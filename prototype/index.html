@@ -67,6 +67,13 @@
                             <option value="beam">パーティクルビーム</option>
                         </select>
                     </div>
+                    <!-- センサーモード選択 (じゃんけん方式) -->
+                    <div class="sensor-row">
+                        <span class="sensor-label">センサー:</span>
+                        <button class="btn sensor-btn active" id="sensor-heat" title="熱源センサー: 移動中の敵を捕捉">🔥 HEAT</button>
+                        <button class="btn sensor-btn" id="sensor-optic" title="光学センサー: 発砲フラッシュを捕捉">👁 OPTIC</button>
+                        <button class="btn sensor-btn" id="sensor-em" title="電磁波センサー: 潜伏中の受動放射を検出">📡 EM</button>
+                    </div>
                     <div style="display:flex; justify-content:center; gap:10px; margin-top:5px;">
                         <button class="btn btn-info" id="btn-scan">アクティブスキャン</button>
                         <button class="btn btn-warning" id="btn-hack">電子戦システム (EW)</button>
@@ -80,6 +87,8 @@
                         <div>エレボスの濃度: <span id="env-erebos" class="highlight-text">測定中</span></div>
                         <div>レーダー有効範囲: <span id="env-radar" class="warning-text">---</span></div>
                         <div>敵性反応: <span id="hostile-count">不明</span></div>
+                        <div>センサーモード: <span id="env-sensor" class="warning-text">🔥 熱源</span></div>
+                        <div>シグナル強度: <span id="env-signal" style="font-family:monospace;letter-spacing:1px;">░░░░░</span></div>
                     </div>
                 </div>
             </div>

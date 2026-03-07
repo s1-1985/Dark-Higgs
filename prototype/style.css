@@ -629,6 +629,59 @@ input[type=range]::-webkit-slider-thumb {
 }
 
 /* ============================================================
+   センサーモード選択ボタン (じゃんけん方式)
+   ============================================================ */
+.sensor-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    margin-bottom: 5px;
+}
+.sensor-label {
+    font-size: 9px;
+    color: #666;
+    white-space: nowrap;
+}
+.sensor-btn {
+    padding: 3px 9px;
+    font-size: 9px;
+    font-family: 'Orbitron', monospace;
+    border: 1px solid #333;
+    background: rgba(0, 0, 0, 0.6);
+    color: #555;
+    cursor: pointer;
+    transition: all 0.2s;
+    min-width: 55px;
+    letter-spacing: 0.5px;
+}
+.sensor-btn:hover {
+    color: #999;
+    border-color: #555;
+}
+/* HEAT アクティブ */
+#sensor-heat.active {
+    border-color: #ff6600;
+    color: #ff8833;
+    box-shadow: 0 0 8px rgba(255, 100, 0, 0.5);
+    background: rgba(255, 80, 0, 0.1);
+}
+/* OPTIC アクティブ */
+#sensor-optic.active {
+    border-color: #00ffaa;
+    color: #00ffcc;
+    box-shadow: 0 0 8px rgba(0, 255, 170, 0.5);
+    background: rgba(0, 255, 170, 0.08);
+}
+/* EM アクティブ */
+#sensor-em.active {
+    border-color: #cc44ff;
+    color: #dd66ff;
+    box-shadow: 0 0 8px rgba(200, 68, 255, 0.5);
+    background: rgba(180, 50, 255, 0.1);
+}
+
+/* ============================================================
    セクタークリアバナー
    ============================================================ */
 #sector-clear-banner {

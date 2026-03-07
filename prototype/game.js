@@ -13,6 +13,12 @@ let sectorCleared = false;
 let scanCooldown = 0; // Active scan cooldown (frames)
 let enemiesKilled = 0; // Stat tracking
 
+// ============================================================
+// マルチセンサーシステム (じゃんけん方式)
+// heat: 移動中の熱源検出  optic: 発砲フラッシュ検出  em: 潜伏中受動放射検出
+// ============================================================
+let currentSensor = 'heat'; // 'heat' | 'optic' | 'em'
+
 let dialogOpen = false;
 let dockingOpen = false;
 
@@ -601,6 +607,12 @@ class Ship {
         this.postFireCooldown = 0;      // 発砲後の再配置タイマー
         this.fireFlashTimer = 0;        // 発砲直後の可視フラッシュタイマー
         this.repositionLogged = false;  // 再配置ログ重複防止
+        // マルチセンサーシグネチャ
+        this.heatSig = 0;    // 熱源シグネチャ: 移動中に上昇
+        this.opticalSig = 0; // 光学シグネチャ: 発砲フラッシュ・低エレボス時
+        this.emSig = 0;      // 電磁波シグネチャ: 潜伏中の受動放射・発砲時スパイク
+        this.prevX = x;      // 移動量計算用
+        this.prevY = y;
     }
 
     setTarget(tx, ty) { this.targetX = tx; this.targetY = ty; this.state = 'moving'; }
@@ -834,6 +846,45 @@ class Ship {
                     life: 1.0, decay: 0.05,
                     color: this.isPlayer ? '#00ffaa' : '#ffaa00'
                 });
+            }
+        }
+
+        // ============================================================
+        // マルチセンサーシグネチャ更新 (敵のみ)
+        // ============================================================
+        if (!this.isPlayer) {
+            // 熱源シグネチャ: 移動量から計算
+            const spd = Math.hypot(this.x - this.prevX, this.y - this.prevY);
+            this.prevX = this.x;
+            this.prevY = this.y;
+            // postFireCooldown中の高速再配置は熱源強め、潜伏中はほぼゼロ
+            if (this.postFireCooldown > 0) {
+                this.heatSig = Math.min(1.0, this.heatSig + 0.05); // 再配置は激しく発熱
+            } else {
+                this.heatSig = Math.min(1.0, spd / 1.0); // 速度に比例
+            }
+
+            // 光学シグネチャ: 発砲フラッシュ時に最大、エレボスで大きく減衰
+            const erebosHere = getErebosIntensity(this.x, this.y);
+            if (this.fireFlashTimer > 50) {
+                this.opticalSig = Math.min(1.0, this.opticalSig + 0.12); // 発砲フラッシュ急上昇
+            } else {
+                // 発光フェード + エレボス減衰
+                this.opticalSig = Math.max(0, this.opticalSig * 0.92) * (1 - erebosHere * 0.95);
+            }
+
+            // 電磁波シグネチャ: 潜伏中は受動放射が漏れる、発砲時スパイク、移動中は無線封鎖
+            if (this.fireFlashTimer > 60) {
+                this.emSig = Math.min(1.0, this.emSig + 0.08); // 武器放電EM スパイク
+            } else if (this.lurking && this.postFireCooldown === 0) {
+                // 潜伏中の受動EM漏洩 (ゆらぎあり)
+                const target = 0.5 + Math.sin(Date.now() * 0.0015 + this.x * 0.001) * 0.1;
+                this.emSig += (target - this.emSig) * 0.03;
+            } else if (this.postFireCooldown > 0) {
+                // 再配置中: 無線封鎖 (熱源は上がるがEMは下がる)
+                this.emSig = Math.max(0, this.emSig - 0.025);
+            } else {
+                this.emSig = Math.max(0, this.emSig - 0.01);
             }
         }
     }
@@ -1136,6 +1187,26 @@ document.getElementById('btn-hack').addEventListener('click', () => {
         logMessage(`EW: 有効範囲内にハッキング可能な対象がいません。`, 'warning-msg');
     }
 });
+// ============================================================
+// センサーモード切替ハンドラ (heat / optic / em)
+// ============================================================
+const SENSOR_INFO = {
+    heat:  { name: '熱源センサー',    tip: '敵の移動時エンジン熱を追跡 — 発砲後の再配置フェーズに有効' },
+    optic: { name: '光学センサー',    tip: '発砲フラッシュを捕捉 — 砲撃直後の一瞬を逃さない' },
+    em:    { name: '電磁波センサー',  tip: '潜伏中の受動EM漏洩を検出 — 索敵フェーズ最適' }
+};
+['heat', 'optic', 'em'].forEach(s => {
+    const btn = document.getElementById(`sensor-${s}`);
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+        currentSensor = s;
+        document.querySelectorAll('.sensor-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        logMessage(`SENSOR: ${SENSOR_INFO[s].name}に切替。${SENSOR_INFO[s].tip}`, 'system-msg');
+        playSound('ui');
+    });
+});
+
 document.getElementById('btn-launch-talos').addEventListener('click', () => {
     if (gameState.credits >= 50) {
         gameState.credits -= 50;
@@ -1157,28 +1228,46 @@ function drawRadarSweep(ctx) {
     // ===== Erebos interference: reduce effective radar range =====
     const erebosAtPlayer = getErebosIntensity(player.x, player.y);
     effectiveRadarRange = RADAR_RANGE * (1 - erebosAtPlayer * 0.65);
-    // Erebos level: 0=clear 0.25=low 0.5=med 0.75=high 1.0=danger
-    const erebosLevel = erebosAtPlayer < 0.25 ? 0 : (erebosAtPlayer < 0.5 ? 1 : (erebosAtPlayer < 0.75 ? 2 : 3));
-    const rangeColors = [
-        { fill: 'rgba(0,255,170,0.05)', stroke: 'rgba(0,255,170,0.3)', sweep: 'rgba(0,255,170,0.8)', wedge: 'rgba(0,255,170,0.15)' },
-        { fill: 'rgba(0,200,100,0.05)', stroke: 'rgba(0,200,100,0.3)', sweep: 'rgba(0,200,100,0.8)', wedge: 'rgba(0,200,100,0.12)' },
-        { fill: 'rgba(200,100,0,0.05)', stroke: 'rgba(200,100,0,0.3)', sweep: 'rgba(255,150,0,0.8)', wedge: 'rgba(200,100,0,0.1)' },
-        { fill: 'rgba(200,0,0,0.05)', stroke: 'rgba(200,0,0,0.4)', sweep: 'rgba(255,50,50,0.7)', wedge: 'rgba(200,0,0,0.1)' }
-    ];
-    const rc = rangeColors[erebosLevel];
 
-    // Visibility Check — Erebos can break contact even within range
+    // ============================================================
+    // センサーモード別: 色・検出ロジック
+    // HEAT  → 移動中の敵を捕捉 (heatSig)
+    // OPTIC → 発砲フラッシュを捕捉 (opticalSig)
+    // EM    → 潜伏中の受動放射を捕捉 (emSig)
+    // ============================================================
+    const sensorConfig = {
+        heat:  { r:'255,80,0',   sig: e => e.heatSig,    rangeScale: 1.0,
+                 erebosMod: 0.35, threshold: 0.3, label: '熱源' },
+        optic: { r:'0,255,170',  sig: e => e.opticalSig,  rangeScale: 0.75,
+                 erebosMod: 0.85, threshold: 0.2, label: '光学' },
+        em:    { r:'180,50,255', sig: e => e.emSig,       rangeScale: 0.85,
+                 erebosMod: 0.1,  threshold: 0.3, label: '電磁波' }
+    };
+    const sc = sensorConfig[currentSensor];
+    const CR = sc.r;
+    const rc = {
+        fill:   `rgba(${CR},0.04)`,
+        stroke: `rgba(${CR},0.35)`,
+        sweep:  `rgba(${CR},0.9)`,
+        wedge:  `rgba(${CR},0.12)`
+    };
+    const sensorRange = effectiveRadarRange * sc.rangeScale;
+
+    // センサー別可視判定
     enemies.forEach(e => {
+        // 発砲フラッシュは常に可視 (物理的爆光)
+        if (e.fireFlashTimer > 0) { e.visible = true; return; }
+
         const dist = Math.hypot(e.x - player.x, e.y - player.y);
-        if (dist <= effectiveRadarRange) {
-            const erebosAtEnemy = getErebosIntensity(e.x, e.y);
-            if (erebosAtEnemy > 0.6) {
-                // Dense Erebos pocket: intermittent contact (flicker)
-                if (!e.visible) e.visible = Math.random() < 0.025;
-                else e.visible = Math.random() > 0.012;
-            } else {
-                e.visible = true;
-            }
+        const erebosAtEnemy = getErebosIntensity(e.x, e.y);
+        const effectiveSensorRange = sensorRange * (1 - erebosAtEnemy * sc.erebosMod);
+        const sig = sc.sig(e);
+
+        if (dist < effectiveSensorRange && sig > sc.threshold) {
+            e.visible = true;
+        } else if (dist < effectiveSensorRange * 0.6 && sig > sc.threshold * 0.5) {
+            // 弱いシグナル: ノイズの中にチラつく
+            e.visible = Math.random() < 0.12;
         } else {
             e.visible = false;
         }
@@ -1196,11 +1285,11 @@ function drawRadarSweep(ctx) {
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    // Draw the sweeping line
+    // Draw the sweeping line (センサー有効範囲まで)
     ctx.rotate(scanAngle);
     ctx.beginPath();
     ctx.moveTo(0, 0);
-    ctx.lineTo(effectiveRadarRange, 0);
+    ctx.lineTo(sensorRange, 0);
     ctx.strokeStyle = rc.sweep;
     ctx.lineWidth = 2;
     ctx.stroke();
@@ -1208,29 +1297,36 @@ function drawRadarSweep(ctx) {
     // Sweeping arc gradient wedge
     ctx.beginPath();
     ctx.moveTo(0, 0);
-    ctx.arc(0, 0, effectiveRadarRange, 0, -0.6, true);
+    ctx.arc(0, 0, sensorRange, 0, -0.6, true);
     ctx.closePath();
     ctx.fillStyle = rc.wedge;
     ctx.fill();
 
     ctx.restore();
 
-    // Draw Erebos visual static/distortion effect when heavily interfered
+    // Erebos static noise (センサーカラーに合わせる)
     if (erebosAtPlayer > 0.4) {
         const staticAlpha = (erebosAtPlayer - 0.4) * 0.15;
         ctx.save();
         ctx.globalAlpha = staticAlpha;
         for (let i = 0; i < 6; i++) {
-            const rx = player.x + (Math.random() - 0.5) * effectiveRadarRange * 2;
-            const ry = player.y + (Math.random() - 0.5) * effectiveRadarRange * 2;
-            if (Math.hypot(rx - player.x, ry - player.y) < effectiveRadarRange) {
-                ctx.fillStyle = `rgba(200, ${Math.random() * 50}, 0, 0.8)`;
+            const rx = player.x + (Math.random() - 0.5) * sensorRange * 2;
+            const ry = player.y + (Math.random() - 0.5) * sensorRange * 2;
+            if (Math.hypot(rx - player.x, ry - player.y) < sensorRange) {
+                ctx.fillStyle = `rgba(${CR}, 0.8)`;
                 ctx.fillRect(rx, ry, 2, 1);
             }
         }
         ctx.restore();
         ctx.globalAlpha = 1;
     }
+
+    // センサーモードラベル (キャンバス右上付近)
+    ctx.save();
+    ctx.font = 'bold 11px Orbitron';
+    ctx.fillStyle = `rgba(${CR}, 0.7)`;
+    ctx.fillText(`[ ${sc.label}センサー ]`, player.x + sensorRange * 0.7, player.y - sensorRange * 0.1);
+    ctx.restore();
 }
 
 function drawMinimap() {
@@ -1352,6 +1448,27 @@ function updateEnvInfo() {
     }
     document.getElementById('hostile-count').textContent =
         enemies.filter(e => e.visible).length > 0 ? enemies.filter(e => e.visible).length + '機' : '不明';
+
+    // センサーモード表示
+    const sensorEl = document.getElementById('env-sensor');
+    if (sensorEl) {
+        const sensorLabels = { heat: '🔥 熱源', optic: '👁 光学', em: '📡 電磁波' };
+        const sensorClasses = { heat: 'warning-text', optic: 'highlight-text', em: '' };
+        sensorEl.textContent = sensorLabels[currentSensor] || '---';
+        sensorEl.className = sensorClasses[currentSensor] || '';
+        sensorEl.style.color = currentSensor === 'em' ? '#cc44ff' : '';
+    }
+
+    // 敵のシグネチャ強度を表示 (デバッグ兼ゲームプレイ情報)
+    const sigEl = document.getElementById('env-signal');
+    if (sigEl && enemies.length > 0) {
+        const boss = enemies[0];
+        const sc = { heat: boss.heatSig, optic: boss.opticalSig, em: boss.emSig };
+        const v = sc[currentSensor] || 0;
+        const bars = '█'.repeat(Math.round(v * 5)) + '░'.repeat(5 - Math.round(v * 5));
+        sigEl.textContent = bars;
+        sigEl.style.color = v > 0.5 ? '#ff4d4d' : (v > 0.25 ? '#ffaa00' : '#444');
+    }
 }
 
 // ============================================================
