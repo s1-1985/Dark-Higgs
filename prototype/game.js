@@ -8,6 +8,10 @@ const minimapCtx = minimapCanvas.getContext('2d');
 let FIELD_SIZE = 8000;
 let BASE_RADAR_RANGE = 600;
 let RADAR_RANGE = BASE_RADAR_RANGE;
+let effectiveRadarRange = BASE_RADAR_RANGE; // Actual range after Erebos interference
+let sectorCleared = false;
+let scanCooldown = 0; // Active scan cooldown (frames)
+let enemiesKilled = 0; // Stat tracking
 
 let dialogOpen = false;
 let dockingOpen = false;
@@ -123,6 +127,21 @@ let bgStars = [];
 let bgMist = [];
 let scrapDrops = [];
 let stations = [];
+
+// ============================================================
+// エレボス濃度計算 (Erebos Intensity)
+// ============================================================
+function getErebosIntensity(x, y) {
+    let total = 0;
+    bgMist.forEach(m => {
+        const dist = Math.hypot(x - m.x, y - m.y);
+        if (dist < m.r) {
+            const falloff = 1 - (dist / m.r);
+            total += falloff * (m.density || 0.3);
+        }
+    });
+    return Math.min(1.0, total);
+}
 
 // Resize
 function resizeCanvas() {
@@ -430,11 +449,23 @@ class Projectile {
         const hitTarget = this.isPlayer ? enemies.find(e => Math.hypot(e.x - this.x, e.y - this.y) < e.radius * 1.5) : (Math.hypot(player.x - this.x, player.y - this.y) < player.radius * 1.5 ? player : null);
 
         if (hitTarget && hitTarget.hp > 0) {
-            const dmgMult = this.isPlayer ? (1 + (gameState.upgrades.weapons * 0.15)) : 1;
+            let dmgMult = this.isPlayer ? (1 + (gameState.upgrades.weapons * 0.15)) : 1;
+            let preemptive = false;
+            // 先制攻撃ボーナス: 2x damage on unaware enemies
+            if (this.isPlayer && hitTarget.detectionState === 'unaware') {
+                dmgMult *= 2.0;
+                preemptive = true;
+                hitTarget.detectionState = 'alerted'; // Now they know!
+                hitTarget.isAggro = true; hitTarget.aggroTimer = 600;
+            }
+            if (!this.isPlayer) hitTarget.detectionState = 'alerted'; // Being hit alerts player too (no-op but consistent)
             hitTarget.hp -= this.dmg * dmgMult;
             this.active = false;
             createHitEffect(this.x, this.y, this.isPlayer ? '#ffaa00' : '#ff4d4d');
             addShake((this.dmg * dmgMult) / 10);
+            if (preemptive) {
+                effects.push({ x: hitTarget.x, y: hitTarget.y - 30, text: `先制! x2 (${Math.floor(this.dmg * dmgMult)})`, life: 1.0, type: 'floatText', c: '#ffff00' });
+            }
         }
     }
     draw(ctx) {
@@ -544,6 +575,9 @@ class Ship {
         this.visible = isPlayer;
         this.isAggro = false; // Tactical AI extension
         this.aggroTimer = 0;
+        this.detectionState = isPlayer ? 'alerted' : 'unaware'; // 'unaware'|'scanning'|'alerted'
+        this.detectionTimer = 0;
+        this.alertLogged = false; // Prevent spam logging
     }
 
     setTarget(tx, ty) { this.targetX = tx; this.targetY = ty; this.state = 'moving'; }
@@ -616,15 +650,38 @@ class Ship {
                 }
             });
 
-            // If no dummy, target player if visible
-            if (!target && this.visible && Math.hypot(player.x - this.x, player.y - this.y) < RADAR_RANGE * 1.5) {
-                target = player;
+            // Enemy detection of player — Erebos reduces detection range
+            if (!target) {
+                const distToPlayer = Math.hypot(player.x - this.x, player.y - this.y);
+                const erebosHere = getErebosIntensity(this.x, this.y);
+                const myDetectRange = 750 * (1 - erebosHere * 0.55);
+
+                if (this.detectionState === 'alerted') {
+                    target = player; // Alerted enemy always hunts player
+                } else if (distToPlayer < myDetectRange) {
+                    this.detectionTimer++;
+                    if (this.detectionTimer > 90) { // ~1.5s to detect
+                        this.detectionState = 'alerted';
+                        if (!this.alertLogged) {
+                            this.alertLogged = true;
+                            logMessage('WARN: 敵軍があなたを探知しました！', 'warning-msg');
+                        }
+                    }
+                } else {
+                    this.detectionTimer = Math.max(0, this.detectionTimer - 1);
+                }
             }
 
             // Different logic per type
             this.speed = this.type === 'fighter' ? 2.5 : (this.type === 'carrier' ? 0.3 : (this.type === 'destroyer' ? 0.6 : 1.2));
 
-            if (target) {
+            // Low HP retreat — fighters and corvettes flee when critically damaged
+            if (this.hp < this.maxHp * 0.25 && this.type !== 'carrier' && this.detectionState === 'alerted') {
+                const fleeAngle = Math.atan2(player.y - this.y, player.x - this.x) + Math.PI;
+                this.x += Math.cos(fleeAngle) * this.speed * 1.3;
+                this.y += Math.sin(fleeAngle) * this.speed * 1.3;
+                this.state = 'retreating';
+            } else if (target) {
                 const dist = Math.hypot(target.x - this.x, target.y - this.y);
                 let ta = Math.atan2(target.y - this.y, target.x - this.x);
                 let diff = ta - this.angle;
@@ -652,11 +709,13 @@ class Ship {
                 if (this.hp < this.prevHp) {
                     this.isAggro = true;
                     this.aggroTimer = 600;
-                    // Alert neighbors
+                    this.detectionState = 'alerted'; // Taking damage = instant alert
+                    // Alert neighbors within comm range
                     enemies.forEach(e => {
-                        if (Math.hypot(this.x - e.x, e.y - e.y) < 800) {
+                        if (Math.hypot(this.x - e.x, this.y - e.y) < 900) {
                             e.isAggro = true;
                             e.aggroTimer = 600;
+                            e.detectionState = 'alerted';
                         }
                     });
                 }
@@ -665,8 +724,8 @@ class Ship {
                 if (this.isAggro) {
                     this.aggroTimer--;
                     if (this.aggroTimer <= 0) this.isAggro = false;
-                    // If aggro but no target, head towards player last known or stay alert
-                    if (this.visible) {
+                    // Aggro enemies always go after player
+                    if (this.detectionState === 'alerted') {
                         target = player;
                     }
                 }
@@ -811,7 +870,22 @@ function createHitEffect(x, y, color) { effects.push({ x, y, r: 0, maxR: 15, a: 
 function updateDrawEffects(ctx) {
     for (let i = effects.length - 1; i >= 0; i--) {
         let ef = effects[i];
-        if (ef.type === 'beam') {
+        if (ef.type === 'floatText') {
+            // Floating damage text
+            ef.y -= 0.8;
+            ef.life -= 0.02;
+            ctx.save();
+            ctx.font = 'bold 18px Orbitron';
+            ctx.fillStyle = ef.c;
+            ctx.globalAlpha = ef.life;
+            ctx.shadowColor = ef.c; ctx.shadowBlur = 8;
+            ctx.textAlign = 'center';
+            ctx.fillText(ef.text, ef.x, ef.y);
+            ctx.shadowBlur = 0;
+            ctx.restore();
+            ctx.globalAlpha = 1;
+            if (ef.life <= 0) effects.splice(i, 1);
+        } else if (ef.type === 'beam') {
             ef.a -= 0.05;
             ctx.beginPath(); ctx.moveTo(ef.x, ef.y); ctx.lineTo(ef.tx, ef.ty);
             ctx.strokeStyle = ef.c; ctx.lineWidth = 4 * ef.a; ctx.stroke();
@@ -838,6 +912,9 @@ function logMessage(text, className) {
 
 // Generate Sector
 function generateSector() {
+    sectorCleared = false;
+    enemiesKilled = 0;
+    scanCooldown = 0;
     // Keep drones if transitioning, but set position
     const tCount = talosDrones.length;
     player = new Ship(FIELD_SIZE / 2, FIELD_SIZE / 2, true);
@@ -858,7 +935,8 @@ function generateSector() {
         bgMist.push({
             x: Math.random() * FIELD_SIZE, y: Math.random() * FIELD_SIZE,
             r: Math.random() * 1000 + 500,
-            color: Math.random() > 0.7 ? '50, 20, 100' : '20, 50, 80' // Magenta vs Blue Nebulae
+            color: Math.random() > 0.7 ? '50, 20, 100' : '20, 50, 80', // Magenta vs Blue Nebulae
+            density: Math.random() * 0.65 + 0.1 // Gameplay density: affects radar + detection
         });
     }
 
@@ -925,11 +1003,21 @@ document.getElementById('btn-cancel').addEventListener('click', () => {
     logMessage('NAV: 待機命令を受諾。', 'system-msg');
 });
 document.getElementById('btn-scan').addEventListener('click', () => {
+    if (scanCooldown > 0) {
+        logMessage(`SENSOR: スキャン再充電中... (残り ${Math.ceil(scanCooldown / 60)}秒)`, 'warning-msg');
+        return;
+    }
     playSound('ui');
-    enemies.forEach(e => e.visible = true);
-    logMessage('SENSOR: アクティブソナー発信。スキャナーをオーバードライブします。', 'system-msg');
+    // Active scan temporarily reveals all enemies + alerts them (they hear the pulse)
+    enemies.forEach(e => {
+        e.visible = true;
+        e.detectionState = 'alerted'; // Active scan is loud — enemies detect you too
+        e.isAggro = true; e.aggroTimer = 400;
+    });
+    scanCooldown = 900; // 15 second cooldown (at 60fps)
+    logMessage('SENSOR: アクティブスキャン発信。全敵性反応を一時的に捕捉。(敵にも探知される！ 再充填: 15秒)', 'system-msg');
     setTimeout(() => {
-        enemies.forEach(e => { if (Math.hypot(e.x - player.x, e.y - player.y) > RADAR_RANGE) e.visible = false; });
+        enemies.forEach(e => { if (Math.hypot(e.x - player.x, e.y - player.y) > effectiveRadarRange) e.visible = false; });
     }, 4000);
 });
 document.getElementById('btn-hack').addEventListener('click', () => {
@@ -965,10 +1053,34 @@ function drawRadarSweep(ctx) {
     if (player.hp <= 0) return;
     scanAngle += 0.03;
 
-    // Visibility Check
+    // ===== Erebos interference: reduce effective radar range =====
+    const erebosAtPlayer = getErebosIntensity(player.x, player.y);
+    effectiveRadarRange = RADAR_RANGE * (1 - erebosAtPlayer * 0.65);
+    // Erebos level: 0=clear 0.25=low 0.5=med 0.75=high 1.0=danger
+    const erebosLevel = erebosAtPlayer < 0.25 ? 0 : (erebosAtPlayer < 0.5 ? 1 : (erebosAtPlayer < 0.75 ? 2 : 3));
+    const rangeColors = [
+        { fill: 'rgba(0,255,170,0.05)', stroke: 'rgba(0,255,170,0.3)', sweep: 'rgba(0,255,170,0.8)', wedge: 'rgba(0,255,170,0.15)' },
+        { fill: 'rgba(0,200,100,0.05)', stroke: 'rgba(0,200,100,0.3)', sweep: 'rgba(0,200,100,0.8)', wedge: 'rgba(0,200,100,0.12)' },
+        { fill: 'rgba(200,100,0,0.05)', stroke: 'rgba(200,100,0,0.3)', sweep: 'rgba(255,150,0,0.8)', wedge: 'rgba(200,100,0,0.1)' },
+        { fill: 'rgba(200,0,0,0.05)', stroke: 'rgba(200,0,0,0.4)', sweep: 'rgba(255,50,50,0.7)', wedge: 'rgba(200,0,0,0.1)' }
+    ];
+    const rc = rangeColors[erebosLevel];
+
+    // Visibility Check — Erebos can break contact even within range
     enemies.forEach(e => {
-        if (Math.hypot(e.x - player.x, e.y - player.y) <= RADAR_RANGE) e.visible = true;
-        else e.visible = false;
+        const dist = Math.hypot(e.x - player.x, e.y - player.y);
+        if (dist <= effectiveRadarRange) {
+            const erebosAtEnemy = getErebosIntensity(e.x, e.y);
+            if (erebosAtEnemy > 0.6) {
+                // Dense Erebos pocket: intermittent contact (flicker)
+                if (!e.visible) e.visible = Math.random() < 0.025;
+                else e.visible = Math.random() > 0.012;
+            } else {
+                e.visible = true;
+            }
+        } else {
+            e.visible = false;
+        }
     });
 
     ctx.save();
@@ -976,10 +1088,10 @@ function drawRadarSweep(ctx) {
 
     // Draw radar circle
     ctx.beginPath();
-    ctx.arc(0, 0, RADAR_RANGE, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(0,255,170,0.05)';
+    ctx.arc(0, 0, effectiveRadarRange, 0, Math.PI * 2);
+    ctx.fillStyle = rc.fill;
     ctx.fill();
-    ctx.strokeStyle = 'rgba(0,255,170,0.3)';
+    ctx.strokeStyle = rc.stroke;
     ctx.lineWidth = 1;
     ctx.stroke();
 
@@ -987,20 +1099,37 @@ function drawRadarSweep(ctx) {
     ctx.rotate(scanAngle);
     ctx.beginPath();
     ctx.moveTo(0, 0);
-    ctx.lineTo(RADAR_RANGE, 0);
-    ctx.strokeStyle = 'rgba(0,255,170,0.8)';
+    ctx.lineTo(effectiveRadarRange, 0);
+    ctx.strokeStyle = rc.sweep;
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // Draw sweeping arc gradient wedge safely
+    // Sweeping arc gradient wedge
     ctx.beginPath();
     ctx.moveTo(0, 0);
-    ctx.arc(0, 0, RADAR_RANGE, 0, -0.6, true);
+    ctx.arc(0, 0, effectiveRadarRange, 0, -0.6, true);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(0,255,170,0.15)';
+    ctx.fillStyle = rc.wedge;
     ctx.fill();
 
     ctx.restore();
+
+    // Draw Erebos visual static/distortion effect when heavily interfered
+    if (erebosAtPlayer > 0.4) {
+        const staticAlpha = (erebosAtPlayer - 0.4) * 0.15;
+        ctx.save();
+        ctx.globalAlpha = staticAlpha;
+        for (let i = 0; i < 6; i++) {
+            const rx = player.x + (Math.random() - 0.5) * effectiveRadarRange * 2;
+            const ry = player.y + (Math.random() - 0.5) * effectiveRadarRange * 2;
+            if (Math.hypot(rx - player.x, ry - player.y) < effectiveRadarRange) {
+                ctx.fillStyle = `rgba(200, ${Math.random() * 50}, 0, 0.8)`;
+                ctx.fillRect(rx, ry, 2, 1);
+            }
+        }
+        ctx.restore();
+        ctx.globalAlpha = 1;
+    }
 }
 
 function drawMinimap() {
@@ -1101,6 +1230,47 @@ function drawBackground(ctx) {
     ctx.stroke();
 }
 
+// ============================================================
+// 環境情報パネル動的更新
+// ============================================================
+function updateEnvInfo() {
+    if (!player || player.hp <= 0) return;
+    const intensity = getErebosIntensity(player.x, player.y);
+    const labels = ['低濃度', '中濃度', '高濃度', '危険領域'];
+    const classes = ['', 'highlight-text', 'warning-text', 'warning-text'];
+    const idx = Math.min(3, Math.floor(intensity * 4));
+
+    const erebosSpan = document.getElementById('env-erebos');
+    const radarSpan = document.getElementById('env-radar');
+    if (erebosSpan) {
+        erebosSpan.textContent = labels[idx];
+        erebosSpan.className = classes[idx];
+    }
+    if (radarSpan) {
+        radarSpan.textContent = `${Math.round(effectiveRadarRange)} u`;
+    }
+    document.getElementById('hostile-count').textContent =
+        enemies.filter(e => e.visible).length > 0 ? enemies.filter(e => e.visible).length + '機' : '不明';
+}
+
+// ============================================================
+// ゲームオーバー / セクタークリア
+// ============================================================
+function showGameOver() {
+    document.getElementById('go-sector').textContent = gameState.sector;
+    document.getElementById('go-credits').textContent = gameState.credits;
+    document.getElementById('go-kills').textContent = enemiesKilled;
+    document.getElementById('game-over-overlay').classList.remove('hidden');
+}
+
+function showSectorClear(bonus) {
+    const el = document.getElementById('sector-clear-banner');
+    if (!el) return;
+    el.querySelector('#sc-bonus').textContent = bonus;
+    el.classList.add('active');
+    setTimeout(() => el.classList.remove('active'), 4000);
+}
+
 function drawTargetLine(ctx) {
     if (player.targetEntity && player.targetEntity.hp > 0) {
         ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(player.targetEntity.x, player.targetEntity.y);
@@ -1117,14 +1287,40 @@ function drawTargetLine(ctx) {
 
 function gameLoop() {
     try {
+        // Tick cooldowns
+        if (scanCooldown > 0) {
+            scanCooldown--;
+            // Update scan button text
+            const btnScan = document.getElementById('btn-scan');
+            if (scanCooldown > 0) {
+                btnScan.textContent = `スキャン (${Math.ceil(scanCooldown / 60)}s)`;
+                btnScan.disabled = true;
+            } else {
+                btnScan.textContent = 'アクティブスキャン';
+                btnScan.disabled = false;
+            }
+        }
+
         // Process Enemy deaths
         for (let i = enemies.length - 1; i >= 0; i--) {
             if (enemies[i].hp <= 0) {
                 createExplosion(enemies[i].x, enemies[i].y, '#ff4d4d', enemies[i].type === 'carrier' ? 40 : (enemies[i].type === 'destroyer' ? 20 : 10));
                 const reward = enemies[i].type === 'carrier' ? 300 : (enemies[i].type === 'destroyer' ? 100 : (enemies[i].type === 'fighter' ? 10 : 30));
                 scrapDrops.push({ x: enemies[i].x, y: enemies[i].y, value: reward, life: 1.0 });
+                enemiesKilled++;
                 enemies.splice(i, 1);
             }
+        }
+
+        // Sector Clear detection
+        if (!sectorCleared && enemies.length === 0 && player && player.hp > 0) {
+            sectorCleared = true;
+            const bonus = 100 + gameState.sector * 75;
+            gameState.credits += bonus;
+            updateTopUI();
+            saveGame();
+            showSectorClear(bonus);
+            logMessage(`MISSION: セクター${gameState.sector}の脅威排除完了。ボーナス: +${bonus} CR`, 'system-msg');
         }
 
         // Projectiles
@@ -1140,6 +1336,7 @@ function gameLoop() {
             player.isDead = true;
             createExplosion(player.x, player.y, '#00ffaa', 50);
             logMessage(`CRITICAL: 船体崩壊。通信途絶...`, 'system-msg');
+            setTimeout(() => showGameOver(), 2500);
         }
         enemies.forEach(e => e.update());
         talosDrones.forEach(d => d.update());
@@ -1225,6 +1422,7 @@ function gameLoop() {
         ctx.restore();
 
         drawMinimap();
+        updateEnvInfo();
 
         requestAnimationFrame(gameLoop);
     } catch (err) {
@@ -1324,3 +1522,13 @@ try {
 } catch (e) {
     window.onerror(e.toString(), "gameLoop", 0, 0, e);
 }
+
+// Game Over / Restart
+document.getElementById('btn-restart').addEventListener('click', () => {
+    document.getElementById('game-over-overlay').classList.add('hidden');
+    gameState.credits = Math.floor(gameState.credits * 0.5); // Keep half credits on death
+    gameState.sector = Math.max(1, gameState.sector); // Keep sector progress
+    generateSector();
+    updateTopUI();
+    logMessage('SYSTEM: TALOS-CMD 緊急再起動完了。クレジット50%喪失。', 'warning-msg');
+});

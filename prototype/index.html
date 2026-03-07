@@ -77,8 +77,8 @@
                 <div class="console-panel right-panel">
                     <div class="panel-header">環境情報</div>
                     <div class="env-info">
-                        <div>エレボスの濃度: <span class="highlight-text">危険領域</span></div>
-                        <div>レーダー有効範囲: <span class="warning-text">制限あり</span></div>
+                        <div>エレボスの濃度: <span id="env-erebos" class="highlight-text">測定中</span></div>
+                        <div>レーダー有効範囲: <span id="env-radar" class="warning-text">---</span></div>
                         <div>敵性反応: <span id="hostile-count">不明</span></div>
                     </div>
                 </div>
@@ -159,6 +159,29 @@
                     <div class="dock-footer">
                         <button class="btn btn-danger" id="btn-leave-dock">ドッキング解除・発進</button>
                     </div>
+                </div>
+            </div>
+
+            <!-- Sector Clear Banner -->
+            <div id="sector-clear-banner">
+                <div class="sc-content">
+                    <span class="sc-title">✦ セクタークリア ✦</span>
+                    <span class="sc-sub">全脅威排除完了 — ボーナス: +<span id="sc-bonus">0</span> CR</span>
+                </div>
+            </div>
+
+            <!-- Game Over Overlay -->
+            <div id="game-over-overlay" class="hidden">
+                <div class="game-over-box">
+                    <div class="go-title">SHIP DESTROYED</div>
+                    <div class="go-sub">TALOS-CMDの船体が崩壊しました</div>
+                    <div class="go-stats">
+                        <div>セクター到達: <span id="go-sector">1</span></div>
+                        <div>敵撃墜数: <span id="go-kills">0</span></div>
+                        <div>残存クレジット: <span id="go-credits">0</span> CR</div>
+                    </div>
+                    <div class="go-note">再起動後、クレジットの50%が引き継がれます。</div>
+                    <button class="btn btn-primary" id="btn-restart">緊急再起動 (RESTART)</button>
                 </div>
             </div>
 
