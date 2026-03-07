@@ -627,3 +627,187 @@ input[type=range]::-webkit-slider-thumb {
     pointer-events: none;
     filter: grayscale(1);
 }
+
+/* ============================================================
+   モバイル対応 (スマートフォン)
+   ============================================================ */
+@media (max-width: 768px) {
+
+    /* ボタン：タッチターゲット最低44px確保 */
+    .btn {
+        padding: 10px 12px;
+        font-size: 10px;
+        min-height: 44px;
+        letter-spacing: 0.5px;
+    }
+
+    .btn-small {
+        padding: 8px 10px;
+        font-size: 9px;
+        min-height: 38px;
+    }
+
+    /* トップバー：コンパクト化 */
+    #top-bar {
+        padding: 6px 10px;
+    }
+
+    #top-bar span {
+        font-size: 11px;
+        letter-spacing: 1px;
+    }
+
+    #top-bar div {
+        gap: 6px;
+    }
+
+    /* ミニマップ：小さく左上に */
+    #minimap-container {
+        width: 130px;
+        height: 130px;
+        top: 52px;
+        left: 8px;
+    }
+
+    .minimap-label {
+        font-size: 8px;
+    }
+
+    /* ボトムコンソール：縦積みレイアウト */
+    #bottom-console {
+        height: auto;
+        bottom: 30px;
+        flex-direction: column;
+        padding: 6px 8px;
+        gap: 4px;
+    }
+
+    .console-panel {
+        padding: 4px 6px;
+        border-right: none;
+        border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .left-panel {
+        border-left: none;
+    }
+
+    .right-panel {
+        border-bottom: none;
+    }
+
+    .panel-header {
+        font-size: 10px;
+        margin-bottom: 4px;
+        letter-spacing: 1px;
+    }
+
+    /* ステータスバー */
+    .status-bar {
+        height: 6px;
+    }
+
+    .status-text {
+        font-size: 10px;
+    }
+
+    /* スピード・兵装コントロール */
+    .speed-control,
+    .weapon-control {
+        gap: 8px;
+        font-size: 10px;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+    }
+
+    input[type=range] {
+        width: 130px;
+        height: 6px;
+    }
+
+    input[type=range]::-webkit-slider-thumb {
+        width: 20px;
+        height: 20px;
+    }
+
+    .sci-fi-select {
+        width: 100%;
+        font-size: 10px;
+        padding: 8px 6px;
+        min-height: 38px;
+    }
+
+    /* 操作ボタン行：横並び・wrap */
+    .center-panel {
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 4px;
+        justify-content: flex-start;
+    }
+
+    .center-panel .btn {
+        flex: 1 1 auto;
+        min-width: 80px;
+        font-size: 9px;
+        padding: 8px 6px;
+    }
+
+    /* 環境情報 */
+    .env-info {
+        font-size: 10px;
+        line-height: 1.6;
+    }
+
+    /* メッセージログ：右上を小さく */
+    #message-log {
+        width: 180px;
+        right: 8px;
+        top: 52px;
+        gap: 4px;
+    }
+
+    .message {
+        font-size: 9px;
+        padding: 6px 8px;
+    }
+
+    /* ダイアログ */
+    .dialog-box {
+        max-width: 90vw;
+        padding: 20px 15px;
+    }
+
+    #dialog-text {
+        font-size: 12px;
+    }
+
+    .dialog-buttons {
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+
+    /* ドッキングメニュー */
+    .dock-window {
+        width: 95vw;
+    }
+
+    .dock-body {
+        grid-template-columns: 1fr;
+        padding: 15px;
+        gap: 15px;
+    }
+
+    .dock-header {
+        padding: 15px;
+    }
+
+    /* 広告バナー */
+    #ad-banner {
+        height: 30px;
+        font-size: 10px;
+    }
+
+    .ad-content {
+        font-size: 10px;
+    }
+}

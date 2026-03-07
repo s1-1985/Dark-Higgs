@@ -211,6 +211,92 @@ canvas.addEventListener('wheel', e => {
 }, { passive: false });
 canvas.addEventListener('contextmenu', e => { if (e.target.id === 'gameCanvas') e.preventDefault() });
 
+// ============================================================
+// タッチ入力対応（スマホ用）
+// ============================================================
+const touch = {
+    startX: 0, startY: 0,
+    lastX: 0, lastY: 0,
+    moved: false,
+    pinchDist: 0,
+    isPinching: false
+};
+
+canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (e.touches.length === 1) {
+        const t = e.touches[0];
+        touch.startX = t.clientX;
+        touch.startY = t.clientY;
+        touch.lastX = t.clientX;
+        touch.lastY = t.clientY;
+        touch.moved = false;
+        touch.isPinching = false;
+        camera.isDragging = true;
+        camera.lastX = t.clientX;
+        camera.lastY = t.clientY;
+    } else if (e.touches.length === 2) {
+        touch.isPinching = true;
+        camera.isDragging = false;
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        touch.pinchDist = Math.hypot(dx, dy);
+    }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    if (e.touches.length === 1 && !touch.isPinching) {
+        const t = e.touches[0];
+        const dx = t.clientX - touch.startX;
+        const dy = t.clientY - touch.startY;
+        if (Math.hypot(dx, dy) > 8) touch.moved = true;
+        camera.x -= (t.clientX - touch.lastX) / camera.zoom;
+        camera.y -= (t.clientY - touch.lastY) / camera.zoom;
+        touch.lastX = t.clientX;
+        touch.lastY = t.clientY;
+        clampCamera();
+    } else if (e.touches.length === 2) {
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const newDist = Math.hypot(dx, dy);
+        const zoomAmount = newDist / touch.pinchDist;
+        const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        const mx_b = (cx / camera.zoom) + camera.x;
+        const my_b = (cy / camera.zoom) + camera.y;
+        camera.zoom = Math.max(camera.minZoom, Math.min(camera.maxZoom, camera.zoom * zoomAmount));
+        camera.x += mx_b - ((cx / camera.zoom) + camera.x);
+        camera.y += my_b - ((cy / camera.zoom) + camera.y);
+        touch.pinchDist = newDist;
+        clampCamera();
+    }
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    camera.isDragging = false;
+    if (!touch.moved && !touch.isPinching) {
+        const worldX = (touch.startX / camera.zoom) + camera.x;
+        const worldY = (touch.startY / camera.zoom) + camera.y;
+        let clickedEnemy = enemies.find(en => en.visible && Math.hypot(en.x - worldX, en.y - worldY) < en.radius * 3);
+        if (clickedEnemy) {
+            player.targetEntity = clickedEnemy;
+            createClickEffect(clickedEnemy.x, clickedEnemy.y, '#ff4d4d');
+            logMessage(`TACTICAL: ターゲットをロック。射撃解を計算中...`, 'system-msg');
+        } else {
+            player.targetEntity = null;
+            player.setTarget(worldX, worldY);
+            createClickEffect(worldX, worldY, '#00ffaa');
+            const dist = Math.hypot(worldX - player.x, worldY - player.y);
+            const speedEst = Math.max(0.1, (player.generatorOutput / 100) * 1.5);
+            const timeSeconds = Math.max(1, Math.floor(dist / (speedEst * 60)));
+            logMessage(`NAV: 進路設定完了。到着予定時間はおよそ ${timeSeconds} 秒です。`, 'system-msg');
+        }
+    }
+    if (e.touches.length < 2) touch.isPinching = false;
+}, { passive: false });
+
 // Classes
 class Structure {
     constructor(x, y, type) {
@@ -954,6 +1040,21 @@ let isMinimapDragging = false;
 minimapCanvas.addEventListener('mousedown', e => { isMinimapDragging = true; handleMinimapInteraction(e); });
 window.addEventListener('mouseup', () => isMinimapDragging = false);
 minimapCanvas.addEventListener('mousemove', e => { if (isMinimapDragging) handleMinimapInteraction(e); });
+
+// ミニマップ タッチ対応
+function handleMinimapTouchInteraction(t) {
+    const r = minimapCanvas.getBoundingClientRect();
+    const mapX = t.clientX - r.left;
+    const mapY = t.clientY - r.top;
+    const wX = (mapX / minimapCanvas.width) * FIELD_SIZE;
+    const wY = (mapY / minimapCanvas.height) * FIELD_SIZE;
+    camera.x = wX - (canvas.width / 2 / camera.zoom);
+    camera.y = wY - (canvas.height / 2 / camera.zoom);
+    clampCamera();
+}
+minimapCanvas.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); isMinimapDragging = true; handleMinimapTouchInteraction(e.touches[0]); }, { passive: false });
+minimapCanvas.addEventListener('touchmove', (e) => { e.preventDefault(); e.stopPropagation(); if (isMinimapDragging) handleMinimapTouchInteraction(e.touches[0]); }, { passive: false });
+minimapCanvas.addEventListener('touchend', () => { isMinimapDragging = false; });
 
 // Background grid system
 function drawBackground(ctx) {
