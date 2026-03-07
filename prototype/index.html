@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Dark Echo: Tactical Space RTS</title>
+    <link rel="stylesheet" href="style.css">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <div id="game-container">
+        <!-- Main Game Field -->
+        <canvas id="gameCanvas"></canvas>
+
+        <!-- UI Overlay -->
+        <div id="ui-layer">
+            <!-- Top Bar (New feature for Save & Currency) -->
+            <div id="top-bar">
+                <span id="sector-display">セクター: 1</span>
+                <div>
+                    <span id="currency-display">クレジット: 0 CR</span>
+                    <button class="btn btn-primary btn-small" id="btn-save">データ保存 (ローカル)</button>
+                    <button class="btn btn-primary btn-small" id="btn-reset">リセット</button>
+                </div>
+            </div>
+
+            <!-- Minimap -->
+            <div id="minimap-container">
+                <canvas id="minimapCanvas"></canvas>
+                <div class="minimap-overlay">
+                    <span class="minimap-label">レーダーリンク</span>
+                </div>
+            </div>
+
+            <!-- Bottom Console -->
+            <div id="bottom-console">
+                <div class="console-panel left-panel">
+                    <div class="panel-header">TALOS-CMD (母艦)</div>
+                    <div class="unit-status">
+                        <div class="status-bar">
+                            <div class="fill hp-fill" style="width: 100%"></div>
+                        </div>
+                        <div class="status-text">船体耐久度: 100%</div>
+                    </div>
+                    <div class="action-buttons" style="margin-top: 10px;">
+                        <button class="btn btn-primary" id="btn-launch-talos" title="Cost: 50 CR">TALOS 出撃 (50
+                            CR)</button>
+                        <span id="talos-count" style="font-size:10px; color:#00ffaa; margin-left: 5px;">稼働中: 0</span>
+                    </div>
+                </div>
+
+                <div class="console-panel center-panel">
+                    <div class="speed-control">
+                        <span>ジェネレータ出力</span>
+                        <input type="range" id="speedSlider" min="0" max="100" value="50">
+                        <span id="speedValue">50%</span>
+                    </div>
+                    <div class="weapon-control">
+                        <span>主兵装 </span>
+                        <select id="weapon-select" class="sci-fi-select">
+                            <option value="kinetic">キネティックキャノン(実弾)</option>
+                            <option value="missile">ホーミングミサイル</option>
+                            <option value="beam">パーティクルビーム</option>
+                        </select>
+                    </div>
+                    <div style="display:flex; justify-content:center; gap:10px; margin-top:5px;">
+                        <button class="btn btn-info" id="btn-scan">アクティブスキャン</button>
+                        <button class="btn btn-warning" id="btn-hack">電子戦システム (EW)</button>
+                        <button class="btn btn-danger" id="btn-cancel">ナビゲーションキャンセル</button>
+                    </div>
+                </div>
+
+                <div class="console-panel right-panel">
+                    <div class="panel-header">環境情報</div>
+                    <div class="env-info">
+                        <div>エレボスの濃度: <span class="highlight-text">危険領域</span></div>
+                        <div>レーダー有効範囲: <span class="warning-text">制限あり</span></div>
+                        <div>敵性反応: <span id="hostile-count">不明</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="message-log">
+                <div class="message system-msg">SYSTEM: 初期化完了。</div>
+                <div class="message system-msg">SYS: エレボスの霧を検知。暗黒物質の相転移を確認。</div>
+            </div>
+
+            <!-- Dialog Overlay for Sector Transitions -->
+            <div id="dialog-overlay" class="hidden">
+                <div class="dialog-box">
+                    <h3 id="dialog-title">WARNING: セクター境界</h3>
+                    <p id="dialog-text">現在のセクターの端に接近しています。隣接セクターへのワープを起動すると、マップがリセットされ新たな敵性反応に遭遇します。ワープを実行しますか？</p>
+                    <div class="dialog-buttons">
+                        <button class="btn btn-primary" id="btn-dialog-yes">ワープ実行</button>
+                        <button class="btn btn-danger" id="btn-dialog-no">中止</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Docking Prompt -->
+            <div id="dock-prompt">
+                <div class="prompt-content">
+                    <div class="pulse-icon"></div>
+                    <span>補給ステーションの通信圏内です</span>
+                    <button class="btn btn-primary" id="btn-dock">ドッキング開始</button>
+                </div>
+            </div>
+
+            <!-- Docking Menu Overlay -->
+            <div id="docking-menu" class="hidden">
+                <div class="dock-window">
+                    <div class="dock-header">
+                        <h2>STATION SERVICES</h2>
+                        <span class="credits-info">保有クレジット: <span id="dock-credits">0</span> CR</span>
+                    </div>
+
+                    <div class="dock-body">
+                        <div class="service-card">
+                            <h3>艦体修理 (Hull Repair)</h3>
+                            <p>損傷した装甲を完全に修復し、戦闘能力を回復させます。</p>
+                            <button class="btn btn-primary" id="btn-repair-all">全艦修理 (0 CR)</button>
+                        </div>
+
+                        <div class="service-card">
+                            <h3>システムアップグレード</h3>
+                            <div class="upgrade-grid">
+                                <div class="upgrade-item">
+                                    <div class="up-info">
+                                        <span class="up-name">強化装甲 (Hull)</span>
+                                        <span class="up-level">Lv.<span id="level-hull">0</span></span>
+                                    </div>
+                                    <button class="btn btn-info btn-upgrade" id="btn-upgrade-hull">強化 (<span
+                                            id="cost-hull">300</span> CR)</button>
+                                </div>
+                                <div class="upgrade-item">
+                                    <div class="up-info">
+                                        <span class="up-name">高性能レーダー</span>
+                                        <span class="up-level">Lv.<span id="level-radar">0</span></span>
+                                    </div>
+                                    <button class="btn btn-info btn-upgrade" id="btn-upgrade-radar">強化 (<span
+                                            id="cost-radar">300</span> CR)</button>
+                                </div>
+                                <div class="upgrade-item">
+                                    <div class="up-info">
+                                        <span class="up-name">主兵装出力増加</span>
+                                        <span class="up-level">Lv.<span id="level-weapons">0</span></span>
+                                    </div>
+                                    <button class="btn btn-info btn-upgrade" id="btn-upgrade-weapons">強化 (<span
+                                            id="cost-weapons">300</span> CR)</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dock-footer">
+                        <button class="btn btn-danger" id="btn-leave-dock">ドッキング解除・発進</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Ad Banner (Per CSV monetization requirement) -->
+            <div id="ad-banner">
+                <div class="ad-content">
+                    <span class="ad-badge">AD</span>
+                    <span>開発を支援して、広告を削除し機能を拡張しましょう。</span>
+                </div>
+                <button class="btn btn-primary btn-small" id="btn-remove-ads">広告削除 (500 CR)</button>
+            </div>
+        </div>
+    </div>
+    <script src="game.js"></script>
+</body>
+
+</html>
