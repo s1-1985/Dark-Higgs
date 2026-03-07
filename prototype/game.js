@@ -79,12 +79,14 @@ loadGame();
 function updateTopUI() {
     document.getElementById('sector-display').textContent = `セクター: ${gameState.sector}`;
     document.getElementById('currency-display').textContent = `クレジット: ${gameState.credits} CR`;
+    const isMobile = window.innerWidth <= 768;
+    const adH = isMobile ? '28px' : '30px';
     if (!gameState.hasAds) {
         document.getElementById('ad-banner').style.display = 'none';
         document.getElementById('bottom-console').style.bottom = '0';
     } else {
         document.getElementById('ad-banner').style.display = 'flex';
-        document.getElementById('bottom-console').style.bottom = '30px';
+        document.getElementById('bottom-console').style.bottom = adH;
     }
 }
 updateTopUI();
@@ -279,7 +281,9 @@ canvas.addEventListener('touchend', (e) => {
     if (!touch.moved && !touch.isPinching) {
         const worldX = (touch.startX / camera.zoom) + camera.x;
         const worldY = (touch.startY / camera.zoom) + camera.y;
-        let clickedEnemy = enemies.find(en => en.visible && Math.hypot(en.x - worldX, en.y - worldY) < en.radius * 3);
+        // タッチはロックオン判定を広く取る（指で画面を押すと視認が難しいため）
+        const tapRadius = en => en.radius * 6 + 20;
+        let clickedEnemy = enemies.find(en => en.visible && Math.hypot(en.x - worldX, en.y - worldY) < tapRadius(en));
         if (clickedEnemy) {
             player.targetEntity = clickedEnemy;
             createClickEffect(clickedEnemy.x, clickedEnemy.y, '#ff4d4d');
