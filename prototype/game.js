@@ -143,6 +143,24 @@ function getErebosIntensity(x, y) {
     return Math.min(1.0, total);
 }
 
+// エレボスの濃い隠れ場所を探す (ジエンド戦スタイルAI用)
+function findHidingSpot(nearX, nearY, searchRadius) {
+    let best = {
+        x: Math.max(200, Math.min(FIELD_SIZE - 200, nearX + (Math.random() - 0.5) * searchRadius)),
+        y: Math.max(200, Math.min(FIELD_SIZE - 200, nearY + (Math.random() - 0.5) * searchRadius))
+    };
+    let bestScore = 0;
+    for (let i = 0; i < 20; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const dist = Math.random() * searchRadius;
+        const tx = Math.max(200, Math.min(FIELD_SIZE - 200, nearX + Math.cos(angle) * dist));
+        const ty = Math.max(200, Math.min(FIELD_SIZE - 200, nearY + Math.sin(angle) * dist));
+        const score = getErebosIntensity(tx, ty);
+        if (score > bestScore) { bestScore = score; best = { x: tx, y: ty }; }
+    }
+    return best;
+}
+
 // Resize
 function resizeCanvas() {
     canvas.width = window.innerWidth;
@@ -578,6 +596,11 @@ class Ship {
         this.detectionState = isPlayer ? 'alerted' : 'unaware'; // 'unaware'|'scanning'|'alerted'
         this.detectionTimer = 0;
         this.alertLogged = false; // Prevent spam logging
+        // ジエンド戦スタイル AIプロパティ
+        this.lurking = !isPlayer;       // 潜伏モード (エレボスの濃い場所へ移動)
+        this.postFireCooldown = 0;      // 発砲後の再配置タイマー
+        this.fireFlashTimer = 0;        // 発砲直後の可視フラッシュタイマー
+        this.repositionLogged = false;  // 再配置ログ重複防止
     }
 
     setTarget(tx, ty) { this.targetX = tx; this.targetY = ty; this.state = 'moving'; }
@@ -638,33 +661,102 @@ class Ship {
             document.getElementById('hostile-count').textContent = enemies.filter(e => e.visible).length || '不明';
 
         } else {
-            // Enemy AI
-            let target = null;
-            let cDist = Infinity;
+            // ============================================================
+            // 敵AI — ジエンド戦スタイル (一対一・潜伏・発砲後再配置)
+            // ============================================================
 
-            // Prioritize hacked structures (Dummy Signals)
+            // 発砲フラッシュタイマー更新 (発砲直後だけ可視になる)
+            if (this.fireFlashTimer > 0) {
+                this.fireFlashTimer--;
+                this.visible = true;
+            } else if (this.detectionState !== 'alerted' || this.lurking) {
+                // 潜伏中は通常の可視判定に委ねる (drawRadarSweepが制御)
+            }
+
+            // 被弾したら即時探知状態へ (先制攻撃されても反応する)
+            if (this.hp < this.prevHp) {
+                this.detectionState = 'alerted';
+                this.lurking = false;
+            }
+            this.prevHp = this.hp;
+
+            // ハッキング済み構造物への誘引 (EW対策)
+            let decoyTarget = null;
             structures.forEach(s => {
                 if (s.hacked) {
                     const d = Math.hypot(this.x - s.x, this.y - s.y);
-                    if (d < cDist && d < RADAR_RANGE * 4) { cDist = d; target = s; }
+                    if (d < RADAR_RANGE * 5) decoyTarget = s;
                 }
             });
+            if (decoyTarget) {
+                // 囮に釣られている
+                const dDist = Math.hypot(decoyTarget.x - this.x, decoyTarget.y - this.y);
+                if (dDist > 200) {
+                    const ta = Math.atan2(decoyTarget.y - this.y, decoyTarget.x - this.x);
+                    let diff = ta - this.angle;
+                    while (diff < -Math.PI) diff += Math.PI * 2;
+                    while (diff > Math.PI) diff -= Math.PI * 2;
+                    this.angle += diff * 0.05;
+                    this.speed = 0.8;
+                    this.x += Math.cos(this.angle) * this.speed;
+                    this.y += Math.sin(this.angle) * this.speed;
+                }
+                return; // 囮を追ってる間は他のAIをスキップ
+            }
 
-            // Enemy detection of player — Erebos reduces detection range
-            if (!target) {
-                const distToPlayer = Math.hypot(player.x - this.x, player.y - this.y);
-                const erebosHere = getErebosIntensity(this.x, this.y);
-                const myDetectRange = 750 * (1 - erebosHere * 0.55);
+            // ──────────────────────────────────────
+            // 発砲後再配置フェーズ
+            // ──────────────────────────────────────
+            if (this.postFireCooldown > 0) {
+                this.postFireCooldown--;
+                this.speed = 1.2; // 素早く移動して新しい潜伏場所へ
+                if (this.state === 'moving') {
+                    const dist = Math.hypot(this.targetX - this.x, this.targetY - this.y);
+                    if (dist > this.speed) {
+                        this.x += ((this.targetX - this.x) / dist) * this.speed;
+                        this.y += ((this.targetY - this.y) / dist) * this.speed;
+                        const ta = Math.atan2(this.targetY - this.y, this.targetX - this.x);
+                        let diff = ta - this.angle;
+                        while (diff < -Math.PI) diff += Math.PI * 2;
+                        while (diff > Math.PI) diff -= Math.PI * 2;
+                        this.angle += diff * 0.04;
+                    } else {
+                        this.state = 'idle';
+                        this.lurking = true; // 新しい場所に着いたら潜伏再開
+                        if (!this.repositionLogged) {
+                            this.repositionLogged = true;
+                            logMessage('SENSOR: 敵艦の熱源反応が消失。エレボスの霧に再潜伏中...', 'warning-msg');
+                        }
+                    }
+                } else if (this.postFireCooldown < 200) {
+                    // 少し待ってから新しい隠れ場所へ移動
+                    const hideSpot = findHidingSpot(
+                        player.x + (Math.random() - 0.5) * FIELD_SIZE * 0.6,
+                        player.y + (Math.random() - 0.5) * FIELD_SIZE * 0.6,
+                        3000
+                    );
+                    this.setTarget(hideSpot.x, hideSpot.y);
+                    this.repositionLogged = false;
+                }
+                return; // 再配置フェーズ中は他AIスキップ
+            }
 
-                if (this.detectionState === 'alerted') {
-                    target = player; // Alerted enemy always hunts player
-                } else if (distToPlayer < myDetectRange) {
+            // ──────────────────────────────────────
+            // 自艦探知チェック — エレボスで探知範囲が変動
+            // ──────────────────────────────────────
+            const distToPlayer = Math.hypot(player.x - this.x, player.y - this.y);
+            const erebosHere = getErebosIntensity(this.x, this.y);
+            const myDetectRange = 800 * (1 - erebosHere * 0.55) * (1 + gameState.sector * 0.05);
+
+            if (this.detectionState === 'unaware') {
+                if (distToPlayer < myDetectRange) {
                     this.detectionTimer++;
-                    if (this.detectionTimer > 90) { // ~1.5s to detect
+                    if (this.detectionTimer > 80) {
                         this.detectionState = 'alerted';
+                        this.lurking = false;
                         if (!this.alertLogged) {
                             this.alertLogged = true;
-                            logMessage('WARN: 敵軍があなたを探知しました！', 'warning-msg');
+                            logMessage('WARN: 敵艦があなたを探知した！迎撃態勢に入ります。', 'warning-msg');
                         }
                     }
                 } else {
@@ -672,64 +764,15 @@ class Ship {
                 }
             }
 
-            // Different logic per type
-            this.speed = this.type === 'fighter' ? 2.5 : (this.type === 'carrier' ? 0.3 : (this.type === 'destroyer' ? 0.6 : 1.2));
-
-            // Low HP retreat — fighters and corvettes flee when critically damaged
-            if (this.hp < this.maxHp * 0.25 && this.type !== 'carrier' && this.detectionState === 'alerted') {
-                const fleeAngle = Math.atan2(player.y - this.y, player.x - this.x) + Math.PI;
-                this.x += Math.cos(fleeAngle) * this.speed * 1.3;
-                this.y += Math.sin(fleeAngle) * this.speed * 1.3;
-                this.state = 'retreating';
-            } else if (target) {
-                const dist = Math.hypot(target.x - this.x, target.y - this.y);
-                let ta = Math.atan2(target.y - this.y, target.x - this.x);
-                let diff = ta - this.angle;
-                while (diff < -Math.PI) diff += Math.PI * 2;
-                while (diff > Math.PI) diff -= Math.PI * 2;
-                this.angle += diff * 0.05;
-
-                if (dist > (this.type === 'carrier' ? 800 : 350)) {
-                    this.x += Math.cos(this.angle) * this.speed;
-                    this.y += Math.sin(this.angle) * this.speed;
+            // ──────────────────────────────────────
+            // 潜伏モード — エレボスの濃い場所を探す
+            // ──────────────────────────────────────
+            if (this.lurking || this.detectionState === 'unaware') {
+                this.speed = 0.35; // ゆっくり移動 (潜望鏡を出すレベル)
+                if (this.state === 'idle' && Math.random() < 0.004) {
+                    const hideSpot = findHidingSpot(this.x, this.y, 2000);
+                    this.setTarget(hideSpot.x, hideSpot.y);
                 }
-                const fireRange = this.type === 'carrier' ? 1500 : (this.type === 'fighter' ? 400 : 600);
-                if (dist < fireRange && this.fireCooldown <= 0 && target.hp !== undefined) {
-                    if (this.type === 'carrier') {
-                        enemies.push(new Ship(this.x, this.y, false, 'fighter'));
-                        this.fireCooldown = 300;
-                    } else {
-                        projectiles.push(new Projectile(this.x, this.y, target, false, this.type === 'destroyer' ? 'missile' : 'kinetic'));
-                        playSound('shoot');
-                        this.fireCooldown = this.type === 'destroyer' ? 150 : (this.type === 'fighter' ? 40 : 80);
-                    }
-                }
-            } else {
-                // Tactical AI: Patrol & Alert logic
-                if (this.hp < this.prevHp) {
-                    this.isAggro = true;
-                    this.aggroTimer = 600;
-                    this.detectionState = 'alerted'; // Taking damage = instant alert
-                    // Alert neighbors within comm range
-                    enemies.forEach(e => {
-                        if (Math.hypot(this.x - e.x, this.y - e.y) < 900) {
-                            e.isAggro = true;
-                            e.aggroTimer = 600;
-                            e.detectionState = 'alerted';
-                        }
-                    });
-                }
-                this.prevHp = this.hp;
-
-                if (this.isAggro) {
-                    this.aggroTimer--;
-                    if (this.aggroTimer <= 0) this.isAggro = false;
-                    // Aggro enemies always go after player
-                    if (this.detectionState === 'alerted') {
-                        target = player;
-                    }
-                }
-
                 if (this.state === 'moving') {
                     const dist = Math.hypot(this.targetX - this.x, this.targetY - this.y);
                     if (dist > this.speed) {
@@ -742,10 +785,41 @@ class Ship {
                         this.angle += diff * 0.02;
                     } else this.state = 'idle';
                 }
-                if (this.state === 'idle' && Math.random() < 0.005) {
-                    // Patrol to random nearby point
-                    this.setTarget(this.x + (Math.random() - 0.5) * 2000, this.y + (Math.random() - 0.5) * 2000);
+
+            // ──────────────────────────────────────
+            // 戦闘モード — 射程に入ったら発砲、即再配置
+            // ──────────────────────────────────────
+            } else if (this.detectionState === 'alerted') {
+                const fireRange = 650 + gameState.sector * 20; // セクターが深いほど長射程
+                this.speed = 0.7;
+
+                if (distToPlayer < fireRange && this.fireCooldown <= 0) {
+                    // 発砲！
+                    const wType = gameState.sector <= 2 ? 'kinetic' : 'missile';
+                    projectiles.push(new Projectile(this.x, this.y, player, false, wType));
+                    playSound('shoot');
+                    this.fireCooldown = 180;
+
+                    // 発砲フラッシュ — 約2秒間、位置が露わになる
+                    this.fireFlashTimer = 120;
+                    this.visible = true;
+                    effects.push({ x: this.x, y: this.y, r: 0, maxR: 200, a: 0.9, c: '#ff4d4d', type: 'circle' });
+                    logMessage('WARNING: 砲撃フラッシュ検知！敵艦の位置を一時特定しました。', 'warning-msg');
+
+                    // 発砲後すぐに再配置開始
+                    this.postFireCooldown = 300;
+
+                } else if (distToPlayer > fireRange * 0.7) {
+                    // 射程に入るまで慎重に接近
+                    const ta = Math.atan2(player.y - this.y, player.x - this.x);
+                    let diff = ta - this.angle;
+                    while (diff < -Math.PI) diff += Math.PI * 2;
+                    while (diff > Math.PI) diff -= Math.PI * 2;
+                    this.angle += diff * 0.04;
+                    this.x += Math.cos(this.angle) * this.speed;
+                    this.y += Math.sin(this.angle) * this.speed;
                 }
+                // 射程内に入った後はじっと待って次の射撃機会を伺う
             }
         }
 
@@ -770,29 +844,33 @@ class Ship {
         ctx.translate(this.x, this.y);
         ctx.rotate(this.angle);
 
+        // 潜伏中は半透明 (ノイズの中にかすかに映る)
+        const isLurking = !this.isPlayer && (this.lurking || this.detectionState === 'unaware');
+        const isFlashing = !this.isPlayer && this.fireFlashTimer > 0;
+        if (isLurking) ctx.globalAlpha = 0.4 + Math.sin(Date.now() * 0.003) * 0.15; // ゆらゆら点滅
+        if (isFlashing) ctx.globalAlpha = 1.0;
+
         ctx.beginPath();
         if (this.isPlayer) {
             ctx.moveTo(this.radius, 0); ctx.lineTo(-this.radius, -this.radius * 0.6);
             ctx.lineTo(-this.radius * 0.5, 0); ctx.lineTo(-this.radius, this.radius * 0.6);
             ctx.fillStyle = '#00ffaa'; ctx.shadowColor = '#00ffaa';
+            ctx.shadowBlur = 15;
         } else {
-            if (this.type === 'destroyer') {
-                ctx.moveTo(this.radius, 0); ctx.lineTo(-this.radius, -this.radius * 0.8);
-                ctx.lineTo(-this.radius * 0.6, 0); ctx.lineTo(-this.radius, this.radius * 0.8);
-            } else {
-                ctx.moveTo(this.radius, 0); ctx.lineTo(-this.radius, -this.radius);
-                ctx.lineTo(-this.radius * 0.2, 0); ctx.lineTo(-this.radius, this.radius);
-            }
-            ctx.fillStyle = '#ff4d4d'; ctx.shadowColor = '#ff4d4d';
+            // 敵は発砲フラッシュ中は大きく赤く光る
+            const r = isFlashing ? this.radius * 1.5 : this.radius;
+            ctx.moveTo(r, 0); ctx.lineTo(-r, -r * 0.8);
+            ctx.lineTo(-r * 0.6, 0); ctx.lineTo(-r, r * 0.8);
+            ctx.fillStyle = isFlashing ? '#ff8888' : '#ff4d4d';
+            ctx.shadowColor = '#ff4d4d';
+            ctx.shadowBlur = isFlashing ? 40 : 15;
         }
-        ctx.shadowBlur = 15;
         ctx.closePath(); ctx.fill();
         ctx.shadowBlur = 0;
 
         if (this.isPlayer) {
             ctx.beginPath(); ctx.arc(0, 0, this.radius * 1.5, 0, Math.PI * 2);
             ctx.strokeStyle = 'rgba(0,255,170,0.4)'; ctx.stroke();
-            // Draw obvious self indicator
             ctx.beginPath();
             ctx.moveTo(-40, 0); ctx.lineTo(-20, 0);
             ctx.moveTo(40, 0); ctx.lineTo(20, 0);
@@ -801,10 +879,22 @@ class Ship {
             ctx.strokeStyle = 'rgba(0,255,170,0.8)'; ctx.stroke();
         }
         ctx.restore();
+        ctx.globalAlpha = 1;
 
-        if (!this.isPlayer && this.hp < this.maxHp) {
-            ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(this.x - 10, this.y - 25, 20, 3);
-            ctx.fillStyle = '#ff4d4d'; ctx.fillRect(this.x - 10, this.y - 25, 20 * (this.hp / this.maxHp), 3);
+        if (!this.isPlayer && this.visible) {
+            // HP バー
+            ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(this.x - 15, this.y - 28, 30, 4);
+            ctx.fillStyle = this.hp / this.maxHp < 0.3 ? '#ff8800' : '#ff4d4d';
+            ctx.fillRect(this.x - 15, this.y - 28, 30 * (this.hp / this.maxHp), 4);
+            // 敵艦名表示 (発砲フラッシュ中のみ)
+            if (isFlashing) {
+                ctx.fillStyle = '#ff8888';
+                ctx.font = 'bold 11px Orbitron';
+                ctx.textAlign = 'center';
+                ctx.shadowColor = '#ff4d4d'; ctx.shadowBlur = 6;
+                ctx.fillText(`HOSTILE [${gameState.sector}]`, this.x, this.y - 35);
+                ctx.shadowBlur = 0;
+            }
         }
     }
 }
@@ -942,12 +1032,23 @@ function generateSector() {
 
     for (let i = 0; i < tCount; i++) talosDrones.push(new TalosDrone(player.x, player.y));
 
-    let enemyCount = 15 + gameState.sector * 5;
-    for (let i = 0; i < enemyCount; i++) {
-        let rand = Math.random();
-        let type = rand < 0.1 ? 'carrier' : (rand < 0.3 ? 'destroyer' : 'corvette');
-        enemies.push(new Ship(Math.random() * FIELD_SIZE, Math.random() * FIELD_SIZE, false, type));
-    }
+    // ===== ジエンド戦スタイル: 1セクター = 敵1機 =====
+    // 敵をエレボスの濃い場所に配置 (プレイヤーから遠い位置)
+    const spawnAngle = Math.random() * Math.PI * 2;
+    const spawnDist = 3000 + Math.random() * 2000; // 3000-5000u離れた場所
+    const spawnCenterX = FIELD_SIZE / 2 + Math.cos(spawnAngle) * spawnDist * 0.5;
+    const spawnCenterY = FIELD_SIZE / 2 + Math.sin(spawnAngle) * spawnDist * 0.5;
+    const bossSpawn = findHidingSpot(
+        Math.max(500, Math.min(FIELD_SIZE - 500, spawnCenterX)),
+        Math.max(500, Math.min(FIELD_SIZE - 500, spawnCenterY)),
+        1500
+    );
+    const boss = new Ship(bossSpawn.x, bossSpawn.y, false, 'destroyer');
+    // セクターが深いほど高HP・高速化
+    boss.maxHp = 500 + gameState.sector * 200;
+    boss.hp = boss.maxHp;
+    boss.lurking = true;
+    enemies.push(boss);
     for (let i = 0; i < 8; i++) {
         structures.push(new Structure(Math.random() * FIELD_SIZE, Math.random() * FIELD_SIZE, Math.random() > 0.5 ? 'colony' : 'derelict'));
     }
