@@ -201,6 +201,55 @@
                 </div>
             </div>
 
+            <!-- Ship Select Lobby -->
+            <div id="ship-select-lobby">
+                <div class="lobby-container">
+                    <div class="lobby-title">艦種選択</div>
+                    <div class="lobby-subtitle">出撃前に艦種を選択してください</div>
+                    <div class="ship-cards">
+                        <div class="ship-card" id="card-assault">
+                            <div class="ship-icon">⚔</div>
+                            <div class="ship-name">攻撃型</div>
+                            <div class="ship-desc">高耐久・複数同時発射<br>正面突破の重装甲艦</div>
+                            <div class="ship-stats">
+                                <div class="stat-row"><span>耐久</span><div class="stat-bar"><div class="stat-fill" style="width:90%"></div></div></div>
+                                <div class="stat-row"><span>速度</span><div class="stat-bar"><div class="stat-fill" style="width:45%"></div></div></div>
+                                <div class="stat-row"><span>火力</span><div class="stat-bar"><div class="stat-fill" style="width:90%"></div></div></div>
+                                <div class="stat-row"><span>隠密</span><div class="stat-bar"><div class="stat-fill" style="width:15%"></div></div></div>
+                            </div>
+                            <div class="ship-ability">特殊: 3連装同時発射</div>
+                            <button class="btn btn-primary ship-select-btn" data-type="assault">選択して出撃</button>
+                        </div>
+                        <div class="ship-card" id="card-stealth">
+                            <div class="ship-icon">◈</div>
+                            <div class="ship-name">潜航型</div>
+                            <div class="ship-desc">極低耐久・最高速度<br>ヒッグス雲への完全潜伏</div>
+                            <div class="ship-stats">
+                                <div class="stat-row"><span>耐久</span><div class="stat-bar"><div class="stat-fill" style="width:20%"></div></div></div>
+                                <div class="stat-row"><span>速度</span><div class="stat-bar"><div class="stat-fill" style="width:100%"></div></div></div>
+                                <div class="stat-row"><span>火力</span><div class="stat-bar"><div class="stat-fill" style="width:45%"></div></div></div>
+                                <div class="stat-row"><span>隠密</span><div class="stat-bar"><div class="stat-fill" style="width:95%"></div></div></div>
+                            </div>
+                            <div class="ship-ability">特殊: 3種ジャミング装備</div>
+                            <button class="btn btn-primary ship-select-btn" data-type="stealth">選択して出撃</button>
+                        </div>
+                        <div class="ship-card" id="card-carrier">
+                            <div class="ship-icon">⊕</div>
+                            <div class="ship-name">空母型</div>
+                            <div class="ship-desc">中耐久・ドローン展開<br>戦場支配型の建設艦</div>
+                            <div class="ship-stats">
+                                <div class="stat-row"><span>耐久</span><div class="stat-bar"><div class="stat-fill" style="width:65%"></div></div></div>
+                                <div class="stat-row"><span>速度</span><div class="stat-bar"><div class="stat-fill" style="width:30%"></div></div></div>
+                                <div class="stat-row"><span>火力</span><div class="stat-bar"><div class="stat-fill" style="width:60%"></div></div></div>
+                                <div class="stat-row"><span>隠密</span><div class="stat-bar"><div class="stat-fill" style="width:30%"></div></div></div>
+                            </div>
+                            <div class="ship-ability">特殊: ドローン初期展開済み</div>
+                            <button class="btn btn-primary ship-select-btn" data-type="carrier">選択して出撃</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Game Over Overlay -->
             <div id="game-over-overlay" class="hidden">
                 <div class="game-over-box">

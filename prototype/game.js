@@ -63,6 +63,7 @@ function playSound(type) {
 
 // Game State Storage
 let gameState = {
+    shipType: 'assault', // 'assault' | 'stealth' | 'carrier'
     sector: 1,
     credits: 0,
     hasAds: true,
@@ -606,9 +607,11 @@ class Ship {
         this.generatorOutput = 50;
 
         if (isPlayer) {
-            this.type = 'mothership';
+            this.type = gameState.shipType || 'assault';
+            // 艦種別スタッツ
+            const hpBase = { assault: 3500, stealth: 700, carrier: 2500 };
             this.radius = 20;
-            this.maxHp = 2000 * (1 + (gameState.upgrades.hull * 0.25));
+            this.maxHp = (hpBase[gameState.shipType] || 2000) * (1 + (gameState.upgrades.hull * 0.25));
         } else {
             this.type = type; // corvette, destroyer, carrier, fighter
             this.radius = type === 'carrier' ? 30 : (type === 'destroyer' ? 18 : (type === 'fighter' ? 6 : 12));
@@ -644,8 +647,9 @@ class Ship {
         if (this.fireCooldown > 0) this.fireCooldown--;
 
         if (this.isPlayer) {
-            // Speed defined by GEN engine allocation
-            this.speed = (genAlloc.engine / 100) * 3.0;
+            // Speed defined by GEN engine allocation + 艦種補正
+            const speedMult = { assault: 0.8, stealth: 1.4, carrier: 0.6 };
+            this.speed = (genAlloc.engine / 100) * 3.0 * (speedMult[gameState.shipType] || 1.0);
 
             // Boundary detection for Sector Transition Dialog
             if ((this.x < 100 || this.x > FIELD_SIZE - 100 || this.y < 100 || this.y > FIELD_SIZE - 100) && !dialogOpen) {
@@ -672,6 +676,16 @@ class Ship {
                 if (dist < wRange && this.fireCooldown <= 0) {
                     this.weaponType = wType;
                     projectiles.push(new Projectile(this.x, this.y, this.targetEntity, true, wType));
+                    // 攻撃型特殊: 3連装同時発射 (kinetic時のみ)
+                    if (gameState.shipType === 'assault' && wType === 'kinetic') {
+                        const spread = 0.12;
+                        const baseAngle = Math.atan2(this.targetEntity.y - this.y, this.targetEntity.x - this.x);
+                        [-spread, spread].forEach(offset => {
+                            const p = new Projectile(this.x, this.y, this.targetEntity, true, 'kinetic');
+                            p.angle = baseAngle + offset;
+                            projectiles.push(p);
+                        });
+                    }
                     playSound('shoot');
                     this.fireCooldown = WEAPON_COOLDOWNS[wType];
                 }
@@ -1190,9 +1204,27 @@ function generateSector() {
         centerCameraOnPlayer();
     }, 100);
 
-    logMessage(`SYSTEM: ワープ完了。セクター ${gameState.sector} に到着しました。環境マッピング中...`, 'system-msg');
+    // 艦種別初期処理
+    if (gameState.shipType === 'carrier' && drones.length === 0) {
+        // 空母型: ドローン初期展開済み
+        drones.push(new TalosDrone(player.x + 50, player.y));
+        logMessage('CARRIER: ドローン初期展開完了。', 'system-msg');
+    }
+
+    const shipLabel = { assault: '攻撃型', stealth: '潜航型', carrier: '空母型' };
+    logMessage(`SYSTEM: ワープ完了。セクター ${gameState.sector} に到着しました [${shipLabel[gameState.shipType] || '不明'}]。環境マッピング中...`, 'system-msg');
 }
-generateSector(); // Initial map
+
+function startGame(shipType) {
+    gameState.shipType = shipType;
+    document.getElementById('ship-select-lobby').classList.add('hidden');
+    generateSector();
+}
+
+// 艦種選択ボタン
+document.querySelectorAll('.ship-select-btn').forEach(btn => {
+    btn.addEventListener('click', () => startGame(btn.dataset.type));
+});
 
 // UI Binding Logic for gameplay
 function showDialog() {

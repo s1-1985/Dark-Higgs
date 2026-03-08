@@ -1039,3 +1039,119 @@ input[type=range]::-webkit-slider-thumb {
     }
     .prompt-content span { font-size: 11px; }
 }
+
+/* ═══════════════════════════════════════════
+   艦種選択ロビー
+═══════════════════════════════════════════ */
+#ship-select-lobby {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: radial-gradient(ellipse at center, #040d1a 0%, #010203 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+}
+#ship-select-lobby.hidden { display: none; }
+
+.lobby-container {
+    text-align: center;
+    width: 100%;
+    max-width: 900px;
+    padding: 20px;
+}
+.lobby-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 28px;
+    font-weight: 700;
+    color: #00ffaa;
+    letter-spacing: 6px;
+    text-shadow: 0 0 20px rgba(0,255,170,0.5);
+    margin-bottom: 8px;
+}
+.lobby-subtitle {
+    font-size: 13px;
+    color: #607080;
+    letter-spacing: 2px;
+    margin-bottom: 32px;
+}
+.ship-cards {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+.ship-card {
+    background: rgba(0,20,40,0.9);
+    border: 1px solid #1a3a5a;
+    border-radius: 8px;
+    padding: 24px 20px;
+    width: 240px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    cursor: pointer;
+}
+.ship-card:hover {
+    border-color: #00ffaa;
+    box-shadow: 0 0 20px rgba(0,255,170,0.15);
+}
+.ship-icon {
+    font-size: 36px;
+    line-height: 1;
+    color: #00ffaa;
+    text-shadow: 0 0 12px rgba(0,255,170,0.6);
+}
+#card-stealth .ship-icon { color: #50c8ff; text-shadow: 0 0 12px rgba(80,200,255,0.6); }
+#card-carrier .ship-icon { color: #ffaa00; text-shadow: 0 0 12px rgba(255,170,0,0.6); }
+.ship-name {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    color: #e0f0ff;
+    letter-spacing: 3px;
+}
+.ship-desc {
+    font-size: 11px;
+    color: #607080;
+    line-height: 1.6;
+    text-align: center;
+}
+.ship-stats { width: 100%; display: flex; flex-direction: column; gap: 6px; }
+.stat-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 10px;
+    color: #607080;
+}
+.stat-row span { width: 26px; text-align: left; }
+.stat-bar {
+    flex: 1;
+    height: 4px;
+    background: rgba(255,255,255,0.07);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.stat-fill {
+    height: 100%;
+    background: #00ffaa;
+    border-radius: 2px;
+}
+#card-stealth .stat-fill { background: #50c8ff; }
+#card-carrier .stat-fill { background: #ffaa00; }
+.ship-ability {
+    font-size: 10px;
+    color: #00ffaa;
+    background: rgba(0,255,170,0.07);
+    border: 1px solid rgba(0,255,170,0.2);
+    border-radius: 4px;
+    padding: 4px 10px;
+    text-align: center;
+}
+#card-stealth .ship-ability { color: #50c8ff; background: rgba(80,200,255,0.07); border-color: rgba(80,200,255,0.2); }
+#card-carrier .ship-ability { color: #ffaa00; background: rgba(255,170,0,0.07); border-color: rgba(255,170,0,0.2); }
+.ship-select-btn { width: 100%; margin-top: 4px; }
