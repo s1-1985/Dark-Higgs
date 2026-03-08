@@ -456,6 +456,21 @@ class Projectile {
                 target.hp -= 150 * dmgMult;
                 createHitEffect(target.x, target.y, isPlayer ? '#00ffaa' : '#ff4d4d');
                 effects.push({ x: this.x, y: this.y, tx: target.x, ty: target.y, type: 'beam', a: 1, c: isPlayer ? '#00ffaa' : '#ff4d4d' });
+                // ヒッグスダークチャネル: ビームがヒッグス雲を押し分けて通路を作る
+                // ヒッグスセンサーで軌跡として可視化される
+                const dx = target.x - x;
+                const dy = target.y - y;
+                const beamLen = Math.hypot(dx, dy);
+                const steps = Math.max(5, Math.floor(beamLen / 60));
+                for (let s = 0; s <= steps; s++) {
+                    const t = s / steps;
+                    const wx = x + dx * t;
+                    const wy = y + dy * t;
+                    const localHiggs = getHiggsIntensity(wx, wy);
+                    if (localHiggs > 0.08) {
+                        higgsWakes.push({ x: wx, y: wy, intensity: localHiggs * 1.4, life: 1.0 });
+                    }
+                }
             }
         }
     }
@@ -611,6 +626,7 @@ class Ship {
         this.lurking = !isPlayer;       // 潜伏モード (ヒッグス濃度の高い場所へ移動)
         this.postFireCooldown = 0;      // 発砲後の再配置タイマー
         this.fireFlashTimer = 0;        // 発砲直後の可視フラッシュタイマー
+        this.weaponType = 'kinetic';    // 最後に発射した武器種 (シグネチャ計算用)
         this.repositionLogged = false;  // 再配置ログ重複防止
         // マルチセンサーシグネチャ
         this.heatSig = 0;    // 熱源シグネチャ: 移動中に上昇
@@ -654,6 +670,7 @@ class Ship {
                 }
 
                 if (dist < wRange && this.fireCooldown <= 0) {
+                    this.weaponType = wType;
                     projectiles.push(new Projectile(this.x, this.y, this.targetEntity, true, wType));
                     playSound('shoot');
                     this.fireCooldown = WEAPON_COOLDOWNS[wType];
@@ -813,7 +830,8 @@ class Ship {
 
                 if (distToPlayer < fireRange && this.fireCooldown <= 0) {
                     // 発砲！
-                    const wType = gameState.sector <= 2 ? 'kinetic' : 'missile';
+                    const wType = gameState.sector <= 2 ? 'kinetic' : (gameState.sector <= 4 ? 'missile' : 'beam');
+                    this.weaponType = wType;
                     projectiles.push(new Projectile(this.x, this.y, player, false, wType));
                     playSound('shoot');
                     this.fireCooldown = 180;
@@ -821,8 +839,9 @@ class Ship {
                     // 発砲フラッシュ — 約2秒間、位置が露わになる
                     this.fireFlashTimer = 120;
                     this.visible = true;
+                    const sigLabel = { kinetic: '銃口炎[光学]', missile: '推進炎[熱源+EM]', beam: 'EMパルス[EM+光学]' };
                     effects.push({ x: this.x, y: this.y, r: 0, maxR: 200, a: 0.9, c: '#ff4d4d', type: 'circle' });
-                    logMessage('WARNING: 砲撃フラッシュ検知！敵艦の位置を一時特定しました。', 'warning-msg');
+                    logMessage(`WARNING: 敵艦発砲検知 — ${sigLabel[wType] || '不明'}シグネチャ捕捉。`, 'warning-msg');
 
                     // 発砲後すぐに再配置開始
                     this.postFireCooldown = 300;
@@ -863,17 +882,31 @@ class Ship {
             const spd = Math.hypot(this.x - this.prevX, this.y - this.prevY);
             this.prevX = this.x;
             this.prevY = this.y;
-            // postFireCooldown中の高速再配置は熱源強め、潜伏中はほぼゼロ
-            if (this.postFireCooldown > 0) {
-                this.heatSig = Math.min(1.0, this.heatSig + 0.05); // 再配置は激しく発熱
+            // 熱源シグネチャ: 武器種と状態で変化
+            // - missile: 推進剤燃焼で長時間高熱
+            // - beam: チャージ中に廃熱上昇
+            // - 再配置中: エンジン全開で発熱
+            const higgsHere = getHiggsIntensity(this.x, this.y);
+            if (this.weaponType === 'missile' && this.fireFlashTimer > 20) {
+                this.heatSig = Math.min(1.0, this.heatSig + 0.07); // ミサイル推進剤燃焼
+            } else if (this.weaponType === 'beam' && this.fireFlashTimer > 60) {
+                this.heatSig = Math.min(1.0, this.heatSig + 0.04); // ビームチャージ廃熱
+            } else if (this.postFireCooldown > 0) {
+                this.heatSig = Math.min(1.0, this.heatSig + 0.05); // 再配置エンジン全開
             } else {
                 this.heatSig = Math.min(1.0, spd / 1.0); // 速度に比例
             }
 
-            // 光学シグネチャ: 発砲フラッシュ時に最大、ヒッグスで大きく減衰
-            const higgsHere = getHiggsIntensity(this.x, this.y);
-            if (this.fireFlashTimer > 50) {
-                this.opticalSig = Math.min(1.0, this.opticalSig + 0.12); // 発砲フラッシュ急上昇
+            // 光学シグネチャ: 武器種で異なる
+            // - kinetic: 銃口炎 (短く強烈な光学スパイク)
+            // - missile: 打ち出し時の小フラッシュ
+            // - beam: 中程度の光学 (エネルギー放射)
+            if (this.weaponType === 'kinetic' && this.fireFlashTimer > 50) {
+                this.opticalSig = Math.min(1.0, this.opticalSig + 0.18); // 銃口炎フラッシュ
+            } else if (this.weaponType === 'beam' && this.fireFlashTimer > 40) {
+                this.opticalSig = Math.min(1.0, this.opticalSig + 0.10); // ビーム光
+            } else if (this.weaponType === 'missile' && this.fireFlashTimer > 100) {
+                this.opticalSig = Math.min(1.0, this.opticalSig + 0.04); // 打ち出し小フラッシュ
             } else {
                 // 発光フェード + ヒッグス減衰
                 this.opticalSig = Math.max(0, this.opticalSig * 0.92) * (1 - higgsHere * 0.95);
@@ -897,9 +930,16 @@ class Ship {
                 this.higgsSig = Math.max(0, this.higgsSig - 0.02);
             }
 
-            // 電磁波シグネチャ: 潜伏中は受動放射が漏れる、発砲時スパイク、移動中は無線封鎖
-            if (this.fireFlashTimer > 60) {
-                this.emSig = Math.min(1.0, this.emSig + 0.08); // 武器放電EM スパイク
+            // 電磁波シグネチャ: 武器種で異なる
+            // - beam: チャージ中に強いEMパルス (最大の特徴量)
+            // - missile: 誘導系EMが持続
+            // - kinetic: 薬莢排出の微弱EMのみ
+            if (this.weaponType === 'beam' && this.fireFlashTimer > 50) {
+                this.emSig = Math.min(1.0, this.emSig + 0.14); // ビームチャージ強EM
+            } else if (this.weaponType === 'missile' && this.fireFlashTimer > 30) {
+                this.emSig = Math.min(1.0, this.emSig + 0.05); // ミサイル誘導EM
+            } else if (this.weaponType === 'kinetic' && this.fireFlashTimer > 90) {
+                this.emSig = Math.min(1.0, this.emSig + 0.02); // 薬莢微弱EM
             } else if (this.lurking && this.postFireCooldown === 0) {
                 // 潜伏中の受動EM漏洩 (ゆらぎあり)
                 const target = 0.5 + Math.sin(Date.now() * 0.0015 + this.x * 0.001) * 0.1;
