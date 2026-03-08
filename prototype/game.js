@@ -887,7 +887,7 @@ class Ship {
                 this.higgsSig += (target - this.higgsSig) * 0.04;
             } else if (this.postFireCooldown > 0) {
                 // 再配置中: 高速移動でヒッグスウェイクが強まる
-                const spd = Math.hypot(this.x - this.prevX, this.y - this.prevY);
+                // spd は prevX/prevY更新前 (line 863) に計算済み — ここで再宣言しない
                 this.higgsSig = Math.min(1.0, higgsAtThisShip * spd * 1.5);
                 // ウェイクを残す
                 if (higgsAtThisShip > 0.15 && spd > 0.2) {
@@ -1207,21 +1207,32 @@ GEN_KEYS.forEach(key => {
         // ゼロサム: 他のスライダーを按分調整
         const others = GEN_KEYS.filter(k => k !== key);
         const otherTotal = others.reduce((sum, k) => sum + genAlloc[k], 0);
-        if (otherTotal > 0 && delta !== 0) {
+        if (delta !== 0) {
             let remaining = -delta;
-            others.forEach((k, i) => {
-                if (i === others.length - 1) {
-                    genAlloc[k] = Math.max(0, genAlloc[k] + remaining);
-                } else {
-                    const adj = Math.round(remaining * (genAlloc[k] / otherTotal));
-                    genAlloc[k] = Math.max(0, genAlloc[k] + adj);
-                    remaining -= adj;
-                }
-                const el = document.getElementById(`gen-${k}`);
-                const valEl = document.getElementById(`gen-${k}-val`);
-                if (el) el.value = genAlloc[k];
-                if (valEl) valEl.textContent = genAlloc[k] + '%';
-            });
+            if (otherTotal > 0) {
+                // 按分配分
+                others.forEach((k, i) => {
+                    if (i === others.length - 1) {
+                        genAlloc[k] = Math.max(0, genAlloc[k] + remaining);
+                    } else {
+                        const adj = Math.round(remaining * (genAlloc[k] / otherTotal));
+                        genAlloc[k] = Math.max(0, genAlloc[k] + adj);
+                        remaining -= adj;
+                    }
+                    const el = document.getElementById(`gen-${k}`);
+                    const valEl = document.getElementById(`gen-${k}-val`);
+                    if (el) el.value = genAlloc[k];
+                    if (valEl) valEl.textContent = genAlloc[k] + '%';
+                });
+            } else {
+                // 他が全て0 → 最後のスライダーに全て割り当て
+                const last = others[others.length - 1];
+                genAlloc[last] = Math.max(0, genAlloc[last] + remaining);
+                const el = document.getElementById(`gen-${last}`);
+                const valEl = document.getElementById(`gen-${last}-val`);
+                if (el) el.value = genAlloc[last];
+                if (valEl) valEl.textContent = genAlloc[last] + '%';
+            }
         }
 
         const valEl = document.getElementById(`gen-${key}-val`);
@@ -1399,6 +1410,28 @@ function drawRadarSweep(ctx) {
     ctx.fill();
 
     ctx.restore();
+
+    // EMセンサー専用: 収集直後のEMスパイク可視化
+    if (currentSensor === 'em') {
+        resourceNodes.forEach(n => {
+            if (n.emFlashTimer <= 0) return;
+            const dist = Math.hypot(n.x - player.x, n.y - player.y);
+            if (dist < sensorRange) {
+                const intensity = n.emFlashTimer / 180;
+                ctx.save();
+                ctx.globalAlpha = intensity * 0.9;
+                ctx.fillStyle = '#cc44ff';
+                ctx.shadowColor = '#cc44ff';
+                ctx.shadowBlur = 20 * intensity;
+                ctx.beginPath();
+                ctx.arc(n.x, n.y, 7 * intensity, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.restore();
+                ctx.globalAlpha = 1;
+            }
+        });
+    }
 
     // ヒッグスセンサー専用: ウェイク軌跡 + リソースノード可視化
     if (currentSensor === 'higgs') {
@@ -1752,9 +1785,9 @@ function gameLoop() {
         // リソースノード収集チェック (プレイヤー接近で自動収集)
         for (let i = resourceNodes.length - 1; i >= 0; i--) {
             const n = resourceNodes[i];
-            if (!n.active) continue;
-            // EMスパイクタイマー更新
+            // EMスパイクタイマー: 収集後も非アクティブ状態でカウントダウン継続
             if (n.emFlashTimer > 0) n.emFlashTimer--;
+            if (!n.active) continue;
             if (player && player.hp > 0) {
                 const d = Math.hypot(player.x - n.x, player.y - n.y);
                 if (d < player.radius + 40) {
