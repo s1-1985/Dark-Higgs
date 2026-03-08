@@ -361,25 +361,73 @@ class Structure {
         this.color = type === 'colony' ? 'rgba(34, 68, 170, 0.5)' : 'rgba(85, 85, 85, 0.5)';
     }
     draw(ctx) {
-        ctx.beginPath();
+        const t = Date.now();
+        const hColor = this.hacked ? '#00aaff' : null;
+
         if (this.type === 'colony') {
-            ctx.rect(this.x - 30, this.y - 30, 60, 60);
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            ctx.strokeStyle = hColor || 'rgba(60,100,220,0.9)';
+            ctx.fillStyle = hColor ? 'rgba(0,100,200,0.25)' : 'rgba(34,68,170,0.25)';
+            ctx.lineWidth = 2;
+            ctx.shadowColor = hColor || '#2244aa'; ctx.shadowBlur = 10;
+            // Octagonal body
+            ctx.beginPath();
+            for (let i = 0; i < 8; i++) {
+                const a = (i / 8) * Math.PI * 2 - Math.PI / 8;
+                const px = Math.cos(a) * 28, py = Math.sin(a) * 28;
+                if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+            }
+            ctx.closePath(); ctx.fill(); ctx.stroke();
+            // Cross frame
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.moveTo(-28, 0); ctx.lineTo(28, 0);
+            ctx.moveTo(0, -28); ctx.lineTo(0, 28);
+            ctx.stroke();
+            // Rotating corner nodes
+            const rAngle = t * 0.0006;
+            for (let i = 0; i < 4; i++) {
+                const a = (i / 4) * Math.PI * 2 + rAngle;
+                ctx.fillStyle = hColor ? '#00ffaa' : '#4466cc';
+                ctx.shadowBlur = 6;
+                ctx.beginPath();
+                ctx.arc(Math.cos(a) * 36, Math.sin(a) * 36, 4, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.shadowBlur = 0;
+            ctx.restore();
         } else {
-            ctx.moveTo(this.x - 10, this.y - 20); ctx.lineTo(this.x + 10, this.y - 20);
-            ctx.lineTo(this.x + 20, this.y + 20); ctx.lineTo(this.x - 20, this.y + 20);
-            ctx.closePath();
+            // Derelict wreckage
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            ctx.strokeStyle = hColor || 'rgba(140,115,80,0.9)';
+            ctx.fillStyle = hColor ? 'rgba(0,100,200,0.2)' : 'rgba(70,60,45,0.55)';
+            ctx.lineWidth = 2;
+            ctx.shadowColor = hColor || '#554433'; ctx.shadowBlur = 6;
+            // Irregular hull fragment
+            ctx.beginPath();
+            ctx.moveTo(-6, -18); ctx.lineTo(13, -9);
+            ctx.lineTo(18, 6); ctx.lineTo(4, 15);
+            ctx.lineTo(-14, 12); ctx.lineTo(-17, -4);
+            ctx.closePath(); ctx.fill(); ctx.stroke();
+            // Internal fracture lines
+            ctx.strokeStyle = hColor ? 'rgba(0,200,255,0.5)' : 'rgba(130,105,70,0.65)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(-6, -18); ctx.lineTo(4, -3); ctx.lineTo(18, 6);
+            ctx.moveTo(-14, 12); ctx.lineTo(4, -3);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            ctx.restore();
         }
-        ctx.strokeStyle = this.hacked ? '#00aaff' : this.color;
-        ctx.lineWidth = 2; ctx.stroke();
-        ctx.fillStyle = this.color; ctx.fill();
 
         if (this.hacked) {
-            // Emitting Decoy Pulses
             ctx.beginPath();
-            const r = 200 * ((Date.now() % 2000) / 2000);
+            const r = 200 * ((t % 2000) / 2000);
             ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
-            ctx.strokeStyle = `rgba(0, 170, 255, ${1 - (r / 200)})`;
-            ctx.stroke();
+            ctx.strokeStyle = `rgba(0, 170, 255, ${1 - r / 200})`;
+            ctx.lineWidth = 1; ctx.stroke();
         }
     }
 }
@@ -521,13 +569,39 @@ class Projectile {
         ctx.translate(this.x, this.y);
         ctx.rotate(this.angle);
         if (this.type === 'kinetic') {
-            ctx.fillStyle = this.isPlayer ? '#00ffaa' : '#ff4d4d';
-            ctx.fillRect(-5, -1, 10, 2);
+            const c = this.isPlayer ? '#00ffaa' : '#ff4d4d';
+            ctx.shadowColor = c; ctx.shadowBlur = 5;
+            ctx.fillStyle = c;
+            ctx.beginPath();
+            ctx.moveTo(7, 0);
+            ctx.lineTo(0, -1.5); ctx.lineTo(-5, -1);
+            ctx.lineTo(-5, 1); ctx.lineTo(0, 1.5);
+            ctx.closePath(); ctx.fill();
+            ctx.shadowBlur = 0;
         } else if (this.type === 'missile') {
-            ctx.fillStyle = '#fff';
-            ctx.fillRect(-6, -2, 12, 4);
-            ctx.fillStyle = '#ffaa00';
-            ctx.fillRect(-10, -1, 4, 2); // exhaust
+            // Body
+            ctx.fillStyle = '#ddd';
+            ctx.beginPath();
+            ctx.moveTo(8, 0);
+            ctx.lineTo(2, -2.5); ctx.lineTo(-5, -2.5);
+            ctx.lineTo(-6, -1.5); ctx.lineTo(-6, 1.5);
+            ctx.lineTo(-5, 2.5); ctx.lineTo(2, 2.5);
+            ctx.closePath(); ctx.fill();
+            // Fins
+            ctx.fillStyle = '#999';
+            ctx.beginPath();
+            ctx.moveTo(-3, -2.5); ctx.lineTo(-7, -5); ctx.lineTo(-6, -2.5);
+            ctx.closePath(); ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(-3, 2.5); ctx.lineTo(-7, 5); ctx.lineTo(-6, 2.5);
+            ctx.closePath(); ctx.fill();
+            // Exhaust
+            ctx.shadowColor = '#ff8800'; ctx.shadowBlur = 8;
+            ctx.fillStyle = '#ff9900';
+            ctx.beginPath();
+            ctx.moveTo(-6, -1.2); ctx.lineTo(-12, 0); ctx.lineTo(-6, 1.2);
+            ctx.closePath(); ctx.fill();
+            ctx.shadowBlur = 0;
         }
         ctx.restore();
     }
@@ -587,11 +661,19 @@ class TalosDrone {
     draw(ctx) {
         ctx.save();
         ctx.translate(this.x, this.y);
-        ctx.rotate(this.angle);
-        ctx.fillStyle = '#4da6ff';
+        const spinAngle = this.angle + Date.now() * 0.002;
+        ctx.rotate(spinAngle);
+        const r = this.radius * 2.8;
+        // Diamond outline
+        ctx.shadowColor = '#4da6ff'; ctx.shadowBlur = 8;
+        ctx.strokeStyle = '#4da6ff'; ctx.lineWidth = 1.2;
         ctx.beginPath();
-        ctx.moveTo(this.radius, 0); ctx.lineTo(-this.radius, -this.radius); ctx.lineTo(-this.radius, this.radius);
-        ctx.fill();
+        ctx.moveTo(r, 0); ctx.lineTo(0, -r); ctx.lineTo(-r, 0); ctx.lineTo(0, r);
+        ctx.closePath(); ctx.stroke();
+        // Glowing core
+        ctx.fillStyle = '#4da6ff';
+        ctx.beginPath(); ctx.arc(0, 0, this.radius * 0.9, 0, Math.PI * 2); ctx.fill();
+        ctx.shadowBlur = 0;
         ctx.restore();
     }
 }
@@ -981,23 +1063,115 @@ class Ship {
         if (isLurking) ctx.globalAlpha = 0.4 + Math.sin(Date.now() * 0.003) * 0.15; // ゆらゆら点滅
         if (isFlashing) ctx.globalAlpha = 1.0;
 
-        ctx.beginPath();
         if (this.isPlayer) {
-            ctx.moveTo(this.radius, 0); ctx.lineTo(-this.radius, -this.radius * 0.6);
-            ctx.lineTo(-this.radius * 0.5, 0); ctx.lineTo(-this.radius, this.radius * 0.6);
-            ctx.fillStyle = '#00ffaa'; ctx.shadowColor = '#00ffaa';
-            ctx.shadowBlur = 15;
+            const r = this.radius;
+            // Engine glow at rear
+            const eng = ctx.createRadialGradient(-r * 0.7, 0, 0, -r * 0.7, 0, r * 0.9);
+            eng.addColorStop(0, 'rgba(0,255,170,0.55)');
+            eng.addColorStop(1, 'rgba(0,255,170,0)');
+            ctx.fillStyle = eng;
+            ctx.beginPath(); ctx.arc(-r * 0.7, 0, r * 0.9, 0, Math.PI * 2); ctx.fill();
+
+            ctx.shadowColor = '#00ffaa'; ctx.shadowBlur = 15;
+            ctx.fillStyle = '#00ffaa';
+            // Main hull
+            ctx.beginPath();
+            ctx.moveTo(r * 1.1, 0);
+            ctx.lineTo(r * 0.25, -r * 0.35);
+            ctx.lineTo(-r * 0.5, -r * 0.28);
+            ctx.lineTo(-r * 0.85, 0);
+            ctx.lineTo(-r * 0.5, r * 0.28);
+            ctx.lineTo(r * 0.25, r * 0.35);
+            ctx.closePath(); ctx.fill();
+            // Top wing
+            ctx.beginPath();
+            ctx.moveTo(r * 0.1, -r * 0.35);
+            ctx.lineTo(-r * 0.25, -r * 1.05);
+            ctx.lineTo(-r * 0.6, -r * 0.75);
+            ctx.lineTo(-r * 0.5, -r * 0.28);
+            ctx.closePath(); ctx.fill();
+            // Bottom wing
+            ctx.beginPath();
+            ctx.moveTo(r * 0.1, r * 0.35);
+            ctx.lineTo(-r * 0.25, r * 1.05);
+            ctx.lineTo(-r * 0.6, r * 0.75);
+            ctx.lineTo(-r * 0.5, r * 0.28);
+            ctx.closePath(); ctx.fill();
+            // Cockpit tinted glass
+            ctx.fillStyle = 'rgba(0,80,60,0.85)';
+            ctx.strokeStyle = '#00ffaa'; ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(r * 0.75, 0);
+            ctx.lineTo(r * 0.2, -r * 0.22);
+            ctx.lineTo(-r * 0.1, 0);
+            ctx.lineTo(r * 0.2, r * 0.22);
+            ctx.closePath(); ctx.fill(); ctx.stroke();
+            ctx.shadowBlur = 0;
         } else {
             // 敵は発砲フラッシュ中は大きく赤く光る
             const r = isFlashing ? this.radius * 1.5 : this.radius;
-            ctx.moveTo(r, 0); ctx.lineTo(-r, -r * 0.8);
-            ctx.lineTo(-r * 0.6, 0); ctx.lineTo(-r, r * 0.8);
             ctx.fillStyle = isFlashing ? '#ff8888' : '#ff4d4d';
             ctx.shadowColor = '#ff4d4d';
             ctx.shadowBlur = isFlashing ? 40 : 15;
+            if (this.type === 'destroyer') {
+                // Heavy warship - broad and angular
+                ctx.beginPath();
+                ctx.moveTo(r, 0);
+                ctx.lineTo(r * 0.3, -r * 0.65);
+                ctx.lineTo(-r * 0.4, -r * 0.85);
+                ctx.lineTo(-r, -r * 0.4);
+                ctx.lineTo(-r, r * 0.4);
+                ctx.lineTo(-r * 0.4, r * 0.85);
+                ctx.lineTo(r * 0.3, r * 0.65);
+                ctx.closePath(); ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = isFlashing ? '#ffaaaa' : '#cc2222';
+                ctx.beginPath(); ctx.rect(-r*0.35, -r*0.95, r*0.45, r*0.2); ctx.fill();
+                ctx.beginPath(); ctx.rect(-r*0.35, r*0.75, r*0.45, r*0.2); ctx.fill();
+            } else if (this.type === 'carrier') {
+                // Capital ship - wide and flat
+                ctx.beginPath();
+                ctx.moveTo(r * 0.7, 0);
+                ctx.lineTo(r * 0.35, -r * 0.45);
+                ctx.lineTo(-r * 0.5, -r * 0.65);
+                ctx.lineTo(-r, -r * 0.35);
+                ctx.lineTo(-r, r * 0.35);
+                ctx.lineTo(-r * 0.5, r * 0.65);
+                ctx.lineTo(r * 0.35, r * 0.45);
+                ctx.closePath(); ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                ctx.beginPath(); ctx.rect(-r*0.8, -r*0.25, r*0.9, r*0.5); ctx.fill();
+                ctx.strokeStyle = isFlashing ? '#ffaaaa' : '#cc2222';
+                ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(-r*0.8, 0); ctx.lineTo(-r*0.1, 0); ctx.stroke();
+            } else if (this.type === 'fighter') {
+                // Small dart with swept wings
+                ctx.beginPath();
+                ctx.moveTo(r * 1.2, 0);
+                ctx.lineTo(-r * 0.2, -r * 0.45);
+                ctx.lineTo(-r * 0.9, -r * 1.1);
+                ctx.lineTo(-r * 0.9, -r * 0.3);
+                ctx.lineTo(-r, 0);
+                ctx.lineTo(-r * 0.9, r * 0.3);
+                ctx.lineTo(-r * 0.9, r * 1.1);
+                ctx.lineTo(-r * 0.2, r * 0.45);
+                ctx.closePath(); ctx.fill();
+            } else {
+                // corvette - sleek raider
+                ctx.beginPath();
+                ctx.moveTo(r, 0);
+                ctx.lineTo(r * 0.1, -r * 0.5);
+                ctx.lineTo(-r * 0.5, -r * 0.75);
+                ctx.lineTo(-r * 0.9, -r * 0.45);
+                ctx.lineTo(-r * 0.7, 0);
+                ctx.lineTo(-r * 0.9, r * 0.45);
+                ctx.lineTo(-r * 0.5, r * 0.75);
+                ctx.lineTo(r * 0.1, r * 0.5);
+                ctx.closePath(); ctx.fill();
+            }
+            ctx.shadowBlur = 0;
         }
-        ctx.closePath(); ctx.fill();
-        ctx.shadowBlur = 0;
 
         if (this.isPlayer) {
             ctx.beginPath(); ctx.arc(0, 0, this.radius * 1.5, 0, Math.PI * 2);
@@ -1916,36 +2090,53 @@ function gameLoop() {
         structures.forEach(s => s.draw(ctx));
         drawTargetLine(ctx);
 
-        // リソースノード描画 (フィールド上の発光点)
+        // リソースノード描画 (回転するヘックスクリスタル)
         resourceNodes.forEach(n => {
             if (!n.active) return;
-            const pulse = 0.5 + Math.sin(Date.now() * 0.003 + n.x * 0.001) * 0.3;
+            const t = Date.now();
+            const pulse = 0.5 + Math.sin(t * 0.003 + n.x * 0.001) * 0.3;
+            const spin = (t * 0.0008 + n.x * 0.0003) % (Math.PI * 2);
             ctx.save();
-            ctx.globalAlpha = 0.15 + pulse * 0.1; // 通常時は非常に暗い (ヒッグスセンサー不使用時はほぼ見えない)
+            ctx.translate(n.x, n.y);
+            ctx.rotate(spin);
+            ctx.globalAlpha = 0.15 + pulse * 0.12;
             ctx.fillStyle = '#50c8ff';
-            ctx.shadowColor = '#50c8ff';
-            ctx.shadowBlur = 20;
+            ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = 20;
+            // Crystal hexagon
             ctx.beginPath();
-            ctx.arc(n.x, n.y, 4, 0, Math.PI * 2);
-            ctx.fill();
+            for (let i = 0; i < 6; i++) {
+                const a = (i / 6) * Math.PI * 2;
+                const px = Math.cos(a) * 6, py = Math.sin(a) * 6;
+                if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+            }
+            ctx.closePath(); ctx.fill();
+            // Inner highlight
+            ctx.globalAlpha = 0.08 + pulse * 0.06;
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            for (let i = 0; i < 6; i++) {
+                const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+                const px = Math.cos(a) * 3, py = Math.sin(a) * 3;
+                if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+            }
+            ctx.closePath(); ctx.fill();
             ctx.shadowBlur = 0;
             ctx.restore();
             ctx.globalAlpha = 1;
         });
 
-        // Render scrap
+        // Render scrap (rotating data fragment squares)
         scrapDrops.forEach(s => {
-            ctx.fillStyle = '#00ffaa';
-            ctx.shadowColor = '#00ffaa';
-            ctx.shadowBlur = 10;
-            ctx.beginPath();
-            ctx.arc(s.x, s.y, 4, 0, Math.PI * 2);
-            ctx.fill();
+            const angle = (Date.now() * 0.001 + s.x * 0.01) % (Math.PI * 2);
+            ctx.save();
+            ctx.translate(s.x, s.y);
+            ctx.rotate(angle);
+            ctx.fillStyle = '#00ffaa'; ctx.shadowColor = '#00ffaa'; ctx.shadowBlur = 10;
+            ctx.fillRect(-3, -3, 6, 6);
             ctx.shadowBlur = 0;
             ctx.fillStyle = '#fff';
-            ctx.beginPath();
-            ctx.arc(s.x, s.y, 2, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.fillRect(-1.5, -1.5, 3, 3);
+            ctx.restore();
         });
 
         if (player && player.hp > 0) drawRadarSweep(ctx);
