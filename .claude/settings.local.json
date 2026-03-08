@@ -2,7 +2,25 @@
   "permissions": {
     "allow": [
       "Bash(git config --global user.name \"s1-1985\")",
-      "Bash(git config --global user.email \"raven19850115@hotmail.co.jp\")"
+      "Bash(git config --global user.email \"raven19850115@hotmail.co.jp\")",
+      "Bash(where python)",
+      "Bash(where python3)",
+      "Bash(where npx)",
+      "Bash(where node)",
+      "Bash(npx --version)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8080/)",
+      "Bash(powershell -Command \":*)",
+      "Bash(grep -v \"//.*emSig\\\\|//.*em:\")",
+      "Bash(cmd /c \"python --version\")",
+      "Bash(cmd /c \"py --version\")",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(node --version)",
+      "Bash(powershell -Command \"Get-Command python,python3,py,node,npx -ErrorAction SilentlyContinue | Select-Object Name,Source\")",
+      "Bash(curl http://localhost:8080/)",
+      "Bash(powershell -NoProfile -ExecutionPolicy Bypass -File \"C:/Users/user/Desktop/Dark higgs/server.ps1\")",
+      "Bash(curl -s http://localhost:3000/)",
+      "Bash(grep -v \"//.*\\\\\\(heat\\\\|optic\\\\|em\\\\\\)\")",
+      "Bash(node --check \"/c/Users/user/Desktop/Dark higgs/prototype/game.js\")"
     ]
   }
 }
