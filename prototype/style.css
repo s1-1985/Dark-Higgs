@@ -680,6 +680,81 @@ input[type=range]::-webkit-slider-thumb {
     box-shadow: 0 0 8px rgba(200, 68, 255, 0.5);
     background: rgba(180, 50, 255, 0.1);
 }
+/* HIGGS アクティブ */
+#sensor-higgs.active {
+    border-color: #50c8ff;
+    color: #80ddff;
+    box-shadow: 0 0 8px rgba(80, 200, 255, 0.5);
+    background: rgba(50, 180, 255, 0.1);
+}
+
+/* GEN配分スライダー */
+.gen-control {
+    margin: 3px 0;
+}
+.gen-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 9px;
+    color: #666;
+    margin-bottom: 2px;
+    font-family: 'Orbitron', monospace;
+    letter-spacing: 0.5px;
+}
+.gen-total {
+    font-size: 9px;
+    font-family: 'Orbitron', monospace;
+    color: #00ffaa;
+}
+.gen-sliders {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.gen-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.gen-label {
+    font-size: 8px;
+    font-family: 'Orbitron', monospace;
+    width: 28px;
+    text-align: right;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+}
+.eng-label { color: #ff8833; }
+.wep-label { color: #ff4d4d; }
+.sen-label { color: #00ffaa; }
+.ai-label  { color: #cc44ff; }
+.gen-slider {
+    flex: 1;
+    height: 3px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: rgba(255,255,255,0.1);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+}
+.gen-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #00ffaa;
+    cursor: pointer;
+}
+.gen-val {
+    font-size: 8px;
+    font-family: 'Orbitron', monospace;
+    color: #aaa;
+    width: 28px;
+    text-align: right;
+    flex-shrink: 0;
+}
 
 /* ============================================================
    セクタークリアバナー

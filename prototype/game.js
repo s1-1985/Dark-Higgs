@@ -8,7 +8,7 @@ const minimapCtx = minimapCanvas.getContext('2d');
 let FIELD_SIZE = 8000;
 let BASE_RADAR_RANGE = 600;
 let RADAR_RANGE = BASE_RADAR_RANGE;
-let effectiveRadarRange = BASE_RADAR_RANGE; // Actual range after Erebos interference
+let effectiveRadarRange = BASE_RADAR_RANGE; // Actual range after Higgs interference
 let sectorCleared = false;
 let scanCooldown = 0; // Active scan cooldown (frames)
 let enemiesKilled = 0; // Stat tracking
@@ -133,11 +133,16 @@ let bgStars = [];
 let bgMist = [];
 let scrapDrops = [];
 let stations = [];
+let higgsWakes = [];    // ヒッグスウェイク軌跡 {x, y, intensity, life}
+let resourceNodes = []; // リソースノード {x, y, active, emFlashTimer}
+
+// GEN配分 (ゼロサム: エンジン/武器/センサー/AI の合計=100)
+let genAlloc = { engine: 30, weapons: 25, sensors: 25, ai: 20 };
 
 // ============================================================
-// エレボス濃度計算 (Erebos Intensity)
+// ヒッグス粒子強度計算 (Higgs Intensity)
 // ============================================================
-function getErebosIntensity(x, y) {
+function getHiggsIntensity(x, y) {
     let total = 0;
     bgMist.forEach(m => {
         const dist = Math.hypot(x - m.x, y - m.y);
@@ -149,7 +154,7 @@ function getErebosIntensity(x, y) {
     return Math.min(1.0, total);
 }
 
-// エレボスの濃い隠れ場所を探す (ジエンド戦スタイルAI用)
+// ヒッグス濃度の高い隠れ場所を探す (ジエンド戦スタイルAI用)
 function findHidingSpot(nearX, nearY, searchRadius) {
     let best = {
         x: Math.max(200, Math.min(FIELD_SIZE - 200, nearX + (Math.random() - 0.5) * searchRadius)),
@@ -161,7 +166,7 @@ function findHidingSpot(nearX, nearY, searchRadius) {
         const dist = Math.random() * searchRadius;
         const tx = Math.max(200, Math.min(FIELD_SIZE - 200, nearX + Math.cos(angle) * dist));
         const ty = Math.max(200, Math.min(FIELD_SIZE - 200, nearY + Math.sin(angle) * dist));
-        const score = getErebosIntensity(tx, ty);
+        const score = getHiggsIntensity(tx, ty);
         if (score > bestScore) { bestScore = score; best = { x: tx, y: ty }; }
     }
     return best;
@@ -222,7 +227,7 @@ canvas.addEventListener('mousedown', (e) => {
             createClickEffect(worldX, worldY, '#00ffaa');
             const dist = Math.hypot(worldX - player.x, worldY - player.y);
             // Speed is generator output / 100 * base speed. Base speed is very slow (1.5)
-            const speedEst = Math.max(0.1, (player.generatorOutput / 100) * 1.5);
+            const speedEst = Math.max(0.1, (genAlloc.engine / 100) * 3.0);
             const timeSeconds = Math.max(1, Math.floor(dist / (speedEst * 60)));
             logMessage(`NAV: 進路設定完了。到着予定時間はおよそ ${timeSeconds} 秒です。`, 'system-msg');
         }
@@ -336,7 +341,7 @@ canvas.addEventListener('touchend', (e) => {
             player.setTarget(worldX, worldY);
             createClickEffect(worldX, worldY, '#00ffaa');
             const dist = Math.hypot(worldX - player.x, worldY - player.y);
-            const speedEst = Math.max(0.1, (player.generatorOutput / 100) * 1.5);
+            const speedEst = Math.max(0.1, (genAlloc.engine / 100) * 3.0);
             const timeSeconds = Math.max(1, Math.floor(dist / (speedEst * 60)));
             logMessage(`NAV: 進路設定完了。到着予定時間はおよそ ${timeSeconds} 秒です。`, 'system-msg');
         }
@@ -603,14 +608,15 @@ class Ship {
         this.detectionTimer = 0;
         this.alertLogged = false; // Prevent spam logging
         // ジエンド戦スタイル AIプロパティ
-        this.lurking = !isPlayer;       // 潜伏モード (エレボスの濃い場所へ移動)
+        this.lurking = !isPlayer;       // 潜伏モード (ヒッグス濃度の高い場所へ移動)
         this.postFireCooldown = 0;      // 発砲後の再配置タイマー
         this.fireFlashTimer = 0;        // 発砲直後の可視フラッシュタイマー
         this.repositionLogged = false;  // 再配置ログ重複防止
         // マルチセンサーシグネチャ
         this.heatSig = 0;    // 熱源シグネチャ: 移動中に上昇
-        this.opticalSig = 0; // 光学シグネチャ: 発砲フラッシュ・低エレボス時
+        this.opticalSig = 0; // 光学シグネチャ: 発砲フラッシュ・低ヒッグス時
         this.emSig = 0;      // 電磁波シグネチャ: 潜伏中の受動放射・発砲時スパイク
+        this.higgsSig = 0;   // ヒッグスシグネチャ: ヒッグス雲内での乱流・ウェイク
         this.prevX = x;      // 移動量計算用
         this.prevY = y;
     }
@@ -622,8 +628,8 @@ class Ship {
         if (this.fireCooldown > 0) this.fireCooldown--;
 
         if (this.isPlayer) {
-            // Speed defined by generator output slider
-            this.speed = (this.generatorOutput / 100) * 1.5;
+            // Speed defined by GEN engine allocation
+            this.speed = (genAlloc.engine / 100) * 3.0;
 
             // Boundary detection for Sector Transition Dialog
             if ((this.x < 100 || this.x > FIELD_SIZE - 100 || this.y < 100 || this.y > FIELD_SIZE - 100) && !dialogOpen) {
@@ -737,7 +743,7 @@ class Ship {
                         this.lurking = true; // 新しい場所に着いたら潜伏再開
                         if (!this.repositionLogged) {
                             this.repositionLogged = true;
-                            logMessage('SENSOR: 敵艦の熱源反応が消失。エレボスの霧に再潜伏中...', 'warning-msg');
+                            logMessage('SENSOR: 敵艦の熱源反応が消失。ヒッグス粒子の霧に再潜伏中...', 'warning-msg');
                         }
                     }
                 } else if (this.postFireCooldown < 200) {
@@ -754,11 +760,11 @@ class Ship {
             }
 
             // ──────────────────────────────────────
-            // 自艦探知チェック — エレボスで探知範囲が変動
+            // 自艦探知チェック — ヒッグスで探知範囲が変動
             // ──────────────────────────────────────
             const distToPlayer = Math.hypot(player.x - this.x, player.y - this.y);
-            const erebosHere = getErebosIntensity(this.x, this.y);
-            const myDetectRange = 800 * (1 - erebosHere * 0.55) * (1 + gameState.sector * 0.05);
+            const higgsHereDetect = getHiggsIntensity(this.x, this.y);
+            const myDetectRange = 800 * (1 - higgsHereDetect * 0.55) * (1 + gameState.sector * 0.05);
 
             if (this.detectionState === 'unaware') {
                 if (distToPlayer < myDetectRange) {
@@ -777,7 +783,7 @@ class Ship {
             }
 
             // ──────────────────────────────────────
-            // 潜伏モード — エレボスの濃い場所を探す
+            // 潜伏モード — ヒッグス濃度の高い場所を探す
             // ──────────────────────────────────────
             if (this.lurking || this.detectionState === 'unaware') {
                 this.speed = 0.35; // ゆっくり移動 (潜望鏡を出すレベル)
@@ -864,13 +870,31 @@ class Ship {
                 this.heatSig = Math.min(1.0, spd / 1.0); // 速度に比例
             }
 
-            // 光学シグネチャ: 発砲フラッシュ時に最大、エレボスで大きく減衰
-            const erebosHere = getErebosIntensity(this.x, this.y);
+            // 光学シグネチャ: 発砲フラッシュ時に最大、ヒッグスで大きく減衰
+            const higgsHere = getHiggsIntensity(this.x, this.y);
             if (this.fireFlashTimer > 50) {
                 this.opticalSig = Math.min(1.0, this.opticalSig + 0.12); // 発砲フラッシュ急上昇
             } else {
-                // 発光フェード + エレボス減衰
-                this.opticalSig = Math.max(0, this.opticalSig * 0.92) * (1 - erebosHere * 0.95);
+                // 発光フェード + ヒッグス減衰
+                this.opticalSig = Math.max(0, this.opticalSig * 0.92) * (1 - higgsHere * 0.95);
+            }
+
+            // ヒッグスシグネチャ: ヒッグス雲内で潜伏すると乱流が生じる
+            const higgsAtThisShip = higgsHere;
+            if (this.lurking && this.postFireCooldown === 0) {
+                // 潜伏中はヒッグス内の微妙な乱流 (濃度に比例)
+                const target = higgsAtThisShip * 0.6 + Math.sin(Date.now() * 0.002 + this.y * 0.001) * 0.1;
+                this.higgsSig += (target - this.higgsSig) * 0.04;
+            } else if (this.postFireCooldown > 0) {
+                // 再配置中: 高速移動でヒッグスウェイクが強まる
+                const spd = Math.hypot(this.x - this.prevX, this.y - this.prevY);
+                this.higgsSig = Math.min(1.0, higgsAtThisShip * spd * 1.5);
+                // ウェイクを残す
+                if (higgsAtThisShip > 0.15 && spd > 0.2) {
+                    higgsWakes.push({ x: this.x, y: this.y, intensity: higgsAtThisShip * 0.8, life: 1.0 });
+                }
+            } else {
+                this.higgsSig = Math.max(0, this.higgsSig - 0.02);
             }
 
             // 電磁波シグネチャ: 潜伏中は受動放射が漏れる、発砲時スパイク、移動中は無線封鎖
@@ -1059,9 +1083,9 @@ function generateSector() {
     // Keep drones if transitioning, but set position
     const tCount = talosDrones.length;
     player = new Ship(FIELD_SIZE / 2, FIELD_SIZE / 2, true);
-    player.generatorOutput = document.getElementById('speedSlider').value;
+    player.generatorOutput = genAlloc.engine;
     enemies = []; structures = []; projectiles = []; effects = []; talosDrones = []; particles = []; debris = []; scrapDrops = [];
-    stations = [];
+    stations = []; higgsWakes = []; resourceNodes = [];
 
     // Apply Upgrades to Stats
     RADAR_RANGE = BASE_RADAR_RANGE * (1 + (gameState.upgrades.radar * 0.2));
@@ -1084,7 +1108,7 @@ function generateSector() {
     for (let i = 0; i < tCount; i++) talosDrones.push(new TalosDrone(player.x, player.y));
 
     // ===== ジエンド戦スタイル: 1セクター = 敵1機 =====
-    // 敵をエレボスの濃い場所に配置 (プレイヤーから遠い位置)
+    // 敵をヒッグス濃度の高い場所に配置 (プレイヤーから遠い位置)
     const spawnAngle = Math.random() * Math.PI * 2;
     const spawnDist = 3000 + Math.random() * 2000; // 3000-5000u離れた場所
     const spawnCenterX = FIELD_SIZE / 2 + Math.cos(spawnAngle) * spawnDist * 0.5;
@@ -1105,6 +1129,18 @@ function generateSector() {
     }
     for (let i = 0; i < 3; i++) {
         stations.push(new Station(Math.random() * (FIELD_SIZE - 2000) + 1000, Math.random() * (FIELD_SIZE - 2000) + 1000));
+    }
+
+    // リソースノード: 5〜8個をマップ上にランダム配置 (ヒッグス雲内を優先)
+    const nodeCount = 5 + Math.floor(Math.random() * 4);
+    for (let i = 0; i < nodeCount; i++) {
+        // ヒッグス濃度の高い場所に配置 (暗黒物質の凝縮点)
+        const spot = findHidingSpot(
+            Math.random() * FIELD_SIZE,
+            Math.random() * FIELD_SIZE,
+            2000
+        );
+        resourceNodes.push({ x: spot.x, y: spot.y, active: true, emFlashTimer: 0 });
     }
 
     centerCameraOnPlayer();
@@ -1143,10 +1179,66 @@ document.getElementById('btn-dialog-no').addEventListener('click', () => {
     setTimeout(() => { dialogOpen = false; }, 2000);
 });
 
-document.getElementById('speedSlider').addEventListener('input', e => {
-    document.getElementById('speedValue').textContent = `${e.target.value}%`;
-    if (player) player.generatorOutput = e.target.value;
+// ============================================================
+// GEN配分スライダー (ゼロサム: 合計100%)
+// ============================================================
+const GEN_KEYS = ['engine', 'weapons', 'sensors', 'ai'];
+
+function updateGenTotal() {
+    const total = GEN_KEYS.reduce((sum, k) => sum + genAlloc[k], 0);
+    const totalEl = document.getElementById('gen-total');
+    if (totalEl) {
+        totalEl.textContent = `計${total}%`;
+        totalEl.style.color = total === 100 ? '#00ffaa' : '#ff4d4d';
+    }
+    // プレイヤー速度をエンジン配分で決定
+    if (player) player.generatorOutput = genAlloc.engine;
+}
+
+GEN_KEYS.forEach(key => {
+    const slider = document.getElementById(`gen-${key}`);
+    if (!slider) return;
+    slider.addEventListener('input', e => {
+        const newVal = parseInt(e.target.value);
+        const oldVal = genAlloc[key];
+        const delta = newVal - oldVal;
+        genAlloc[key] = newVal;
+
+        // ゼロサム: 他のスライダーを按分調整
+        const others = GEN_KEYS.filter(k => k !== key);
+        const otherTotal = others.reduce((sum, k) => sum + genAlloc[k], 0);
+        if (otherTotal > 0 && delta !== 0) {
+            let remaining = -delta;
+            others.forEach((k, i) => {
+                if (i === others.length - 1) {
+                    genAlloc[k] = Math.max(0, genAlloc[k] + remaining);
+                } else {
+                    const adj = Math.round(remaining * (genAlloc[k] / otherTotal));
+                    genAlloc[k] = Math.max(0, genAlloc[k] + adj);
+                    remaining -= adj;
+                }
+                const el = document.getElementById(`gen-${k}`);
+                const valEl = document.getElementById(`gen-${k}-val`);
+                if (el) el.value = genAlloc[k];
+                if (valEl) valEl.textContent = genAlloc[k] + '%';
+            });
+        }
+
+        const valEl = document.getElementById(`gen-${key}-val`);
+        if (valEl) valEl.textContent = newVal + '%';
+        updateGenTotal();
+    });
 });
+updateGenTotal();
+
+// 旧スライダー互換 (参照が残っている場合のフォールバック)
+const legacySlider = document.getElementById('speedSlider');
+if (legacySlider) {
+    legacySlider.addEventListener('input', e => {
+        document.getElementById('speedValue').textContent = `${e.target.value}%`;
+        if (player) player.generatorOutput = e.target.value;
+    });
+}
 document.getElementById('btn-cancel').addEventListener('click', () => {
     playSound('ui');
     if (!player) return;
@@ -1188,14 +1280,15 @@ document.getElementById('btn-hack').addEventListener('click', () => {
     }
 });
 // ============================================================
-// センサーモード切替ハンドラ (heat / optic / em)
+// センサーモード切替ハンドラ (heat / optic / em / higgs)
 // ============================================================
 const SENSOR_INFO = {
-    heat:  { name: '熱源センサー',    tip: '敵の移動時エンジン熱を追跡 — 発砲後の再配置フェーズに有効' },
-    optic: { name: '光学センサー',    tip: '発砲フラッシュを捕捉 — 砲撃直後の一瞬を逃さない' },
-    em:    { name: '電磁波センサー',  tip: '潜伏中の受動EM漏洩を検出 — 索敵フェーズ最適' }
+    heat:  { name: '熱源センサー',       tip: '敵の移動時エンジン熱を追跡 — 発砲後の再配置フェーズに有効' },
+    optic: { name: '光学センサー',       tip: '発砲フラッシュを捕捉 — 砲撃直後の一瞬を逃さない' },
+    em:    { name: '電磁波センサー',     tip: '潜伏中の受動EM漏洩を検出 — 索敵フェーズ最適' },
+    higgs: { name: 'ヒッグスセンサー',   tip: 'ヒッグス雲の乱流・ウェイク軌跡・リソースノードを検出' }
 };
-['heat', 'optic', 'em'].forEach(s => {
+['heat', 'optic', 'em', 'higgs'].forEach(s => {
     const btn = document.getElementById(`sensor-${s}`);
     if (!btn) return;
     btn.addEventListener('click', () => {
@@ -1225,23 +1318,26 @@ function drawRadarSweep(ctx) {
     if (player.hp <= 0) return;
     scanAngle += 0.03;
 
-    // ===== Erebos interference: reduce effective radar range =====
-    const erebosAtPlayer = getErebosIntensity(player.x, player.y);
-    effectiveRadarRange = RADAR_RANGE * (1 - erebosAtPlayer * 0.65);
+    // ===== Higgs interference: reduce effective radar range =====
+    const higgsAtPlayer = getHiggsIntensity(player.x, player.y);
+    effectiveRadarRange = RADAR_RANGE * (1 - higgsAtPlayer * 0.65) * (1 + genAlloc.sensors / 100 * 0.5);
 
     // ============================================================
     // センサーモード別: 色・検出ロジック
     // HEAT  → 移動中の敵を捕捉 (heatSig)
     // OPTIC → 発砲フラッシュを捕捉 (opticalSig)
     // EM    → 潜伏中の受動放射を捕捉 (emSig)
+    // HIGGS → ヒッグス雲乱流・ウェイク・リソースノード捕捉 (higgsSig)
     // ============================================================
     const sensorConfig = {
-        heat:  { r:'255,80,0',   sig: e => e.heatSig,    rangeScale: 1.0,
-                 erebosMod: 0.35, threshold: 0.3, label: '熱源' },
-        optic: { r:'0,255,170',  sig: e => e.opticalSig,  rangeScale: 0.75,
-                 erebosMod: 0.85, threshold: 0.2, label: '光学' },
-        em:    { r:'180,50,255', sig: e => e.emSig,       rangeScale: 0.85,
-                 erebosMod: 0.1,  threshold: 0.3, label: '電磁波' }
+        heat:  { r:'255,80,0',    sig: e => e.heatSig,    rangeScale: 1.0,
+                 higgsMod: 0.35, threshold: 0.3, label: '熱源' },
+        optic: { r:'0,255,170',   sig: e => e.opticalSig,  rangeScale: 0.75,
+                 higgsMod: 0.85, threshold: 0.2, label: '光学' },
+        em:    { r:'180,50,255',  sig: e => e.emSig,       rangeScale: 0.85,
+                 higgsMod: 0.1,  threshold: 0.3, label: '電磁波' },
+        higgs: { r:'80,200,255',  sig: e => e.higgsSig,    rangeScale: 1.2,
+                 higgsMod: 0.0,  threshold: 0.15, label: 'ヒッグス' }
     };
     const sc = sensorConfig[currentSensor];
     const CR = sc.r;
@@ -1259,8 +1355,8 @@ function drawRadarSweep(ctx) {
         if (e.fireFlashTimer > 0) { e.visible = true; return; }
 
         const dist = Math.hypot(e.x - player.x, e.y - player.y);
-        const erebosAtEnemy = getErebosIntensity(e.x, e.y);
-        const effectiveSensorRange = sensorRange * (1 - erebosAtEnemy * sc.erebosMod);
+        const higgsAtEnemy = getHiggsIntensity(e.x, e.y);
+        const effectiveSensorRange = sensorRange * (1 - higgsAtEnemy * sc.higgsMod);
         const sig = sc.sig(e);
 
         if (dist < effectiveSensorRange && sig > sc.threshold) {
@@ -1304,9 +1400,52 @@ function drawRadarSweep(ctx) {
 
     ctx.restore();
 
-    // Erebos static noise (センサーカラーに合わせる)
-    if (erebosAtPlayer > 0.4) {
-        const staticAlpha = (erebosAtPlayer - 0.4) * 0.15;
+    // ヒッグスセンサー専用: ウェイク軌跡 + リソースノード可視化
+    if (currentSensor === 'higgs') {
+        // ウェイク軌跡を描画
+        higgsWakes.forEach(w => {
+            const dist = Math.hypot(w.x - player.x, w.y - player.y);
+            if (dist < sensorRange) {
+                ctx.save();
+                ctx.globalAlpha = w.life * 0.7;
+                ctx.fillStyle = `rgba(${CR}, 0.8)`;
+                ctx.beginPath();
+                ctx.arc(w.x, w.y, 3 * w.intensity, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+                ctx.globalAlpha = 1;
+            }
+        });
+        // リソースノードを輝点として表示
+        resourceNodes.forEach(n => {
+            if (!n.active) return;
+            const dist = Math.hypot(n.x - player.x, n.y - player.y);
+            if (dist < sensorRange) {
+                const pulse = 0.6 + Math.sin(Date.now() * 0.004) * 0.4;
+                ctx.save();
+                ctx.globalAlpha = pulse;
+                ctx.fillStyle = '#ffffff';
+                ctx.shadowColor = `rgba(${CR}, 1)`;
+                ctx.shadowBlur = 15;
+                ctx.beginPath();
+                ctx.arc(n.x, n.y, 5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.globalAlpha = 0.3;
+                ctx.strokeStyle = `rgba(${CR}, 0.8)`;
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.arc(n.x, n.y, 20, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.restore();
+                ctx.globalAlpha = 1;
+            }
+        });
+    }
+
+    // ヒッグス静電ノイズ (センサーカラーに合わせる)
+    if (higgsAtPlayer > 0.4) {
+        const staticAlpha = (higgsAtPlayer - 0.4) * 0.15;
         ctx.save();
         ctx.globalAlpha = staticAlpha;
         for (let i = 0; i < 6; i++) {
@@ -1357,6 +1496,17 @@ function drawMinimap() {
     enemies.forEach(e => {
         if (e.visible || e.hp <= 0) { minimapCtx.beginPath(); minimapCtx.arc(e.x * sX, e.y * sY, 2, 0, Math.PI * 2); minimapCtx.fill(); }
     });
+
+    // リソースノード (ヒッグスセンサー使用中のみミニマップ表示)
+    if (currentSensor === 'higgs') {
+        minimapCtx.fillStyle = '#50c8ff';
+        resourceNodes.forEach(n => {
+            if (!n.active) return;
+            minimapCtx.beginPath();
+            minimapCtx.arc(n.x * sX, n.y * sY, 2.5, 0, Math.PI * 2);
+            minimapCtx.fill();
+        });
+    }
 }
 
 function handleMinimapInteraction(e) {
@@ -1388,7 +1538,7 @@ minimapCanvas.addEventListener('touchend', () => { isMinimapDragging = false; })
 
 // Background grid system
 function drawBackground(ctx) {
-    // Render Mist Clouds (Erebos Dark Matter)
+    // Render Mist Clouds (Higgs Particle Fog)
     bgMist.forEach(m => {
         let alpha = 0.03;
         if (player.hp > 0 && Math.hypot(player.x - m.x, player.y - m.y) < RADAR_RANGE) alpha = 0.07;
@@ -1432,16 +1582,16 @@ function drawBackground(ctx) {
 // ============================================================
 function updateEnvInfo() {
     if (!player || player.hp <= 0) return;
-    const intensity = getErebosIntensity(player.x, player.y);
+    const intensity = getHiggsIntensity(player.x, player.y);
     const labels = ['低濃度', '中濃度', '高濃度', '危険領域'];
     const classes = ['', 'highlight-text', 'warning-text', 'warning-text'];
     const idx = Math.min(3, Math.floor(intensity * 4));
 
-    const erebosSpan = document.getElementById('env-erebos');
+    const higgsSpan = document.getElementById('env-higgs');
     const radarSpan = document.getElementById('env-radar');
-    if (erebosSpan) {
-        erebosSpan.textContent = labels[idx];
-        erebosSpan.className = classes[idx];
+    if (higgsSpan) {
+        higgsSpan.textContent = labels[idx];
+        higgsSpan.className = classes[idx];
     }
     if (radarSpan) {
         radarSpan.textContent = `${Math.round(effectiveRadarRange)} u`;
@@ -1452,22 +1602,29 @@ function updateEnvInfo() {
     // センサーモード表示
     const sensorEl = document.getElementById('env-sensor');
     if (sensorEl) {
-        const sensorLabels = { heat: '🔥 熱源', optic: '👁 光学', em: '📡 電磁波' };
-        const sensorClasses = { heat: 'warning-text', optic: 'highlight-text', em: '' };
+        const sensorLabels = { heat: '🔥 熱源', optic: '👁 光学', em: '📡 電磁波', higgs: '〰 ヒッグス' };
+        const sensorColors = { heat: '#ff6600', optic: '#00ffaa', em: '#cc44ff', higgs: '#50c8ff' };
         sensorEl.textContent = sensorLabels[currentSensor] || '---';
-        sensorEl.className = sensorClasses[currentSensor] || '';
-        sensorEl.style.color = currentSensor === 'em' ? '#cc44ff' : '';
+        sensorEl.className = '';
+        sensorEl.style.color = sensorColors[currentSensor] || '';
     }
 
     // 敵のシグネチャ強度を表示 (デバッグ兼ゲームプレイ情報)
     const sigEl = document.getElementById('env-signal');
     if (sigEl && enemies.length > 0) {
         const boss = enemies[0];
-        const sc = { heat: boss.heatSig, optic: boss.opticalSig, em: boss.emSig };
+        const sc = { heat: boss.heatSig, optic: boss.opticalSig, em: boss.emSig, higgs: boss.higgsSig };
         const v = sc[currentSensor] || 0;
         const bars = '█'.repeat(Math.round(v * 5)) + '░'.repeat(5 - Math.round(v * 5));
         sigEl.textContent = bars;
         sigEl.style.color = v > 0.5 ? '#ff4d4d' : (v > 0.25 ? '#ffaa00' : '#444');
+    }
+
+    // GEN配分情報 (リソースノード数)
+    const nodeEl = document.getElementById('env-nodes');
+    if (nodeEl) {
+        const activeNodes = resourceNodes.filter(n => n.active).length;
+        nodeEl.textContent = `${activeNodes}/${resourceNodes.length}`;
     }
 }
 
@@ -1579,6 +1736,42 @@ function gameLoop() {
             }
         }
 
+        // ヒッグスウェイク更新 (時間経過でフェードアウト)
+        for (let i = higgsWakes.length - 1; i >= 0; i--) {
+            higgsWakes[i].life -= 0.005;
+            if (higgsWakes[i].life <= 0) higgsWakes.splice(i, 1);
+        }
+        // プレイヤーの移動でもウェイクを生成
+        if (player && player.hp > 0 && player.state === 'moving') {
+            const playerHiggs = getHiggsIntensity(player.x, player.y);
+            if (playerHiggs > 0.2 && Math.random() < 0.3) {
+                higgsWakes.push({ x: player.x, y: player.y, intensity: playerHiggs * 0.6, life: 0.8 });
+            }
+        }
+
+        // リソースノード収集チェック (プレイヤー接近で自動収集)
+        for (let i = resourceNodes.length - 1; i >= 0; i--) {
+            const n = resourceNodes[i];
+            if (!n.active) continue;
+            // EMスパイクタイマー更新
+            if (n.emFlashTimer > 0) n.emFlashTimer--;
+            if (player && player.hp > 0) {
+                const d = Math.hypot(player.x - n.x, player.y - n.y);
+                if (d < player.radius + 40) {
+                    // 収集！
+                    n.active = false;
+                    n.emFlashTimer = 180; // 3秒間EMスパイク
+                    // EMスパイク: EM状態が高まった状態を記録 (敵に見える)
+                    gameState.credits += 30; // リソース価値 (仮: 将来はアップグレードポイントに)
+                    updateTopUI();
+                    playSound('ui');
+                    effects.push({ x: n.x, y: n.y, r: 0, maxR: 80, a: 1, c: '#50c8ff', type: 'circle' });
+                    logMessage(`HIGGS: ヒッグス凝縮点を採取 (+30 CR)。EMスパイク発生中 — 敵に検知される可能性あり。`, 'system-msg');
+                    createClickEffect(n.x, n.y, '#50c8ff');
+                }
+            }
+        }
+
         // Docking Detection
         if (player && player.hp > 0 && !dockingOpen) {
             let nearStation = stations.find(s => Math.hypot(player.x - s.x, player.y - s.y) < s.radius + 50);
@@ -1611,6 +1804,23 @@ function gameLoop() {
         stations.forEach(s => s.draw(ctx));
         structures.forEach(s => s.draw(ctx));
         drawTargetLine(ctx);
+
+        // リソースノード描画 (フィールド上の発光点)
+        resourceNodes.forEach(n => {
+            if (!n.active) return;
+            const pulse = 0.5 + Math.sin(Date.now() * 0.003 + n.x * 0.001) * 0.3;
+            ctx.save();
+            ctx.globalAlpha = 0.15 + pulse * 0.1; // 通常時は非常に暗い (ヒッグスセンサー不使用時はほぼ見えない)
+            ctx.fillStyle = '#50c8ff';
+            ctx.shadowColor = '#50c8ff';
+            ctx.shadowBlur = 20;
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.restore();
+            ctx.globalAlpha = 1;
+        });
 
         // Render scrap
         scrapDrops.forEach(s => {

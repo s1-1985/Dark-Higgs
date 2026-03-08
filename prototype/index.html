@@ -54,10 +54,30 @@
                 </div>
 
                 <div class="console-panel center-panel">
-                    <div class="speed-control">
-                        <span>ジェネレータ出力</span>
-                        <input type="range" id="speedSlider" min="0" max="100" value="50">
-                        <span id="speedValue">50%</span>
+                    <div class="gen-control">
+                        <div class="gen-header"><span>GEN配分</span><span id="gen-total" class="gen-total">計100%</span></div>
+                        <div class="gen-sliders">
+                            <div class="gen-row">
+                                <label class="gen-label eng-label" title="エンジン出力 → 移動速度">ENG</label>
+                                <input type="range" class="gen-slider" id="gen-engine" min="0" max="100" value="30">
+                                <span class="gen-val" id="gen-engine-val">30%</span>
+                            </div>
+                            <div class="gen-row">
+                                <label class="gen-label wep-label" title="武装出力 → 火力・連射数">WEP</label>
+                                <input type="range" class="gen-slider" id="gen-weapons" min="0" max="100" value="25">
+                                <span class="gen-val" id="gen-weapons-val">25%</span>
+                            </div>
+                            <div class="gen-row">
+                                <label class="gen-label sen-label" title="センサー出力 → 探知レンジ">SEN</label>
+                                <input type="range" class="gen-slider" id="gen-sensors" min="0" max="100" value="25">
+                                <span class="gen-val" id="gen-sensors-val">25%</span>
+                            </div>
+                            <div class="gen-row">
+                                <label class="gen-label ai-label" title="AI処理 → 命中率・回避 (EM放射源)">AI</label>
+                                <input type="range" class="gen-slider" id="gen-ai" min="0" max="100" value="20">
+                                <span class="gen-val" id="gen-ai-val">20%</span>
+                            </div>
+                        </div>
                     </div>
                     <div class="weapon-control">
                         <span>主兵装 </span>
@@ -73,6 +93,7 @@
                         <button class="btn sensor-btn active" id="sensor-heat" title="熱源センサー: 移動中の敵を捕捉">🔥 HEAT</button>
                         <button class="btn sensor-btn" id="sensor-optic" title="光学センサー: 発砲フラッシュを捕捉">👁 OPTIC</button>
                         <button class="btn sensor-btn" id="sensor-em" title="電磁波センサー: 潜伏中の受動放射を検出">📡 EM</button>
+                        <button class="btn sensor-btn" id="sensor-higgs" title="ヒッグスセンサー: ヒッグス雲乱流・ウェイク・リソースノード検出">〰 HIGGS</button>
                     </div>
                     <div style="display:flex; justify-content:center; gap:10px; margin-top:5px;">
                         <button class="btn btn-info" id="btn-scan">アクティブスキャン</button>
@@ -84,7 +105,8 @@
                 <div class="console-panel right-panel">
                     <div class="panel-header">環境情報</div>
                     <div class="env-info">
-                        <div>エレボスの濃度: <span id="env-erebos" class="highlight-text">測定中</span></div>
+                        <div>ヒッグス濃度: <span id="env-higgs" class="highlight-text">測定中</span></div>
+                        <div>リソースノード: <span id="env-nodes" class="highlight-text">---</span></div>
                         <div>レーダー有効範囲: <span id="env-radar" class="warning-text">---</span></div>
                         <div>敵性反応: <span id="hostile-count">不明</span></div>
                         <div>センサーモード: <span id="env-sensor" class="warning-text">🔥 熱源</span></div>
@@ -95,7 +117,7 @@
 
             <div id="message-log">
                 <div class="message system-msg">SYSTEM: 初期化完了。</div>
-                <div class="message system-msg">SYS: エレボスの霧を検知。暗黒物質の相転移を確認。</div>
+                <div class="message system-msg">SYS: ヒッグス粒子の霧を検知。暗黒物質の相転移を確認。</div>
             </div>
 
             <!-- Dialog Overlay for Sector Transitions -->
