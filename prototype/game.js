@@ -123,6 +123,7 @@ document.getElementById('btn-remove-ads').addEventListener('click', () => {
 
 // Core Entities
 let player;
+let gameLoopRunning = false;
 let enemies = [];
 let projectiles = [];
 let structures = [];
@@ -210,6 +211,7 @@ function centerCameraOnPlayer() {
 
 // Input Handling
 canvas.addEventListener('mousedown', (e) => {
+    if (!player) return; // ship not selected yet
     if (e.target.closest('#ui-layer') && !e.target.closest('#gameCanvas')) return; // Ignore clicks on UI
     if (e.button === 0) {
         const worldX = (e.clientX / camera.zoom) + camera.x;
@@ -1219,6 +1221,10 @@ function startGame(shipType) {
     gameState.shipType = shipType;
     document.getElementById('ship-select-lobby').classList.add('hidden');
     generateSector();
+    if (!gameLoopRunning) {
+        gameLoopRunning = true;
+        gameLoop();
+    }
 }
 
 // 艦種選択ボタン
@@ -2050,11 +2056,7 @@ document.getElementById('btn-upgrade-hull').addEventListener('click', () => buyU
 document.getElementById('btn-upgrade-radar').addEventListener('click', () => buyUpgrade('radar'));
 document.getElementById('btn-upgrade-weapons').addEventListener('click', () => buyUpgrade('weapons'));
 
-try {
-    gameLoop();
-} catch (e) {
-    window.onerror(e.toString(), "gameLoop", 0, 0, e);
-}
+// gameLoop is started by startGame() after ship selection
 
 // Game Over / Restart
 document.getElementById('btn-restart').addEventListener('click', () => {
