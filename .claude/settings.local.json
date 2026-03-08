@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git config --global user.name \"s1-1985\")",
+      "Bash(git config --global user.email \"raven19850115@hotmail.co.jp\")"
+    ]
+  }
+}
