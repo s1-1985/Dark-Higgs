@@ -702,8 +702,8 @@ class TalosDrone {
                 projectiles.push(new Projectile(this.x, this.y, closest, true, 'kinetic'));
                 this.fireCooldown = 20;
             }
-        } else {
-            // Idle orbit player
+        } else if (player && player.hp > 0) {
+            // Idle orbit player (プレイヤーが存在し生存中のみ)
             const dx = player.x - this.x;
             const dy = player.y - this.y;
             if (Math.hypot(dx, dy) > 150) {
@@ -1652,6 +1652,7 @@ document.getElementById('btn-scan').addEventListener('click', () => {
     scanCooldown = 900; // 15 second cooldown (at 60fps)
     logMessage('SENSOR: アクティブスキャン発信。全敵性反応を一時的に捕捉。(敵にも探知される！ 再充填: 15秒)', 'system-msg');
     setTimeout(() => {
+        if (!player || player.hp <= 0) return;
         enemies.forEach(e => { if (Math.hypot(e.x - player.x, e.y - player.y) > effectiveRadarRange) e.visible = false; });
     }, 4000);
 });
@@ -2295,10 +2296,14 @@ function gameLoop() {
         structures.forEach(s => s.draw(ctx));
         drawTargetLine(ctx);
 
-        // リソースノード描画 (HIGGSセンサー使用中のみ可視 — 設計仕様)
-        if (currentSensor === 'higgs') {
+        // リソースノード描画 (HIGGSセンサー使用中かつセンサー有効範囲内のみ可視 — 設計仕様)
+        if (currentSensor === 'higgs' && player && player.hp > 0) {
+            // HIGGSセンサーはrangeScale=1.2倍で広い探知範囲を持つ
+            const higgsNodeRange = effectiveRadarRange * 1.2;
             resourceNodes.forEach(n => {
                 if (!n.active) return;
+                // センサー有効範囲外は不可視
+                if (Math.hypot(n.x - player.x, n.y - player.y) > higgsNodeRange) return;
                 const t = Date.now();
                 const pulse = 0.5 + Math.sin(t * 0.003 + n.x * 0.001) * 0.3;
                 const spin = (t * 0.0008 + n.x * 0.0003) % (Math.PI * 2);
@@ -2377,6 +2382,7 @@ const btnDock = document.getElementById('btn-dock');
 const btnLeave = document.getElementById('btn-leave-dock');
 
 btnDock.addEventListener('click', () => {
+    if (!player || player.hp <= 0) return;
     dockingOpen = true;
     dockPrompt.classList.remove('active');
     dockingMenu.classList.remove('hidden');
