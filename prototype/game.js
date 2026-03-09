@@ -64,6 +64,7 @@ function playSound(type) {
 // Game State Storage
 let gameState = {
     shipType: 'assault', // 'assault' | 'stealth' | 'carrier'
+    mode: 'br',          // 'br' (Battle Royale) | 'sd' (Search & Destroy)
     sector: 1,
     credits: 0,
     hasAds: true,
@@ -209,6 +210,21 @@ function centerCameraOnPlayer() {
     clampCamera();
 }
 
+// カメラ追従フラグ (自艦追従ON/OFF)
+let cameraFollowPlayer = false;
+
+function updateCameraFollowBtn() {
+    const btn = document.getElementById('btn-camera-follow');
+    if (!btn) return;
+    if (cameraFollowPlayer) {
+        btn.textContent = '追従 ON';
+        btn.classList.add('active');
+    } else {
+        btn.textContent = '追従 OFF';
+        btn.classList.remove('active');
+    }
+}
+
 // Input Handling
 canvas.addEventListener('mousedown', (e) => {
     if (!player) return; // ship not selected yet
@@ -267,13 +283,26 @@ canvas.addEventListener('contextmenu', e => { if (e.target.id === 'gameCanvas') 
 // ============================================================
 // タッチ入力対応（スマホ用）
 // ============================================================
+// 操作方式:
+//   1本指ドラッグ (即時)      → カメラパン (最も頻繁な操作なので即時)
+//   1本指タップ (敵の上)      → ターゲットロック
+//   1本指長押し (250ms, 移動量小) → ウェイポイント指定
+//   2本指ドラッグ            → カメラパン
+//   ピンチ                  → ズーム
+// ============================================================
 const touch = {
     startX: 0, startY: 0,
     lastX: 0, lastY: 0,
+    startTime: 0,
     moved: false,
+    waypointFired: false, // 長押しウェイポイント発動済み
+    waypointTimer: null,  // 長押し判定タイマー
     pinchDist: 0,
     isPinching: false
 };
+
+const TOUCH_WAYPOINT_DELAY = 250;  // 長押し判定: 250ms
+const TOUCH_MOVE_THRESHOLD = 12;   // 長押し中の最大許容移動距離 (px)
 
 canvas.addEventListener('touchstart', (e) => {
     e.preventDefault();
@@ -283,12 +312,34 @@ canvas.addEventListener('touchstart', (e) => {
         touch.startY = t.clientY;
         touch.lastX = t.clientX;
         touch.lastY = t.clientY;
+        touch.startTime = Date.now();
         touch.moved = false;
+        touch.waypointFired = false;
         touch.isPinching = false;
+        // 1本指ドラッグ = 即時カメラパン
         camera.isDragging = true;
         camera.lastX = t.clientX;
         camera.lastY = t.clientY;
+
+        // 長押し検出: 250ms後にウェイポイント指定
+        clearTimeout(touch.waypointTimer);
+        touch.waypointTimer = setTimeout(() => {
+            if (!touch.isPinching && !touch.moved && player) {
+                const worldX = (touch.startX / camera.zoom) + camera.x;
+                const worldY = (touch.startY / camera.zoom) + camera.y;
+                player.targetEntity = null;
+                player.setTarget(worldX, worldY);
+                createClickEffect(worldX, worldY, '#00ffaa');
+                const dist = Math.hypot(worldX - player.x, worldY - player.y);
+                const speedEst = Math.max(0.1, (genAlloc.engine / 100) * 3.0);
+                const timeSeconds = Math.max(1, Math.floor(dist / (speedEst * 60)));
+                logMessage(`NAV: 進路設定完了。到着予定時間はおよそ ${timeSeconds} 秒です。`, 'system-msg');
+                playSound('ui');
+                touch.waypointFired = true;
+            }
+        }, TOUCH_WAYPOINT_DELAY);
     } else if (e.touches.length === 2) {
+        clearTimeout(touch.waypointTimer);
         touch.isPinching = true;
         camera.isDragging = false;
         const dx = e.touches[0].clientX - e.touches[1].clientX;
@@ -303,7 +354,12 @@ canvas.addEventListener('touchmove', (e) => {
         const t = e.touches[0];
         const dx = t.clientX - touch.startX;
         const dy = t.clientY - touch.startY;
-        if (Math.hypot(dx, dy) > 8) touch.moved = true;
+        if (Math.hypot(dx, dy) > TOUCH_MOVE_THRESHOLD) {
+            touch.moved = true;
+            // 動いた場合は長押しウェイポイントをキャンセル
+            clearTimeout(touch.waypointTimer);
+        }
+        // 1本指ドラッグ = カメラパン (常時)
         camera.x -= (t.clientX - touch.lastX) / camera.zoom;
         camera.y -= (t.clientY - touch.lastY) / camera.zoom;
         touch.lastX = t.clientX;
@@ -328,8 +384,12 @@ canvas.addEventListener('touchmove', (e) => {
 
 canvas.addEventListener('touchend', (e) => {
     e.preventDefault();
+    clearTimeout(touch.waypointTimer);
     camera.isDragging = false;
-    if (!touch.moved && !touch.isPinching) {
+    const elapsed = Date.now() - touch.startTime;
+
+    // 短いタップ (移動なし, 250ms未満) → 敵の上なら ターゲットロック
+    if (!touch.moved && !touch.waypointFired && !touch.isPinching && elapsed < TOUCH_WAYPOINT_DELAY && player) {
         const worldX = (touch.startX / camera.zoom) + camera.x;
         const worldY = (touch.startY / camera.zoom) + camera.y;
         // タッチはロックオン判定を広く取る（指で画面を押すと視認が難しいため）
@@ -339,17 +399,12 @@ canvas.addEventListener('touchend', (e) => {
             player.targetEntity = clickedEnemy;
             createClickEffect(clickedEnemy.x, clickedEnemy.y, '#ff4d4d');
             logMessage(`TACTICAL: ターゲットをロック。射撃解を計算中...`, 'system-msg');
-        } else {
-            player.targetEntity = null;
-            player.setTarget(worldX, worldY);
-            createClickEffect(worldX, worldY, '#00ffaa');
-            const dist = Math.hypot(worldX - player.x, worldY - player.y);
-            const speedEst = Math.max(0.1, (genAlloc.engine / 100) * 3.0);
-            const timeSeconds = Math.max(1, Math.floor(dist / (speedEst * 60)));
-            logMessage(`NAV: 進路設定完了。到着予定時間はおよそ ${timeSeconds} 秒です。`, 'system-msg');
         }
+        // 空き領域タップは何もしない (ウェイポイントは長押しで)
     }
-    if (e.touches.length < 2) touch.isPinching = false;
+    if (e.touches.length < 2) {
+        touch.isPinching = false;
+    }
 }, { passive: false });
 
 // Classes
@@ -1367,8 +1422,18 @@ function generateSector() {
     boss.hp = boss.maxHp;
     boss.lurking = true;
     enemies.push(boss);
-    for (let i = 0; i < 8; i++) {
-        structures.push(new Structure(Math.random() * FIELD_SIZE, Math.random() * FIELD_SIZE, Math.random() > 0.5 ? 'colony' : 'derelict'));
+    // S&Dモード: コロニーノードを多く配置 (ハック目標)
+    const colonyCount = gameState.mode === 'sd' ? 5 : 3;
+    for (let i = 0; i < colonyCount; i++) {
+        structures.push(new Structure(
+            Math.random() * (FIELD_SIZE - 2000) + 1000,
+            Math.random() * (FIELD_SIZE - 2000) + 1000,
+            'colony'
+        ));
+    }
+    // 難破船 (デコイ・ハック・ルート用)
+    for (let i = 0; i < 5; i++) {
+        structures.push(new Structure(Math.random() * FIELD_SIZE, Math.random() * FIELD_SIZE, 'derelict'));
     }
     for (let i = 0; i < 3; i++) {
         stations.push(new Station(Math.random() * (FIELD_SIZE - 2000) + 1000, Math.random() * (FIELD_SIZE - 2000) + 1000));
@@ -1407,12 +1472,28 @@ function generateSector() {
 function startGame(shipType) {
     gameState.shipType = shipType;
     document.getElementById('ship-select-lobby').classList.add('hidden');
+    // S&D進捗バーの表示制御
+    const sdBar = document.getElementById('sd-progress-bar');
+    if (sdBar) sdBar.style.display = gameState.mode === 'sd' ? 'block' : 'none';
+    // モード表示をトップバーに反映
+    const modeLabel = gameState.mode === 'sd' ? 'S&D' : 'BR';
+    document.getElementById('sector-display').textContent = `セクター: ${gameState.sector} [${modeLabel}]`;
     generateSector();
     if (!gameLoopRunning) {
         gameLoopRunning = true;
         gameLoop();
     }
 }
+
+// ゲームモード選択ボタン
+document.querySelectorAll('.mode-card').forEach(card => {
+    card.addEventListener('click', () => {
+        document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+        gameState.mode = card.dataset.mode;
+        playSound('ui');
+    });
+});
 
 // 艦種選択ボタン
 document.querySelectorAll('.ship-select-btn').forEach(btn => {
@@ -1521,6 +1602,13 @@ document.getElementById('btn-cancel').addEventListener('click', () => {
     player.setTarget(player.x, player.y);
     player.targetEntity = null;
     logMessage('NAV: 待機命令を受諾。', 'system-msg');
+});
+document.getElementById('btn-camera-follow').addEventListener('click', () => {
+    cameraFollowPlayer = !cameraFollowPlayer;
+    updateCameraFollowBtn();
+    if (cameraFollowPlayer) centerCameraOnPlayer();
+    logMessage(`NAV: カメラ追従 ${cameraFollowPlayer ? 'ON' : 'OFF'}`, 'system-msg');
+    playSound('ui');
 });
 document.getElementById('btn-scan').addEventListener('click', () => {
     if (scanCooldown > 0) {
@@ -2032,14 +2120,35 @@ function gameLoop() {
         }
 
         // Sector Clear detection
-        if (!sectorCleared && enemies.length === 0 && player && player.hp > 0) {
-            sectorCleared = true;
-            const bonus = 100 + gameState.sector * 75;
-            gameState.credits += bonus;
-            updateTopUI();
-            saveGame();
-            showSectorClear(bonus);
-            logMessage(`MISSION: セクター${gameState.sector}の脅威排除完了。ボーナス: +${bonus} CR`, 'system-msg');
+        if (!sectorCleared && player && player.hp > 0) {
+            // 勝利条件チェック
+            const allEnemiesDown = enemies.length === 0;
+            const colonyNodes = structures.filter(s => s.type === 'colony');
+            const allNodesHacked = colonyNodes.length > 0 && colonyNodes.every(s => s.hacked);
+            const sdWin = gameState.mode === 'sd' && allNodesHacked;
+
+            if (allEnemiesDown || sdWin) {
+                sectorCleared = true;
+                const bonus = 100 + gameState.sector * 75 + (sdWin && !allEnemiesDown ? 50 : 0);
+                gameState.credits += bonus;
+                updateTopUI();
+                saveGame();
+                showSectorClear(bonus);
+                if (sdWin && !allEnemiesDown) {
+                    logMessage(`MISSION: 全ノードハック完了。S&D目標達成。ボーナス: +${bonus} CR`, 'system-msg');
+                } else {
+                    logMessage(`MISSION: セクター${gameState.sector}の脅威排除完了。ボーナス: +${bonus} CR`, 'system-msg');
+                }
+            }
+
+            // S&Dモード: ハック進捗をUIに反映
+            if (gameState.mode === 'sd' && colonyNodes.length > 0) {
+                const hackedCount = colonyNodes.filter(s => s.hacked).length;
+                document.getElementById('sd-progress-bar') &&
+                    (document.getElementById('sd-progress-fill').style.width = `${(hackedCount / colonyNodes.length) * 100}%`);
+                document.getElementById('sd-progress-text') &&
+                    (document.getElementById('sd-progress-text').textContent = `ノード: ${hackedCount}/${colonyNodes.length}`);
+            }
         }
 
         // Projectiles
@@ -2126,6 +2235,9 @@ function gameLoop() {
                 prompt.classList.remove('active');
             }
         }
+
+        // カメラ追従
+        if (cameraFollowPlayer && player) centerCameraOnPlayer();
 
         // Rendering
         ctx.clearRect(0, 0, canvas.width, canvas.height);

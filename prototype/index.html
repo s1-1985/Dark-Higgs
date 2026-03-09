@@ -34,6 +34,15 @@
                 <div class="minimap-overlay">
                     <span class="minimap-label">レーダーリンク</span>
                 </div>
+                <!-- S&D進捗バー (S&Dモード時のみ表示) -->
+                <div id="sd-progress-bar" style="display:none; margin-top:4px;">
+                    <div style="font-size:9px; color:#00ffaa; font-family:'Orbitron',monospace; margin-bottom:2px;">
+                        <span id="sd-progress-text">ノード: 0/0</span>
+                    </div>
+                    <div style="background:rgba(0,255,170,0.15); border:1px solid #00ffaa44; height:6px; border-radius:3px; overflow:hidden;">
+                        <div id="sd-progress-fill" style="height:100%; width:0%; background:#00ffaa; transition:width 0.3s;"></div>
+                    </div>
+                </div>
             </div>
 
             <!-- Bottom Console -->
@@ -99,6 +108,7 @@
                         <button class="btn btn-info" id="btn-scan">アクティブスキャン</button>
                         <button class="btn btn-warning" id="btn-hack">電子戦システム (EW)</button>
                         <button class="btn btn-danger" id="btn-cancel">ナビゲーションキャンセル</button>
+                        <button class="btn btn-primary" id="btn-camera-follow">追従 OFF</button>
                     </div>
                 </div>
 
@@ -205,7 +215,25 @@
             <div id="ship-select-lobby">
                 <div class="lobby-container">
                     <div class="lobby-title">艦種選択</div>
-                    <div class="lobby-subtitle">出撃前に艦種を選択してください</div>
+                    <div class="lobby-subtitle">出撃前に艦種とゲームモードを選択してください</div>
+
+                    <!-- ゲームモード選択 -->
+                    <div class="mode-select">
+                        <div class="mode-label">ゲームモード</div>
+                        <div class="mode-cards">
+                            <div class="mode-card active" id="mode-card-br" data-mode="br">
+                                <div class="mode-icon">⚔</div>
+                                <div class="mode-name">バトルロワイアル</div>
+                                <div class="mode-desc">相手を先に殲滅した方の勝ち</div>
+                            </div>
+                            <div class="mode-card" id="mode-card-sd" data-mode="sd">
+                                <div class="mode-icon">◉</div>
+                                <div class="mode-name">サーチ&amp;デストロイ</div>
+                                <div class="mode-desc">全ノードをハック、または相手を殲滅</div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="ship-cards">
                         <div class="ship-card" id="card-assault">
                             <div class="ship-icon">⚔</div>
