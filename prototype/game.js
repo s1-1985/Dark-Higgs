@@ -1377,13 +1377,11 @@ function logMessage(text, className) {
 }
 
 // Generate Sector
-let higgsGrowthFrame = 0; // ヒッグス自然成長フレームカウンタ
 
 function generateSector() {
     sectorCleared = false;
     enemiesKilled = 0;
     scanCooldown = 0;
-    higgsGrowthFrame = 0;
     // Keep drones if transitioning, but set position
     const tCount = talosDrones.length;
     player = new Ship(FIELD_SIZE / 2, FIELD_SIZE / 2, true);
