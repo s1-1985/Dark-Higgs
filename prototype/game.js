@@ -187,7 +187,7 @@ resizeCanvas();
 const camera = {
     x: 0,
     y: 0,
-    zoom: 1, minZoom: 0.1, maxZoom: 3,
+    zoom: 0.02, minZoom: 0.005, maxZoom: 3,
     isDragging: false, lastX: 0, lastY: 0,
     shake: 0
 };
