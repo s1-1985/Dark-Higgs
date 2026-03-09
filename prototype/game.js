@@ -67,7 +67,6 @@ let gameState = {
     mode: 'br',          // 'br' (Battle Royale) | 'sd' (Search & Destroy)
     sector: 1,
     credits: 0,
-    hasAds: true,
     upgrades: {
         hull: 0,      // +20% HP per level
         radar: 0,     // +15% range per level
@@ -103,15 +102,6 @@ function updateTopUI() {
     const modeLabel = gameState.mode === 'sd' ? 'S&D' : 'BR';
     document.getElementById('sector-display').textContent = `セクター: ${gameState.sector} [${modeLabel}]`;
     document.getElementById('currency-display').textContent = `クレジット: ${gameState.credits} CR`;
-    const isMobile = window.innerWidth <= 768;
-    const adH = isMobile ? '28px' : '30px';
-    if (!gameState.hasAds) {
-        document.getElementById('ad-banner').style.display = 'none';
-        document.getElementById('bottom-console').style.bottom = '0';
-    } else {
-        document.getElementById('ad-banner').style.display = 'flex';
-        document.getElementById('bottom-console').style.bottom = adH;
-    }
 }
 updateTopUI();
 
@@ -121,17 +111,6 @@ document.getElementById('btn-reset').addEventListener('click', () => {
     localStorage.removeItem('darkEchoSave');
     location.reload();
 });
-document.getElementById('btn-remove-ads').addEventListener('click', () => {
-    if (gameState.credits >= 500) {
-        gameState.credits -= 500;
-        gameState.hasAds = false;
-        saveGame();
-        updateTopUI();
-        logMessage('SYS: プレミアム機能がアンロックされました。(広告削除)', 'system-msg');
-    } else {
-        logMessage('SYS: 広告削除のためのクレジットが不足しています (500 CR 必要)。', 'warning-msg');
-    }
-});
 
 
 // Core Entities
@@ -140,7 +119,6 @@ let gameLoopRunning = false;
 let enemies = [];
 let projectiles = [];
 let structures = [];
-let talosDrones = [];
 let effects = [];
 let particles = [];
 let debris = [];
@@ -152,7 +130,7 @@ let higgsWakes = [];    // ヒッグスウェイク軌跡 {x, y, intensity, life
 let resourceNodes = []; // リソースノード {x, y, active, emFlashTimer}
 
 // GEN配分 (ゼロサム: エンジン/武器/センサー/AI の合計=100)
-let genAlloc = { engine: 30, weapons: 25, sensors: 25, ai: 20 };
+let genAlloc = { engine: 40, weapons: 30, sensors: 30, ai: 50 };
 
 // ============================================================
 // ヒッグス粒子強度計算 (Higgs Intensity)
@@ -677,76 +655,6 @@ class Projectile {
     }
 }
 
-class TalosDrone {
-    constructor(x, y) {
-        this.x = x; this.y = y;
-        this.angle = 0;
-        this.fireCooldown = 0;
-        this.radius = 4;
-    }
-    update() {
-        if (this.fireCooldown > 0) this.fireCooldown--;
-
-        // Find closest enemy
-        let closest = null; let cDist = 600;
-        enemies.forEach(e => {
-            const d = Math.hypot(e.x - this.x, e.y - this.y);
-            if (d < cDist && e.hp > 0) { cDist = d; closest = e; }
-        });
-
-        if (closest) {
-            // Attack run
-            const targetAngle = Math.atan2(closest.y - this.y, closest.x - this.x);
-            let diff = targetAngle - this.angle;
-            while (diff < -Math.PI) diff += Math.PI * 2;
-            while (diff > Math.PI) diff -= Math.PI * 2;
-            this.angle += diff * 0.1;
-
-            if (cDist > 150) {
-                this.x += Math.cos(this.angle) * 4;
-                this.y += Math.sin(this.angle) * 4;
-            } else {
-                this.x += Math.cos(this.angle + Math.PI / 2) * 3; // Strafe
-                this.y += Math.sin(this.angle + Math.PI / 2) * 3;
-            }
-            if (this.fireCooldown <= 0) {
-                projectiles.push(new Projectile(this.x, this.y, closest, true, 'kinetic'));
-                this.fireCooldown = 20;
-            }
-        } else if (player && player.hp > 0) {
-            // Idle orbit player (プレイヤーが存在し生存中のみ)
-            const dx = player.x - this.x;
-            const dy = player.y - this.y;
-            if (Math.hypot(dx, dy) > 150) {
-                this.angle = Math.atan2(dy, dx);
-                this.x += Math.cos(this.angle) * 3;
-                this.y += Math.sin(this.angle) * 3;
-            } else {
-                this.angle += 0.05;
-                this.x = player.x + Math.cos(this.angle) * 100;
-                this.y = player.y + Math.sin(this.angle) * 100;
-            }
-        }
-    }
-    draw(ctx) {
-        ctx.save();
-        ctx.translate(this.x, this.y);
-        const spinAngle = this.angle + Date.now() * 0.002;
-        ctx.rotate(spinAngle);
-        const r = this.radius * 2.8;
-        // Diamond outline
-        ctx.shadowColor = '#4da6ff'; ctx.shadowBlur = 8;
-        ctx.strokeStyle = '#4da6ff'; ctx.lineWidth = 1.2;
-        ctx.beginPath();
-        ctx.moveTo(r, 0); ctx.lineTo(0, -r); ctx.lineTo(-r, 0); ctx.lineTo(0, r);
-        ctx.closePath(); ctx.stroke();
-        // Glowing core
-        ctx.fillStyle = '#4da6ff';
-        ctx.beginPath(); ctx.arc(0, 0, this.radius * 0.9, 0, Math.PI * 2); ctx.fill();
-        ctx.shadowBlur = 0;
-        ctx.restore();
-    }
-}
 
 const WEAPON_COOLDOWNS = { kinetic: 15, missile: 100, beam: 200 };
 
@@ -1382,11 +1290,9 @@ function generateSector() {
     sectorCleared = false;
     enemiesKilled = 0;
     scanCooldown = 0;
-    // Keep drones if transitioning, but set position
-    const tCount = talosDrones.length;
     player = new Ship(FIELD_SIZE / 2, FIELD_SIZE / 2, true);
     player.generatorOutput = genAlloc.engine;
-    enemies = []; structures = []; projectiles = []; effects = []; talosDrones = []; particles = []; debris = []; scrapDrops = [];
+    enemies = []; structures = []; projectiles = []; effects = []; particles = []; debris = []; scrapDrops = [];
     stations = []; higgsWakes = []; resourceNodes = [];
 
     // Apply Upgrades to Stats
@@ -1394,35 +1300,50 @@ function generateSector() {
 
     // Environmental Background
     bgStars = [];
-    const starColors = ['#ffffff','#ffffff','#ccddff','#ffeecc','#aabbff','#ffd8aa'];
-    for (let i = 0; i < 3000; i++) {
-        const layer = i < 1500 ? 0 : (i < 2400 ? 1 : 2); // 1500 far, 900 mid, 600 near
-        const sizes  = [0.5, 1.1, 2.2];
-        const alphas = [0.18, 0.45, 0.85];
+    // 星の色: 青白(O/B型)・白(A型)・淡黄(F/G型)・橙赤(K/M型)・青紫(Wolf-Rayet)
+    const starColors = [
+        '#ffffff','#ffffff','#ddeeff','#ddeeff',  // 白・青白 (多め)
+        '#aaccff','#88bbff',                       // 青白 (O/B型)
+        '#fff5cc','#ffeeaa',                       // 淡黄 (F/G型)
+        '#ffcc88','#ffaa66',                       // 橙 (K型)
+        '#ff8866',                                 // 赤 (M型)
+        '#cc99ff'                                  // 青紫 (Wolf-Rayet)
+    ];
+    // レイヤー0: 遠景(微星5000), レイヤー1: 中景(1500), レイヤー2: 近景(800 + 輝く星)
+    const layerDist = [0, 5000, 6500, 7300];
+    for (let i = 0; i < 7300; i++) {
+        const layer = i < 5000 ? 0 : (i < 6500 ? 1 : 2);
+        const sizes  = [0.4, 1.0, 2.5];
+        const alphas = [0.12, 0.40, 0.90];
+        // 近景の一部は特に大きく輝かせる
+        const isBright = layer === 2 && Math.random() < 0.15;
         bgStars.push({
-            x: Math.random() * FIELD_SIZE * 2.5,
-            y: Math.random() * FIELD_SIZE * 2.5,
-            size:  sizes[layer]  + Math.random() * sizes[layer],
-            alpha: alphas[layer] * (0.6 + Math.random() * 0.4),
+            x: Math.random() * FIELD_SIZE * 3.0,
+            y: Math.random() * FIELD_SIZE * 3.0,
+            size:  isBright
+                ? 2.8 + Math.random() * 2.0
+                : sizes[layer] + Math.random() * sizes[layer],
+            alpha: isBright ? 1.0 : alphas[layer] * (0.55 + Math.random() * 0.45),
             color: starColors[Math.floor(Math.random() * starColors.length)],
             twinkle: Math.random() * Math.PI * 2,
+            isBright,
             layer
         });
     }
     bgMist = [];
-    const mistColors = ['50,20,110','20,50,110','90,20,50','10,65,85','55,35,10','15,80,60'];
-    for (let i = 0; i < 80; i++) {
+    // 星雲色: 紫・青・赤紫・緑青・琥珀 — より鮮やかな値
+    const mistColors = ['70,20,140','25,60,160','130,20,70','10,90,110','80,50,10','15,110,80'];
+    for (let i = 0; i < 100; i++) {
         const density = Math.random() * 0.65 + 0.1;
         bgMist.push({
             x: Math.random() * FIELD_SIZE, y: Math.random() * FIELD_SIZE,
-            r: Math.random() * 4000 + 1500,
-            // 高密度ゾーンは色を固定しない (drawBackground側で青緑に上書き)
+            r: Math.random() * 5000 + 2000,
             color: mistColors[Math.floor(Math.random() * mistColors.length)],
-            density
+            density,
+            // 各雲に個別パルス位相を持たせる
+            phase: Math.random() * Math.PI * 2
         });
     }
-
-    for (let i = 0; i < tCount; i++) talosDrones.push(new TalosDrone(player.x, player.y));
 
     // ===== ジエンド戦スタイル: 1セクター = 敵1機 =====
     // 敵をヒッグス濃度の高い場所に配置 (プレイヤーから遠い位置)
@@ -1483,12 +1404,6 @@ function generateSector() {
         centerCameraOnPlayer();
     }, 100);
 
-    // 艦種別初期処理
-    if (gameState.shipType === 'carrier' && talosDrones.length === 0) {
-        // 空母型: ドローン初期展開済み
-        talosDrones.push(new TalosDrone(player.x + 50, player.y));
-        logMessage('CARRIER: ドローン初期展開完了。', 'system-msg');
-    }
 
     const shipLabel = { assault: '攻撃型', stealth: '潜航型', carrier: '空母型' };
     logMessage(`SYSTEM: ワープ完了。セクター ${gameState.sector} に到着しました [${shipLabel[gameState.shipType] || '不明'}]。環境マッピング中...`, 'system-msg');
@@ -1549,9 +1464,10 @@ document.getElementById('btn-dialog-no').addEventListener('click', () => {
 });
 
 // ============================================================
-// GEN配分スライダー (ゼロサム: 合計100%)
+// GEN配分スライダー (ゼロサム: 合計100% — ENG/WEP/SEN のみ)
+// AI は独立スライダー (0〜100% 自由設定、GEN合計に含まない)
 // ============================================================
-const GEN_KEYS = ['engine', 'weapons', 'sensors', 'ai'];
+const GEN_KEYS = ['engine', 'weapons', 'sensors'];
 
 function updateGenTotal() {
     const total = GEN_KEYS.reduce((sum, k) => sum + genAlloc[k], 0);
@@ -1623,6 +1539,16 @@ GEN_KEYS.forEach(key => {
     });
 });
 updateGenTotal();
+
+// AI スライダー: GENゼロサムとは独立して 0〜100% 自由設定
+const aiSlider = document.getElementById('gen-ai');
+const aiValEl  = document.getElementById('gen-ai-val');
+if (aiSlider) {
+    aiSlider.addEventListener('input', e => {
+        genAlloc.ai = parseInt(e.target.value);
+        if (aiValEl) aiValEl.textContent = genAlloc.ai + '%';
+    });
+}
 
 // 旧スライダー互換 (参照が残っている場合のフォールバック)
 const legacySlider = document.getElementById('speedSlider');
@@ -1702,17 +1628,6 @@ const SENSOR_INFO = {
     });
 });
 
-document.getElementById('btn-launch-talos').addEventListener('click', () => {
-    if (gameState.credits >= 50) {
-        gameState.credits -= 50;
-        updateTopUI();
-        talosDrones.push(new TalosDrone(player.x, player.y));
-        logMessage('HANGER: 自律型兵器「TALOS」を出撃させました。', 'system-msg');
-        document.getElementById('talos-count').textContent = `稼働中: ${talosDrones.length}`;
-    } else {
-        logMessage('SYS: 出撃に必要なクレジットが不足しています (必要: 50 CR)。', 'warning-msg');
-    }
-});
 
 
 let scanAngle = 0;
@@ -1920,7 +1835,6 @@ function drawMinimap() {
 
     // Talos
     minimapCtx.fillStyle = '#4da6ff';
-    talosDrones.forEach(t => { minimapCtx.beginPath(); minimapCtx.arc(t.x * sX, t.y * sY, 1.5, 0, Math.PI * 2); minimapCtx.fill(); });
 
     // Enemies (only visible ones; dead enemies are removed in game loop before minimap draws)
     minimapCtx.fillStyle = '#ff4d4d';
@@ -1972,12 +1886,12 @@ function drawBackground(ctx) {
     const vw = canvas.width / camera.zoom;
     const vh = canvas.height / camera.zoom;
 
-    // Deep space base fill
-    ctx.fillStyle = 'rgb(1,2,10)';
+    // Deep space base fill — 深宇宙の漆黒に極微細な青みを加える
+    ctx.fillStyle = 'rgb(1,3,14)';
     ctx.fillRect(camera.x, camera.y, vw, vh);
 
     // Multi-layer parallax stars
-    const parallaxes = [0.12, 0.32, 0.62];
+    const parallaxes = [0.10, 0.28, 0.58];
     const now = Date.now() * 0.001;
     const cx = camera.x, cy = camera.y;
 
@@ -1987,42 +1901,62 @@ function drawBackground(ctx) {
         const sy = s.y - cy * px;
         // Cull off-screen
         if (sx < cx - 20 || sx > cx + vw + 20 || sy < cy - 20 || sy > cy + vh + 20) return;
-        const twinkle = s.layer === 2
-            ? s.alpha * (0.65 + Math.sin(now * 1.2 + s.twinkle) * 0.35)
-            : s.alpha;
-        ctx.globalAlpha = twinkle;
+
+        let twinkle = s.alpha;
+        if (s.layer >= 1) {
+            twinkle = s.alpha * (0.60 + Math.sin(now * (0.8 + s.twinkle * 0.5) + s.twinkle) * 0.40);
+        }
+        ctx.globalAlpha = Math.max(0, twinkle);
         ctx.fillStyle = s.color;
-        if (s.layer === 2 && s.size > 2.5) {
+
+        if (s.isBright) {
+            // 明るい近景星: グロー + 十字フレア
+            ctx.shadowColor = s.color;
+            ctx.shadowBlur = 12;
+            ctx.fillRect(sx, sy, s.size, s.size);
+            ctx.shadowBlur = 0;
+            ctx.globalAlpha = twinkle * 0.30;
+            ctx.fillRect(sx - s.size * 2.5, sy + s.size * 0.3, s.size * 7, s.size * 0.35);
+            ctx.fillRect(sx + s.size * 0.3, sy - s.size * 2.5, s.size * 0.35, s.size * 7);
+        } else if (s.layer === 2 && s.size > 1.8) {
             ctx.shadowColor = s.color;
             ctx.shadowBlur = 5;
+            ctx.fillRect(sx, sy, s.size, s.size);
+            ctx.shadowBlur = 0;
+        } else {
+            ctx.fillRect(sx, sy, s.size, s.size);
         }
-        ctx.fillRect(sx, sy, s.size, s.size);
-        ctx.shadowBlur = 0;
     });
     ctx.globalAlpha = 1;
 
-    // Nebula / Higgs mist clouds
-    // 高密度(density>0.45)はヒッグス場として青緑の輝きで視覚化
-    const pulse = 0.85 + Math.sin(now * 0.4) * 0.15;
+    // Nebula / Higgs mist clouds — 鮮やかな星雲・ヒッグス場を可視化
     bgMist.forEach(m => {
         const isHiggs = m.density > 0.45;
-        let baseAlpha = isHiggs ? 0.10 * pulse : 0.025;
+        const pulse = 0.80 + Math.sin(now * 0.35 + (m.phase || 0)) * 0.20;
+        let baseAlpha = isHiggs ? 0.13 * pulse : 0.035 + m.density * 0.03;
         const g = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.r);
-        const col = isHiggs ? '40,200,255' : m.color;
-        g.addColorStop(0,    `rgba(${col},${(baseAlpha * 2.2).toFixed(3)})`);
-        g.addColorStop(0.30, `rgba(${col},${(baseAlpha * 1.0).toFixed(3)})`);
-        g.addColorStop(0.65, `rgba(${col},${(baseAlpha * 0.4).toFixed(3)})`);
+        const col = isHiggs ? '40,210,255' : m.color;
+        g.addColorStop(0,    `rgba(${col},${Math.min(0.55, baseAlpha * 2.5).toFixed(3)})`);
+        g.addColorStop(0.25, `rgba(${col},${(baseAlpha * 1.2).toFixed(3)})`);
+        g.addColorStop(0.60, `rgba(${col},${(baseAlpha * 0.45).toFixed(3)})`);
         g.addColorStop(1,    'rgba(0,0,0,0)');
         ctx.fillStyle = g;
         ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2); ctx.fill();
 
         // 高密度コアに輝点を追加
         if (isHiggs) {
-            const cg = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.r * 0.25);
-            cg.addColorStop(0, `rgba(80,240,255,${(0.07 * pulse).toFixed(3)})`);
+            const cg = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.r * 0.22);
+            cg.addColorStop(0, `rgba(90,245,255,${(0.09 * pulse).toFixed(3)})`);
             cg.addColorStop(1, 'rgba(0,0,0,0)');
             ctx.fillStyle = cg;
-            ctx.beginPath(); ctx.arc(m.x, m.y, m.r * 0.25, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(m.x, m.y, m.r * 0.22, 0, Math.PI * 2); ctx.fill();
+        } else if (m.density > 0.30) {
+            // 中密度星雲: 内側に輝きコアを追加
+            const mc = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.r * 0.18);
+            mc.addColorStop(0, `rgba(${m.color},${(0.06 * pulse).toFixed(3)})`);
+            mc.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = mc;
+            ctx.beginPath(); ctx.arc(m.x, m.y, m.r * 0.18, 0, Math.PI * 2); ctx.fill();
         }
     });
 
@@ -2208,7 +2142,6 @@ function gameLoop() {
             setTimeout(() => showGameOver(), 2500);
         }
         enemies.forEach(e => e.update());
-        talosDrones.forEach(d => d.update());
 
         // Scrap Collection
         for (let i = scrapDrops.length - 1; i >= 0; i--) {
@@ -2369,7 +2302,6 @@ function gameLoop() {
         updateDrawDebrisParticles(ctx);
 
         enemies.forEach(e => e.draw(ctx));
-        talosDrones.forEach(d => d.draw(ctx));
         if (player && player.hp > 0) player.draw(ctx);
 
         ctx.restore();
@@ -2484,5 +2416,5 @@ document.getElementById('btn-restart').addEventListener('click', () => {
     gameState.sector = Math.max(1, gameState.sector); // Keep sector progress
     generateSector();
     updateTopUI();
-    logMessage('SYSTEM: TALOS-CMD 緊急再起動完了。クレジット50%喪失。', 'warning-msg');
+    logMessage('SYSTEM: 艦体緊急再起動完了。クレジット50%喪失。', 'warning-msg');
 });

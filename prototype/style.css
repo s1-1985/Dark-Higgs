@@ -185,10 +185,6 @@ body {
     border-right: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.left-panel {
-    flex: 1;
-    border-left: 1px solid rgba(255, 255, 255, 0.1);
-}
 
 .center-panel {
     flex: 2;
@@ -394,40 +390,6 @@ input[type=range]::-webkit-slider-thumb {
     gap: 20px;
 }
 
-/* Ad Banner */
-#ad-banner {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    height: 30px;
-    background: #111;
-    border-top: 1px solid #333;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    gap: 20px;
-    z-index: 50;
-    pointer-events: auto;
-}
-
-.ad-content {
-    font-size: 12px;
-    color: #999;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-family: 'Orbitron', sans-serif;
-}
-
-.ad-badge {
-    background: #ffaa00;
-    color: #000;
-    font-weight: bold;
-    padding: 2px 5px;
-    border-radius: 2px;
-    font-size: 10px;
-}
 
 /* Docking Prompt */
 #dock-prompt {
@@ -912,29 +874,6 @@ input[type=range]::-webkit-slider-thumb {
         gap: 3px;
     }
 
-    /* 行1: HP + TALOSボタン (横並び) */
-    .left-panel {
-        flex-direction: row;
-        align-items: center;
-        gap: 8px;
-        padding: 3px 0;
-        border-right: none;
-        border-left: none;
-        border-bottom: 1px solid rgba(255,255,255,0.08);
-    }
-    .left-panel .panel-header { display: none; }
-    .left-panel .unit-status { flex: 1; min-width: 0; }
-    .left-panel .action-buttons { margin-top: 0 !important; flex-shrink: 0; display: flex; align-items: center; gap: 6px; }
-    .status-bar { height: 5px; margin-bottom: 2px; }
-    .status-text { font-size: 9px; }
-    #btn-launch-talos {
-        font-size: 8px;
-        padding: 5px 8px;
-        min-height: 34px;
-        letter-spacing: 0;
-        white-space: nowrap;
-    }
-    #talos-count { font-size: 9px; white-space: nowrap; }
 
     /* 行2: ジェネレータ + 兵装 (横並び) */
     .center-panel {
@@ -996,19 +935,6 @@ input[type=range]::-webkit-slider-thumb {
     .right-panel { display: none !important; }
     .panel-header { font-size: 9px; margin-bottom: 3px; letter-spacing: 0.5px; }
 
-    /* ─── AD BANNER: 28px ─── */
-    #ad-banner {
-        height: 28px;
-        gap: 8px;
-    }
-    .ad-content {
-        font-size: 9px;
-        gap: 6px;
-    }
-    /* 広告テキスト省略 */
-    .ad-content span:last-of-type { display: none; }
-    .ad-badge { font-size: 8px; padding: 1px 4px; }
-    #btn-remove-ads { padding: 2px 7px; font-size: 8px; min-height: 22px; }
 
     /* ─── ダイアログ ─── */
     .dialog-box {
