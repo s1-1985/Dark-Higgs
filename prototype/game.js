@@ -187,7 +187,7 @@ resizeCanvas();
 const camera = {
     x: 0,
     y: 0,
-    zoom: 0.02, minZoom: 0.005, maxZoom: 3,
+    zoom: 0.08, minZoom: 0.005, maxZoom: 3,
     isDragging: false, lastX: 0, lastY: 0,
     shake: 0
 };
@@ -1570,14 +1570,15 @@ GEN_KEYS.forEach(key => {
         if (delta !== 0) {
             let remaining = -delta;
             if (otherTotal > 0) {
-                // 按分配分
+                // 按分配分 (クリップ後の実変化量でremainingを追跡)
                 others.forEach((k, i) => {
+                    const prevVal = genAlloc[k];
                     if (i === others.length - 1) {
-                        genAlloc[k] = Math.max(0, genAlloc[k] + remaining);
+                        genAlloc[k] = Math.min(100, Math.max(0, genAlloc[k] + remaining));
                     } else {
                         const adj = Math.round(remaining * (genAlloc[k] / otherTotal));
-                        genAlloc[k] = Math.max(0, genAlloc[k] + adj);
-                        remaining -= adj;
+                        genAlloc[k] = Math.min(100, Math.max(0, genAlloc[k] + adj));
+                        remaining -= (genAlloc[k] - prevVal); // クリップ後の実変化量を引く
                     }
                     const el = document.getElementById(`gen-${k}`);
                     const valEl = document.getElementById(`gen-${k}-val`);
@@ -1587,11 +1588,23 @@ GEN_KEYS.forEach(key => {
             } else {
                 // 他が全て0 → 最後のスライダーに全て割り当て
                 const last = others[others.length - 1];
-                genAlloc[last] = Math.max(0, genAlloc[last] + remaining);
+                genAlloc[last] = Math.min(100, Math.max(0, genAlloc[last] + remaining));
                 const el = document.getElementById(`gen-${last}`);
                 const valEl = document.getElementById(`gen-${last}-val`);
                 if (el) el.value = genAlloc[last];
                 if (valEl) valEl.textContent = genAlloc[last] + '%';
+            }
+            // 端数誤差補正: 合計が100になるよう最終調整
+            const total = GEN_KEYS.reduce((sum, k) => sum + genAlloc[k], 0);
+            if (total !== 100) {
+                const diff = 100 - total;
+                // 最も大きい配分のキーで調整
+                const adjustKey = others.reduce((best, k) => genAlloc[k] > genAlloc[best] ? k : best, others[0]);
+                genAlloc[adjustKey] = Math.min(100, Math.max(0, genAlloc[adjustKey] + diff));
+                const el = document.getElementById(`gen-${adjustKey}`);
+                const valEl = document.getElementById(`gen-${adjustKey}-val`);
+                if (el) el.value = genAlloc[adjustKey];
+                if (valEl) valEl.textContent = genAlloc[adjustKey] + '%';
             }
         }
 
@@ -1647,7 +1660,8 @@ document.getElementById('btn-hack').addEventListener('click', () => {
     let closest = null; let cd = Infinity;
     structures.forEach(s => {
         const d = Math.hypot(player.x - s.x, player.y - s.y);
-        if (d < cd && d < RADAR_RANGE) { cd = d; closest = s; }
+        // ヒッグス干渉を考慮した有効レンジを使用 (effectiveRadarRange)
+        if (d < cd && d < effectiveRadarRange) { cd = d; closest = s; }
     });
     if (closest && !closest.hacked) {
         closest.hacked = true;
@@ -1898,10 +1912,10 @@ function drawMinimap() {
     minimapCtx.fillStyle = '#4da6ff';
     talosDrones.forEach(t => { minimapCtx.beginPath(); minimapCtx.arc(t.x * sX, t.y * sY, 1.5, 0, Math.PI * 2); minimapCtx.fill(); });
 
-    // Enemies
+    // Enemies (only visible ones; dead enemies are removed in game loop before minimap draws)
     minimapCtx.fillStyle = '#ff4d4d';
     enemies.forEach(e => {
-        if (e.visible || e.hp <= 0) { minimapCtx.beginPath(); minimapCtx.arc(e.x * sX, e.y * sY, 2, 0, Math.PI * 2); minimapCtx.fill(); }
+        if (e.visible && e.hp > 0) { minimapCtx.beginPath(); minimapCtx.arc(e.x * sX, e.y * sY, 2, 0, Math.PI * 2); minimapCtx.fill(); }
     });
 
     // リソースノード (ヒッグスセンサー使用中のみミニマップ表示)
@@ -2189,6 +2203,9 @@ function gameLoop() {
         // Scrap Collection
         for (let i = scrapDrops.length - 1; i >= 0; i--) {
             let s = scrapDrops[i];
+            // 時間経過でフェードアウト (約30秒 = 1800フレーム)
+            s.life -= 0.00055;
+            if (s.life <= 0) { scrapDrops.splice(i, 1); continue; }
             if (player && player.hp > 0) {
                 const d = Math.hypot(player.x - s.x, player.y - s.y);
                 if (d < 200) {
@@ -2315,10 +2332,11 @@ function gameLoop() {
             });
         }
 
-        // Render scrap (rotating data fragment squares)
+        // Render scrap (rotating data fragment squares, fades over time)
         scrapDrops.forEach(s => {
             const angle = (Date.now() * 0.001 + s.x * 0.01) % (Math.PI * 2);
             ctx.save();
+            ctx.globalAlpha = Math.min(1, s.life * 2); // フェードアウト (lifeが0.5を下回ると透過開始)
             ctx.translate(s.x, s.y);
             ctx.rotate(angle);
             ctx.fillStyle = '#00ffaa'; ctx.shadowColor = '#00ffaa'; ctx.shadowBlur = 10;
@@ -2327,6 +2345,7 @@ function gameLoop() {
             ctx.fillStyle = '#fff';
             ctx.fillRect(-1.5, -1.5, 3, 3);
             ctx.restore();
+            ctx.globalAlpha = 1;
         });
 
         if (player && player.hp > 0) drawRadarSweep(ctx);
@@ -2347,7 +2366,8 @@ function gameLoop() {
         requestAnimationFrame(gameLoop);
     } catch (err) {
         console.error("Game loop error:", err);
-        window.onerror(err.message, "game.js - gameLoop", 0, 0, err);
+        // エラー発生後もゲームループを継続する (一時的なエラーでフリーズしない)
+        requestAnimationFrame(gameLoop);
     }
 }
 // Docking Logic
