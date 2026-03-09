@@ -1381,9 +1381,9 @@ function generateSector() {
     }, 100);
 
     // 艦種別初期処理
-    if (gameState.shipType === 'carrier' && drones.length === 0) {
+    if (gameState.shipType === 'carrier' && talosDrones.length === 0) {
         // 空母型: ドローン初期展開済み
-        drones.push(new TalosDrone(player.x + 50, player.y));
+        talosDrones.push(new TalosDrone(player.x + 50, player.y));
         logMessage('CARRIER: ドローン初期展開完了。', 'system-msg');
     }
 
