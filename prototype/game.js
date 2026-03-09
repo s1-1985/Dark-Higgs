@@ -17,7 +17,7 @@ let enemiesKilled = 0; // Stat tracking
 // マルチセンサーシステム (じゃんけん方式)
 // heat: 移動中の熱源検出  optic: 発砲フラッシュ検出  em: 潜伏中受動放射検出
 // ============================================================
-let currentSensor = 'heat'; // 'heat' | 'optic' | 'em'
+let currentSensor = 'heat'; // 'heat' | 'optic' | 'em' | 'higgs'
 
 let dialogOpen = false;
 let dockingOpen = false;
@@ -89,7 +89,8 @@ function saveGame() {
 loadGame();
 
 function updateTopUI() {
-    document.getElementById('sector-display').textContent = `セクター: ${gameState.sector}`;
+    const modeLabel = gameState.mode === 'sd' ? 'S&D' : 'BR';
+    document.getElementById('sector-display').textContent = `セクター: ${gameState.sector} [${modeLabel}]`;
     document.getElementById('currency-display').textContent = `クレジット: ${gameState.credits} CR`;
     const isMobile = window.innerWidth <= 768;
     const adH = isMobile ? '28px' : '30px';
@@ -1451,6 +1452,12 @@ function generateSector() {
         resourceNodes.push({ x: spot.x, y: spot.y, active: true, emFlashTimer: 0 });
     }
 
+    // S&D進捗バーをリセット
+    const sdFill = document.getElementById('sd-progress-fill');
+    const sdText = document.getElementById('sd-progress-text');
+    if (sdFill) sdFill.style.width = '0%';
+    if (sdText) sdText.textContent = `ノード: 0/${gameState.mode === 'sd' ? 5 : 3}`;
+
     centerCameraOnPlayer();
 
     // Add delay to ensure canvas is sized before centering camera again
@@ -1475,9 +1482,7 @@ function startGame(shipType) {
     // S&D進捗バーの表示制御
     const sdBar = document.getElementById('sd-progress-bar');
     if (sdBar) sdBar.style.display = gameState.mode === 'sd' ? 'block' : 'none';
-    // モード表示をトップバーに反映
-    const modeLabel = gameState.mode === 'sd' ? 'S&D' : 'BR';
-    document.getElementById('sector-display').textContent = `セクター: ${gameState.sector} [${modeLabel}]`;
+    updateTopUI();
     generateSector();
     if (!gameLoopRunning) {
         gameLoopRunning = true;
@@ -2261,40 +2266,42 @@ function gameLoop() {
         structures.forEach(s => s.draw(ctx));
         drawTargetLine(ctx);
 
-        // リソースノード描画 (回転するヘックスクリスタル)
-        resourceNodes.forEach(n => {
-            if (!n.active) return;
-            const t = Date.now();
-            const pulse = 0.5 + Math.sin(t * 0.003 + n.x * 0.001) * 0.3;
-            const spin = (t * 0.0008 + n.x * 0.0003) % (Math.PI * 2);
-            ctx.save();
-            ctx.translate(n.x, n.y);
-            ctx.rotate(spin);
-            ctx.globalAlpha = 0.15 + pulse * 0.12;
-            ctx.fillStyle = '#50c8ff';
-            ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = 20;
-            // Crystal hexagon
-            ctx.beginPath();
-            for (let i = 0; i < 6; i++) {
-                const a = (i / 6) * Math.PI * 2;
-                const px = Math.cos(a) * 6, py = Math.sin(a) * 6;
-                if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-            }
-            ctx.closePath(); ctx.fill();
-            // Inner highlight
-            ctx.globalAlpha = 0.08 + pulse * 0.06;
-            ctx.fillStyle = '#fff';
-            ctx.beginPath();
-            for (let i = 0; i < 6; i++) {
-                const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
-                const px = Math.cos(a) * 3, py = Math.sin(a) * 3;
-                if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-            }
-            ctx.closePath(); ctx.fill();
-            ctx.shadowBlur = 0;
-            ctx.restore();
-            ctx.globalAlpha = 1;
-        });
+        // リソースノード描画 (HIGGSセンサー使用中のみ可視 — 設計仕様)
+        if (currentSensor === 'higgs') {
+            resourceNodes.forEach(n => {
+                if (!n.active) return;
+                const t = Date.now();
+                const pulse = 0.5 + Math.sin(t * 0.003 + n.x * 0.001) * 0.3;
+                const spin = (t * 0.0008 + n.x * 0.0003) % (Math.PI * 2);
+                ctx.save();
+                ctx.translate(n.x, n.y);
+                ctx.rotate(spin);
+                ctx.globalAlpha = 0.15 + pulse * 0.12;
+                ctx.fillStyle = '#50c8ff';
+                ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = 20;
+                // Crystal hexagon
+                ctx.beginPath();
+                for (let i = 0; i < 6; i++) {
+                    const a = (i / 6) * Math.PI * 2;
+                    const px = Math.cos(a) * 6, py = Math.sin(a) * 6;
+                    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                }
+                ctx.closePath(); ctx.fill();
+                // Inner highlight
+                ctx.globalAlpha = 0.08 + pulse * 0.06;
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                for (let i = 0; i < 6; i++) {
+                    const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+                    const px = Math.cos(a) * 3, py = Math.sin(a) * 3;
+                    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                }
+                ctx.closePath(); ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.restore();
+                ctx.globalAlpha = 1;
+            });
+        }
 
         // Render scrap (rotating data fragment squares)
         scrapDrops.forEach(s => {
@@ -2404,7 +2411,10 @@ function buyUpgrade(type) {
         playSound('ui');
 
         // Re-calculate stats
-        if (type === 'hull') player.maxHp = 2000 * (1 + (gameState.upgrades.hull * 0.25));
+        if (type === 'hull') {
+            const hpBase = { assault: 3500, stealth: 700, carrier: 2500 };
+            player.maxHp = (hpBase[gameState.shipType] || 2000) * (1 + (gameState.upgrades.hull * 0.25));
+        }
         if (type === 'radar') RADAR_RANGE = BASE_RADAR_RANGE * (1 + (gameState.upgrades.radar * 0.2));
 
         updateTopUI();
