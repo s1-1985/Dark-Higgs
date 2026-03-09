@@ -78,8 +78,19 @@ let gameState = {
 function loadGame() {
     const saved = localStorage.getItem('darkEchoSave');
     if (saved) {
-        gameState = JSON.parse(saved);
-        updateTopUI();
+        try {
+            const loaded = JSON.parse(saved);
+            // デフォルト値とマージ (古い保存データにないフィールドをデフォルト値で補完)
+            gameState = Object.assign({}, gameState, loaded);
+            // upgrades はネストされているので個別マージ
+            if (loaded.upgrades) {
+                gameState.upgrades = Object.assign({}, gameState.upgrades, loaded.upgrades);
+            }
+            updateTopUI();
+        } catch (e) {
+            console.warn('SYSTEM: 保存データの読み込みに失敗しました。初期状態で起動します。', e);
+            localStorage.removeItem('darkEchoSave');
+        }
     }
 }
 function saveGame() {
