@@ -1156,3 +1156,60 @@ input[type=range]::-webkit-slider-thumb {
 #card-stealth .ship-ability { color: #50c8ff; background: rgba(80,200,255,0.07); border-color: rgba(80,200,255,0.2); }
 #card-carrier .ship-ability { color: #ffaa00; background: rgba(255,170,0,0.07); border-color: rgba(255,170,0,0.2); }
 .ship-select-btn { width: 100%; margin-top: 4px; }
+
+/* ゲームモード選択 */
+.mode-select {
+    margin-bottom: 24px;
+}
+.mode-label {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 11px;
+    color: #607080;
+    letter-spacing: 3px;
+    margin-bottom: 10px;
+}
+.mode-cards {
+    display: flex;
+    gap: 14px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+.mode-card {
+    background: rgba(0,20,40,0.85);
+    border: 1px solid #1a3a5a;
+    border-radius: 8px;
+    padding: 14px 24px;
+    min-width: 180px;
+    cursor: pointer;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+}
+.mode-card:hover {
+    border-color: #00ffaa44;
+}
+.mode-card.active {
+    border-color: #00ffaa;
+    box-shadow: 0 0 16px rgba(0,255,170,0.2);
+    background: rgba(0,255,170,0.05);
+}
+.mode-icon {
+    font-size: 22px;
+    color: #00ffaa;
+}
+.mode-name {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    color: #e0f0ff;
+    letter-spacing: 2px;
+}
+.mode-desc {
+    font-size: 10px;
+    color: #607080;
+    text-align: center;
+}
+#mode-card-sd .mode-icon { color: #ffaa00; }
+#mode-card-sd.active { border-color: #ffaa00; box-shadow: 0 0 16px rgba(255,170,0,0.2); background: rgba(255,170,0,0.05); }
