@@ -5,7 +5,7 @@ const ctx = canvas.getContext('2d');
 const minimapCanvas = document.getElementById('minimapCanvas');
 const minimapCtx = minimapCanvas.getContext('2d');
 
-let FIELD_SIZE = 8000;
+let FIELD_SIZE = 20000;
 let BASE_RADAR_RANGE = 600;
 let RADAR_RANGE = BASE_RADAR_RANGE;
 let effectiveRadarRange = BASE_RADAR_RANGE; // Actual range after Higgs interference
@@ -901,7 +901,7 @@ class Ship {
             // 潜伏モード — ヒッグス濃度の高い場所を探す
             // ──────────────────────────────────────
             if (this.lurking || this.detectionState === 'unaware') {
-                this.speed = 0.35; // ゆっくり移動 (潜望鏡を出すレベル)
+                this.speed = 0.07; // 極低速 (熱源シグネチャを検知閾値以下に抑える)
                 if (this.state === 'idle' && Math.random() < 0.004) {
                     const hideSpot = findHidingSpot(this.x, this.y, 2000);
                     this.setTarget(hideSpot.x, hideSpot.y);
@@ -1057,10 +1057,8 @@ class Ship {
         ctx.translate(this.x, this.y);
         ctx.rotate(this.angle);
 
-        // 潜伏中は半透明 (ノイズの中にかすかに映る)
-        const isLurking = !this.isPlayer && (this.lurking || this.detectionState === 'unaware');
+        // 発砲フラッシュ中は全不透明
         const isFlashing = !this.isPlayer && this.fireFlashTimer > 0;
-        if (isLurking) ctx.globalAlpha = 0.4 + Math.sin(Date.now() * 0.003) * 0.15; // ゆらゆら点滅
         if (isFlashing) ctx.globalAlpha = 1.0;
 
         if (this.isPlayer) {
@@ -1322,16 +1320,31 @@ function generateSector() {
 
     // Environmental Background
     bgStars = [];
-    for (let i = 0; i < 500; i++) {
-        bgStars.push({ x: Math.random() * FIELD_SIZE, y: Math.random() * FIELD_SIZE, size: Math.random() * 2, color: Math.random() > 0.8 ? '#ccddff' : '#ffffff' });
+    const starColors = ['#ffffff','#ffffff','#ccddff','#ffeecc','#aabbff','#ffd8aa'];
+    for (let i = 0; i < 3000; i++) {
+        const layer = i < 1500 ? 0 : (i < 2400 ? 1 : 2); // 1500 far, 900 mid, 600 near
+        const sizes  = [0.5, 1.1, 2.2];
+        const alphas = [0.18, 0.45, 0.85];
+        bgStars.push({
+            x: Math.random() * FIELD_SIZE * 2.5,
+            y: Math.random() * FIELD_SIZE * 2.5,
+            size:  sizes[layer]  + Math.random() * sizes[layer],
+            alpha: alphas[layer] * (0.6 + Math.random() * 0.4),
+            color: starColors[Math.floor(Math.random() * starColors.length)],
+            twinkle: Math.random() * Math.PI * 2,
+            layer
+        });
     }
     bgMist = [];
-    for (let i = 0; i < 40; i++) {
+    const mistColors = ['50,20,110','20,50,110','90,20,50','10,65,85','55,35,10','15,80,60'];
+    for (let i = 0; i < 80; i++) {
+        const density = Math.random() * 0.65 + 0.1;
         bgMist.push({
             x: Math.random() * FIELD_SIZE, y: Math.random() * FIELD_SIZE,
-            r: Math.random() * 1000 + 500,
-            color: Math.random() > 0.7 ? '50, 20, 100' : '20, 50, 80', // Magenta vs Blue Nebulae
-            density: Math.random() * 0.65 + 0.1 // Gameplay density: affects radar + detection
+            r: Math.random() * 4000 + 1500,
+            // 高密度ゾーンは色を固定しない (drawBackground側で青緑に上書き)
+            color: mistColors[Math.floor(Math.random() * mistColors.length)],
+            density
         });
     }
 
@@ -1340,7 +1353,7 @@ function generateSector() {
     // ===== ジエンド戦スタイル: 1セクター = 敵1機 =====
     // 敵をヒッグス濃度の高い場所に配置 (プレイヤーから遠い位置)
     const spawnAngle = Math.random() * Math.PI * 2;
-    const spawnDist = 3000 + Math.random() * 2000; // 3000-5000u離れた場所
+    const spawnDist = 7000 + Math.random() * 5000; // 7000-12000u離れた場所
     const spawnCenterX = FIELD_SIZE / 2 + Math.cos(spawnAngle) * spawnDist * 0.5;
     const spawnCenterY = FIELD_SIZE / 2 + Math.sin(spawnAngle) * spawnDist * 0.5;
     const bossSpawn = findHidingSpot(
@@ -1757,6 +1770,18 @@ function drawMinimap() {
     minimapCtx.clearRect(0, 0, minimapCanvas.width, minimapCanvas.height);
     const sX = minimapCanvas.width / FIELD_SIZE; const sY = minimapCanvas.height / FIELD_SIZE;
 
+    // ヒッグス濃度オーバーレイ (高密度ゾーンを青緑で表示)
+    bgMist.forEach(m => {
+        if (m.density <= 0.45) return;
+        const mx = m.x * sX, my = m.y * sY, mr = m.r * sX;
+        const g = minimapCtx.createRadialGradient(mx, my, 0, mx, my, mr);
+        g.addColorStop(0,   `rgba(40,200,255,${(m.density * 0.35).toFixed(2)})`);
+        g.addColorStop(0.5, `rgba(40,200,255,${(m.density * 0.12).toFixed(2)})`);
+        g.addColorStop(1,   'rgba(0,0,0,0)');
+        minimapCtx.fillStyle = g;
+        minimapCtx.beginPath(); minimapCtx.arc(mx, my, mr, 0, Math.PI * 2); minimapCtx.fill();
+    });
+
     // Viewport
     minimapCtx.strokeStyle = 'rgba(255,255,0,0.5)'; minimapCtx.lineWidth = 1;
     minimapCtx.strokeRect(camera.x * sX, camera.y * sY, (canvas.width / camera.zoom) * sX, (canvas.height / camera.zoom) * sY);
@@ -1823,41 +1848,75 @@ minimapCanvas.addEventListener('touchend', () => { isMinimapDragging = false; })
 
 // Background grid system
 function drawBackground(ctx) {
-    // Render Mist Clouds (Higgs Particle Fog)
+    const vw = canvas.width / camera.zoom;
+    const vh = canvas.height / camera.zoom;
+
+    // Deep space base fill
+    ctx.fillStyle = 'rgb(1,2,10)';
+    ctx.fillRect(camera.x, camera.y, vw, vh);
+
+    // Multi-layer parallax stars
+    const parallaxes = [0.12, 0.32, 0.62];
+    const now = Date.now() * 0.001;
+    const cx = camera.x, cy = camera.y;
+
+    bgStars.forEach(s => {
+        const px = parallaxes[s.layer];
+        const sx = s.x - cx * px;
+        const sy = s.y - cy * px;
+        // Cull off-screen
+        if (sx < cx - 20 || sx > cx + vw + 20 || sy < cy - 20 || sy > cy + vh + 20) return;
+        const twinkle = s.layer === 2
+            ? s.alpha * (0.65 + Math.sin(now * 1.2 + s.twinkle) * 0.35)
+            : s.alpha;
+        ctx.globalAlpha = twinkle;
+        ctx.fillStyle = s.color;
+        if (s.layer === 2 && s.size > 2.5) {
+            ctx.shadowColor = s.color;
+            ctx.shadowBlur = 5;
+        }
+        ctx.fillRect(sx, sy, s.size, s.size);
+        ctx.shadowBlur = 0;
+    });
+    ctx.globalAlpha = 1;
+
+    // Nebula / Higgs mist clouds
+    // 高密度(density>0.45)はヒッグス場として青緑の輝きで視覚化
+    const pulse = 0.85 + Math.sin(now * 0.4) * 0.15;
     bgMist.forEach(m => {
-        let alpha = 0.03;
-        if (player.hp > 0 && Math.hypot(player.x - m.x, player.y - m.y) < RADAR_RANGE) alpha = 0.07;
+        const isHiggs = m.density > 0.45;
+        let baseAlpha = isHiggs ? 0.10 * pulse : 0.025;
         const g = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.r);
-        g.addColorStop(0, `rgba(${m.color}, ${alpha})`);
-        g.addColorStop(1, 'rgba(0,0,0,0)');
+        const col = isHiggs ? '40,200,255' : m.color;
+        g.addColorStop(0,    `rgba(${col},${(baseAlpha * 2.2).toFixed(3)})`);
+        g.addColorStop(0.30, `rgba(${col},${(baseAlpha * 1.0).toFixed(3)})`);
+        g.addColorStop(0.65, `rgba(${col},${(baseAlpha * 0.4).toFixed(3)})`);
+        g.addColorStop(1,    'rgba(0,0,0,0)');
         ctx.fillStyle = g;
         ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2); ctx.fill();
+
+        // 高密度コアに輝点を追加
+        if (isHiggs) {
+            const cg = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.r * 0.25);
+            cg.addColorStop(0, `rgba(80,240,255,${(0.07 * pulse).toFixed(3)})`);
+            cg.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = cg;
+            ctx.beginPath(); ctx.arc(m.x, m.y, m.r * 0.25, 0, Math.PI * 2); ctx.fill();
+        }
     });
 
-    // Render Stars (parallax 0.5)
-    ctx.save();
-    // Shifting them slightly based on camera to give pseudo-parallax
-    ctx.translate(camera.x * 0.5, camera.y * 0.5);
-    bgStars.forEach(s => {
-        ctx.fillStyle = s.color;
-        ctx.globalAlpha = 0.3;
-        ctx.fillRect(s.x, s.y, s.size, s.size);
-    });
-    ctx.restore();
-
-    const gridSize = 200;
-    const startX = Math.floor(camera.x / gridSize) * gridSize;
-    const startY = Math.floor(camera.y / gridSize) * gridSize;
-
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+    // Sparse coordinate grid (large cells)
+    const gridSize = 2000;
+    const startX = Math.floor(cx / gridSize) * gridSize;
+    const startY = Math.floor(cy / gridSize) * gridSize;
+    ctx.strokeStyle = 'rgba(255,255,255,0.02)';
     ctx.lineWidth = 1;
-
     ctx.beginPath();
-    for (let x = startX; x < camera.x + canvas.width / camera.zoom; x += gridSize) {
-        ctx.moveTo(x, camera.y); ctx.lineTo(x, camera.y + canvas.height / camera.zoom);
+    for (let x = startX; x < cx + vw; x += gridSize) {
+        ctx.moveTo(x, cy); ctx.lineTo(x, cy + vh);
     }
-    for (let y = startY; y < camera.y + canvas.height / camera.zoom; y += gridSize) {
-        ctx.moveTo(camera.x, y); ctx.lineTo(camera.x + canvas.width / camera.zoom, y);
+    for (let y = startY; y < cy + vh; y += gridSize) {
+        ctx.moveTo(cx, y); ctx.lineTo(cx + vw, y);
     }
     ctx.stroke();
 }
