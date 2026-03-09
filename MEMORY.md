@@ -25,10 +25,10 @@ Dark-Higgs/
     └── style.css               # Sci-fi styling (Orbitron font, green palette)
 ```
 
-## Implemented Features (Latest — commit b3fc4e4)
+## Implemented Features (Latest — commit ad99ade+)
 
 ### コア
-- Canvas 2D field (20000×20000)
+- Canvas 2D field (50000×50000)
 - Radar/minimap (top-left, camera view frame付き)
 - Bottom console: ship status / weapon select / environment info
 - Web Audio API SFX
@@ -68,6 +68,13 @@ Dark-Higgs/
 - **ヒッグスウェイク軌跡**: 移動でヒッグス雲に軌跡、HIGGSセンサーで追跡可
 - **higgsSig**: 敵が潜伏中にヒッグス乱流シグネチャを発生
 - **ビームダークチャネル**: beamがヒッグス雲を通ると軌跡がHIGGSセンサーで見える
+- **自然成長**: 時間経過でミスト密度が上昇 (Battle Royale的ゾーン圧縮)
+- **エンジン減速**: ヒッグス高濃度内で最大45%速度低下
+- **ビームダメージ減衰**: ヒッグス経路上で最大80%ダメージ低下 (高濃度エリアでビーム無力化)
+
+### EM ∝ AI配分 (設計確定仕様)
+- プレイヤーのAI配分が高いほど敵の探知範囲が広がる (高AIモード=EM放射増=発見されやすい)
+- AI=0%: 敵探知範囲×0.5倍, AI=100%: 敵探知範囲×1.0倍
 
 ### 武器シグネチャ
 - **kinetic**: 銃口炎→光学スパイク大、EM微弱
@@ -127,12 +134,12 @@ Dark-Higgs/
 - 破壊: ミサイルぶつけてシグネチャ発生 → 敵をあぶり出す
 
 ## Next Implementation Priorities
-1. AIロックオンシステム (仮想ターゲット候補表示、確率%UI)
-2. ビームの方向射撃 (ロックオンなし可、ヒッグス減衰)
-3. デコイ・ドローン積載システム
-4. 残骸インタラクション (ルート/ハッキング/破壊)
-5. センサー制約型敵AI (playerLastKnownPos予測モデル)
-6. ヒッグス自然成長 (時間経過で濃度上昇)
+1. センサー制約型敵AI (playerLastKnownPos予測モデル、適応戦略パターン)
+2. AIロックオンシステム (仮想ターゲット候補表示、確率%UI)
+3. 潜航型ジャミング3種実装 (範囲ジャミング/継続EMジャム/EMパルス)
+4. 空母型建設物4種 (砲台/ビームバリア/センサーブイ/ヒッグス散布装置)
+5. ドローン4種 (攻撃/デコイ/哨戒/建設)
+6. リソースノードをアップグレードポイント化 (現状は+30CRのみ → 設計はアップグレードツリー)
 
 ## User Preferences
 - 実装前に確認不要 (承認済みとして進める)

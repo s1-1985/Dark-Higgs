@@ -5,7 +5,7 @@ const ctx = canvas.getContext('2d');
 const minimapCanvas = document.getElementById('minimapCanvas');
 const minimapCtx = minimapCanvas.getContext('2d');
 
-let FIELD_SIZE = 20000;
+let FIELD_SIZE = 50000;
 let BASE_RADAR_RANGE = 600;
 let RADAR_RANGE = BASE_RADAR_RANGE;
 let effectiveRadarRange = BASE_RADAR_RANGE; // Actual range after Higgs interference
@@ -560,7 +560,10 @@ class Projectile {
             this.active = false;
             if (target && target.hp > 0) {
                 const dmgMult = this.isPlayer ? (1 + (gameState.upgrades.weapons * 0.15)) : 1;
-                target.hp -= 150 * dmgMult;
+                // ヒッグス高濃度エリアではビームダメージ大幅低下 (設計確定仕様)
+                const higgsBetween = getHiggsIntensity((x + target.x) / 2, (y + target.y) / 2);
+                const higgsBeamPenalty = 1 - higgsBetween * 0.8; // 最大80%ダメージ減衰
+                target.hp -= 150 * dmgMult * higgsBeamPenalty;
                 createHitEffect(target.x, target.y, isPlayer ? '#00ffaa' : '#ff4d4d');
                 effects.push({ x: this.x, y: this.y, tx: target.x, ty: target.y, type: 'beam', a: 1, c: isPlayer ? '#00ffaa' : '#ff4d4d' });
                 // ヒッグスダークチャネル: ビームがヒッグス雲を押し分けて通路を作る
@@ -787,9 +790,10 @@ class Ship {
         if (this.fireCooldown > 0) this.fireCooldown--;
 
         if (this.isPlayer) {
-            // Speed defined by GEN engine allocation + 艦種補正
+            // Speed defined by GEN engine allocation + 艦種補正 + ヒッグス減速
             const speedMult = { assault: 0.8, stealth: 1.4, carrier: 0.6 };
-            this.speed = (genAlloc.engine / 100) * 3.0 * (speedMult[gameState.shipType] || 1.0);
+            const higgsSlowdown = 1 - getHiggsIntensity(this.x, this.y) * 0.45; // 高濃度で最大45%減速
+            this.speed = (genAlloc.engine / 100) * 3.0 * (speedMult[gameState.shipType] || 1.0) * higgsSlowdown;
 
             // Boundary detection for Sector Transition Dialog
             if ((this.x < 100 || this.x > FIELD_SIZE - 100 || this.y < 100 || this.y > FIELD_SIZE - 100) && !dialogOpen) {
@@ -935,7 +939,9 @@ class Ship {
             // ──────────────────────────────────────
             const distToPlayer = Math.hypot(player.x - this.x, player.y - this.y);
             const higgsHereDetect = getHiggsIntensity(this.x, this.y);
-            const myDetectRange = 800 * (1 - higgsHereDetect * 0.55) * (1 + gameState.sector * 0.05);
+            // EM ∝ AI配分: プレイヤーのAI配分が高いほどEM放射増→敵に探知されやすい (設計確定仕様)
+            const playerEmBoost = 0.5 + (genAlloc.ai / 100) * 0.5; // AI=0%→0.5x, AI=100%→1.0x
+            const myDetectRange = 800 * (1 - higgsHereDetect * 0.55) * (1 + gameState.sector * 0.05) * playerEmBoost;
 
             if (this.detectionState === 'unaware') {
                 if (distToPlayer < myDetectRange) {
@@ -1360,10 +1366,13 @@ function logMessage(text, className) {
 }
 
 // Generate Sector
+let higgsGrowthFrame = 0; // ヒッグス自然成長フレームカウンタ
+
 function generateSector() {
     sectorCleared = false;
     enemiesKilled = 0;
     scanCooldown = 0;
+    higgsGrowthFrame = 0;
     // Keep drones if transitioning, but set position
     const tCount = talosDrones.length;
     player = new Ship(FIELD_SIZE / 2, FIELD_SIZE / 2, true);
@@ -1409,7 +1418,7 @@ function generateSector() {
     // ===== ジエンド戦スタイル: 1セクター = 敵1機 =====
     // 敵をヒッグス濃度の高い場所に配置 (プレイヤーから遠い位置)
     const spawnAngle = Math.random() * Math.PI * 2;
-    const spawnDist = 7000 + Math.random() * 5000; // 7000-12000u離れた場所
+    const spawnDist = 15000 + Math.random() * 10000; // 15000-25000u離れた場所 (50000マップ対応)
     const spawnCenterX = FIELD_SIZE / 2 + Math.cos(spawnAngle) * spawnDist * 0.5;
     const spawnCenterY = FIELD_SIZE / 2 + Math.sin(spawnAngle) * spawnDist * 0.5;
     const bossSpawn = findHidingSpot(
@@ -1851,12 +1860,7 @@ function drawRadarSweep(ctx) {
         ctx.globalAlpha = 1;
     }
 
-    // センサーモードラベル (キャンバス右上付近)
-    ctx.save();
-    ctx.font = 'bold 11px Orbitron';
-    ctx.fillStyle = `rgba(${CR}, 0.7)`;
-    ctx.fillText(`[ ${sc.label}センサー ]`, player.x + sensorRange * 0.7, player.y - sensorRange * 0.1);
-    ctx.restore();
+    // センサーモードラベルはUIパネル側に表示するためキャンバス上のテキストは除去
 }
 
 function drawMinimap() {
@@ -2099,6 +2103,14 @@ function drawTargetLine(ctx) {
 
 function gameLoop() {
     try {
+        // ヒッグス自然成長 (Battle Royale的ゾーン圧縮 — 時間経過で濃度上昇)
+        // 全ミスト密度を毎フレーム微増、最大0.95まで
+        if (player && player.hp > 0 && Math.random() < 0.004) { // ~4フレームに1回更新
+            bgMist.forEach(m => {
+                m.density = Math.min(0.95, m.density + 0.0002);
+            });
+        }
+
         // Tick cooldowns
         if (scanCooldown > 0) {
             scanCooldown--;
