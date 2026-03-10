@@ -813,9 +813,13 @@ class Ship {
 
             // UI
             const hpP = Math.max(0, (this.hp / this.maxHp) * 100);
-            document.querySelector('.hp-fill').style.width = hpP + '%';
-            document.querySelector('.hp-fill').style.backgroundColor = hpP < 30 ? '#ff4d4d' : '#00ffaa';
-            document.querySelector('.status-text').textContent = `船体耐久度: ${Math.floor(hpP)}%`;
+            const hpFill = document.querySelector('.hp-fill');
+            if (hpFill) {
+                hpFill.style.width = hpP + '%';
+                hpFill.style.backgroundColor = hpP < 30 ? '#ff4d4d' : '#00ffaa';
+            }
+            const stEl = document.querySelector('.status-text');
+            if (stEl) stEl.textContent = `船体耐久度: ${Math.floor(hpP)}%`;
             const hcEl = document.getElementById('hostile-count');
             if (hcEl) hcEl.textContent = enemies.filter(e => e.visible).length || '不明';
 
