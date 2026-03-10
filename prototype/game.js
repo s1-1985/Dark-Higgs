@@ -5,13 +5,28 @@ const ctx = canvas.getContext('2d');
 const minimapCanvas = document.getElementById('minimapCanvas');
 const minimapCtx = minimapCanvas.getContext('2d');
 
-let FIELD_SIZE = 50000;
+const MAP_RADIUS = 35000;
+const MAP_CX = MAP_RADIUS;
+const MAP_CY = MAP_RADIUS;
+let FIELD_SIZE = MAP_RADIUS * 2;
 let BASE_RADAR_RANGE = 600;
 let RADAR_RANGE = BASE_RADAR_RANGE;
-let effectiveRadarRange = BASE_RADAR_RANGE; // Actual range after Higgs interference
+let effectiveRadarRange = BASE_RADAR_RANGE;
 let sectorCleared = false;
-let scanCooldown = 0; // Active scan cooldown (frames)
-let enemiesKilled = 0; // Stat tracking
+let omniSonarCooldown = 0;
+let dirSonarCooldown = 0;
+let passiveAlertTimer = 0;
+let passiveCheckTimer = 0;
+let mouseWorldX = MAP_CX;
+let mouseWorldY = MAP_CY;
+let dirSonarVisual = null; // { angle, halfAngle, range, life }
+let enemiesKilled = 0;
+
+// センサーLv別性能定数
+const OMNI_SONAR_RANGE  = [0, MAP_RADIUS/6, MAP_RADIUS/3, MAP_RADIUS/2]; // Lv1,2,3 @100%SEN
+const DIR_SONAR_HALF_ANGLE = [0, Math.PI/36, Math.PI/12, Math.PI/9];     // 5°/15°/20° 半角
+const DIR_SONAR_MAX_RANGE  = MAP_RADIUS * 2;                               // マップ直径
+const UPGRADE_MULT = [0, 1.0, 1.5, 2.0]; // Lv別性能倍率 (index=Lv)
 
 // ============================================================
 // マルチセンサーシステム (じゃんけん方式)
@@ -63,14 +78,15 @@ function playSound(type) {
 
 // Game State Storage
 let gameState = {
-    shipType: 'assault', // 'assault' | 'stealth' | 'carrier'
-    mode: 'br',          // 'br' (Battle Royale) | 'sd' (Search & Destroy)
+    shipType: 'assault',
+    mode: 'br',
     sector: 1,
-    credits: 0,
+    credits: 0,       // スクラップ (アップグレード素材 + 修理費)
     upgrades: {
-        hull: 0,      // +20% HP per level
-        radar: 0,     // +15% range per level
-        weapons: 0    // +10% dmg per level
+        engine:  1,   // エンジン  Lv1-3: 移動速度
+        weapons: 1,   // 武装      Lv1-3: 火力
+        armor:   1,   // 装甲      Lv1-3: HP
+        sensor:  1    // センサー  Lv1-3: ソナー範囲・精度
     }
 };
 
@@ -101,7 +117,7 @@ loadGame();
 function updateTopUI() {
     const modeLabel = gameState.mode === 'sd' ? 'S&D' : 'BR';
     document.getElementById('sector-display').textContent = `セクター: ${gameState.sector} [${modeLabel}]`;
-    document.getElementById('currency-display').textContent = `クレジット: ${gameState.credits} CR`;
+    document.getElementById('currency-display').textContent = `スクラップ: ${gameState.credits} SCR`;
 }
 updateTopUI();
 
@@ -148,19 +164,26 @@ function getHiggsIntensity(x, y) {
 }
 
 // ヒッグス濃度の高い隠れ場所を探す (ジエンド戦スタイルAI用)
+function clampToMapCircle(x, y, margin = 200) {
+    const dx = x - MAP_CX, dy = y - MAP_CY;
+    const d = Math.hypot(dx, dy);
+    const limit = MAP_RADIUS - margin;
+    if (d > limit) {
+        const a = Math.atan2(dy, dx);
+        return { x: MAP_CX + Math.cos(a) * limit, y: MAP_CY + Math.sin(a) * limit };
+    }
+    return { x, y };
+}
+
 function findHidingSpot(nearX, nearY, searchRadius) {
-    let best = {
-        x: Math.max(200, Math.min(FIELD_SIZE - 200, nearX + (Math.random() - 0.5) * searchRadius)),
-        y: Math.max(200, Math.min(FIELD_SIZE - 200, nearY + (Math.random() - 0.5) * searchRadius))
-    };
+    let best = clampToMapCircle(nearX + (Math.random() - 0.5) * searchRadius, nearY + (Math.random() - 0.5) * searchRadius);
     let bestScore = 0;
     for (let i = 0; i < 20; i++) {
         const angle = Math.random() * Math.PI * 2;
         const dist = Math.random() * searchRadius;
-        const tx = Math.max(200, Math.min(FIELD_SIZE - 200, nearX + Math.cos(angle) * dist));
-        const ty = Math.max(200, Math.min(FIELD_SIZE - 200, nearY + Math.sin(angle) * dist));
-        const score = getHiggsIntensity(tx, ty);
-        if (score > bestScore) { bestScore = score; best = { x: tx, y: ty }; }
+        const raw = clampToMapCircle(nearX + Math.cos(angle) * dist, nearY + Math.sin(angle) * dist);
+        const score = getHiggsIntensity(raw.x, raw.y);
+        if (score > bestScore) { bestScore = score; best = raw; }
     }
     return best;
 }
@@ -200,6 +223,22 @@ function centerCameraOnPlayer() {
     clampCamera();
 }
 
+// スクリーン座標 → ワールド座標変換 (getBoundingClientRect でCSS/canvas解像度差を補正)
+function screenToWorld(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const cx = (clientX - rect.left) * (canvas.width / rect.width);
+    const cy = (clientY - rect.top) * (canvas.height / rect.height);
+    return { x: cx / camera.zoom + camera.x, y: cy / camera.zoom + camera.y };
+}
+// ドラッグ差分をワールド単位に変換 (CSS/canvas解像度差を補正)
+function dragDeltaWorld(dClientX, dClientY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+        dx: dClientX * (canvas.width / rect.width) / camera.zoom,
+        dy: dClientY * (canvas.height / rect.height) / camera.zoom
+    };
+}
+
 // カメラ追従フラグ (自艦追従ON/OFF)
 let cameraFollowPlayer = false;
 
@@ -220,8 +259,7 @@ canvas.addEventListener('mousedown', (e) => {
     if (!player) return; // ship not selected yet
     if (e.target.closest('#ui-layer') && !e.target.closest('#gameCanvas')) return; // Ignore clicks on UI
     if (e.button === 0) {
-        const worldX = (e.clientX / camera.zoom) + camera.x;
-        const worldY = (e.clientY / camera.zoom) + camera.y;
+        const { x: worldX, y: worldY } = screenToWorld(e.clientX, e.clientY);
 
         // Find clicked enemy
         let clickedEnemy = enemies.find(en => en.visible && Math.hypot(en.x - worldX, en.y - worldY) < en.radius * 2);
@@ -248,9 +286,11 @@ canvas.addEventListener('mousedown', (e) => {
 });
 window.addEventListener('mouseup', e => { if (e.button === 2) camera.isDragging = false; });
 window.addEventListener('mousemove', e => {
+    const mw = screenToWorld(e.clientX, e.clientY);
+    mouseWorldX = mw.x; mouseWorldY = mw.y;
     if (camera.isDragging) {
-        camera.x -= (e.clientX - camera.lastX) / camera.zoom;
-        camera.y -= (e.clientY - camera.lastY) / camera.zoom;
+        const d = dragDeltaWorld(e.clientX - camera.lastX, e.clientY - camera.lastY);
+        camera.x -= d.dx; camera.y -= d.dy;
         camera.lastX = e.clientX;
         camera.lastY = e.clientY;
         clampCamera();
@@ -261,11 +301,11 @@ canvas.addEventListener('wheel', e => {
     if (e.target.id !== 'gameCanvas') return;
     e.preventDefault();
     const zoomAmount = e.deltaY > 0 ? 0.9 : 1.1;
-    const mx_b = (e.clientX / camera.zoom) + camera.x;
-    const my_b = (e.clientY / camera.zoom) + camera.y;
+    const { x: mx_b, y: my_b } = screenToWorld(e.clientX, e.clientY);
     camera.zoom = Math.max(camera.minZoom, Math.min(camera.maxZoom, camera.zoom * zoomAmount));
-    camera.x += mx_b - ((e.clientX / camera.zoom) + camera.x);
-    camera.y += my_b - ((e.clientY / camera.zoom) + camera.y);
+    const after = screenToWorld(e.clientX, e.clientY);
+    camera.x += mx_b - after.x;
+    camera.y += my_b - after.y;
     clampCamera();
 }, { passive: false });
 canvas.addEventListener('contextmenu', e => { if (e.target.id === 'gameCanvas') e.preventDefault() });
@@ -315,8 +355,7 @@ canvas.addEventListener('touchstart', (e) => {
         clearTimeout(touch.waypointTimer);
         touch.waypointTimer = setTimeout(() => {
             if (!touch.isPinching && !touch.moved && player) {
-                const worldX = (touch.startX / camera.zoom) + camera.x;
-                const worldY = (touch.startY / camera.zoom) + camera.y;
+                const { x: worldX, y: worldY } = screenToWorld(touch.startX, touch.startY);
                 player.targetEntity = null;
                 player.setTarget(worldX, worldY);
                 createClickEffect(worldX, worldY, '#00ffaa');
@@ -346,12 +385,14 @@ canvas.addEventListener('touchmove', (e) => {
         const dy = t.clientY - touch.startY;
         if (Math.hypot(dx, dy) > TOUCH_MOVE_THRESHOLD) {
             touch.moved = true;
-            // 動いた場合は長押しウェイポイントをキャンセル
             clearTimeout(touch.waypointTimer);
         }
-        // 1本指ドラッグ = カメラパン (常時)
-        camera.x -= (t.clientX - touch.lastX) / camera.zoom;
-        camera.y -= (t.clientY - touch.lastY) / camera.zoom;
+        // タッチ位置をワールド座標で追跡 (指向性ソナー方向用)
+        const mwt = screenToWorld(t.clientX, t.clientY);
+        mouseWorldX = mwt.x; mouseWorldY = mwt.y;
+        // 1本指ドラッグ = カメラパン (getBoundingClientRect補正済み)
+        const dtd = dragDeltaWorld(t.clientX - touch.lastX, t.clientY - touch.lastY);
+        camera.x -= dtd.dx; camera.y -= dtd.dy;
         touch.lastX = t.clientX;
         touch.lastY = t.clientY;
         clampCamera();
@@ -362,11 +403,11 @@ canvas.addEventListener('touchmove', (e) => {
         const zoomAmount = newDist / touch.pinchDist;
         const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
         const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-        const mx_b = (cx / camera.zoom) + camera.x;
-        const my_b = (cy / camera.zoom) + camera.y;
+        const { x: mx_b, y: my_b } = screenToWorld(cx, cy);
         camera.zoom = Math.max(camera.minZoom, Math.min(camera.maxZoom, camera.zoom * zoomAmount));
-        camera.x += mx_b - ((cx / camera.zoom) + camera.x);
-        camera.y += my_b - ((cy / camera.zoom) + camera.y);
+        const afterP = screenToWorld(cx, cy);
+        camera.x += mx_b - afterP.x;
+        camera.y += my_b - afterP.y;
         touch.pinchDist = newDist;
         clampCamera();
     }
@@ -380,8 +421,7 @@ canvas.addEventListener('touchend', (e) => {
 
     // 短いタップ (移動なし, 250ms未満) → 敵の上なら ターゲットロック
     if (!touch.moved && !touch.waypointFired && !touch.isPinching && elapsed < TOUCH_WAYPOINT_DELAY && player) {
-        const worldX = (touch.startX / camera.zoom) + camera.x;
-        const worldY = (touch.startY / camera.zoom) + camera.y;
+        const { x: worldX, y: worldY } = screenToWorld(touch.startX, touch.startY);
         // タッチはロックオン判定を広く取る（指で画面を押すと視認が難しいため）
         const tapRadius = en => en.radius * 6 + 20;
         let clickedEnemy = enemies.find(en => en.visible && Math.hypot(en.x - worldX, en.y - worldY) < tapRadius(en));
@@ -670,10 +710,9 @@ class Ship {
 
         if (isPlayer) {
             this.type = gameState.shipType || 'assault';
-            // 艦種別スタッツ
             const hpBase = { assault: 3500, stealth: 700, carrier: 2500 };
             this.radius = 20;
-            this.maxHp = (hpBase[gameState.shipType] || 2000) * (1 + (gameState.upgrades.hull * 0.25));
+            this.maxHp = (hpBase[gameState.shipType] || 2000) * UPGRADE_MULT[gameState.upgrades.armor];
         } else {
             this.type = type; // corvette, destroyer, carrier, fighter
             this.radius = type === 'carrier' ? 30 : (type === 'destroyer' ? 18 : (type === 'fighter' ? 6 : 12));
@@ -698,8 +737,13 @@ class Ship {
         this.opticalSig = 0; // 光学シグネチャ: 発砲フラッシュ・低ヒッグス時
         this.emSig = 0;      // 電磁波シグネチャ: 潜伏中の受動放射・発砲時スパイク
         this.higgsSig = 0;   // ヒッグスシグネチャ: ヒッグス雲内での乱流・ウェイク
-        this.prevX = x;      // 移動量計算用
+        this.prevX = x;
         this.prevY = y;
+        // ソナーコンタクト
+        this.contactAccuracy = 0;
+        this.contactLife = 0;
+        this.displayX = x;
+        this.displayY = y;
     }
 
     setTarget(tx, ty) { this.targetX = tx; this.targetY = ty; this.state = 'moving'; }
@@ -711,11 +755,11 @@ class Ship {
         if (this.isPlayer) {
             // Speed defined by GEN engine allocation + 艦種補正 + ヒッグス減速
             const speedMult = { assault: 0.8, stealth: 1.4, carrier: 0.6 };
-            const higgsSlowdown = 1 - getHiggsIntensity(this.x, this.y) * 0.45; // 高濃度で最大45%減速
-            this.speed = (genAlloc.engine / 100) * 3.0 * (speedMult[gameState.shipType] || 1.0) * higgsSlowdown;
+            const higgsSlowdown = 1 - getHiggsIntensity(this.x, this.y) * 0.45;
+            this.speed = (genAlloc.engine / 100) * 3.0 * (speedMult[gameState.shipType] || 1.0) * higgsSlowdown * UPGRADE_MULT[gameState.upgrades.engine];
 
-            // Boundary detection for Sector Transition Dialog
-            if ((this.x < 100 || this.x > FIELD_SIZE - 100 || this.y < 100 || this.y > FIELD_SIZE - 100) && !dialogOpen) {
+            // 円形マップ境界検知
+            if (Math.hypot(this.x - MAP_CX, this.y - MAP_CY) > MAP_RADIUS - 100 && !dialogOpen) {
                 showDialog();
             }
 
@@ -738,7 +782,9 @@ class Ship {
 
                 if (dist < wRange && this.fireCooldown <= 0) {
                     this.weaponType = wType;
-                    projectiles.push(new Projectile(this.x, this.y, this.targetEntity, true, wType));
+                    const proj = new Projectile(this.x, this.y, this.targetEntity, true, wType);
+                    if (proj.dmg) proj.dmg *= UPGRADE_MULT[gameState.upgrades.weapons];
+                    projectiles.push(proj);
                     // 攻撃型特殊: 3連装同時発射 (kinetic時のみ)
                     if (gameState.shipType === 'assault' && wType === 'kinetic') {
                         const spread = 0.12;
@@ -767,10 +813,15 @@ class Ship {
 
             // UI
             const hpP = Math.max(0, (this.hp / this.maxHp) * 100);
-            document.querySelector('.hp-fill').style.width = hpP + '%';
-            document.querySelector('.hp-fill').style.backgroundColor = hpP < 30 ? '#ff4d4d' : '#00ffaa';
-            document.querySelector('.status-text').textContent = `船体耐久度: ${Math.floor(hpP)}%`;
-            document.getElementById('hostile-count').textContent = enemies.filter(e => e.visible).length || '不明';
+            const hpFill = document.querySelector('.hp-fill');
+            if (hpFill) {
+                hpFill.style.width = hpP + '%';
+                hpFill.style.backgroundColor = hpP < 30 ? '#ff4d4d' : '#00ffaa';
+            }
+            const stEl = document.querySelector('.status-text');
+            if (stEl) stEl.textContent = `船体耐久度: ${Math.floor(hpP)}%`;
+            const hcEl = document.getElementById('hostile-count');
+            if (hcEl) hcEl.textContent = enemies.filter(e => e.visible).length || '不明';
 
         } else {
             // ============================================================
@@ -782,7 +833,7 @@ class Ship {
                 this.fireFlashTimer--;
                 this.visible = true;
             } else if (this.detectionState !== 'alerted' || this.lurking) {
-                // 潜伏中は通常の可視判定に委ねる (drawRadarSweepが制御)
+                // 潜伏中はソナーコンタクトで制御
             }
 
             // 被弾したら即時探知状態へ (先制攻撃されても反応する)
@@ -1035,7 +1086,20 @@ class Ship {
     draw(ctx) {
         if (!this.visible && !this.isPlayer) return;
         ctx.save();
-        ctx.translate(this.x, this.y);
+
+        // ソナーコンタクト: 精度に基づいた表示位置とアルファ
+        let drawX = this.x, drawY = this.y;
+        if (!this.isPlayer && this.contactLife > 0) {
+            drawX = this.displayX;
+            drawY = this.displayY;
+            const lifeAlpha = Math.min(1, this.contactLife / 60);
+            const accAlpha  = 0.3 + this.contactAccuracy * 0.7;
+            ctx.globalAlpha = lifeAlpha * accAlpha;
+            // 低精度: 点滅
+            if (this.contactAccuracy < 0.4 && Math.random() < 0.35) ctx.globalAlpha = 0;
+        }
+
+        ctx.translate(drawX, drawY);
         ctx.rotate(this.angle);
 
         // 発砲フラッシュ中は全不透明
@@ -1166,17 +1230,49 @@ class Ship {
         ctx.globalAlpha = 1;
 
         if (!this.isPlayer && this.visible) {
-            // HP バー
-            ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(this.x - 15, this.y - 28, 30, 4);
-            ctx.fillStyle = this.hp / this.maxHp < 0.3 ? '#ff8800' : '#ff4d4d';
-            ctx.fillRect(this.x - 15, this.y - 28, 30 * (this.hp / this.maxHp), 4);
-            // 敵艦名表示 (発砲フラッシュ中のみ)
+            const dispX = this.contactLife > 0 ? this.displayX : this.x;
+            const dispY = this.contactLife > 0 ? this.displayY : this.y;
+
+            // 精度サークル (不確実性ゾーン)
+            if (this.contactLife > 0 && this.contactAccuracy < 0.95) {
+                const uncertaintyR = Math.max(20, (1 - this.contactAccuracy) * 400);
+                const acc = this.contactAccuracy;
+                const col = acc > 0.7 ? '0,255,170' : (acc > 0.4 ? '255,170,0' : '255,77,77');
+                const lifeA = Math.min(1, this.contactLife / 60) * 0.4;
+                ctx.save();
+                ctx.globalAlpha = lifeA;
+                ctx.beginPath();
+                ctx.arc(dispX, dispY, uncertaintyR, 0, Math.PI * 2);
+                ctx.strokeStyle = `rgba(${col},0.7)`;
+                ctx.lineWidth = 1;
+                ctx.setLineDash([8, 8]);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                // 色グラデーション: 精度ラベル
+                ctx.fillStyle = `rgba(${col},0.9)`;
+                ctx.font = '9px Orbitron';
+                ctx.textAlign = 'center';
+                ctx.fillText(`${Math.round(this.contactAccuracy * 100)}%`, dispX, dispY - uncertaintyR - 5);
+                ctx.restore();
+                ctx.globalAlpha = 1;
+            }
+
+            // HP バー (発砲フラッシュ中 or 高精度コンタクト時)
+            if (isFlashing || this.contactAccuracy > 0.6) {
+                const a = isFlashing ? 1.0 : Math.min(1, this.contactLife / 60) * this.contactAccuracy;
+                ctx.globalAlpha = a;
+                ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(dispX - 15, dispY - 28, 30, 4);
+                ctx.fillStyle = this.hp / this.maxHp < 0.3 ? '#ff8800' : '#ff4d4d';
+                ctx.fillRect(dispX - 15, dispY - 28, 30 * (this.hp / this.maxHp), 4);
+                ctx.globalAlpha = 1;
+            }
+            // 敵艦名 (発砲フラッシュ中のみ)
             if (isFlashing) {
                 ctx.fillStyle = '#ff8888';
                 ctx.font = 'bold 11px Orbitron';
                 ctx.textAlign = 'center';
                 ctx.shadowColor = '#ff4d4d'; ctx.shadowBlur = 6;
-                ctx.fillText(`HOSTILE [${gameState.sector}]`, this.x, this.y - 35);
+                ctx.fillText(`HOSTILE [${gameState.sector}]`, dispX, dispY - 35);
                 ctx.shadowBlur = 0;
             }
         }
@@ -1277,11 +1373,18 @@ function updateDrawEffects(ctx) {
 
 function logMessage(text, className) {
     const log = document.getElementById('message-log');
+    if (!log) return;
     const msg = document.createElement('div');
-    msg.className = `message ${className}`; msg.textContent = text;
+    msg.className = `message ${className}`;
+    const now = new Date();
+    const ts = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+    msg.textContent = `[${ts}] ${text}`;
     log.appendChild(msg);
-    if (log.children.length > 5) log.removeChild(log.firstChild);
-    setTimeout(() => { if (msg.parentNode) msg.parentNode.removeChild(msg); }, 7000);
+    // 最大100件
+    while (log.children.length > 100) log.removeChild(log.firstChild);
+    // 自動スクロール (下端付近の時のみ)
+    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+    if (atBottom) log.scrollTop = log.scrollHeight;
 }
 
 // Generate Sector
@@ -1289,14 +1392,16 @@ function logMessage(text, className) {
 function generateSector() {
     sectorCleared = false;
     enemiesKilled = 0;
-    scanCooldown = 0;
-    player = new Ship(FIELD_SIZE / 2, FIELD_SIZE / 2, true);
+    omniSonarCooldown = 0;
+    dirSonarCooldown = 0;
+    dirSonarVisual = null;
+    player = new Ship(MAP_CX, MAP_CY, true);
     player.generatorOutput = genAlloc.engine;
     enemies = []; structures = []; projectiles = []; effects = []; particles = []; debris = []; scrapDrops = [];
     stations = []; higgsWakes = []; resourceNodes = [];
 
-    // Apply Upgrades to Stats
-    RADAR_RANGE = BASE_RADAR_RANGE * (1 + (gameState.upgrades.radar * 0.2));
+    // センサーLvによるレーダー基本範囲の反映
+    RADAR_RANGE = BASE_RADAR_RANGE * UPGRADE_MULT[gameState.upgrades.sensor];
 
     // Environmental Background
     bgStars = [];
@@ -1345,17 +1450,12 @@ function generateSector() {
         });
     }
 
-    // ===== ジエンド戦スタイル: 1セクター = 敵1機 =====
-    // 敵をヒッグス濃度の高い場所に配置 (プレイヤーから遠い位置)
+    // 敵を円形マップ内のヒッグス濃度の高い場所に配置
     const spawnAngle = Math.random() * Math.PI * 2;
-    const spawnDist = 15000 + Math.random() * 10000; // 15000-25000u離れた場所 (50000マップ対応)
-    const spawnCenterX = FIELD_SIZE / 2 + Math.cos(spawnAngle) * spawnDist * 0.5;
-    const spawnCenterY = FIELD_SIZE / 2 + Math.sin(spawnAngle) * spawnDist * 0.5;
-    const bossSpawn = findHidingSpot(
-        Math.max(500, Math.min(FIELD_SIZE - 500, spawnCenterX)),
-        Math.max(500, Math.min(FIELD_SIZE - 500, spawnCenterY)),
-        1500
-    );
+    const spawnDist  = 10000 + Math.random() * (MAP_RADIUS - 12000);
+    const spawnCenterX = MAP_CX + Math.cos(spawnAngle) * spawnDist;
+    const spawnCenterY = MAP_CY + Math.sin(spawnAngle) * spawnDist;
+    const bossSpawn = findHidingSpot(spawnCenterX, spawnCenterY, 2000);
     const boss = new Ship(bossSpawn.x, bossSpawn.y, false, 'destroyer');
     // セクターが深いほど高HP・高速化
     boss.maxHp = 500 + gameState.sector * 200;
@@ -1365,29 +1465,27 @@ function generateSector() {
     // S&Dモード: コロニーノードを多く配置 (ハック目標)
     const colonyCount = gameState.mode === 'sd' ? 5 : 3;
     for (let i = 0; i < colonyCount; i++) {
-        structures.push(new Structure(
-            Math.random() * (FIELD_SIZE - 2000) + 1000,
-            Math.random() * (FIELD_SIZE - 2000) + 1000,
-            'colony'
-        ));
+        const a = (i / colonyCount) * Math.PI * 2 + Math.random() * 0.8;
+        const r = 5000 + Math.random() * (MAP_RADIUS - 7000);
+        structures.push(new Structure(MAP_CX + Math.cos(a) * r, MAP_CY + Math.sin(a) * r, 'colony'));
     }
-    // 難破船 (デコイ・ハック・ルート用)
     for (let i = 0; i < 5; i++) {
-        structures.push(new Structure(Math.random() * FIELD_SIZE, Math.random() * FIELD_SIZE, 'derelict'));
+        const sp = clampToMapCircle(
+            MAP_CX + (Math.random() - 0.5) * MAP_RADIUS * 1.6,
+            MAP_CY + (Math.random() - 0.5) * MAP_RADIUS * 1.6
+        );
+        structures.push(new Structure(sp.x, sp.y, 'derelict'));
     }
     for (let i = 0; i < 3; i++) {
-        stations.push(new Station(Math.random() * (FIELD_SIZE - 2000) + 1000, Math.random() * (FIELD_SIZE - 2000) + 1000));
+        const a2 = Math.random() * Math.PI * 2, r2 = 4000 + Math.random() * (MAP_RADIUS - 6000);
+        stations.push(new Station(MAP_CX + Math.cos(a2) * r2, MAP_CY + Math.sin(a2) * r2));
     }
 
     // リソースノード: 5〜8個をマップ上にランダム配置 (ヒッグス雲内を優先)
     const nodeCount = 5 + Math.floor(Math.random() * 4);
     for (let i = 0; i < nodeCount; i++) {
-        // ヒッグス濃度の高い場所に配置 (暗黒物質の凝縮点)
-        const spot = findHidingSpot(
-            Math.random() * FIELD_SIZE,
-            Math.random() * FIELD_SIZE,
-            2000
-        );
+        const na = Math.random() * Math.PI * 2, nr = Math.random() * (MAP_RADIUS - 3000);
+        const spot = findHidingSpot(MAP_CX + Math.cos(na) * nr, MAP_CY + Math.sin(na) * nr, 2000);
         resourceNodes.push({ x: spot.x, y: spot.y, active: true, emFlashTimer: 0 });
     }
 
@@ -1455,9 +1553,9 @@ document.getElementById('btn-dialog-yes').addEventListener('click', () => {
 });
 document.getElementById('btn-dialog-no').addEventListener('click', () => {
     document.getElementById('dialog-overlay').classList.add('hidden');
-    // Bump player back in
-    player.x = Math.max(300, Math.min(player.x, FIELD_SIZE - 300));
-    player.y = Math.max(300, Math.min(player.y, FIELD_SIZE - 300));
+    // 円形境界内に押し戻す
+    const pushBack = clampToMapCircle(player.x, player.y, 500);
+    player.x = pushBack.x; player.y = pushBack.y;
     player.setTarget(player.x, player.y);
     centerCameraOnPlayer();
     setTimeout(() => { dialogOpen = false; }, 2000);
@@ -1572,25 +1670,8 @@ document.getElementById('btn-camera-follow').addEventListener('click', () => {
     logMessage(`NAV: カメラ追従 ${cameraFollowPlayer ? 'ON' : 'OFF'}`, 'system-msg');
     playSound('ui');
 });
-document.getElementById('btn-scan').addEventListener('click', () => {
-    if (scanCooldown > 0) {
-        logMessage(`SENSOR: スキャン再充電中... (残り ${Math.ceil(scanCooldown / 60)}秒)`, 'warning-msg');
-        return;
-    }
-    playSound('ui');
-    // Active scan temporarily reveals all enemies + alerts them (they hear the pulse)
-    enemies.forEach(e => {
-        e.visible = true;
-        e.detectionState = 'alerted'; // Active scan is loud — enemies detect you too
-        e.isAggro = true; e.aggroTimer = 400;
-    });
-    scanCooldown = 900; // 15 second cooldown (at 60fps)
-    logMessage('SENSOR: アクティブスキャン発信。全敵性反応を一時的に捕捉。(敵にも探知される！ 再充填: 15秒)', 'system-msg');
-    setTimeout(() => {
-        if (!player || player.hp <= 0) return;
-        enemies.forEach(e => { if (Math.hypot(e.x - player.x, e.y - player.y) > effectiveRadarRange) e.visible = false; });
-    }, 4000);
-});
+document.getElementById('btn-scan').addEventListener('click', fireOmniSonar);
+document.getElementById('btn-dir-sonar').addEventListener('click', fireDirectionalSonar);
 document.getElementById('btn-hack').addEventListener('click', () => {
     playSound('ui');
     let closest = null; let cd = Infinity;
@@ -1630,183 +1711,256 @@ const SENSOR_INFO = {
 
 
 
-let scanAngle = 0;
-function drawRadarSweep(ctx) {
-    if (player.hp <= 0) return;
-    scanAngle += 0.03;
+// ============================================================
+// センサーモード設定
+// ============================================================
+const sensorConfig = {
+    heat:  { r:'255,80,0',   sig: e => e.heatSig,    rangeScale: 1.0,  higgsMod: 0.35, threshold: 0.3,  label: '熱源' },
+    optic: { r:'0,255,170',  sig: e => e.opticalSig, rangeScale: 0.75, higgsMod: 0.85, threshold: 0.2,  label: '光学' },
+    em:    { r:'180,50,255', sig: e => e.emSig,       rangeScale: 0.85, higgsMod: 0.1,  threshold: 0.3,  label: '電磁波' },
+    higgs: { r:'80,200,255', sig: e => e.higgsSig,    rangeScale: 1.2,  higgsMod: 0.0,  threshold: 0.15, label: 'ヒッグス' }
+};
 
-    // ===== Higgs interference: reduce effective radar range =====
+// ============================================================
+// パッシブアンテナ常時検知チェック
+// ============================================================
+function checkPassiveDetection() {
+    passiveCheckTimer++;
+    if (passiveCheckTimer < 120) return;
+    passiveCheckTimer = 0;
+
+    const sc = sensorConfig[currentSensor];
+    let detected = false;
+    enemies.forEach(e => {
+        if (e.hp <= 0) return;
+        if (sc.sig(e) > sc.threshold * 0.5) detected = true;
+    });
+
+    if (detected) {
+        passiveAlertTimer = 180;
+        logMessage(`PASSIVE: 不明シグネチャを検知 ─ ${sc.label}放射源。位置・方向不明。`, 'warning-msg');
+        const ind = document.getElementById('passive-indicator');
+        if (ind) { ind.classList.add('alert'); setTimeout(() => ind.classList.remove('alert'), 3000); }
+    }
+}
+
+// ============================================================
+// 精度計算ユーティリティ
+// ============================================================
+function calcAccuracy(dist, maxRange, distDecay0, higgsBlock) {
+    const distDecay = 1.0 - distDecay0 * (dist / maxRange);
+    const aiCoeff   = 0.5 + (genAlloc.ai / 100);
+    return Math.max(0.05, Math.min(1.0, distDecay * aiCoeff * (1 - higgsBlock * 0.5)));
+}
+
+function applyContact(e, accuracy, life = 600) {
+    if (accuracy > e.contactAccuracy || e.contactLife < 60) {
+        const jitter = (1 - accuracy) * 400;
+        e.displayX = e.x + (Math.random() - 0.5) * jitter;
+        e.displayY = e.y + (Math.random() - 0.5) * jitter;
+        e.contactAccuracy = accuracy;
+    }
+    e.contactLife = Math.max(e.contactLife, life);
+    e.visible = true;
+}
+
+// ============================================================
+// 全周囲ソナー
+// ============================================================
+function fireOmniSonar() {
+    if (!player || player.hp <= 0) return;
+    if (omniSonarCooldown > 0) {
+        logMessage(`SENSOR: 全周囲ソナー再充電中... (残り ${Math.ceil(omniSonarCooldown / 60)}秒)`, 'warning-msg');
+        return;
+    }
+    const sensorLv  = gameState.upgrades.sensor;
+    const baseRange = OMNI_SONAR_RANGE[sensorLv];
+    const omniRange = baseRange * (genAlloc.sensors / 100);
+
+    playSound('ui');
+    let detected = 0;
+    enemies.forEach(e => {
+        if (e.hp <= 0) return;
+        const dist = Math.hypot(e.x - player.x, e.y - player.y);
+        if (dist > omniRange) return;
+        const higgsBlock = getHiggsIntensity((e.x + player.x) / 2, (e.y + player.y) / 2);
+        const acc = calcAccuracy(dist, omniRange, 0.6, higgsBlock);
+        applyContact(e, acc);
+        detected++;
+    });
+    omniSonarCooldown = 900;
+    enemies.forEach(e => { e.detectionState = 'alerted'; e.isAggro = true; e.aggroTimer = 400; });
+    const rStr = Math.round(omniRange);
+    logMessage(detected > 0
+        ? `SONAR[全周囲] Lv${sensorLv}: ${detected}件の反応捕捉 (範囲: ${rStr}u) ─ 位置暴露注意`
+        : `SONAR[全周囲] Lv${sensorLv}: 有効範囲 ${rStr}u 内に反応なし`,
+        'system-msg');
+    effects.push({ x: player.x, y: player.y, r: 0, maxR: omniRange, a: 0.6, c: '#00ffaa', type: 'circle' });
+}
+
+// ============================================================
+// 指向性ソナー
+// ============================================================
+function fireDirectionalSonar() {
+    if (!player || player.hp <= 0) return;
+    if (dirSonarCooldown > 0) {
+        logMessage(`SENSOR: 指向性ソナー再充電中... (残り ${Math.ceil(dirSonarCooldown / 60)}秒)`, 'warning-msg');
+        return;
+    }
+    const sensorLv  = gameState.upgrades.sensor;
+    const halfAngle = DIR_SONAR_HALF_ANGLE[sensorLv];
+    const maxRange  = DIR_SONAR_MAX_RANGE * (genAlloc.sensors / 100);
+    const targetAngle = Math.atan2(mouseWorldY - player.y, mouseWorldX - player.x);
+
+    playSound('ui');
+    let detected = 0;
+    enemies.forEach(e => {
+        if (e.hp <= 0) return;
+        const dist = Math.hypot(e.x - player.x, e.y - player.y);
+        if (dist > maxRange) return;
+        let diff = Math.atan2(e.y - player.y, e.x - player.x) - targetAngle;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        while (diff >  Math.PI) diff -= Math.PI * 2;
+        if (Math.abs(diff) > halfAngle) return;
+        const higgsBlock = getHiggsIntensity((e.x + player.x) / 2, (e.y + player.y) / 2);
+        const acc = calcAccuracy(dist, maxRange, 0.5, higgsBlock);
+        applyContact(e, acc);
+        detected++;
+    });
+    dirSonarCooldown = 300;
+    dirSonarVisual = { angle: targetAngle, halfAngle, range: maxRange, life: 1.0 };
+    const deg = Math.round(targetAngle * 180 / Math.PI);
+    logMessage(detected > 0
+        ? `SONAR[指向性] Lv${sensorLv}: 方位${deg}° → ${detected}件捕捉`
+        : `SONAR[指向性] Lv${sensorLv}: 方位${deg}° → 反応なし`,
+        'system-msg');
+}
+
+// ============================================================
+// パッシブアンテナ描画 + ソナーコーン描画
+// ============================================================
+function drawPassiveAntenna(ctx) {
+    if (!player || player.hp <= 0) return;
+
     const higgsAtPlayer = getHiggsIntensity(player.x, player.y);
     effectiveRadarRange = RADAR_RANGE * (1 - higgsAtPlayer * 0.65) * (1 + genAlloc.sensors / 100 * 0.5);
 
-    // ============================================================
-    // センサーモード別: 色・検出ロジック
-    // HEAT  → 移動中の敵を捕捉 (heatSig)
-    // OPTIC → 発砲フラッシュを捕捉 (opticalSig)
-    // EM    → 潜伏中の受動放射を捕捉 (emSig)
-    // HIGGS → ヒッグス雲乱流・ウェイク・リソースノード捕捉 (higgsSig)
-    // ============================================================
-    const sensorConfig = {
-        heat:  { r:'255,80,0',    sig: e => e.heatSig,    rangeScale: 1.0,
-                 higgsMod: 0.35, threshold: 0.3, label: '熱源' },
-        optic: { r:'0,255,170',   sig: e => e.opticalSig,  rangeScale: 0.75,
-                 higgsMod: 0.85, threshold: 0.2, label: '光学' },
-        em:    { r:'180,50,255',  sig: e => e.emSig,       rangeScale: 0.85,
-                 higgsMod: 0.1,  threshold: 0.3, label: '電磁波' },
-        higgs: { r:'80,200,255',  sig: e => e.higgsSig,    rangeScale: 1.2,
-                 higgsMod: 0.0,  threshold: 0.15, label: 'ヒッグス' }
-    };
     const sc = sensorConfig[currentSensor];
     const CR = sc.r;
-    const rc = {
-        fill:   `rgba(${CR},0.04)`,
-        stroke: `rgba(${CR},0.35)`,
-        sweep:  `rgba(${CR},0.9)`,
-        wedge:  `rgba(${CR},0.12)`
-    };
+    const t  = Date.now();
+
+    // EM / HIGGS センサー専用のウェイク・ノード描画
     const sensorRange = effectiveRadarRange * sc.rangeScale;
-
-    // センサー別可視判定
-    enemies.forEach(e => {
-        // 発砲フラッシュは常に可視 (物理的爆光)
-        if (e.fireFlashTimer > 0) { e.visible = true; return; }
-
-        const dist = Math.hypot(e.x - player.x, e.y - player.y);
-        const higgsAtEnemy = getHiggsIntensity(e.x, e.y);
-        const effectiveSensorRange = sensorRange * (1 - higgsAtEnemy * sc.higgsMod);
-        const sig = sc.sig(e);
-
-        if (dist < effectiveSensorRange && sig > sc.threshold) {
-            e.visible = true;
-        } else if (dist < effectiveSensorRange * 0.6 && sig > sc.threshold * 0.5) {
-            // 弱いシグナル: ノイズの中にチラつく
-            e.visible = Math.random() < 0.12;
-        } else {
-            e.visible = false;
-        }
-    });
-
-    ctx.save();
-    ctx.translate(player.x, player.y);
-
-    // Draw radar circle
-    ctx.beginPath();
-    ctx.arc(0, 0, effectiveRadarRange, 0, Math.PI * 2);
-    ctx.fillStyle = rc.fill;
-    ctx.fill();
-    ctx.strokeStyle = rc.stroke;
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    // Draw the sweeping line (センサー有効範囲まで)
-    ctx.rotate(scanAngle);
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(sensorRange, 0);
-    ctx.strokeStyle = rc.sweep;
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // Sweeping arc gradient wedge
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.arc(0, 0, sensorRange, 0, -0.6, true);
-    ctx.closePath();
-    ctx.fillStyle = rc.wedge;
-    ctx.fill();
-
-    ctx.restore();
-
-    // EMセンサー専用: 収集直後のEMスパイク可視化
     if (currentSensor === 'em') {
         resourceNodes.forEach(n => {
             if (n.emFlashTimer <= 0) return;
-            const dist = Math.hypot(n.x - player.x, n.y - player.y);
-            if (dist < sensorRange) {
-                const intensity = n.emFlashTimer / 180;
-                ctx.save();
-                ctx.globalAlpha = intensity * 0.9;
-                ctx.fillStyle = '#cc44ff';
-                ctx.shadowColor = '#cc44ff';
-                ctx.shadowBlur = 20 * intensity;
-                ctx.beginPath();
-                ctx.arc(n.x, n.y, 7 * intensity, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.shadowBlur = 0;
-                ctx.restore();
-                ctx.globalAlpha = 1;
-            }
+            if (Math.hypot(n.x - player.x, n.y - player.y) > sensorRange) return;
+            const intensity = n.emFlashTimer / 180;
+            ctx.save(); ctx.globalAlpha = intensity * 0.9;
+            ctx.fillStyle = '#cc44ff'; ctx.shadowColor = '#cc44ff'; ctx.shadowBlur = 20 * intensity;
+            ctx.beginPath(); ctx.arc(n.x, n.y, 7 * intensity, 0, Math.PI * 2); ctx.fill();
+            ctx.shadowBlur = 0; ctx.restore(); ctx.globalAlpha = 1;
         });
     }
-
-    // ヒッグスセンサー専用: ウェイク軌跡 + リソースノード可視化
     if (currentSensor === 'higgs') {
-        // ウェイク軌跡を描画
         higgsWakes.forEach(w => {
-            const dist = Math.hypot(w.x - player.x, w.y - player.y);
-            if (dist < sensorRange) {
-                ctx.save();
-                ctx.globalAlpha = w.life * 0.7;
-                ctx.fillStyle = `rgba(${CR}, 0.8)`;
-                ctx.beginPath();
-                ctx.arc(w.x, w.y, 3 * w.intensity, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.restore();
-                ctx.globalAlpha = 1;
-            }
+            if (Math.hypot(w.x - player.x, w.y - player.y) > sensorRange) return;
+            ctx.save(); ctx.globalAlpha = w.life * 0.7;
+            ctx.fillStyle = `rgba(${CR},0.8)`; ctx.beginPath();
+            ctx.arc(w.x, w.y, 3 * w.intensity, 0, Math.PI * 2); ctx.fill();
+            ctx.restore(); ctx.globalAlpha = 1;
         });
-        // リソースノードを輝点として表示
         resourceNodes.forEach(n => {
-            if (!n.active) return;
-            const dist = Math.hypot(n.x - player.x, n.y - player.y);
-            if (dist < sensorRange) {
-                const pulse = 0.6 + Math.sin(Date.now() * 0.004) * 0.4;
-                ctx.save();
-                ctx.globalAlpha = pulse;
-                ctx.fillStyle = '#ffffff';
-                ctx.shadowColor = `rgba(${CR}, 1)`;
-                ctx.shadowBlur = 15;
-                ctx.beginPath();
-                ctx.arc(n.x, n.y, 5, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.shadowBlur = 0;
-                ctx.globalAlpha = 0.3;
-                ctx.strokeStyle = `rgba(${CR}, 0.8)`;
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.arc(n.x, n.y, 20, 0, Math.PI * 2);
-                ctx.stroke();
-                ctx.restore();
-                ctx.globalAlpha = 1;
-            }
+            if (!n.active || Math.hypot(n.x - player.x, n.y - player.y) > sensorRange) return;
+            const pulse = 0.6 + Math.sin(t * 0.004) * 0.4;
+            ctx.save(); ctx.globalAlpha = pulse;
+            ctx.fillStyle = '#fff'; ctx.shadowColor = `rgba(${CR},1)`; ctx.shadowBlur = 15;
+            ctx.beginPath(); ctx.arc(n.x, n.y, 5, 0, Math.PI * 2); ctx.fill();
+            ctx.shadowBlur = 0; ctx.globalAlpha = 0.3;
+            ctx.strokeStyle = `rgba(${CR},0.8)`; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.arc(n.x, n.y, 20, 0, Math.PI * 2); ctx.stroke();
+            ctx.restore(); ctx.globalAlpha = 1;
         });
     }
 
-    // ヒッグス静電ノイズ (センサーカラーに合わせる)
+    // ヒッグス静電ノイズ
     if (higgsAtPlayer > 0.4) {
         const staticAlpha = (higgsAtPlayer - 0.4) * 0.15;
-        ctx.save();
-        ctx.globalAlpha = staticAlpha;
+        ctx.save(); ctx.globalAlpha = staticAlpha;
         for (let i = 0; i < 6; i++) {
             const rx = player.x + (Math.random() - 0.5) * sensorRange * 2;
             const ry = player.y + (Math.random() - 0.5) * sensorRange * 2;
             if (Math.hypot(rx - player.x, ry - player.y) < sensorRange) {
-                ctx.fillStyle = `rgba(${CR}, 0.8)`;
-                ctx.fillRect(rx, ry, 2, 1);
+                ctx.fillStyle = `rgba(${CR},0.8)`; ctx.fillRect(rx, ry, 2, 1);
             }
         }
-        ctx.restore();
-        ctx.globalAlpha = 1;
+        ctx.restore(); ctx.globalAlpha = 1;
     }
 
-    // センサーモードラベルはUIパネル側に表示するためキャンバス上のテキストは除去
+    // パッシブアンテナビジュアル: 小さい多重パルスリング
+    ctx.save();
+    ctx.translate(player.x, player.y);
+    const alerting = passiveAlertTimer > 0;
+    const ringColor = alerting ? '255,170,0' : CR;
+    const baseR = 60, maxR = 220;
+    for (let i = 0; i < 3; i++) {
+        const phase = ((t / 2200) + i / 3) % 1;
+        const r     = baseR + (maxR - baseR) * phase;
+        const alpha = (1 - phase) * (alerting ? 0.65 : 0.35);
+        ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(${ringColor},${alpha.toFixed(3)})`;
+        ctx.lineWidth = alerting ? 1.5 : 1;
+        ctx.stroke();
+    }
+    // コンパスティック
+    ctx.strokeStyle = `rgba(${CR},0.25)`; ctx.lineWidth = 1;
+    for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * (baseR - 12), Math.sin(a) * (baseR - 12));
+        ctx.lineTo(Math.cos(a) * (baseR + 12), Math.sin(a) * (baseR + 12));
+        ctx.stroke();
+    }
+    ctx.restore();
+
+    // 指向性ソナーコーン描画
+    if (dirSonarVisual && dirSonarVisual.life > 0) {
+        const sv = dirSonarVisual;
+        ctx.save();
+        ctx.translate(player.x, player.y);
+        ctx.rotate(sv.angle);
+        ctx.globalAlpha = sv.life * 0.25;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.arc(0, 0, sv.range * camera.zoom < 3 ? sv.range : sv.range, -sv.halfAngle, sv.halfAngle);
+        ctx.closePath();
+        ctx.fillStyle = `rgba(${CR},0.5)`;
+        ctx.fill();
+        ctx.globalAlpha = sv.life * 0.7;
+        ctx.strokeStyle = `rgba(${CR},0.9)`;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.restore();
+        ctx.globalAlpha = 1;
+        dirSonarVisual.life -= 0.012;
+        if (dirSonarVisual.life <= 0) dirSonarVisual = null;
+    }
 }
 
 function drawMinimap() {
-    minimapCtx.clearRect(0, 0, minimapCanvas.width, minimapCanvas.height);
-    const sX = minimapCanvas.width / FIELD_SIZE; const sY = minimapCanvas.height / FIELD_SIZE;
+    const mW = minimapCanvas.width, mH = minimapCanvas.height;
+    minimapCtx.clearRect(0, 0, mW, mH);
+    const sX = mW / FIELD_SIZE; const sY = mH / FIELD_SIZE;
+    const cxM = MAP_CX * sX, cyM = MAP_CY * sY;
+    const rM  = MAP_RADIUS * Math.min(sX, sY);
 
-    // ヒッグス濃度オーバーレイ (高密度ゾーンを青緑で表示)
+    // 円形クリップ
+    minimapCtx.save();
+    minimapCtx.beginPath();
+    minimapCtx.arc(cxM, cyM, rM, 0, Math.PI * 2);
+    minimapCtx.clip();
+
+    // ヒッグス濃度オーバーレイ
     bgMist.forEach(m => {
         if (m.density <= 0.45) return;
         const mx = m.x * sX, my = m.y * sY, mr = m.r * sX;
@@ -1852,6 +2006,14 @@ function drawMinimap() {
             minimapCtx.fill();
         });
     }
+
+    // クリップ解除後に円形境界線
+    minimapCtx.restore();
+    minimapCtx.beginPath();
+    minimapCtx.arc(cxM, cyM, rM, 0, Math.PI * 2);
+    minimapCtx.strokeStyle = 'rgba(0,255,170,0.5)';
+    minimapCtx.lineWidth = 1.5;
+    minimapCtx.stroke();
 }
 
 function handleMinimapInteraction(e) {
@@ -1974,6 +2136,25 @@ function drawBackground(ctx) {
         ctx.moveTo(cx, y); ctx.lineTo(cx + vw, y);
     }
     ctx.stroke();
+
+    // 円形マップ境界 (外側を暗くして境界を強調)
+    ctx.save();
+    // 境界ライン
+    ctx.beginPath();
+    ctx.arc(MAP_CX, MAP_CY, MAP_RADIUS, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(0,255,170,0.18)';
+    ctx.lineWidth = 80;
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(0,255,170,0.5)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    // マップ外を暗く塗り潰す (クリッピングの逆)
+    ctx.beginPath();
+    ctx.rect(cx, cy, vw, vh);
+    ctx.arc(MAP_CX, MAP_CY, MAP_RADIUS + 2, 0, Math.PI * 2, true);
+    ctx.fillStyle = 'rgba(0,0,5,0.92)';
+    ctx.fill();
+    ctx.restore();
 }
 
 // ============================================================
@@ -1993,7 +2174,9 @@ function updateEnvInfo() {
         higgsSpan.className = classes[idx];
     }
     if (radarSpan) {
-        radarSpan.textContent = `${Math.round(effectiveRadarRange)} u`;
+        const sLv = gameState.upgrades.sensor;
+        const omniR = Math.round(OMNI_SONAR_RANGE[sLv] * (genAlloc.sensors / 100));
+        radarSpan.textContent = `全周囲 ${omniR}u / 指向 ${Math.round(DIR_SONAR_MAX_RANGE * genAlloc.sensors / 100)}u`;
     }
     document.getElementById('hostile-count').textContent =
         enemies.filter(e => e.visible).length > 0 ? enemies.filter(e => e.visible).length + '機' : '不明';
@@ -2053,9 +2236,19 @@ function drawTargetLine(ctx) {
         ctx.strokeStyle = 'rgba(255, 77, 77, 0.8)'; ctx.stroke();
     } else if (player.state === 'moving') {
         ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(player.targetX, player.targetY);
-        ctx.setLineDash([5, 10]); ctx.strokeStyle = 'rgba(0, 255, 170, 0.3)'; ctx.stroke(); ctx.setLineDash([]);
+        ctx.setLineDash([10, 14]);
+        ctx.strokeStyle = 'rgba(0,255,170,0.85)';
+        ctx.lineWidth = 2;
+        ctx.shadowColor = '#00ffaa'; ctx.shadowBlur = 6;
+        ctx.stroke();
+        ctx.setLineDash([]); ctx.lineWidth = 1; ctx.shadowBlur = 0;
+        // ウェイポイントマーカー
+        ctx.beginPath(); ctx.arc(player.targetX, player.targetY, 10, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(0,255,170,0.9)'; ctx.lineWidth = 2;
+        ctx.shadowColor = '#00ffaa'; ctx.shadowBlur = 10; ctx.stroke();
+        ctx.shadowBlur = 0; ctx.lineWidth = 1;
         ctx.beginPath(); ctx.arc(player.targetX, player.targetY, 3, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(0, 255, 170, 0.5)'; ctx.fill();
+        ctx.fillStyle = '#00ffaa'; ctx.fill();
     }
 }
 
@@ -2069,19 +2262,43 @@ function gameLoop() {
             });
         }
 
-        // Tick cooldowns
-        if (scanCooldown > 0) {
-            scanCooldown--;
-            // Update scan button text
-            const btnScan = document.getElementById('btn-scan');
-            if (scanCooldown > 0) {
-                btnScan.textContent = `スキャン (${Math.ceil(scanCooldown / 60)}s)`;
-                btnScan.disabled = true;
-            } else {
-                btnScan.textContent = 'アクティブスキャン';
-                btnScan.disabled = false;
+        // ソナークールダウン更新
+        if (omniSonarCooldown > 0) {
+            omniSonarCooldown--;
+            const btnOmni = document.getElementById('btn-scan');
+            if (btnOmni) {
+                btnOmni.textContent = omniSonarCooldown > 0 ? `全周囲ソナー (${Math.ceil(omniSonarCooldown/60)}s)` : '全周囲ソナー';
+                btnOmni.disabled = omniSonarCooldown > 0;
             }
         }
+        if (dirSonarCooldown > 0) {
+            dirSonarCooldown--;
+            const btnDir = document.getElementById('btn-dir-sonar');
+            if (btnDir) {
+                btnDir.textContent = dirSonarCooldown > 0 ? `指向性ソナー (${Math.ceil(dirSonarCooldown/60)}s)` : '指向性ソナー';
+                btnDir.disabled = dirSonarCooldown > 0;
+            }
+        }
+        if (passiveAlertTimer > 0) passiveAlertTimer--;
+
+        // コンタクトライフ更新 (ソナー探知結果の消滅管理)
+        enemies.forEach(e => {
+            if (e.contactLife > 0) {
+                e.contactLife--;
+                e.visible = true;
+                // ゆっくり表示位置を実位置に近づける
+                if (e.displayX !== undefined) {
+                    e.displayX += (e.x - e.displayX) * 0.005;
+                    e.displayY += (e.y - e.displayY) * 0.005;
+                }
+            } else if (e.fireFlashTimer <= 0) {
+                e.visible = false;
+                e.contactAccuracy = 0;
+            }
+        });
+
+        // パッシブアンテナ検知チェック
+        if (player && player.hp > 0) checkPassiveDetection();
 
         // Process Enemy deaths
         for (let i = enemies.length - 1; i >= 0; i--) {
@@ -2159,7 +2376,7 @@ function gameLoop() {
                     gameState.credits += s.value;
                     updateTopUI();
                     playSound('ui');
-                    logMessage(`TAC: スクラップ回収完了 (報酬: ${s.value} CR)`, 'system-msg');
+                    logMessage(`TAC: スクラップ回収 +${s.value} SCR`, 'system-msg');
                     createClickEffect(s.x, s.y, '#00ffaa');
                     scrapDrops.splice(i, 1);
                 }
@@ -2196,7 +2413,7 @@ function gameLoop() {
                     updateTopUI();
                     playSound('ui');
                     effects.push({ x: n.x, y: n.y, r: 0, maxR: 80, a: 1, c: '#50c8ff', type: 'circle' });
-                    logMessage(`HIGGS: ヒッグス凝縮点を採取 (+30 CR)。EMスパイク発生中 — 敵に検知される可能性あり。`, 'system-msg');
+                    logMessage(`HIGGS: ヒッグス凝縮点を採取 (+30 SCR)。EMスパイク発生中 — 敵に検知される可能性あり。`, 'system-msg');
                     createClickEffect(n.x, n.y, '#50c8ff');
                 }
             }
@@ -2295,7 +2512,7 @@ function gameLoop() {
             ctx.globalAlpha = 1;
         });
 
-        if (player && player.hp > 0) drawRadarSweep(ctx);
+        if (player && player.hp > 0) drawPassiveAntenna(ctx);
 
         projectiles.forEach(p => p.draw(ctx));
         updateDrawEffects(ctx);
@@ -2338,34 +2555,28 @@ btnLeave.addEventListener('click', () => {
     playSound('ui');
 });
 
+function getUpgradeCost(lv) { return lv * 300; } // Lv1→2: 300 SCR, Lv2→3: 600 SCR
+
 function updateDockingUI() {
     document.getElementById('dock-credits').textContent = gameState.credits;
 
-    // Repair cost: 1 credit per 2 HP missing
     const missingHp = player.maxHp - player.hp;
     const repairCost = Math.ceil(missingHp / 2);
     const btnRepair = document.getElementById('btn-repair-all');
-    btnRepair.textContent = `全艦修理 (${repairCost} CR)`;
+    btnRepair.textContent = `全艦修理 (${repairCost} SCR)`;
     btnRepair.disabled = gameState.credits < repairCost || repairCost === 0;
 
-    // Upgrade costs
-    const getCost = (lvl) => (lvl + 1) * 300;
-
-    const hLvl = gameState.upgrades.hull;
-    const rLvl = gameState.upgrades.radar;
-    const wLvl = gameState.upgrades.weapons;
-
-    document.getElementById('level-hull').textContent = hLvl;
-    document.getElementById('cost-hull').textContent = getCost(hLvl);
-    document.getElementById('btn-upgrade-hull').disabled = gameState.credits < getCost(hLvl);
-
-    document.getElementById('level-radar').textContent = rLvl;
-    document.getElementById('cost-radar').textContent = getCost(rLvl);
-    document.getElementById('btn-upgrade-radar').disabled = gameState.credits < getCost(rLvl);
-
-    document.getElementById('level-weapons').textContent = wLvl;
-    document.getElementById('cost-weapons').textContent = getCost(wLvl);
-    document.getElementById('btn-upgrade-weapons').disabled = gameState.credits < getCost(wLvl);
+    ['engine', 'weapons', 'armor', 'sensor'].forEach(type => {
+        const lv   = gameState.upgrades[type];
+        const cost = getUpgradeCost(lv);
+        const maxed = lv >= 3;
+        const lvEl   = document.getElementById(`level-${type}`);
+        const costEl = document.getElementById(`cost-${type}`);
+        const btnEl  = document.getElementById(`btn-upgrade-${type}`);
+        if (lvEl)   lvEl.textContent  = lv;
+        if (costEl) costEl.textContent = maxed ? 'MAX' : cost;
+        if (btnEl)  btnEl.disabled = maxed || gameState.credits < cost;
+    });
 }
 
 document.getElementById('btn-repair-all').addEventListener('click', () => {
@@ -2377,35 +2588,36 @@ document.getElementById('btn-repair-all').addEventListener('click', () => {
         playSound('ui');
         updateTopUI();
         updateDockingUI();
-        logMessage('MAINT: 全システムの修復が完了しました。', 'system-msg');
+        logMessage(`MAINT: 全システム修復完了 (-${repairCost} SCR)`, 'system-msg');
     }
 });
 
 function buyUpgrade(type) {
-    const lvl = gameState.upgrades[type];
-    const cost = (lvl + 1) * 300;
+    const lv   = gameState.upgrades[type];
+    if (lv >= 3) return;
+    const cost = getUpgradeCost(lv);
     if (gameState.credits >= cost) {
         gameState.credits -= cost;
         gameState.upgrades[type]++;
         playSound('ui');
-
-        // Re-calculate stats
-        if (type === 'hull') {
+        // ステータス再計算
+        if (type === 'armor') {
             const hpBase = { assault: 3500, stealth: 700, carrier: 2500 };
-            player.maxHp = (hpBase[gameState.shipType] || 2000) * (1 + (gameState.upgrades.hull * 0.25));
+            player.maxHp = (hpBase[gameState.shipType] || 2000) * UPGRADE_MULT[gameState.upgrades.armor];
         }
-        if (type === 'radar') RADAR_RANGE = BASE_RADAR_RANGE * (1 + (gameState.upgrades.radar * 0.2));
-
+        if (type === 'sensor') RADAR_RANGE = BASE_RADAR_RANGE * UPGRADE_MULT[gameState.upgrades.sensor];
         updateTopUI();
         updateDockingUI();
         saveGame();
-        logMessage(`UPGRADE: ${type.toUpperCase()} システムを強化しました。レベル: ${gameState.upgrades[type]}`, 'system-msg');
+        const names = { engine:'エンジン', weapons:'武装', armor:'装甲', sensor:'センサー' };
+        logMessage(`UPGRADE: ${names[type]} Lv${gameState.upgrades[type]} に強化完了 (Lv${lv}→${gameState.upgrades[type]}) ─ 性能 ×${UPGRADE_MULT[gameState.upgrades[type]].toFixed(1)}`, 'system-msg');
     }
 }
 
-document.getElementById('btn-upgrade-hull').addEventListener('click', () => buyUpgrade('hull'));
-document.getElementById('btn-upgrade-radar').addEventListener('click', () => buyUpgrade('radar'));
-document.getElementById('btn-upgrade-weapons').addEventListener('click', () => buyUpgrade('weapons'));
+['engine', 'weapons', 'armor', 'sensor'].forEach(type => {
+    const btn = document.getElementById(`btn-upgrade-${type}`);
+    if (btn) btn.addEventListener('click', () => buyUpgrade(type));
+});
 
 // gameLoop is started by startGame() after ship selection
 

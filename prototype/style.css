@@ -163,39 +163,75 @@ body {
 /* Bottom Console */
 #bottom-console {
     position: absolute;
-    bottom: 30px;
+    bottom: 0;
     left: 0;
     width: 100%;
-    height: 140px;
-    background: linear-gradient(to top, rgba(10, 15, 20, 0.95), rgba(15, 25, 30, 0.7));
+    height: auto;
+    min-height: 120px;
+    background: linear-gradient(to top, rgba(5,10,15,0.97), rgba(10,18,25,0.85));
     border-top: 1px solid rgba(0, 255, 170, 0.3);
-    backdrop-filter: blur(10px);
+    backdrop-filter: blur(12px);
     display: flex;
-    justify-content: space-between;
-    padding: 10px 20px;
+    justify-content: flex-start;
+    align-items: stretch;
+    padding: 6px 0;
     pointer-events: auto;
-    transition: bottom 0.3s;
+    z-index: 20;
+    gap: 0;
 }
 
 .console-panel {
     display: flex;
     flex-direction: column;
     justify-content: flex-start;
-    padding: 5px 15px;
+    padding: 4px 12px;
     border-right: 1px solid rgba(255, 255, 255, 0.1);
+    flex-shrink: 0;
 }
 
+.left-panel {
+    width: 140px;
+    min-width: 120px;
+}
 
 .center-panel {
-    flex: 2;
-    align-items: center;
+    flex: 1;
+    min-width: 280px;
+    align-items: stretch;
     justify-content: center;
+    gap: 3px;
+}
+
+.action-panel {
+    width: 220px;
+    min-width: 180px;
+}
+
+/* アクションボタングリッド */
+.action-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 5px;
+    flex: 1;
+    margin-top: 4px;
+}
+.action-btn {
+    padding: 6px 4px;
+    font-size: 9px;
+    line-height: 1.4;
+    text-align: center;
+    white-space: normal;
+    letter-spacing: 0.3px;
+    min-height: 40px;
+}
+.action-btn:last-child {
+    grid-column: 1 / -1;
 }
 
 .right-panel {
     flex: 1;
     border-right: none;
+    min-width: 160px;
 }
 
 .panel-header {
@@ -291,56 +327,81 @@ input[type=range]::-webkit-slider-thumb {
     text-shadow: 0 0 5px rgba(255, 170, 0, 0.5);
 }
 
-/* Message Log */
-#message-log {
+/* Log Panel */
+#log-panel {
     position: absolute;
     top: 60px;
-    right: 20px;
-    width: 330px;
+    right: 16px;
+    width: 320px;
+    max-height: calc(100vh - 220px);
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    pointer-events: none;
+    background: rgba(0,8,12,0.88);
+    border: 1px solid rgba(77,166,255,0.25);
+    border-radius: 4px;
+    backdrop-filter: blur(8px);
+    pointer-events: auto;
+    z-index: 5;
 }
+
+#log-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 10px;
+    border-bottom: 1px solid rgba(77,166,255,0.2);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 9px;
+    color: #4da6ff;
+    letter-spacing: 2px;
+    flex-shrink: 0;
+}
+
+#passive-indicator {
+    font-size: 8px;
+    color: #333;
+    letter-spacing: 1px;
+    transition: color 0.3s, text-shadow 0.3s;
+}
+#passive-indicator.alert {
+    color: #ffaa00;
+    text-shadow: 0 0 8px rgba(255,170,0,0.8);
+    animation: passivePulse 0.5s infinite alternate;
+}
+@keyframes passivePulse {
+    from { opacity: 0.6; }
+    to   { opacity: 1.0; }
+}
+
+#message-log {
+    overflow-y: auto;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 0;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(77,166,255,0.3) transparent;
+}
+#message-log::-webkit-scrollbar { width: 4px; }
+#message-log::-webkit-scrollbar-thumb { background: rgba(77,166,255,0.3); border-radius: 2px; }
 
 .message {
-    padding: 10px 15px;
-    background: rgba(0, 0, 0, 0.7);
-    border-left: 3px solid #ccc;
-    font-size: 12px;
+    padding: 4px 10px;
+    background: transparent;
+    border-left: 2px solid #ccc;
+    font-size: 10px;
     font-family: 'Orbitron', sans-serif;
-    animation: slideIn 0.3s ease-out, fadeOut 5s forwards;
-    animation-delay: 0s, 7s;
-    backdrop-filter: blur(5px);
+    line-height: 1.5;
+    animation: slideIn 0.2s ease-out;
 }
 
-.system-msg {
-    border-color: #4da6ff;
-    color: #4da6ff;
-}
-
-.warning-msg {
-    border-color: #ffaa00;
-    color: #ffaa00;
-}
+.system-msg  { border-color: #4da6ff; color: #4da6ff; }
+.warning-msg { border-color: #ffaa00; color: #ffaa00; }
 
 @keyframes slideIn {
-    from {
-        transform: translateX(100%);
-        opacity: 0;
-    }
-
-    to {
-        transform: translateX(0);
-        opacity: 1;
-    }
-}
-
-@keyframes fadeOut {
-    to {
-        opacity: 0;
-        pointer-events: none;
-    }
+    from { transform: translateX(20px); opacity: 0; }
+    to   { transform: translateX(0);    opacity: 1; }
 }
 
 /* Dialog */
@@ -847,50 +908,56 @@ input[type=range]::-webkit-slider-thumb {
     }
     .minimap-label { font-size: 7px; letter-spacing: 1px; }
 
-    /* ─── MESSAGE LOG: ミニマップ横の小さいトースト ─── */
-    #message-log {
-        position: absolute;
+    /* ─── LOG PANEL: モバイルでは小さく ─── */
+    #log-panel {
         top: 44px;
-        left: 122px;
-        right: 6px;
-        width: auto;
-        gap: 2px;
-        pointer-events: none;
-    }
-    .message {
+        right: 4px;
+        width: 200px;
+        max-height: 120px;
         font-size: 8px;
-        padding: 3px 7px;
-        line-height: 1.4;
-        animation: slideIn 0.2s ease-out, fadeOut 2s forwards;
-        animation-delay: 0s, 3s;
     }
+    #log-header { padding: 3px 6px; font-size: 7px; }
+    .message { font-size: 7px; padding: 2px 6px; }
 
-    /* ─── BOTTOM CONSOLE: コンパクト3行 ─── */
+    /* ─── BOTTOM CONSOLE: モバイル横スクロール ─── */
     #bottom-console {
-        bottom: 28px;
+        bottom: 0;
         height: auto;
-        flex-direction: column;
-        padding: 4px 8px 5px;
-        gap: 3px;
+        flex-direction: row;
+        padding: 4px 0;
+        gap: 0;
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
     }
 
+    /* 左ステータスパネル */
+    .left-panel {
+        width: 110px;
+        min-width: 100px;
+        padding: 3px 8px;
+        flex-shrink: 0;
+    }
+    .left-panel .status-text { font-size: 8px; }
 
-    /* 行2: ジェネレータ + 兵装 (横並び) */
+    /* 中央コントロール */
     .center-panel {
         flex-direction: column;
         align-items: stretch;
         gap: 3px;
-        padding: 3px 0;
-        border-right: none;
+        padding: 3px 8px;
+        border-right: 1px solid rgba(255,255,255,0.1);
+        min-width: 220px;
+        flex-shrink: 0;
     }
-    .speed-control, .weapon-control {
+    .weapon-control {
         gap: 6px;
         font-size: 9px;
         flex-wrap: nowrap;
         justify-content: flex-start;
         align-items: center;
     }
-    .speed-control span, .weapon-control span {
+    .weapon-control span {
         white-space: nowrap;
         flex-shrink: 0;
         font-size: 8px;
@@ -904,31 +971,33 @@ input[type=range]::-webkit-slider-thumb {
         border-radius: 5px;
     }
     input[type=range]::-webkit-slider-thumb {
-        width: 28px;
-        height: 28px;
+        width: 22px;
+        height: 22px;
     }
-    #speedValue { font-size: 9px; white-space: nowrap; flex-shrink: 0; }
 
     .sci-fi-select {
         flex: 1;
         font-size: 9px;
-        padding: 6px 4px;
-        min-height: 34px;
+        padding: 4px 3px;
+        min-height: 28px;
+        width: 130px;
     }
 
-    /* 行3: アクションボタン */
-    .center-panel > div:last-child {
-        display: flex !important;
-        gap: 4px;
-        margin-top: 2px !important;
+    /* アクションパネル */
+    .action-panel {
+        width: 160px;
+        min-width: 150px;
+        flex-shrink: 0;
+        padding: 3px 8px;
     }
-    .center-panel > div:last-child .btn {
-        flex: 1;
+    .action-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 4px;
+    }
+    .action-btn {
         font-size: 8px;
-        padding: 8px 2px;
-        letter-spacing: 0;
-        min-height: 36px;
-        white-space: nowrap;
+        padding: 5px 2px;
+        min-height: 34px;
     }
 
     /* 環境情報パネル: 非表示(スペース節約) */
