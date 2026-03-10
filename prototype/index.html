@@ -47,20 +47,6 @@
 
             <!-- Bottom Console -->
             <div id="bottom-console">
-                <div class="console-panel left-panel">
-                    <div class="panel-header">TALOS-CMD (母艦)</div>
-                    <div class="unit-status">
-                        <div class="status-bar">
-                            <div class="fill hp-fill" style="width: 100%"></div>
-                        </div>
-                        <div class="status-text">船体耐久度: 100%</div>
-                    </div>
-                    <div class="action-buttons" style="margin-top: 10px;">
-                        <button class="btn btn-primary" id="btn-launch-talos" title="Cost: 50 CR">TALOS 出撃 (50
-                            CR)</button>
-                        <span id="talos-count" style="font-size:10px; color:#00ffaa; margin-left: 5px;">稼働中: 0</span>
-                    </div>
-                </div>
 
                 <div class="console-panel center-panel">
                     <div class="gen-control">
@@ -68,23 +54,25 @@
                         <div class="gen-sliders">
                             <div class="gen-row">
                                 <label class="gen-label eng-label" title="エンジン出力 → 移動速度">ENG</label>
-                                <input type="range" class="gen-slider" id="gen-engine" min="0" max="100" value="30">
-                                <span class="gen-val" id="gen-engine-val">30%</span>
+                                <input type="range" class="gen-slider" id="gen-engine" min="0" max="100" value="40">
+                                <span class="gen-val" id="gen-engine-val">40%</span>
                             </div>
                             <div class="gen-row">
                                 <label class="gen-label wep-label" title="武装出力 → 火力・連射数">WEP</label>
-                                <input type="range" class="gen-slider" id="gen-weapons" min="0" max="100" value="25">
-                                <span class="gen-val" id="gen-weapons-val">25%</span>
+                                <input type="range" class="gen-slider" id="gen-weapons" min="0" max="100" value="30">
+                                <span class="gen-val" id="gen-weapons-val">30%</span>
                             </div>
                             <div class="gen-row">
                                 <label class="gen-label sen-label" title="センサー出力 → 探知レンジ">SEN</label>
-                                <input type="range" class="gen-slider" id="gen-sensors" min="0" max="100" value="25">
-                                <span class="gen-val" id="gen-sensors-val">25%</span>
+                                <input type="range" class="gen-slider" id="gen-sensors" min="0" max="100" value="30">
+                                <span class="gen-val" id="gen-sensors-val">30%</span>
                             </div>
+                        </div>
+                        <div style="border-top:1px solid rgba(77,166,255,0.2); margin-top:4px; padding-top:4px;">
                             <div class="gen-row">
-                                <label class="gen-label ai-label" title="AI処理 → 命中率・回避 (EM放射源)">AI</label>
-                                <input type="range" class="gen-slider" id="gen-ai" min="0" max="100" value="20">
-                                <span class="gen-val" id="gen-ai-val">20%</span>
+                                <label class="gen-label ai-label" title="AI処理 → 命中率・回避・EM放射強度 (独立)">AI</label>
+                                <input type="range" class="gen-slider" id="gen-ai" min="0" max="100" value="50">
+                                <span class="gen-val" id="gen-ai-val">50%</span>
                             </div>
                         </div>
                     </div>
@@ -282,7 +270,7 @@
             <div id="game-over-overlay" class="hidden">
                 <div class="game-over-box">
                     <div class="go-title">SHIP DESTROYED</div>
-                    <div class="go-sub">TALOS-CMDの船体が崩壊しました</div>
+                    <div class="go-sub">艦体が限界を超え崩壊しました</div>
                     <div class="go-stats">
                         <div>セクター到達: <span id="go-sector">1</span></div>
                         <div>敵撃墜数: <span id="go-kills">0</span></div>
@@ -293,14 +281,6 @@
                 </div>
             </div>
 
-            <!-- Ad Banner (Per CSV monetization requirement) -->
-            <div id="ad-banner">
-                <div class="ad-content">
-                    <span class="ad-badge">AD</span>
-                    <span>開発を支援して、広告を削除し機能を拡張しましょう。</span>
-                </div>
-                <button class="btn btn-primary btn-small" id="btn-remove-ads">広告削除 (500 CR)</button>
-            </div>
         </div>
     </div>
     <script src="game.js"></script>
