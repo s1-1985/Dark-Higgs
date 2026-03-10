@@ -167,36 +167,71 @@ body {
     left: 0;
     width: 100%;
     height: auto;
-    min-height: 130px;
+    min-height: 120px;
     background: linear-gradient(to top, rgba(5,10,15,0.97), rgba(10,18,25,0.85));
     border-top: 1px solid rgba(0, 255, 170, 0.3);
     backdrop-filter: blur(12px);
     display: flex;
-    justify-content: space-between;
-    padding: 8px 16px;
+    justify-content: flex-start;
+    align-items: stretch;
+    padding: 6px 0;
     pointer-events: auto;
     z-index: 20;
+    gap: 0;
 }
 
 .console-panel {
     display: flex;
     flex-direction: column;
     justify-content: flex-start;
-    padding: 5px 15px;
+    padding: 4px 12px;
     border-right: 1px solid rgba(255, 255, 255, 0.1);
+    flex-shrink: 0;
 }
 
+.left-panel {
+    width: 140px;
+    min-width: 120px;
+}
 
 .center-panel {
-    flex: 2;
-    align-items: center;
+    flex: 1;
+    min-width: 280px;
+    align-items: stretch;
     justify-content: center;
+    gap: 3px;
+}
+
+.action-panel {
+    width: 220px;
+    min-width: 180px;
+}
+
+/* アクションボタングリッド */
+.action-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 5px;
+    flex: 1;
+    margin-top: 4px;
+}
+.action-btn {
+    padding: 6px 4px;
+    font-size: 9px;
+    line-height: 1.4;
+    text-align: center;
+    white-space: normal;
+    letter-spacing: 0.3px;
+    min-height: 40px;
+}
+.action-btn:last-child {
+    grid-column: 1 / -1;
 }
 
 .right-panel {
     flex: 1;
     border-right: none;
+    min-width: 160px;
 }
 
 .panel-header {
@@ -884,32 +919,45 @@ input[type=range]::-webkit-slider-thumb {
     #log-header { padding: 3px 6px; font-size: 7px; }
     .message { font-size: 7px; padding: 2px 6px; }
 
-    /* ─── BOTTOM CONSOLE: コンパクト3行 ─── */
+    /* ─── BOTTOM CONSOLE: モバイル横スクロール ─── */
     #bottom-console {
-        bottom: 28px;
+        bottom: 0;
         height: auto;
-        flex-direction: column;
-        padding: 4px 8px 5px;
-        gap: 3px;
+        flex-direction: row;
+        padding: 4px 0;
+        gap: 0;
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
     }
 
+    /* 左ステータスパネル */
+    .left-panel {
+        width: 110px;
+        min-width: 100px;
+        padding: 3px 8px;
+        flex-shrink: 0;
+    }
+    .left-panel .status-text { font-size: 8px; }
 
-    /* 行2: ジェネレータ + 兵装 (横並び) */
+    /* 中央コントロール */
     .center-panel {
         flex-direction: column;
         align-items: stretch;
         gap: 3px;
-        padding: 3px 0;
-        border-right: none;
+        padding: 3px 8px;
+        border-right: 1px solid rgba(255,255,255,0.1);
+        min-width: 220px;
+        flex-shrink: 0;
     }
-    .speed-control, .weapon-control {
+    .weapon-control {
         gap: 6px;
         font-size: 9px;
         flex-wrap: nowrap;
         justify-content: flex-start;
         align-items: center;
     }
-    .speed-control span, .weapon-control span {
+    .weapon-control span {
         white-space: nowrap;
         flex-shrink: 0;
         font-size: 8px;
@@ -923,31 +971,33 @@ input[type=range]::-webkit-slider-thumb {
         border-radius: 5px;
     }
     input[type=range]::-webkit-slider-thumb {
-        width: 28px;
-        height: 28px;
+        width: 22px;
+        height: 22px;
     }
-    #speedValue { font-size: 9px; white-space: nowrap; flex-shrink: 0; }
 
     .sci-fi-select {
         flex: 1;
         font-size: 9px;
-        padding: 6px 4px;
-        min-height: 34px;
+        padding: 4px 3px;
+        min-height: 28px;
+        width: 130px;
     }
 
-    /* 行3: アクションボタン */
-    .center-panel > div:last-child {
-        display: flex !important;
-        gap: 4px;
-        margin-top: 2px !important;
+    /* アクションパネル */
+    .action-panel {
+        width: 160px;
+        min-width: 150px;
+        flex-shrink: 0;
+        padding: 3px 8px;
     }
-    .center-panel > div:last-child .btn {
-        flex: 1;
+    .action-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 4px;
+    }
+    .action-btn {
         font-size: 8px;
-        padding: 8px 2px;
-        letter-spacing: 0;
-        min-height: 36px;
-        white-space: nowrap;
+        padding: 5px 2px;
+        min-height: 34px;
     }
 
     /* 環境情報パネル: 非表示(スペース節約) */

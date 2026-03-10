@@ -48,6 +48,23 @@
             <!-- Bottom Console -->
             <div id="bottom-console">
 
+                <!-- 左: 艦体ステータス -->
+                <div class="console-panel left-panel">
+                    <div class="panel-header">SHIP STATUS</div>
+                    <div class="status-bar"><div class="hp-fill" style="width:100%"></div></div>
+                    <div class="status-text">船体耐久度: 100%</div>
+                    <div style="margin-top:6px; font-family:'Orbitron',monospace; font-size:10px; color:#aaa;">
+                        敵性: <span id="hostile-count" style="color:#ffaa00;">不明</span>
+                    </div>
+                    <div style="margin-top:2px; font-family:'Orbitron',monospace; font-size:10px; color:#aaa;">
+                        Higgs: <span id="env-higgs" class="highlight-text">---</span>
+                    </div>
+                    <div style="margin-top:2px; font-family:'Orbitron',monospace; font-size:10px; color:#aaa;">
+                        ノード: <span id="env-nodes" class="highlight-text">---</span>
+                    </div>
+                </div>
+
+                <!-- 中央: GEN配分 + 兵装 + センサー -->
                 <div class="console-panel center-panel">
                     <div class="gen-control">
                         <div class="gen-header"><span>GEN配分</span><span id="gen-total" class="gen-total">計100%</span></div>
@@ -76,40 +93,43 @@
                             </div>
                         </div>
                     </div>
-                    <div class="weapon-control">
-                        <span>主兵装 </span>
+                    <div class="weapon-control" style="margin-top:4px;">
+                        <span>兵装</span>
                         <select id="weapon-select" class="sci-fi-select">
-                            <option value="kinetic">キネティックキャノン(実弾)</option>
-                            <option value="missile">ホーミングミサイル</option>
-                            <option value="beam">パーティクルビーム</option>
+                            <option value="kinetic">KIN キネティック</option>
+                            <option value="missile">MSL ホーミング</option>
+                            <option value="beam">BEM パーティクル</option>
                         </select>
                     </div>
-                    <!-- センサーモード選択 (じゃんけん方式) -->
-                    <div class="sensor-row">
-                        <span class="sensor-label">センサー:</span>
-                        <button class="btn sensor-btn active" id="sensor-heat" title="熱源センサー: 移動中の敵を捕捉">🔥 HEAT</button>
-                        <button class="btn sensor-btn" id="sensor-optic" title="光学センサー: 発砲フラッシュを捕捉">👁 OPTIC</button>
-                        <button class="btn sensor-btn" id="sensor-em" title="電磁波センサー: 潜伏中の受動放射を検出">📡 EM</button>
-                        <button class="btn sensor-btn" id="sensor-higgs" title="ヒッグスセンサー: ヒッグス雲乱流・ウェイク・リソースノード検出">〰 HIGGS</button>
-                    </div>
-                    <div style="display:flex; justify-content:center; gap:8px; margin-top:5px; flex-wrap:wrap;">
-                        <button class="btn btn-info" id="btn-scan">全周囲ソナー</button>
-                        <button class="btn btn-info" id="btn-dir-sonar">指向性ソナー</button>
-                        <button class="btn btn-warning" id="btn-hack">電子戦 (EW)</button>
-                        <button class="btn btn-danger" id="btn-cancel">停止</button>
-                        <button class="btn btn-primary" id="btn-camera-follow">追従 OFF</button>
+                    <!-- センサーモード -->
+                    <div class="sensor-row" style="margin-top:4px;">
+                        <span class="sensor-label">SNS:</span>
+                        <button class="btn sensor-btn active" id="sensor-heat" title="熱源センサー">🔥 HEAT</button>
+                        <button class="btn sensor-btn" id="sensor-optic" title="光学センサー">👁 OPT</button>
+                        <button class="btn sensor-btn" id="sensor-em" title="電磁波センサー">📡 EM</button>
+                        <button class="btn sensor-btn" id="sensor-higgs" title="ヒッグスセンサー">〰 HGS</button>
                     </div>
                 </div>
 
+                <!-- 右: アクションボタン -->
+                <div class="console-panel action-panel">
+                    <div class="panel-header">ACTIONS</div>
+                    <div class="action-grid">
+                        <button class="btn btn-info action-btn" id="btn-scan">全周囲<br>ソナー</button>
+                        <button class="btn btn-info action-btn" id="btn-dir-sonar">指向性<br>ソナー</button>
+                        <button class="btn btn-warning action-btn" id="btn-hack">電子戦<br>EW</button>
+                        <button class="btn btn-danger action-btn" id="btn-cancel">停止<br>STOP</button>
+                        <button class="btn btn-primary action-btn" id="btn-camera-follow">追従<br>OFF</button>
+                    </div>
+                </div>
+
+                <!-- 最右: 環境情報 (デスクトップのみ) -->
                 <div class="console-panel right-panel">
                     <div class="panel-header">環境情報</div>
                     <div class="env-info">
-                        <div>ヒッグス濃度: <span id="env-higgs" class="highlight-text">測定中</span></div>
-                        <div>リソースノード: <span id="env-nodes" class="highlight-text">---</span></div>
-                        <div>レーダー有効範囲: <span id="env-radar" class="warning-text">---</span></div>
-                        <div>敵性反応: <span id="hostile-count">不明</span></div>
-                        <div>センサーモード: <span id="env-sensor" class="warning-text">🔥 熱源</span></div>
-                        <div>シグナル強度: <span id="env-signal" style="font-family:monospace;letter-spacing:1px;">░░░░░</span></div>
+                        <div>レーダー範囲: <span id="env-radar" class="warning-text">---</span></div>
+                        <div>センサー: <span id="env-sensor" class="warning-text">🔥 熱源</span></div>
+                        <div>シグナル: <span id="env-signal" style="font-family:monospace;letter-spacing:1px;">░░░░░</span></div>
                     </div>
                 </div>
             </div>

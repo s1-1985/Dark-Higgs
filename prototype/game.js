@@ -223,6 +223,22 @@ function centerCameraOnPlayer() {
     clampCamera();
 }
 
+// スクリーン座標 → ワールド座標変換 (getBoundingClientRect でCSS/canvas解像度差を補正)
+function screenToWorld(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const cx = (clientX - rect.left) * (canvas.width / rect.width);
+    const cy = (clientY - rect.top) * (canvas.height / rect.height);
+    return { x: cx / camera.zoom + camera.x, y: cy / camera.zoom + camera.y };
+}
+// ドラッグ差分をワールド単位に変換 (CSS/canvas解像度差を補正)
+function dragDeltaWorld(dClientX, dClientY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+        dx: dClientX * (canvas.width / rect.width) / camera.zoom,
+        dy: dClientY * (canvas.height / rect.height) / camera.zoom
+    };
+}
+
 // カメラ追従フラグ (自艦追従ON/OFF)
 let cameraFollowPlayer = false;
 
@@ -243,8 +259,7 @@ canvas.addEventListener('mousedown', (e) => {
     if (!player) return; // ship not selected yet
     if (e.target.closest('#ui-layer') && !e.target.closest('#gameCanvas')) return; // Ignore clicks on UI
     if (e.button === 0) {
-        const worldX = (e.clientX / camera.zoom) + camera.x;
-        const worldY = (e.clientY / camera.zoom) + camera.y;
+        const { x: worldX, y: worldY } = screenToWorld(e.clientX, e.clientY);
 
         // Find clicked enemy
         let clickedEnemy = enemies.find(en => en.visible && Math.hypot(en.x - worldX, en.y - worldY) < en.radius * 2);
@@ -271,11 +286,11 @@ canvas.addEventListener('mousedown', (e) => {
 });
 window.addEventListener('mouseup', e => { if (e.button === 2) camera.isDragging = false; });
 window.addEventListener('mousemove', e => {
-    mouseWorldX = (e.clientX / camera.zoom) + camera.x;
-    mouseWorldY = (e.clientY / camera.zoom) + camera.y;
+    const mw = screenToWorld(e.clientX, e.clientY);
+    mouseWorldX = mw.x; mouseWorldY = mw.y;
     if (camera.isDragging) {
-        camera.x -= (e.clientX - camera.lastX) / camera.zoom;
-        camera.y -= (e.clientY - camera.lastY) / camera.zoom;
+        const d = dragDeltaWorld(e.clientX - camera.lastX, e.clientY - camera.lastY);
+        camera.x -= d.dx; camera.y -= d.dy;
         camera.lastX = e.clientX;
         camera.lastY = e.clientY;
         clampCamera();
@@ -286,11 +301,11 @@ canvas.addEventListener('wheel', e => {
     if (e.target.id !== 'gameCanvas') return;
     e.preventDefault();
     const zoomAmount = e.deltaY > 0 ? 0.9 : 1.1;
-    const mx_b = (e.clientX / camera.zoom) + camera.x;
-    const my_b = (e.clientY / camera.zoom) + camera.y;
+    const { x: mx_b, y: my_b } = screenToWorld(e.clientX, e.clientY);
     camera.zoom = Math.max(camera.minZoom, Math.min(camera.maxZoom, camera.zoom * zoomAmount));
-    camera.x += mx_b - ((e.clientX / camera.zoom) + camera.x);
-    camera.y += my_b - ((e.clientY / camera.zoom) + camera.y);
+    const after = screenToWorld(e.clientX, e.clientY);
+    camera.x += mx_b - after.x;
+    camera.y += my_b - after.y;
     clampCamera();
 }, { passive: false });
 canvas.addEventListener('contextmenu', e => { if (e.target.id === 'gameCanvas') e.preventDefault() });
@@ -340,8 +355,7 @@ canvas.addEventListener('touchstart', (e) => {
         clearTimeout(touch.waypointTimer);
         touch.waypointTimer = setTimeout(() => {
             if (!touch.isPinching && !touch.moved && player) {
-                const worldX = (touch.startX / camera.zoom) + camera.x;
-                const worldY = (touch.startY / camera.zoom) + camera.y;
+                const { x: worldX, y: worldY } = screenToWorld(touch.startX, touch.startY);
                 player.targetEntity = null;
                 player.setTarget(worldX, worldY);
                 createClickEffect(worldX, worldY, '#00ffaa');
@@ -374,11 +388,11 @@ canvas.addEventListener('touchmove', (e) => {
             clearTimeout(touch.waypointTimer);
         }
         // タッチ位置をワールド座標で追跡 (指向性ソナー方向用)
-        mouseWorldX = (t.clientX / camera.zoom) + camera.x;
-        mouseWorldY = (t.clientY / camera.zoom) + camera.y;
-        // 1本指ドラッグ = カメラパン
-        camera.x -= (t.clientX - touch.lastX) / camera.zoom;
-        camera.y -= (t.clientY - touch.lastY) / camera.zoom;
+        const mwt = screenToWorld(t.clientX, t.clientY);
+        mouseWorldX = mwt.x; mouseWorldY = mwt.y;
+        // 1本指ドラッグ = カメラパン (getBoundingClientRect補正済み)
+        const dtd = dragDeltaWorld(t.clientX - touch.lastX, t.clientY - touch.lastY);
+        camera.x -= dtd.dx; camera.y -= dtd.dy;
         touch.lastX = t.clientX;
         touch.lastY = t.clientY;
         clampCamera();
@@ -389,11 +403,11 @@ canvas.addEventListener('touchmove', (e) => {
         const zoomAmount = newDist / touch.pinchDist;
         const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
         const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-        const mx_b = (cx / camera.zoom) + camera.x;
-        const my_b = (cy / camera.zoom) + camera.y;
+        const { x: mx_b, y: my_b } = screenToWorld(cx, cy);
         camera.zoom = Math.max(camera.minZoom, Math.min(camera.maxZoom, camera.zoom * zoomAmount));
-        camera.x += mx_b - ((cx / camera.zoom) + camera.x);
-        camera.y += my_b - ((cy / camera.zoom) + camera.y);
+        const afterP = screenToWorld(cx, cy);
+        camera.x += mx_b - afterP.x;
+        camera.y += my_b - afterP.y;
         touch.pinchDist = newDist;
         clampCamera();
     }
@@ -407,8 +421,7 @@ canvas.addEventListener('touchend', (e) => {
 
     // 短いタップ (移動なし, 250ms未満) → 敵の上なら ターゲットロック
     if (!touch.moved && !touch.waypointFired && !touch.isPinching && elapsed < TOUCH_WAYPOINT_DELAY && player) {
-        const worldX = (touch.startX / camera.zoom) + camera.x;
-        const worldY = (touch.startY / camera.zoom) + camera.y;
+        const { x: worldX, y: worldY } = screenToWorld(touch.startX, touch.startY);
         // タッチはロックオン判定を広く取る（指で画面を押すと視認が難しいため）
         const tapRadius = en => en.radius * 6 + 20;
         let clickedEnemy = enemies.find(en => en.visible && Math.hypot(en.x - worldX, en.y - worldY) < tapRadius(en));
@@ -803,7 +816,8 @@ class Ship {
             document.querySelector('.hp-fill').style.width = hpP + '%';
             document.querySelector('.hp-fill').style.backgroundColor = hpP < 30 ? '#ff4d4d' : '#00ffaa';
             document.querySelector('.status-text').textContent = `船体耐久度: ${Math.floor(hpP)}%`;
-            document.getElementById('hostile-count').textContent = enemies.filter(e => e.visible).length || '不明';
+            const hcEl = document.getElementById('hostile-count');
+            if (hcEl) hcEl.textContent = enemies.filter(e => e.visible).length || '不明';
 
         } else {
             // ============================================================
