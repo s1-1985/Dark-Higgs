@@ -92,10 +92,11 @@
                         <button class="btn sensor-btn" id="sensor-em" title="電磁波センサー: 潜伏中の受動放射を検出">📡 EM</button>
                         <button class="btn sensor-btn" id="sensor-higgs" title="ヒッグスセンサー: ヒッグス雲乱流・ウェイク・リソースノード検出">〰 HIGGS</button>
                     </div>
-                    <div style="display:flex; justify-content:center; gap:10px; margin-top:5px;">
-                        <button class="btn btn-info" id="btn-scan">アクティブスキャン</button>
-                        <button class="btn btn-warning" id="btn-hack">電子戦システム (EW)</button>
-                        <button class="btn btn-danger" id="btn-cancel">ナビゲーションキャンセル</button>
+                    <div style="display:flex; justify-content:center; gap:8px; margin-top:5px; flex-wrap:wrap;">
+                        <button class="btn btn-info" id="btn-scan">全周囲ソナー</button>
+                        <button class="btn btn-info" id="btn-dir-sonar">指向性ソナー</button>
+                        <button class="btn btn-warning" id="btn-hack">電子戦 (EW)</button>
+                        <button class="btn btn-danger" id="btn-cancel">停止</button>
                         <button class="btn btn-primary" id="btn-camera-follow">追従 OFF</button>
                     </div>
                 </div>
@@ -113,9 +114,15 @@
                 </div>
             </div>
 
-            <div id="message-log">
-                <div class="message system-msg">SYSTEM: 初期化完了。</div>
-                <div class="message system-msg">SYS: ヒッグス粒子の霧を検知。暗黒物質の相転移を確認。</div>
+            <div id="log-panel">
+                <div id="log-header">
+                    <span>SYSTEM LOG</span>
+                    <span id="passive-indicator">● PASSIVE</span>
+                </div>
+                <div id="message-log">
+                    <div class="message system-msg">SYSTEM: 初期化完了。</div>
+                    <div class="message system-msg">SYS: ヒッグス粒子の霧を検知。暗黒物質の相転移を確認。</div>
+                </div>
             </div>
 
             <!-- Dialog Overlay for Sector Transitions -->
@@ -159,27 +166,31 @@
                             <div class="upgrade-grid">
                                 <div class="upgrade-item">
                                     <div class="up-info">
-                                        <span class="up-name">強化装甲 (Hull)</span>
-                                        <span class="up-level">Lv.<span id="level-hull">0</span></span>
+                                        <span class="up-name">エンジン — 移動速度</span>
+                                        <span class="up-level">Lv.<span id="level-engine">1</span> / 3</span>
                                     </div>
-                                    <button class="btn btn-info btn-upgrade" id="btn-upgrade-hull">強化 (<span
-                                            id="cost-hull">300</span> CR)</button>
+                                    <button class="btn btn-info btn-upgrade" id="btn-upgrade-engine">強化 (<span id="cost-engine">300</span> SCR)</button>
                                 </div>
                                 <div class="upgrade-item">
                                     <div class="up-info">
-                                        <span class="up-name">高性能レーダー</span>
-                                        <span class="up-level">Lv.<span id="level-radar">0</span></span>
+                                        <span class="up-name">武装 — 火力・ダメージ</span>
+                                        <span class="up-level">Lv.<span id="level-weapons">1</span> / 3</span>
                                     </div>
-                                    <button class="btn btn-info btn-upgrade" id="btn-upgrade-radar">強化 (<span
-                                            id="cost-radar">300</span> CR)</button>
+                                    <button class="btn btn-info btn-upgrade" id="btn-upgrade-weapons">強化 (<span id="cost-weapons">300</span> SCR)</button>
                                 </div>
                                 <div class="upgrade-item">
                                     <div class="up-info">
-                                        <span class="up-name">主兵装出力増加</span>
-                                        <span class="up-level">Lv.<span id="level-weapons">0</span></span>
+                                        <span class="up-name">装甲 — 耐久 HP</span>
+                                        <span class="up-level">Lv.<span id="level-armor">1</span> / 3</span>
                                     </div>
-                                    <button class="btn btn-info btn-upgrade" id="btn-upgrade-weapons">強化 (<span
-                                            id="cost-weapons">300</span> CR)</button>
+                                    <button class="btn btn-info btn-upgrade" id="btn-upgrade-armor">強化 (<span id="cost-armor">300</span> SCR)</button>
+                                </div>
+                                <div class="upgrade-item">
+                                    <div class="up-info">
+                                        <span class="up-name">センサー — ソナー範囲</span>
+                                        <span class="up-level">Lv.<span id="level-sensor">1</span> / 3</span>
+                                    </div>
+                                    <button class="btn btn-info btn-upgrade" id="btn-upgrade-sensor">強化 (<span id="cost-sensor">300</span> SCR)</button>
                                 </div>
                             </div>
                         </div>
