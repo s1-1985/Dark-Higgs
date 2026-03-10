@@ -97,10 +97,9 @@ function loadGame() {
             const loaded = JSON.parse(saved);
             // デフォルト値とマージ (古い保存データにないフィールドをデフォルト値で補完)
             gameState = Object.assign({}, gameState, loaded);
-            // upgrades はネストされているので個別マージ
-            if (loaded.upgrades) {
-                gameState.upgrades = Object.assign({}, gameState.upgrades, loaded.upgrades);
-            }
+            // upgrades: デフォルト値を先に置き旧スキーマの欠損キー(armor/sensor)を補完
+            const defaultUpgrades = { engine: 1, weapons: 1, armor: 1, sensor: 1 };
+            gameState.upgrades = Object.assign({}, defaultUpgrades, loaded.upgrades || {});
             updateTopUI();
         } catch (e) {
             console.warn('SYSTEM: 保存データの読み込みに失敗しました。初期状態で起動します。', e);
@@ -712,7 +711,7 @@ class Ship {
             this.type = gameState.shipType || 'assault';
             const hpBase = { assault: 3500, stealth: 700, carrier: 2500 };
             this.radius = 20;
-            this.maxHp = (hpBase[gameState.shipType] || 2000) * UPGRADE_MULT[gameState.upgrades.armor];
+            this.maxHp = (hpBase[gameState.shipType] || 2000) * (UPGRADE_MULT[gameState.upgrades.armor] || 1.0);
         } else {
             this.type = type; // corvette, destroyer, carrier, fighter
             this.radius = type === 'carrier' ? 30 : (type === 'destroyer' ? 18 : (type === 'fighter' ? 6 : 12));
@@ -756,7 +755,7 @@ class Ship {
             // Speed defined by GEN engine allocation + 艦種補正 + ヒッグス減速
             const speedMult = { assault: 0.8, stealth: 1.4, carrier: 0.6 };
             const higgsSlowdown = 1 - getHiggsIntensity(this.x, this.y) * 0.45;
-            this.speed = (genAlloc.engine / 100) * 3.0 * (speedMult[gameState.shipType] || 1.0) * higgsSlowdown * UPGRADE_MULT[gameState.upgrades.engine];
+            this.speed = (genAlloc.engine / 100) * 3.0 * (speedMult[gameState.shipType] || 1.0) * higgsSlowdown * (UPGRADE_MULT[gameState.upgrades.engine] || 1.0);
 
             // 円形マップ境界検知
             if (Math.hypot(this.x - MAP_CX, this.y - MAP_CY) > MAP_RADIUS - 100 && !dialogOpen) {
@@ -783,7 +782,7 @@ class Ship {
                 if (dist < wRange && this.fireCooldown <= 0) {
                     this.weaponType = wType;
                     const proj = new Projectile(this.x, this.y, this.targetEntity, true, wType);
-                    if (proj.dmg) proj.dmg *= UPGRADE_MULT[gameState.upgrades.weapons];
+                    if (proj.dmg) proj.dmg *= (UPGRADE_MULT[gameState.upgrades.weapons] || 1.0);
                     projectiles.push(proj);
                     // 攻撃型特殊: 3連装同時発射 (kinetic時のみ)
                     if (gameState.shipType === 'assault' && wType === 'kinetic') {
