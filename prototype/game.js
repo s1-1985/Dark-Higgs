@@ -1468,18 +1468,8 @@ class Ship {
                         });
                     });
                 });
-            } else {
-                // 敵艦: シンプルな単排気
-                if (Math.random() < 0.5) {
-                    const exX = this.x - Math.cos(this.angle) * this.radius;
-                    const exY = this.y - Math.sin(this.angle) * this.radius;
-                    particles.push({
-                        x: exX + (Math.random() - 0.5) * 10, y: exY + (Math.random() - 0.5) * 10,
-                        vx: -Math.cos(this.angle) * (1 + Math.random()), vy: -Math.sin(this.angle) * (1 + Math.random()),
-                        life: 1.0, decay: 0.05, size: 2, color: '#ffaa00'
-                    });
-                }
             }
+            // 敵艦: エンジン排気エフェクトは非表示 (スタルス設計 — センサー検知のみで捕捉)
         }
 
         // ============================================================
@@ -3313,20 +3303,21 @@ function updateSigCanvas() {
         // 波の高さ = v * rowH * 0.43 (値が大きいほど振幅大)
         // 波の間隔 = baseFreq + v*9 (値が大きいほど密)
         // スクロール速度も値に比例
-        const amp   = v * rowH * 0.43;
+        // sqrt スケーリング: 微小シグネチャでも視覚的に明確な波形を表示
+        const amp   = Math.sqrt(v) * rowH * 0.38;
         const freq  = sig.baseFreq + v * 9.0;
         const scroll = nowSec * (1.5 + v * 4.0);
 
-        // 値ゼロでも極細の基線アニメが見えるよう微細ノイズを加える
-        const idleAmp  = rowH * 0.015;
+        // 常時ベースライン波形 (値ゼロでも動く)
+        const idleAmp  = rowH * 0.06;
         const idleFreq = 0.8;
 
         sc.save();
         sc.shadowColor = sig.color;
-        sc.shadowBlur  = v > 0.05 ? 5 : 1;
+        sc.shadowBlur  = v > 0.02 ? 5 : 2;
         sc.strokeStyle = sig.color;
-        sc.lineWidth   = v > 0.05 ? 1.4 : 0.7;
-        sc.globalAlpha = 0.25 + v * 0.75;
+        sc.lineWidth   = v > 0.02 ? 1.4 : 0.9;
+        sc.globalAlpha = 0.35 + v * 0.65;
         sc.beginPath();
         for (let x = xStart; x <= xEnd; x++) {
             const t = (x - xStart) / (xEnd - xStart);
@@ -3426,19 +3417,20 @@ function updateEnvSigCanvas() {
         const xStart = 10;
         const xEnd = w - 6;
 
-        const amp    = v * rowH * 0.43;
+        // sqrt スケーリング: 微小シグネチャでも視覚的に明確な波形を表示
+        const amp    = Math.sqrt(v) * rowH * 0.38;
         const freq   = sig.baseFreq + v * 9.0;
         const scroll = nowSec * (1.5 + v * 4.0) + i * 2.1; // 位相オフセット
 
-        const idleAmp  = rowH * 0.015;
+        const idleAmp  = rowH * 0.06;
         const idleFreq = 0.7 + i * 0.2;
 
         ec.save();
         ec.shadowColor = sig.color;
-        ec.shadowBlur  = v > 0.05 ? 5 : 1;
+        ec.shadowBlur  = v > 0.02 ? 5 : 2;
         ec.strokeStyle = sig.color;
-        ec.lineWidth   = v > 0.05 ? 1.4 : 0.7;
-        ec.globalAlpha = 0.25 + v * 0.75;
+        ec.lineWidth   = v > 0.02 ? 1.4 : 0.9;
+        ec.globalAlpha = 0.35 + v * 0.65;
         ec.beginPath();
         for (let x = xStart; x <= xEnd; x++) {
             const t = (x - xStart) / (xEnd - xStart);
