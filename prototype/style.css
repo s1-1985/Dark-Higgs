@@ -167,7 +167,7 @@ body {
     left: 0;
     width: 100%;
     height: auto;
-    min-height: 120px;
+    min-height: 140px;
     background: linear-gradient(to top, rgba(5,10,15,0.97), rgba(10,18,25,0.85));
     border-top: 1px solid rgba(0, 255, 170, 0.3);
     backdrop-filter: blur(12px);
@@ -262,7 +262,7 @@ body {
 }
 
 .status-text {
-    font-size: 12px;
+    font-size: 13px;
     color: #aaa;
     font-family: 'Orbitron', sans-serif;
 }
@@ -311,7 +311,7 @@ input[type=range]::-webkit-slider-thumb {
 
 /* Env Info */
 .env-info {
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1.8;
     color: #ccc;
     font-family: 'Orbitron', sans-serif;

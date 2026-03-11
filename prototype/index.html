@@ -59,13 +59,16 @@
                     <div style="margin-top:2px; font-family:'Orbitron',monospace; font-size:10px; color:#aaa;">
                         Higgs: <span id="env-higgs" class="highlight-text">---</span>
                     </div>
+                    <div style="margin-top:2px; font-family:'Orbitron',monospace; font-size:9px; color:#aaa;">
+                        弾: <span id="ammo-display" style="color:#ffaa00;">---</span>
+                    </div>
                     <div style="margin-top:2px; font-family:'Orbitron',monospace; font-size:10px; color:#aaa;">
                         ノード: <span id="env-nodes" class="highlight-text">---</span>
                     </div>
                     <div style="margin-top:4px; font-family:'Orbitron',monospace; font-size:9px; color:#aaa;">
                         自機SIG:
                     </div>
-                    <canvas id="sig-canvas" width="100" height="48" style="width:100%; height:48px; border:1px solid rgba(0,255,170,0.2); background:rgba(0,5,10,0.8); border-radius:2px; display:block; margin-top:2px;"></canvas>
+                    <canvas id="sig-canvas" width="180" height="72" style="width:100%; height:72px; border:1px solid rgba(0,255,170,0.2); background:rgba(0,5,10,0.8); border-radius:2px; display:block; margin-top:2px;"></canvas>
                 </div>
 
                 <!-- 中央: GEN配分 + 兵装 + センサー -->
@@ -141,6 +144,7 @@
                         <button class="btn btn-warning action-btn" id="btn-hack">電子戦<br>EW</button>
                         <button class="btn btn-danger action-btn" id="btn-cancel">停止<br>STOP</button>
                         <button class="btn btn-primary action-btn" id="btn-camera-follow">追従<br>OFF</button>
+                        <button class="btn action-btn" id="btn-attack-toggle" style="background:rgba(0,180,60,0.25);border-color:#00b43c;color:#00ff66;">攻撃<br>ON</button>
                     </div>
                 </div>
 
@@ -150,7 +154,10 @@
                     <div class="env-info">
                         <div>レーダー範囲: <span id="env-radar" class="warning-text">---</span></div>
                         <div>センサー: <span id="env-sensor" class="warning-text">🔥 熱源</span></div>
-                        <div>シグナル: <span id="env-signal" style="font-family:monospace;letter-spacing:1px;">░░░░░</span></div>
+                        <div style="margin-top:4px; font-family:'Orbitron',monospace; font-size:9px; color:#aaa;">
+                            環境SIG:
+                        </div>
+                        <canvas id="env-sig-canvas" width="180" height="72" style="width:100%; height:72px; border:1px solid rgba(0,255,170,0.2); background:rgba(0,5,10,0.8); border-radius:2px; display:block; margin-top:2px;"></canvas>
                     </div>
                 </div>
             </div>
