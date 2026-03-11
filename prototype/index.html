@@ -62,6 +62,10 @@
                     <div style="margin-top:2px; font-family:'Orbitron',monospace; font-size:10px; color:#aaa;">
                         ノード: <span id="env-nodes" class="highlight-text">---</span>
                     </div>
+                    <div style="margin-top:4px; font-family:'Orbitron',monospace; font-size:9px; color:#aaa;">
+                        自機SIG:
+                    </div>
+                    <div id="self-sig-display" style="font-family:monospace; font-size:9px; line-height:1.4;">░░░░</div>
                 </div>
 
                 <!-- 中央: GEN配分 + 兵装 + センサー -->
@@ -92,6 +96,13 @@
                                 <span class="gen-val" id="gen-ai-val">50%</span>
                             </div>
                         </div>
+                        <div style="border-top:1px solid rgba(0,255,170,0.2); margin-top:4px; padding-top:4px;">
+                            <div class="gen-row">
+                                <label class="gen-label" style="color:#ffaa00" title="ジェネレーター総出力ゲイン (50-200%)">GAIN</label>
+                                <input type="range" class="gen-slider" id="gen-gain" min="50" max="200" value="100">
+                                <span class="gen-val" id="gen-gain-val">×1.0</span>
+                            </div>
+                        </div>
                     </div>
                     <div class="weapon-control" style="margin-top:4px;">
                         <span>兵装</span>
@@ -99,6 +110,16 @@
                             <option value="kinetic">KIN キネティック</option>
                             <option value="missile">MSL ホーミング</option>
                             <option value="beam">BEM パーティクル</option>
+                        </select>
+                    </div>
+                    <!-- エンジンタイプ -->
+                    <div class="weapon-control" style="margin-top:4px;">
+                        <span>エンジン</span>
+                        <select id="engine-type-select" class="sci-fi-select">
+                            <option value="thermonuclear">THR 熱核エンジン</option>
+                            <option value="pulse">PLS パルスエンジン</option>
+                            <option value="higgs">HGS ヒッグスエンジン</option>
+                            <option value="photon">PHT フォトンエンジン</option>
                         </select>
                     </div>
                     <!-- センサーモード -->
