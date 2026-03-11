@@ -20,13 +20,22 @@ let passiveCheckTimer = 0;
 let mouseWorldX = MAP_CX;
 let mouseWorldY = MAP_CY;
 let dirSonarVisual = null; // { angle, halfAngle, range, life }
+let dirSonarPendingFire = false;
 let enemiesKilled = 0;
+let genGain = 1.0;
 
 // センサーLv別性能定数
 const OMNI_SONAR_RANGE  = [0, MAP_RADIUS/6, MAP_RADIUS/3, MAP_RADIUS/2]; // Lv1,2,3 @100%SEN
 const DIR_SONAR_HALF_ANGLE = [0, Math.PI/36, Math.PI/12, Math.PI/9];     // 5°/15°/20° 半角
 const DIR_SONAR_MAX_RANGE  = MAP_RADIUS * 2;                               // マップ直径
 const UPGRADE_MULT = [0, 1.0, 1.5, 2.0]; // Lv別性能倍率 (index=Lv)
+
+const ENGINE_TYPES = {
+    thermonuclear: { speedMult: 1.0,  heatMult: 1.5,  optMult: 0.3, emMult: 0.4, higgsSpeedBonus: 0.0 },
+    pulse:         { speedMult: 1.1,  heatMult: 0.9,  optMult: 0.7, emMult: 0.6, higgsSpeedBonus: 0.0 },
+    higgs:         { speedMult: 0.85, heatMult: 0.35, optMult: 0.2, emMult: 0.3, higgsSpeedBonus: 0.5 },
+    photon:        { speedMult: 1.3,  heatMult: 0.5,  optMult: 2.0, emMult: 0.4, higgsSpeedBonus: 0.0 }
+};
 
 // ============================================================
 // マルチセンサーシステム (じゃんけん方式)
@@ -82,6 +91,7 @@ let gameState = {
     mode: 'br',
     sector: 1,
     credits: 0,       // スクラップ (アップグレード素材 + 修理費)
+    engineType: 'thermonuclear',
     upgrades: {
         engine:  1,   // エンジン  Lv1-3: 移動速度
         weapons: 1,   // 武装      Lv1-3: 火力
@@ -100,6 +110,7 @@ function loadGame() {
             // upgrades: デフォルト値を先に置き旧スキーマの欠損キー(armor/sensor)を補完
             const defaultUpgrades = { engine: 1, weapons: 1, armor: 1, sensor: 1 };
             gameState.upgrades = Object.assign({}, defaultUpgrades, loaded.upgrades || {});
+            gameState.engineType = gameState.engineType || 'thermonuclear';
             updateTopUI();
         } catch (e) {
             console.warn('SYSTEM: 保存データの読み込みに失敗しました。初期状態で起動します。', e);
@@ -260,6 +271,16 @@ canvas.addEventListener('mousedown', (e) => {
     if (e.button === 0) {
         const { x: worldX, y: worldY } = screenToWorld(e.clientX, e.clientY);
 
+        // 指向性ソナー待機中: 次のクリックで発射方向を決定
+        if (dirSonarPendingFire) {
+            dirSonarPendingFire = false;
+            canvas.style.cursor = 'default';
+            document.getElementById('btn-dir-sonar').classList.remove('pending-fire');
+            const angle = Math.atan2(worldY - player.y, worldX - player.x);
+            fireDirectionalSonar(angle);
+            return;
+        }
+
         // Find clicked enemy
         let clickedEnemy = enemies.find(en => en.visible && Math.hypot(en.x - worldX, en.y - worldY) < en.radius * 2);
 
@@ -267,20 +288,29 @@ canvas.addEventListener('mousedown', (e) => {
             player.targetEntity = clickedEnemy;
             createClickEffect(clickedEnemy.x, clickedEnemy.y, '#ff4d4d');
             logMessage(`TACTICAL: ターゲットをロック。射撃解を計算中...`, 'system-msg');
-        } else {
-            player.targetEntity = null;
-            player.setTarget(worldX, worldY);
-            createClickEffect(worldX, worldY, '#00ffaa');
-            const dist = Math.hypot(worldX - player.x, worldY - player.y);
-            // Speed is generator output / 100 * base speed. Base speed is very slow (1.5)
-            const speedEst = Math.max(0.1, (genAlloc.engine / 100) * 3.0);
-            const timeSeconds = Math.max(1, Math.floor(dist / (speedEst * 60)));
-            logMessage(`NAV: 進路設定完了。到着予定時間はおよそ ${timeSeconds} 秒です。`, 'system-msg');
         }
+        // Single click on empty space: no waypoint (use double-click instead)
     } else if (e.button === 2) {
         camera.isDragging = true;
         camera.lastX = e.clientX;
         camera.lastY = e.clientY;
+    }
+});
+
+// Double-click to set waypoint
+canvas.addEventListener('dblclick', (e) => {
+    if (!player || player.hp <= 0) return;
+    if (dirSonarPendingFire) return; // sonar takes priority
+    const { x: worldX, y: worldY } = screenToWorld(e.clientX, e.clientY);
+    const clickedEnemy = enemies.find(en => en.visible && Math.hypot(en.x - worldX, en.y - worldY) < en.radius * 2);
+    if (!clickedEnemy) {
+        player.targetEntity = null;
+        player.setTarget(worldX, worldY);
+        createClickEffect(worldX, worldY, '#00ffaa');
+        const dist = Math.hypot(worldX - player.x, worldY - player.y);
+        const speedEst = Math.max(0.1, (genAlloc.engine / 100) * 3.0);
+        const timeSeconds = Math.max(1, Math.floor(dist / (speedEst * 60)));
+        logMessage(`NAV: 進路設定完了。到着予定時間はおよそ ${timeSeconds} 秒です。`, 'system-msg');
     }
 });
 window.addEventListener('mouseup', e => { if (e.button === 2) camera.isDragging = false; });
@@ -355,6 +385,16 @@ canvas.addEventListener('touchstart', (e) => {
         touch.waypointTimer = setTimeout(() => {
             if (!touch.isPinching && !touch.moved && player) {
                 const { x: worldX, y: worldY } = screenToWorld(touch.startX, touch.startY);
+                // 指向性ソナー待機中: 長押しで発射方向を決定
+                if (dirSonarPendingFire) {
+                    dirSonarPendingFire = false;
+                    canvas.style.cursor = 'default';
+                    document.getElementById('btn-dir-sonar').classList.remove('pending-fire');
+                    const angle = Math.atan2(worldY - player.y, worldX - player.x);
+                    fireDirectionalSonar(angle);
+                    touch.waypointFired = true;
+                    return;
+                }
                 player.targetEntity = null;
                 player.setTarget(worldX, worldY);
                 createClickEffect(worldX, worldY, '#00ffaa');
@@ -442,6 +482,7 @@ class Structure {
         this.x = x; this.y = y; this.type = type; // 'colony' or 'derelict'
         this.radius = type === 'colony' ? 60 : 30;
         this.hacked = false;
+        this.discovered = false;
         this.color = type === 'colony' ? 'rgba(34, 68, 170, 0.5)' : 'rgba(85, 85, 85, 0.5)';
     }
     draw(ctx) {
@@ -521,6 +562,7 @@ class Station {
         this.x = x; this.y = y;
         this.radius = 120;
         this.angle = 0;
+        this.discovered = false;
     }
     draw(ctx) {
         this.angle += 0.005;
@@ -752,10 +794,15 @@ class Ship {
         if (this.fireCooldown > 0) this.fireCooldown--;
 
         if (this.isPlayer) {
+            // Track previous position for signature calculations
+            this.prevX = this.x; this.prevY = this.y;
             // Speed defined by GEN engine allocation + 艦種補正 + ヒッグス減速
             const speedMult = { assault: 0.8, stealth: 1.4, carrier: 0.6 };
             const higgsSlowdown = 1 - getHiggsIntensity(this.x, this.y) * 0.45;
-            this.speed = (genAlloc.engine / 100) * 3.0 * (speedMult[gameState.shipType] || 1.0) * higgsSlowdown * (UPGRADE_MULT[gameState.upgrades.engine] || 1.0);
+            const engType = ENGINE_TYPES[gameState.engineType] || ENGINE_TYPES.thermonuclear;
+            const higgsHereEng = getHiggsIntensity(this.x, this.y);
+            const higgsBonusSpeed = higgsHereEng * engType.higgsSpeedBonus;
+            this.speed = (genAlloc.engine / 100) * genGain * 3.0 * (speedMult[gameState.shipType] || 1.0) * higgsSlowdown * (UPGRADE_MULT[gameState.upgrades.engine] || 1.0) * engType.speedMult + higgsBonusSpeed;
 
             // 円形マップ境界検知
             if (Math.hypot(this.x - MAP_CX, this.y - MAP_CY) > MAP_RADIUS - 100 && !dialogOpen) {
@@ -1359,6 +1406,27 @@ function updateDrawEffects(ctx) {
             ctx.beginPath(); ctx.moveTo(ef.x, ef.y); ctx.lineTo(ef.tx, ef.ty);
             ctx.strokeStyle = ef.c; ctx.lineWidth = 4 * ef.a; ctx.stroke();
             if (ef.a <= 0) effects.splice(i, 1);
+        } else if (ef.type === 'sonar') {
+            ef.r += ef.speed;
+            if (ef.r >= ef.maxR) {
+                ef.a -= 0.08;
+            } else {
+                ef.a = 0.7 * (1 - ef.r / ef.maxR) + 0.3;
+            }
+            ctx.beginPath(); ctx.arc(ef.x, ef.y, ef.r, 0, Math.PI*2);
+            ctx.strokeStyle = ef.c; ctx.globalAlpha = Math.max(0, ef.a);
+            ctx.lineWidth = 3; ctx.shadowColor = ef.c; ctx.shadowBlur = 15;
+            ctx.stroke(); ctx.shadowBlur = 0;
+            ctx.globalAlpha = 1;
+            if (ef.a <= 0) effects.splice(i, 1);
+        } else if (ef.type === 'sonar-boundary') {
+            ef.life--;
+            ef.a = (ef.life / 60) * 0.5;
+            ctx.beginPath(); ctx.arc(ef.x, ef.y, ef.r, 0, Math.PI*2);
+            ctx.strokeStyle = ef.c; ctx.globalAlpha = ef.a;
+            ctx.lineWidth = 1; ctx.setLineDash([4,4]); ctx.stroke(); ctx.setLineDash([]);
+            ctx.globalAlpha = 1;
+            if (ef.life <= 0) effects.splice(i, 1);
         } else {
             ef.r += ef.type === 'hit' ? 2 : 3; ef.a -= ef.type === 'hit' ? 0.1 : 0.05;
             ctx.beginPath(); ctx.arc(ef.x, ef.y, ef.r, 0, Math.PI * 2);
@@ -1394,6 +1462,7 @@ function generateSector() {
     omniSonarCooldown = 0;
     dirSonarCooldown = 0;
     dirSonarVisual = null;
+    dirSonarPendingFire = false;
     player = new Ship(MAP_CX, MAP_CY, true);
     player.generatorOutput = genAlloc.engine;
     enemies = []; structures = []; projectiles = []; effects = []; particles = []; debris = []; scrapDrops = [];
@@ -1670,7 +1739,38 @@ document.getElementById('btn-camera-follow').addEventListener('click', () => {
     playSound('ui');
 });
 document.getElementById('btn-scan').addEventListener('click', fireOmniSonar);
-document.getElementById('btn-dir-sonar').addEventListener('click', fireDirectionalSonar);
+
+document.getElementById('engine-type-select')?.addEventListener('change', e => {
+    gameState.engineType = e.target.value;
+    const labels = { thermonuclear: '熱核エンジン', pulse: 'パルスエンジン', higgs: 'ヒッグスエンジン', photon: 'フォトンエンジン' };
+    logMessage(`ENG: エンジンタイプを${labels[gameState.engineType]}に変更。`, 'system-msg');
+    playSound('ui');
+});
+
+document.getElementById('gen-gain')?.addEventListener('input', e => {
+    genGain = parseInt(e.target.value) / 100;
+    const valEl = document.getElementById('gen-gain-val');
+    if (valEl) valEl.textContent = `×${genGain.toFixed(1)}`;
+});
+document.getElementById('btn-dir-sonar').addEventListener('click', () => {
+    if (dirSonarCooldown > 0) {
+        logMessage(`SENSOR: 指向性ソナー再充電中... (残り ${Math.ceil(dirSonarCooldown / 60)}秒)`, 'warning-msg');
+        return;
+    }
+    if (dirSonarPendingFire) {
+        // Cancel pending
+        dirSonarPendingFire = false;
+        canvas.style.cursor = 'default';
+        document.getElementById('btn-dir-sonar').classList.remove('pending-fire');
+        logMessage('SENSOR: 指向性ソナー — 照射キャンセル。', 'system-msg');
+        return;
+    }
+    dirSonarPendingFire = true;
+    canvas.style.cursor = 'crosshair';
+    document.getElementById('btn-dir-sonar').classList.add('pending-fire');
+    logMessage('SENSOR: 指向性ソナー待機中 — 照射方向をタップ/クリックしてください。', 'system-msg');
+    playSound('ui');
+});
 document.getElementById('btn-hack').addEventListener('click', () => {
     playSound('ui');
     let closest = null; let cd = Infinity;
@@ -1774,7 +1874,8 @@ function fireOmniSonar() {
     }
     const sensorLv  = gameState.upgrades.sensor;
     const baseRange = OMNI_SONAR_RANGE[sensorLv];
-    const omniRange = baseRange * (genAlloc.sensors / 100);
+    const omniRange = baseRange * (genAlloc.sensors / 100) * genGain;
+    const sc = sensorConfig[currentSensor];
 
     playSound('ui');
     let detected = 0;
@@ -1794,22 +1895,20 @@ function fireOmniSonar() {
         ? `SONAR[全周囲] Lv${sensorLv}: ${detected}件の反応捕捉 (範囲: ${rStr}u) ─ 位置暴露注意`
         : `SONAR[全周囲] Lv${sensorLv}: 有効範囲 ${rStr}u 内に反応なし`,
         'system-msg');
-    effects.push({ x: player.x, y: player.y, r: 0, maxR: omniRange, a: 0.6, c: '#00ffaa', type: 'circle' });
+    effects.push({ x: player.x, y: player.y, r: 0, maxR: omniRange, a: 0.8, c: `rgba(${sc.r},1)`, type: 'sonar', speed: omniRange/60 });
+    effects.push({ x: player.x, y: player.y, r: omniRange, maxR: omniRange, a: 0.5, c: `rgba(${sc.r},0.8)`, type: 'sonar-boundary', life: 60 });
 }
 
 // ============================================================
 // 指向性ソナー
 // ============================================================
-function fireDirectionalSonar() {
+function fireDirectionalSonar(targetAngle) {
     if (!player || player.hp <= 0) return;
-    if (dirSonarCooldown > 0) {
-        logMessage(`SENSOR: 指向性ソナー再充電中... (残り ${Math.ceil(dirSonarCooldown / 60)}秒)`, 'warning-msg');
-        return;
-    }
+    if (dirSonarCooldown > 0) return;
+    if (targetAngle === undefined) targetAngle = Math.atan2(mouseWorldY - player.y, mouseWorldX - player.x);
     const sensorLv  = gameState.upgrades.sensor;
     const halfAngle = DIR_SONAR_HALF_ANGLE[sensorLv];
-    const maxRange  = DIR_SONAR_MAX_RANGE * (genAlloc.sensors / 100);
-    const targetAngle = Math.atan2(mouseWorldY - player.y, mouseWorldX - player.x);
+    const maxRange  = DIR_SONAR_MAX_RANGE * (genAlloc.sensors / 100) * genGain;
 
     playSound('ui');
     let detected = 0;
@@ -1922,6 +2021,53 @@ function drawPassiveAntenna(ctx) {
     }
     ctx.restore();
 
+    // MGS4スレットリング: 受信シグネチャをセンサー別に自機周りに可視化
+    if (player && player.hp > 0) {
+        const sensorColors = {
+            heat: '255,80,0', optic: '0,255,170', em: '180,50,255', higgs: '80,200,255'
+        };
+        const sensorNames = ['heat', 'optic', 'em', 'higgs'];
+        sensorNames.forEach((sName, si) => {
+            const sc2 = sensorConfig[sName];
+            let totalSig = 0;
+            enemies.forEach(e => {
+                if (e.hp <= 0) return;
+                const dist = Math.hypot(e.x - player.x, e.y - player.y);
+                const higgsBlock = getHiggsIntensity((e.x + player.x)/2, (e.y + player.y)/2);
+                const distAtten = Math.max(0, 1 - dist / (effectiveRadarRange * 2));
+                const attenuated = sc2.sig(e) * distAtten * (1 - higgsBlock * sc2.higgsMod);
+                totalSig += attenuated;
+            });
+            totalSig = Math.min(1.0, totalSig);
+            if (totalSig < 0.05) return;
+            const baseRadius = 80 + si * 35;
+            const color = sensorColors[sName];
+            const alpha = totalSig * 0.7;
+            const t2 = Date.now();
+            const pulse = 0.6 + Math.sin(t2 * 0.003 + si * 1.5) * 0.4;
+            ctx.save();
+            ctx.translate(player.x, player.y);
+            ctx.beginPath();
+            ctx.arc(0, 0, baseRadius * (0.9 + totalSig * 0.1), 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(${color},${(alpha * pulse).toFixed(3)})`;
+            ctx.lineWidth = 2 + totalSig * 2;
+            ctx.shadowColor = `rgba(${color},0.8)`;
+            ctx.shadowBlur = 8 * totalSig;
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            const dotCount = Math.max(1, Math.round(totalSig * 8));
+            ctx.fillStyle = `rgba(${color},${alpha})`;
+            for (let d = 0; d < dotCount; d++) {
+                const a = (d / dotCount) * Math.PI * 2 + (t2 * 0.0005);
+                const r = baseRadius;
+                ctx.beginPath();
+                ctx.arc(Math.cos(a)*r, Math.sin(a)*r, 2, 0, Math.PI*2);
+                ctx.fill();
+            }
+            ctx.restore();
+        });
+    }
+
     // 指向性ソナーコーン描画
     if (dirSonarVisual && dirSonarVisual.life > 0) {
         const sv = dirSonarVisual;
@@ -1949,9 +2095,13 @@ function drawPassiveAntenna(ctx) {
 function drawMinimap() {
     const mW = minimapCanvas.width, mH = minimapCanvas.height;
     minimapCtx.clearRect(0, 0, mW, mH);
-    const sX = mW / FIELD_SIZE; const sY = mH / FIELD_SIZE;
-    const cxM = MAP_CX * sX, cyM = MAP_CY * sY;
-    const rM  = MAP_RADIUS * Math.min(sX, sY);
+    // Uniform scale to keep circular map as a circle
+    const mmScale = Math.min(mW, mH) / FIELD_SIZE;
+    const offX = (mW - FIELD_SIZE * mmScale) / 2;
+    const offY = (mH - FIELD_SIZE * mmScale) / 2;
+    const cxM = MAP_CX * mmScale + offX;
+    const cyM = MAP_CY * mmScale + offY;
+    const rM  = MAP_RADIUS * mmScale;
 
     // 円形クリップ
     minimapCtx.save();
@@ -1962,7 +2112,7 @@ function drawMinimap() {
     // ヒッグス濃度オーバーレイ
     bgMist.forEach(m => {
         if (m.density <= 0.45) return;
-        const mx = m.x * sX, my = m.y * sY, mr = m.r * sX;
+        const mx = m.x * mmScale + offX, my = m.y * mmScale + offY, mr = m.r * mmScale;
         const g = minimapCtx.createRadialGradient(mx, my, 0, mx, my, mr);
         g.addColorStop(0,   `rgba(40,200,255,${(m.density * 0.35).toFixed(2)})`);
         g.addColorStop(0.5, `rgba(40,200,255,${(m.density * 0.12).toFixed(2)})`);
@@ -1973,26 +2123,72 @@ function drawMinimap() {
 
     // Viewport
     minimapCtx.strokeStyle = 'rgba(255,255,0,0.5)'; minimapCtx.lineWidth = 1;
-    minimapCtx.strokeRect(camera.x * sX, camera.y * sY, (canvas.width / camera.zoom) * sX, (canvas.height / camera.zoom) * sY);
+    minimapCtx.strokeRect(camera.x * mmScale + offX, camera.y * mmScale + offY, (canvas.width / camera.zoom) * mmScale, (canvas.height / camera.zoom) * mmScale);
 
-    // Structures
-    structures.forEach(s => {
-        minimapCtx.fillStyle = s.hacked ? '#00aaff' : 'rgba(255,255,255,0.2)';
-        minimapCtx.fillRect(s.x * sX - 2, s.y * sY - 2, 4, 4);
+    // Structures (discovered: with icon, undiscovered: very faint)
+    structures.forEach(st => {
+        const mx = st.x * mmScale + offX, my = st.y * mmScale + offY;
+        if (st.discovered || st.hacked) {
+            minimapCtx.fillStyle = st.hacked ? '#00aaff' : (st.type === 'colony' ? '#ffaa00' : '#888888');
+            minimapCtx.shadowColor = minimapCtx.fillStyle; minimapCtx.shadowBlur = 4;
+            minimapCtx.beginPath();
+            minimapCtx.moveTo(mx, my - 4); minimapCtx.lineTo(mx + 4, my);
+            minimapCtx.lineTo(mx, my + 4); minimapCtx.lineTo(mx - 4, my);
+            minimapCtx.closePath(); minimapCtx.fill();
+            minimapCtx.shadowBlur = 0;
+        } else {
+            minimapCtx.fillStyle = 'rgba(255,255,255,0.1)';
+            minimapCtx.fillRect(mx - 2, my - 2, 4, 4);
+        }
     });
 
-    // Player
-    if (player && player.hp > 0) {
-        minimapCtx.fillStyle = '#00ffaa'; minimapCtx.beginPath(); minimapCtx.arc(player.x * sX, player.y * sY, 3, 0, Math.PI * 2); minimapCtx.fill();
-    }
+    // Stations (discovered: hexagon icon)
+    stations.forEach(stn => {
+        const mx = stn.x * mmScale + offX, my = stn.y * mmScale + offY;
+        if (stn.discovered) {
+            minimapCtx.fillStyle = '#00ffff';
+            minimapCtx.shadowColor = '#00ffff'; minimapCtx.shadowBlur = 6;
+            minimapCtx.beginPath();
+            for (let i = 0; i < 6; i++) {
+                const a = (i/6)*Math.PI*2;
+                if (i===0) minimapCtx.moveTo(mx+Math.cos(a)*5, my+Math.sin(a)*5);
+                else minimapCtx.lineTo(mx+Math.cos(a)*5, my+Math.sin(a)*5);
+            }
+            minimapCtx.closePath(); minimapCtx.fill();
+            minimapCtx.shadowBlur = 0;
+        } else {
+            minimapCtx.fillStyle = 'rgba(0,255,255,0.15)';
+            minimapCtx.beginPath(); minimapCtx.arc(mx, my, 2, 0, Math.PI*2); minimapCtx.fill();
+        }
+    });
 
-    // Talos
-    minimapCtx.fillStyle = '#4da6ff';
+    // Player — improved visible marker
+    if (player && player.hp > 0) {
+        const px = player.x * mmScale + offX, py = player.y * mmScale + offY;
+        const t = Date.now();
+        // Pulsing outer ring
+        const pulse = 0.5 + Math.sin(t * 0.005) * 0.5;
+        minimapCtx.strokeStyle = `rgba(0,255,170,${0.4 + pulse * 0.4})`;
+        minimapCtx.lineWidth = 1.5;
+        minimapCtx.beginPath(); minimapCtx.arc(px, py, 7 + pulse * 2, 0, Math.PI * 2); minimapCtx.stroke();
+        // Bright center
+        minimapCtx.shadowColor = '#00ffaa'; minimapCtx.shadowBlur = 6;
+        minimapCtx.fillStyle = '#ffffff';
+        minimapCtx.beginPath(); minimapCtx.arc(px, py, 4, 0, Math.PI * 2); minimapCtx.fill();
+        minimapCtx.shadowBlur = 0;
+        // Direction arrow
+        const arrowLen = 10;
+        minimapCtx.strokeStyle = '#00ffaa'; minimapCtx.lineWidth = 1.5;
+        minimapCtx.beginPath();
+        minimapCtx.moveTo(px, py);
+        minimapCtx.lineTo(px + Math.cos(player.angle) * arrowLen, py + Math.sin(player.angle) * arrowLen);
+        minimapCtx.stroke();
+    }
 
     // Enemies (only visible ones; dead enemies are removed in game loop before minimap draws)
     minimapCtx.fillStyle = '#ff4d4d';
     enemies.forEach(e => {
-        if (e.visible && e.hp > 0) { minimapCtx.beginPath(); minimapCtx.arc(e.x * sX, e.y * sY, 2, 0, Math.PI * 2); minimapCtx.fill(); }
+        if (e.visible && e.hp > 0) { minimapCtx.beginPath(); minimapCtx.arc(e.x * mmScale + offX, e.y * mmScale + offY, 2, 0, Math.PI * 2); minimapCtx.fill(); }
     });
 
     // リソースノード (ヒッグスセンサー使用中のみミニマップ表示)
@@ -2001,7 +2197,7 @@ function drawMinimap() {
         resourceNodes.forEach(n => {
             if (!n.active) return;
             minimapCtx.beginPath();
-            minimapCtx.arc(n.x * sX, n.y * sY, 2.5, 0, Math.PI * 2);
+            minimapCtx.arc(n.x * mmScale + offX, n.y * mmScale + offY, 2.5, 0, Math.PI * 2);
             minimapCtx.fill();
         });
     }
@@ -2018,7 +2214,12 @@ function drawMinimap() {
 function handleMinimapInteraction(e) {
     const r = minimapCanvas.getBoundingClientRect();
     const mapX = e.clientX - r.left; const mapY = e.clientY - r.top;
-    const wX = (mapX / minimapCanvas.width) * FIELD_SIZE; const wY = (mapY / minimapCanvas.height) * FIELD_SIZE;
+    const mW = minimapCanvas.width, mH = minimapCanvas.height;
+    const mmScale = Math.min(mW, mH) / FIELD_SIZE;
+    const offX = (mW - FIELD_SIZE * mmScale) / 2;
+    const offY = (mH - FIELD_SIZE * mmScale) / 2;
+    const wX = (mapX - offX) / mmScale;
+    const wY = (mapY - offY) / mmScale;
     camera.x = wX - (canvas.width / 2 / camera.zoom); camera.y = wY - (canvas.height / 2 / camera.zoom);
     clampCamera();
 }
@@ -2032,8 +2233,12 @@ function handleMinimapTouchInteraction(t) {
     const r = minimapCanvas.getBoundingClientRect();
     const mapX = t.clientX - r.left;
     const mapY = t.clientY - r.top;
-    const wX = (mapX / minimapCanvas.width) * FIELD_SIZE;
-    const wY = (mapY / minimapCanvas.height) * FIELD_SIZE;
+    const mW = minimapCanvas.width, mH = minimapCanvas.height;
+    const mmScale = Math.min(mW, mH) / FIELD_SIZE;
+    const offX = (mW - FIELD_SIZE * mmScale) / 2;
+    const offY = (mH - FIELD_SIZE * mmScale) / 2;
+    const wX = (mapX - offX) / mmScale;
+    const wY = (mapY - offY) / mmScale;
     camera.x = wX - (canvas.width / 2 / camera.zoom);
     camera.y = wY - (canvas.height / 2 / camera.zoom);
     clampCamera();
@@ -2174,8 +2379,8 @@ function updateEnvInfo() {
     }
     if (radarSpan) {
         const sLv = gameState.upgrades.sensor;
-        const omniR = Math.round(OMNI_SONAR_RANGE[sLv] * (genAlloc.sensors / 100));
-        radarSpan.textContent = `全周囲 ${omniR}u / 指向 ${Math.round(DIR_SONAR_MAX_RANGE * genAlloc.sensors / 100)}u`;
+        const omniR = Math.round(OMNI_SONAR_RANGE[sLv] * (genAlloc.sensors / 100) * genGain);
+        radarSpan.textContent = `全周囲 ${omniR}u / 指向 ${Math.round(DIR_SONAR_MAX_RANGE * genAlloc.sensors / 100 * genGain)}u`;
     }
     document.getElementById('hostile-count').textContent =
         enemies.filter(e => e.visible).length > 0 ? enemies.filter(e => e.visible).length + '機' : '不明';
@@ -2190,15 +2395,37 @@ function updateEnvInfo() {
         sensorEl.style.color = sensorColors[currentSensor] || '';
     }
 
-    // 敵のシグネチャ強度を表示 (デバッグ兼ゲームプレイ情報)
+    // 受信シグネチャ強度表示 (複数の敵の最大値)
     const sigEl = document.getElementById('env-signal');
-    if (sigEl && enemies.length > 0) {
-        const boss = enemies[0];
-        const sc = { heat: boss.heatSig, optic: boss.opticalSig, em: boss.emSig, higgs: boss.higgsSig };
-        const v = sc[currentSensor] || 0;
-        const bars = '█'.repeat(Math.round(v * 5)) + '░'.repeat(5 - Math.round(v * 5));
+    if (sigEl) {
+        const sc_map = sensorConfig[currentSensor];
+        let maxSig = 0;
+        enemies.forEach(e => {
+            if (!e.visible) return;
+            const dist = Math.hypot(e.x - player.x, e.y - player.y);
+            const higgsBlock = getHiggsIntensity((e.x + player.x)/2, (e.y + player.y)/2);
+            const attenuated = sc_map.sig(e) * (1 - higgsBlock * sc_map.higgsMod);
+            maxSig = Math.max(maxSig, attenuated);
+        });
+        const bars = '█'.repeat(Math.round(maxSig * 5)) + '░'.repeat(5 - Math.round(maxSig * 5));
         sigEl.textContent = bars;
-        sigEl.style.color = v > 0.5 ? '#ff4d4d' : (v > 0.25 ? '#ffaa00' : '#444');
+        sigEl.style.color = maxSig > 0.6 ? '#ff4d4d' : (maxSig > 0.3 ? '#ffaa00' : '#888');
+    }
+    // 自機シグネチャ表示
+    const selfSigEl = document.getElementById('self-sig-display');
+    if (selfSigEl && player && player.hp > 0) {
+        const speed = Math.hypot((player.x - (player.prevX || player.x)), (player.y - (player.prevY || player.y)));
+        const heatV = Math.min(1, speed * 0.8 + (genAlloc.engine / 100) * 0.3);
+        const optV = player.isFiring ? 0.8 : 0;
+        const emV = Math.min(1, genAlloc.sensors / 100 * 0.4 + genAlloc.ai / 100 * 0.3);
+        const higgsHere = getHiggsIntensity(player.x, player.y);
+        const higgsV = Math.min(1, speed * higgsHere * 1.5);
+        const toBar = v => '█'.repeat(Math.round(v*4))+'░'.repeat(4-Math.round(v*4));
+        selfSigEl.innerHTML =
+            `<span style="color:#ff6600">H:${toBar(heatV)}</span> ` +
+            `<span style="color:#00ffaa">O:${toBar(optV)}</span><br>` +
+            `<span style="color:#cc44ff">E:${toBar(emV)}</span> ` +
+            `<span style="color:#50c8ff">G:${toBar(higgsV)}</span>`;
     }
 
     // GEN配分情報 (リソースノード数)
@@ -2416,6 +2643,15 @@ function gameLoop() {
                     createClickEffect(n.x, n.y, '#50c8ff');
                 }
             }
+        }
+
+        // 構造物・ステーションの発見チェック
+        if (player && player.hp > 0) {
+            [...structures, ...stations].forEach(s => {
+                if (!s.discovered && Math.hypot(player.x - s.x, player.y - s.y) < effectiveRadarRange * 2) {
+                    s.discovered = true;
+                }
+            });
         }
 
         // Docking Detection

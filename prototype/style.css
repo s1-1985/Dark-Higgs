@@ -645,6 +645,19 @@ input[type=range]::-webkit-slider-thumb {
     box-shadow: 0 0 15px rgba(77, 166, 255, 0.4);
 }
 
+/* 指向性ソナー待機中スタイル */
+.pending-fire {
+    border-color: #ffaa00 !important;
+    color: #ffaa00 !important;
+    background: rgba(255, 170, 0, 0.2) !important;
+    box-shadow: 0 0 12px rgba(255, 170, 0, 0.6) !important;
+    animation: pending-pulse 0.8s ease-in-out infinite alternate;
+}
+@keyframes pending-pulse {
+    from { box-shadow: 0 0 8px rgba(255,170,0,0.4); }
+    to   { box-shadow: 0 0 20px rgba(255,170,0,0.9); }
+}
+
 .btn:disabled {
     opacity: 0.3;
     pointer-events: none;
