@@ -248,6 +248,12 @@ function screenToWorld(clientX, clientY) {
     const cy = (clientY - rect.top) * (canvas.height / rect.height);
     return { x: cx / camera.zoom + camera.x, y: cy / camera.zoom + camera.y };
 }
+function worldToScreen(wx, wy) {
+    return {
+        sx: (wx - camera.x) * camera.zoom,
+        sy: (wy - camera.y) * camera.zoom
+    };
+}
 // ドラッグ差分をワールド単位に変換 (CSS/canvas解像度差を補正)
 function dragDeltaWorld(dClientX, dClientY) {
     const rect = canvas.getBoundingClientRect();
@@ -977,38 +983,180 @@ class Ship {
             }
 
             // ──────────────────────────────────────
-            // 自艦探知チェック — ヒッグスで探知範囲が変動
+            // 自機シグネチャ探知チェック
             // ──────────────────────────────────────
             const distToPlayer = Math.hypot(player.x - this.x, player.y - this.y);
             const higgsHereDetect = getHiggsIntensity(this.x, this.y);
-            // EM ∝ AI配分: プレイヤーのAI配分が高いほどEM放射増→敵に探知されやすい (設計確定仕様)
-            const playerEmBoost = 0.5 + (genAlloc.ai / 100) * 0.5; // AI=0%→0.5x, AI=100%→1.0x
+            const playerEmBoost = 0.5 + (genAlloc.ai / 100) * 0.5;
             const myDetectRange = 800 * (1 - higgsHereDetect * 0.55) * (1 + gameState.sector * 0.05) * playerEmBoost;
 
-            if (this.detectionState === 'unaware') {
+            let playerSigDetected = false;
+            let detectedSigStrength = 0;
+            if (player && player.hp > 0) {
+                const pSigs = { heat: player.heatSig||0, optic: player.opticalSig||0, em: player.emSig||0, higgs: player.higgsSig||0 };
+                ['heat','optic','em','higgs'].forEach(sName => {
+                    const sc2 = sensorConfig[sName];
+                    const higgsPath = getHiggsIntensity((player.x + this.x)/2, (player.y + this.y)/2);
+                    const distAtten = Math.max(0, 1 - distToPlayer / (myDetectRange * 2.5 * sc2.rangeScale));
+                    const attenuated = pSigs[sName] * distAtten * (1 - higgsPath * sc2.higgsMod);
+                    if (attenuated > sc2.threshold * 0.6) { playerSigDetected = true; detectedSigStrength = Math.max(detectedSigStrength, attenuated); }
+                });
+                // 接近探知
                 if (distToPlayer < myDetectRange) {
                     this.detectionTimer++;
-                    if (this.detectionTimer > 80) {
-                        this.detectionState = 'alerted';
-                        this.lurking = false;
-                        if (!this.alertLogged) {
-                            this.alertLogged = true;
-                            logMessage('WARN: 敵艦があなたを探知した！迎撃態勢に入ります。', 'warning-msg');
-                        }
-                    }
+                    if (this.detectionTimer > 60) playerSigDetected = true;
                 } else {
                     this.detectionTimer = Math.max(0, this.detectionTimer - 1);
                 }
             }
 
+            // 探知時: 状態遷移
+            if (playerSigDetected && this.aiState !== 'combat') {
+                this.huntTarget = { x: player.x + (Math.random()-0.5)*300, y: player.y + (Math.random()-0.5)*300 };
+                this.huntTimer = 480 + Math.floor(detectedSigStrength * 300);
+                if (distToPlayer < 1800 || detectedSigStrength > 0.6) {
+                    if (this.aiState !== 'combat') {
+                        this.aiState = 'combat';
+                        this.lurking = false;
+                        this.detectionState = 'alerted';
+                        if (!this.alertLogged) { this.alertLogged = true; logMessage('WARN: 敵艦があなたのシグネチャを捕捉。迎撃態勢に入ります。', 'warning-msg'); }
+                    }
+                } else if (this.aiState === 'lurking' || this.aiState === 'gathering') {
+                    this.aiState = 'hunting';
+                    this.gatherTarget = null;
+                    this.lurking = false;
+                    logMessage(`SENSOR: 敵艦が索敵パターンに移行。接近警戒。`, 'warning-msg');
+                }
+            }
+
+            // キャリア: ドローン製造
+            if (this.type === 'carrier') {
+                this.droneSpawnTimer--;
+                if (this.droneSpawnTimer <= 0 && enemies.filter(e=>e.hp>0).length < 5) {
+                    const drone = new Ship(
+                        this.x + (Math.random()-0.5)*300,
+                        this.y + (Math.random()-0.5)*300, false, 'fighter'
+                    );
+                    drone.aiState = 'hunting';
+                    drone.huntTarget = { x: player.x, y: player.y };
+                    drone.huntTimer = 600;
+                    drone.lurking = false;
+                    enemies.push(drone);
+                    this.droneSpawnTimer = 600 + Math.floor(Math.random() * 600);
+                    logMessage('TACTICAL: 敵空母がファイタードローンを射出！', 'warning-msg');
+                }
+            }
+
             // ──────────────────────────────────────
-            // 潜伏モード — ヒッグス濃度の高い場所を探す
+            // 状態別AI実行
             // ──────────────────────────────────────
-            if (this.lurking || this.detectionState === 'unaware') {
-                this.speed = 0.07; // 極低速 (熱源シグネチャを検知閾値以下に抑える)
-                if (this.state === 'idle' && Math.random() < 0.004) {
-                    const hideSpot = findHidingSpot(this.x, this.y, 2000);
-                    this.setTarget(hideSpot.x, hideSpot.y);
+            if (this.aiState === 'combat') {
+                this.lurking = false;
+                const fireRange = 700 + gameState.sector * 25;
+                this.speed = Math.min(2.0, 0.9 + gameState.sector * 0.08);
+
+                if (distToPlayer < fireRange && this.fireCooldown <= 0 && player && player.hp > 0) {
+                    const ta = Math.atan2(player.y - this.y, player.x - this.x);
+                    let diff = ta - this.angle;
+                    while (diff < -Math.PI) diff += Math.PI * 2;
+                    while (diff > Math.PI) diff -= Math.PI * 2;
+                    this.angle += diff * 0.1;
+                    const wType = gameState.sector <= 2 ? 'kinetic' : (gameState.sector <= 4 ? 'missile' : 'beam');
+                    this.weaponType = wType;
+                    projectiles.push(new Projectile(this.x, this.y, player, false, wType));
+                    playSound('shoot');
+                    this.fireCooldown = 150;
+                    this.fireFlashTimer = 120;
+                    this.visible = true;
+                    const sigLabel = { kinetic: '銃口炎[光学]', missile: '推進炎[熱源+EM]', beam: 'EMパルス[EM+光学]' };
+                    effects.push({ x: this.x, y: this.y, r: 0, maxR: 200, a: 0.9, c: '#ff4d4d', type: 'circle' });
+                    logMessage(`WARNING: 敵艦発砲 — ${sigLabel[wType]||''}シグネチャ捕捉。`, 'warning-msg');
+                    this.postFireCooldown = 280;
+                } else if (distToPlayer > fireRange * 0.8 && player && player.hp > 0) {
+                    const ta = Math.atan2(player.y - this.y, player.x - this.x);
+                    let diff = ta - this.angle;
+                    while (diff < -Math.PI) diff += Math.PI * 2;
+                    while (diff > Math.PI) diff -= Math.PI * 2;
+                    this.angle += diff * 0.05;
+                    this.x += Math.cos(this.angle) * this.speed;
+                    this.y += Math.sin(this.angle) * this.speed;
+                }
+                // シグネチャ喪失 → lurking
+                if (!playerSigDetected) {
+                    this.huntTimer = Math.max(0, this.huntTimer - 1);
+                    if (this.huntTimer <= 0) { this.aiState = 'lurking'; this.lurking = true; this.alertLogged = false; this.detectionState = 'unaware'; }
+                } else {
+                    this.huntTimer = Math.min(600, this.huntTimer + 2);
+                }
+
+            } else if (this.aiState === 'hunting') {
+                this.lurking = false;
+                this.speed = Math.min(1.5, 0.8 + gameState.sector * 0.06);
+                if (this.huntTimer > 0) this.huntTimer--;
+                if (this.huntTarget) {
+                    const dist = Math.hypot(this.huntTarget.x - this.x, this.huntTarget.y - this.y);
+                    if (dist > this.speed * 2) {
+                        const ta = Math.atan2(this.huntTarget.y - this.y, this.huntTarget.x - this.x);
+                        let diff = ta - this.angle;
+                        while (diff < -Math.PI) diff += Math.PI * 2;
+                        while (diff > Math.PI) diff -= Math.PI * 2;
+                        this.angle += diff * 0.05;
+                        this.x += Math.cos(this.angle) * this.speed;
+                        this.y += Math.sin(this.angle) * this.speed;
+                    } else {
+                        this.huntTarget = null;
+                    }
+                }
+                if (this.huntTimer <= 0 && !playerSigDetected) { this.aiState = 'lurking'; this.lurking = true; this.detectionState = 'unaware'; }
+
+            } else if (this.aiState === 'gathering') {
+                this.lurking = false;
+                this.speed = Math.min(1.2, 0.7 + gameState.sector * 0.05);
+                // 最寄りノード探索
+                if (!this.gatherTarget || !this.gatherTarget.active) {
+                    let closest = null, closestDist = Infinity;
+                    resourceNodes.forEach(n => { if (!n.active) return; const d = Math.hypot(n.x-this.x, n.y-this.y); if (d < closestDist) { closestDist=d; closest=n; } });
+                    this.gatherTarget = closest;
+                    if (!closest) { this.aiState = 'lurking'; this.lurking = true; }
+                }
+                if (this.gatherTarget) {
+                    const dist = Math.hypot(this.gatherTarget.x - this.x, this.gatherTarget.y - this.y);
+                    if (dist > 50) {
+                        const ta = Math.atan2(this.gatherTarget.y - this.y, this.gatherTarget.x - this.x);
+                        let diff = ta - this.angle;
+                        while (diff < -Math.PI) diff += Math.PI * 2;
+                        while (diff > Math.PI) diff -= Math.PI * 2;
+                        this.angle += diff * 0.05;
+                        this.x += Math.cos(this.angle) * this.speed;
+                        this.y += Math.sin(this.angle) * this.speed;
+                    } else if (this.gatherTarget.active) {
+                        this.gatherTarget.active = false;
+                        this.gatherTarget.emFlashTimer = 120;
+                        this.resourcePoints++;
+                        if (this.resourcePoints >= 2) {
+                            this.maxHp = Math.min(this.maxHp * 1.25, 4000);
+                            this.hp = Math.min(this.hp + 150, this.maxHp);
+                            this.resourcePoints = 0;
+                            logMessage('SENSOR: 敵艦がリソースを回収し戦力を強化した。警戒せよ！', 'warning-msg');
+                        }
+                        this.gatherTarget = null;
+                        this.aiState = 'lurking'; this.lurking = true;
+                    }
+                }
+
+            } else {
+                // lurking (default)
+                this.lurking = true;
+                this.speed = 0.08;
+                const activeNodes = resourceNodes.filter(n => n.active);
+                if (this.state === 'idle') {
+                    if (activeNodes.length > 0 && Math.random() < 0.003) {
+                        this.aiState = 'gathering';
+                        logMessage('SENSOR: 敵艦がリソース収集パターンに移行。', 'system-msg');
+                    } else if (Math.random() < 0.004) {
+                        const hideSpot = findHidingSpot(this.x, this.y, 2500);
+                        this.setTarget(hideSpot.x, hideSpot.y);
+                    }
                 }
                 if (this.state === 'moving') {
                     const dist = Math.hypot(this.targetX - this.x, this.targetY - this.y);
@@ -1022,43 +1170,6 @@ class Ship {
                         this.angle += diff * 0.02;
                     } else this.state = 'idle';
                 }
-
-            // ──────────────────────────────────────
-            // 戦闘モード — 射程に入ったら発砲、即再配置
-            // ──────────────────────────────────────
-            } else if (this.detectionState === 'alerted') {
-                const fireRange = 650 + gameState.sector * 20; // セクターが深いほど長射程
-                this.speed = 0.7;
-
-                if (distToPlayer < fireRange && this.fireCooldown <= 0) {
-                    // 発砲！
-                    const wType = gameState.sector <= 2 ? 'kinetic' : (gameState.sector <= 4 ? 'missile' : 'beam');
-                    this.weaponType = wType;
-                    projectiles.push(new Projectile(this.x, this.y, player, false, wType));
-                    playSound('shoot');
-                    this.fireCooldown = 180;
-
-                    // 発砲フラッシュ — 約2秒間、位置が露わになる
-                    this.fireFlashTimer = 120;
-                    this.visible = true;
-                    const sigLabel = { kinetic: '銃口炎[光学]', missile: '推進炎[熱源+EM]', beam: 'EMパルス[EM+光学]' };
-                    effects.push({ x: this.x, y: this.y, r: 0, maxR: 200, a: 0.9, c: '#ff4d4d', type: 'circle' });
-                    logMessage(`WARNING: 敵艦発砲検知 — ${sigLabel[wType] || '不明'}シグネチャ捕捉。`, 'warning-msg');
-
-                    // 発砲後すぐに再配置開始
-                    this.postFireCooldown = 300;
-
-                } else if (distToPlayer > fireRange * 0.7) {
-                    // 射程に入るまで慎重に接近
-                    const ta = Math.atan2(player.y - this.y, player.x - this.x);
-                    let diff = ta - this.angle;
-                    while (diff < -Math.PI) diff += Math.PI * 2;
-                    while (diff > Math.PI) diff -= Math.PI * 2;
-                    this.angle += diff * 0.04;
-                    this.x += Math.cos(this.angle) * this.speed;
-                    this.y += Math.sin(this.angle) * this.speed;
-                }
-                // 射程内に入った後はじっと待って次の射撃機会を伺う
             }
         }
 
@@ -2387,6 +2498,93 @@ function drawBackground(ctx) {
     ctx.restore();
 }
 
+// オシロスコープ風シグネチャ表示
+const _sigHistory = { heat: [], optic: [], em: [], higgs: [] };
+const _SIG_HIST_LEN = 60;
+
+function updateSigCanvas() {
+    if (!player || player.hp <= 0) return;
+    const sigCanvas = document.getElementById('sig-canvas');
+    if (!sigCanvas) return;
+    const sc = sigCanvas.getContext('2d');
+    const w = sigCanvas.width, h = sigCanvas.height;
+    sc.clearRect(0, 0, w, h);
+    sc.fillStyle = 'rgba(0,5,12,0.9)';
+    sc.fillRect(0, 0, w, h);
+
+    const spd = Math.hypot(player.x-(player.prevX||player.x), player.y-(player.prevY||player.y));
+    const engType = ENGINE_TYPES[gameState.engineType]||ENGINE_TYPES.thermonuclear;
+    const hHere = getHiggsIntensity(player.x, player.y);
+    const currentVals = {
+        heat:  Math.min(1, (spd * 0.6 + genAlloc.engine/100*0.25) * engType.heatMult),
+        optic: Math.min(1, player.opticalSig||0),
+        em:    Math.min(1, (genAlloc.sensors/100*0.4 + genAlloc.ai/100*0.35) * engType.emMult),
+        higgs: Math.min(1, spd * hHere * 2.0 * (engType.higgsSpeedBonus>0 ? 1 : 0.3))
+    };
+
+    const sigs = [
+        { key: 'heat',  color: '#ff6600', label: 'H', freq: 2.1 },
+        { key: 'optic', color: '#00ffaa', label: 'O', freq: 3.4 },
+        { key: 'em',    color: '#cc44ff', label: 'E', freq: 1.8 },
+        { key: 'higgs', color: '#50c8ff', label: 'G', freq: 4.0 }
+    ];
+
+    sigs.forEach(sig => {
+        _sigHistory[sig.key].push(currentVals[sig.key]);
+        if (_sigHistory[sig.key].length > _SIG_HIST_LEN) _sigHistory[sig.key].shift();
+    });
+
+    const t = Date.now() * 0.002;
+    const rowH = h / 4;
+
+    sigs.forEach((sig, i) => {
+        const cy = (i + 0.5) * rowH;
+        const v = currentVals[sig.key];
+        const hist = _sigHistory[sig.key];
+
+        // グリッド線
+        sc.strokeStyle = 'rgba(255,255,255,0.08)';
+        sc.lineWidth = 0.5;
+        sc.beginPath(); sc.moveTo(0, cy); sc.lineTo(w, cy); sc.stroke();
+
+        // ラベル
+        sc.fillStyle = sig.color;
+        sc.font = 'bold 7px monospace';
+        sc.fillText(sig.label, 2, cy + 3);
+
+        // 波形 (履歴+サインノイズ)
+        sc.shadowColor = sig.color;
+        sc.shadowBlur = v > 0.1 ? 4 : 0;
+        sc.strokeStyle = sig.color;
+        sc.lineWidth = 1.2;
+        sc.beginPath();
+        const xStart = 10;
+        const xEnd = w - 2;
+        const histLen = hist.length;
+        for (let x = xStart; x <= xEnd; x++) {
+            const progress = (x - xStart) / (xEnd - xStart);
+            const histIdx = Math.floor(progress * (histLen - 1));
+            const hVal = hist[histIdx] || 0;
+            const noise = Math.sin(t * sig.freq + progress * 14 + i) * 0.15;
+            const y = cy - (hVal + noise * hVal) * rowH * 0.42;
+            if (x === xStart) sc.moveTo(x, y); else sc.lineTo(x, y);
+        }
+        sc.stroke();
+        sc.shadowBlur = 0;
+    });
+
+    // 右端に現在値バー
+    sigs.forEach((sig, i) => {
+        const cy = (i + 0.5) * rowH;
+        const v = currentVals[sig.key];
+        const barH = Math.max(2, v * rowH * 0.85);
+        sc.fillStyle = sig.color;
+        sc.globalAlpha = 0.7;
+        sc.fillRect(w - 4, cy - barH/2, 3, barH);
+        sc.globalAlpha = 1;
+    });
+}
+
 // ============================================================
 // 環境情報パネル動的更新
 // ============================================================
@@ -2437,22 +2635,7 @@ function updateEnvInfo() {
         sigEl.textContent = bars;
         sigEl.style.color = maxSig > 0.6 ? '#ff4d4d' : (maxSig > 0.3 ? '#ffaa00' : '#888');
     }
-    // 自機シグネチャ表示
-    const selfSigEl = document.getElementById('self-sig-display');
-    if (selfSigEl && player && player.hp > 0) {
-        const speed = Math.hypot((player.x - (player.prevX || player.x)), (player.y - (player.prevY || player.y)));
-        const heatV = Math.min(1, speed * 0.8 + (genAlloc.engine / 100) * 0.3);
-        const optV = player.isFiring ? 0.8 : 0;
-        const emV = Math.min(1, genAlloc.sensors / 100 * 0.4 + genAlloc.ai / 100 * 0.3);
-        const higgsHere = getHiggsIntensity(player.x, player.y);
-        const higgsV = Math.min(1, speed * higgsHere * 1.5);
-        const toBar = v => '█'.repeat(Math.round(v*4))+'░'.repeat(4-Math.round(v*4));
-        selfSigEl.innerHTML =
-            `<span style="color:#ff6600">H:${toBar(heatV)}</span> ` +
-            `<span style="color:#00ffaa">O:${toBar(optV)}</span><br>` +
-            `<span style="color:#cc44ff">E:${toBar(emV)}</span> ` +
-            `<span style="color:#50c8ff">G:${toBar(higgsV)}</span>`;
-    }
+    updateSigCanvas();
 
     // GEN配分情報 (リソースノード数)
     const nodeEl = document.getElementById('env-nodes');
@@ -2483,25 +2666,165 @@ function showSectorClear(bonus) {
 function drawTargetLine(ctx) {
     if (player.targetEntity && player.targetEntity.hp > 0) {
         ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(player.targetEntity.x, player.targetEntity.y);
-        ctx.setLineDash([5, 10]); ctx.strokeStyle = 'rgba(255, 77, 77, 0.4)'; ctx.stroke(); ctx.setLineDash([]);
+        ctx.setLineDash([5, 10]); ctx.strokeStyle = 'rgba(255, 77, 77, 0.5)';
+        ctx.lineWidth = Math.max(2, 4 / camera.zoom); ctx.stroke(); ctx.setLineDash([]);
         ctx.beginPath(); ctx.arc(player.targetEntity.x, player.targetEntity.y, player.targetEntity.radius + 5, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(255, 77, 77, 0.8)'; ctx.stroke();
-    } else if (player.state === 'moving') {
+        ctx.strokeStyle = 'rgba(255, 77, 77, 0.9)';
+        ctx.lineWidth = Math.max(2, 3 / camera.zoom); ctx.stroke();
+    }
+    // World-space waypoint indicator (light version, main detail in HUD overlay)
+    else if (player.state === 'moving') {
+        const lineW = Math.max(3, 6 / camera.zoom);
         ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(player.targetX, player.targetY);
-        ctx.setLineDash([10, 14]);
-        ctx.strokeStyle = 'rgba(0,255,170,0.85)';
-        ctx.lineWidth = 2;
-        ctx.shadowColor = '#00ffaa'; ctx.shadowBlur = 6;
+        ctx.setLineDash([Math.max(8, 12/camera.zoom), Math.max(5, 8/camera.zoom)]);
+        ctx.strokeStyle = 'rgba(0,200,255,0.55)';
+        ctx.lineWidth = lineW;
+        ctx.shadowColor = '#00ffff'; ctx.shadowBlur = 8;
         ctx.stroke();
         ctx.setLineDash([]); ctx.lineWidth = 1; ctx.shadowBlur = 0;
-        // ウェイポイントマーカー
-        ctx.beginPath(); ctx.arc(player.targetX, player.targetY, 10, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(0,255,170,0.9)'; ctx.lineWidth = 2;
-        ctx.shadowColor = '#00ffaa'; ctx.shadowBlur = 10; ctx.stroke();
-        ctx.shadowBlur = 0; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.arc(player.targetX, player.targetY, 3, 0, Math.PI * 2);
-        ctx.fillStyle = '#00ffaa'; ctx.fill();
     }
+}
+
+// ============================================================
+// HUDオーバーレイ描画 (スクリーン空間 — ズームに関わらず固定サイズ)
+// ============================================================
+function drawHUDOverlay(ctx) {
+    if (!player || player.hp <= 0) return;
+    const { sx: psx, sy: psy } = worldToScreen(player.x, player.y);
+    const t = Date.now();
+
+    // ── 自機マーカー (常に固定サイズ) ──
+    const mS = 14; // marker size in screen pixels
+    ctx.save();
+    ctx.translate(psx, psy);
+    ctx.rotate(player.angle);
+    ctx.shadowColor = '#00ffaa'; ctx.shadowBlur = 12;
+    ctx.fillStyle = '#00ffaa';
+    ctx.beginPath();
+    ctx.moveTo(mS, 0);
+    ctx.lineTo(-mS * 0.6, -mS * 0.55);
+    ctx.lineTo(-mS * 0.25, 0);
+    ctx.lineTo(-mS * 0.6, mS * 0.55);
+    ctx.closePath();
+    ctx.fill();
+    // パルスリング
+    const pulse = 0.4 + Math.sin(t * 0.005) * 0.3;
+    ctx.globalAlpha = pulse;
+    ctx.strokeStyle = '#00ffaa';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, mS * 1.6 + pulse * 4, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+    ctx.restore();
+
+    // ── ウェイポイントライン + 目的地マーカー ──
+    if (player.state === 'moving') {
+        const { sx: tsx, sy: tsy } = worldToScreen(player.targetX, player.targetY);
+        ctx.save();
+        // 明るい破線
+        ctx.setLineDash([10, 6]);
+        ctx.strokeStyle = '#00ffff';
+        ctx.lineWidth = 1.8;
+        ctx.shadowColor = '#00ffff'; ctx.shadowBlur = 5;
+        ctx.beginPath(); ctx.moveTo(psx, psy); ctx.lineTo(tsx, tsy); ctx.stroke();
+        ctx.setLineDash([]); ctx.shadowBlur = 0;
+
+        // 目的地マーカー (回転クロスヘア + リング)
+        ctx.translate(tsx, tsy);
+        const rot = t * 0.0008;
+        const r = 16;
+        // 外リング
+        ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 2; ctx.shadowColor = '#00ffff'; ctx.shadowBlur = 12;
+        ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
+        // 内側ダイヤ
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.shadowBlur = 6;
+        ctx.beginPath();
+        ctx.moveTo(0, -r * 0.5); ctx.lineTo(r * 0.5, 0); ctx.lineTo(0, r * 0.5); ctx.lineTo(-r * 0.5, 0);
+        ctx.closePath(); ctx.stroke();
+        // 回転腕
+        ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 1.5; ctx.shadowBlur = 8;
+        for (let arm = 0; arm < 4; arm++) {
+            const a = arm * Math.PI / 2 + rot;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+            ctx.lineTo(Math.cos(a) * (r + 8), Math.sin(a) * (r + 8));
+            ctx.stroke();
+        }
+        ctx.shadowBlur = 0;
+        ctx.restore();
+    }
+
+    // ── 可視敵コンタクト (固定サイズダイヤ) ──
+    enemies.forEach(e => {
+        if (!e.visible || e.hp <= 0) return;
+        const dispX = e.contactLife > 0 ? e.displayX : e.x;
+        const dispY = e.contactLife > 0 ? e.displayY : e.y;
+        const { sx: esx, sy: esy } = worldToScreen(dispX, dispY);
+        // 画面外はスキップ
+        if (esx < -30 || esx > canvas.width + 30 || esy < -30 || esy > canvas.height + 30) return;
+        const er = 9;
+        const acc = e.contactAccuracy;
+        const col = acc > 0.7 ? '#ff4d4d' : (acc > 0.4 ? '#ff8800' : '#aaaaaa');
+        ctx.save();
+        ctx.translate(esx, esy);
+        // ダイヤマーカー
+        ctx.shadowColor = col; ctx.shadowBlur = 8;
+        ctx.fillStyle = col;
+        ctx.globalAlpha = 0.8 + Math.sin(t * 0.008) * 0.2;
+        ctx.beginPath();
+        ctx.moveTo(0, -er); ctx.lineTo(er, 0); ctx.lineTo(0, er); ctx.lineTo(-er, 0);
+        ctx.closePath(); ctx.fill();
+        // 不確かさリング
+        ctx.globalAlpha = 0.6;
+        ctx.strokeStyle = col; ctx.lineWidth = 1;
+        const unc = er + (1 - acc) * 14;
+        ctx.beginPath(); ctx.arc(0, 0, unc, 0, Math.PI * 2);
+        ctx.setLineDash([2, 4]); ctx.stroke(); ctx.setLineDash([]);
+        ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+        ctx.restore();
+    });
+
+    // ── MGS4スレットリング (スクリーン空間) ──
+    const sensorColors = { heat: '255,80,0', optic: '0,255,170', em: '180,50,255', higgs: '80,200,255' };
+    ['heat','optic','em','higgs'].forEach((sName, si) => {
+        const sc2 = sensorConfig[sName];
+        let totalSig = 0;
+        enemies.forEach(e => {
+            if (e.hp <= 0) return;
+            const dist = Math.hypot(e.x - player.x, e.y - player.y);
+            const higgsPath = getHiggsIntensity((e.x + player.x)/2, (e.y + player.y)/2);
+            const distAtten = Math.max(0, 1 - dist / (effectiveRadarRange * 2.5));
+            totalSig += sc2.sig(e) * distAtten * (1 - higgsPath * sc2.higgsMod);
+        });
+        totalSig = Math.min(1.0, totalSig);
+        if (totalSig < 0.05) return;
+        const baseR = 28 + si * 12; // screen pixels
+        const color = sensorColors[sName];
+        const pulse2 = 0.55 + Math.sin(t * 0.003 + si * 1.5) * 0.45;
+        const alpha = totalSig * pulse2 * 0.9;
+        ctx.save();
+        ctx.translate(psx, psy);
+        ctx.beginPath();
+        ctx.arc(0, 0, baseR, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(${color},${alpha.toFixed(3)})`;
+        ctx.lineWidth = 1.5 + totalSig * 2.5;
+        ctx.shadowColor = `rgba(${color},0.9)`;
+        ctx.shadowBlur = 10 * totalSig;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        // 方向ドット
+        const dotCount = Math.max(2, Math.round(totalSig * 10));
+        ctx.fillStyle = `rgba(${color},${alpha.toFixed(3)})`;
+        for (let d = 0; d < dotCount; d++) {
+            const a = (d / dotCount) * Math.PI * 2 + t * 0.0005 * (si % 2 === 0 ? 1 : -1);
+            ctx.beginPath();
+            ctx.arc(Math.cos(a) * baseR, Math.sin(a) * baseR, 2, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+    });
 }
 
 function gameLoop() {
@@ -2784,6 +3107,7 @@ function gameLoop() {
 
         ctx.restore();
 
+        drawHUDOverlay(ctx);
         drawMinimap();
         updateEnvInfo();
 
