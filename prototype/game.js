@@ -230,9 +230,12 @@ function addShake(amt) {
 }
 
 function clampCamera() {
-    const margin = 200;
-    camera.x = Math.max(-margin, Math.min(camera.x, FIELD_SIZE + margin - (canvas.width || window.innerWidth) / camera.zoom));
-    camera.y = Math.max(-margin, Math.min(camera.y, FIELD_SIZE + margin - (canvas.height || window.innerHeight) / camera.zoom));
+    // マップの一部が画面内に残る程度まで自由にスクロール可能
+    const vw = (canvas.width || window.innerWidth) / camera.zoom;
+    const vh = (canvas.height || window.innerHeight) / camera.zoom;
+    const minVisible = 400; // この分だけマップが画面内に残る (ワールド単位)
+    camera.x = Math.max(minVisible - vw, Math.min(camera.x, FIELD_SIZE - minVisible));
+    camera.y = Math.max(minVisible - vh, Math.min(camera.y, FIELD_SIZE - minVisible));
 }
 
 function centerCameraOnPlayer() {
@@ -273,10 +276,10 @@ function updateCameraFollowBtn() {
     const btn = document.getElementById('btn-camera-follow');
     if (!btn) return;
     if (cameraFollowPlayer) {
-        btn.textContent = '追従 ON';
+        btn.innerHTML = '<span class="aicon">⊕</span><span class="alabel">FOL ON</span>';
         btn.classList.add('active');
     } else {
-        btn.textContent = '追従 OFF';
+        btn.innerHTML = '<span class="aicon">⊕</span><span class="alabel">FOL</span>';
         btn.classList.remove('active');
     }
 }
@@ -1974,12 +1977,12 @@ document.getElementById('btn-attack-toggle')?.addEventListener('click', () => {
     const btn = document.getElementById('btn-attack-toggle');
     if (btn) {
         if (autoAttackEnabled) {
-            btn.textContent = '攻撃\nON';
+            btn.innerHTML = '<span class="aicon">⚔</span><span class="alabel">ATK ON</span>';
             btn.style.background = 'rgba(0,180,60,0.25)';
             btn.style.borderColor = '#00b43c';
             btn.style.color = '#00ff66';
         } else {
-            btn.textContent = '攻撃\nOFF';
+            btn.innerHTML = '<span class="aicon">⚔</span><span class="alabel">ATK OFF</span>';
             btn.style.background = 'rgba(180,0,0,0.25)';
             btn.style.borderColor = '#b40000';
             btn.style.color = '#ff4444';
@@ -1990,6 +1993,23 @@ document.getElementById('btn-attack-toggle')?.addEventListener('click', () => {
 });
 
 document.getElementById('btn-scan').addEventListener('click', fireOmniSonar);
+
+// ── モバイルメニュー ──
+(function initMobileMenu() {
+    const menuBtn = document.getElementById('mobile-menu-btn');
+    const menuModal = document.getElementById('mobile-menu-modal');
+    if (!menuBtn || !menuModal) return;
+    menuBtn.addEventListener('click', () => menuModal.classList.toggle('hidden'));
+    document.getElementById('mm-close')?.addEventListener('click', () => menuModal.classList.add('hidden'));
+    document.getElementById('mm-save')?.addEventListener('click', () => {
+        document.getElementById('btn-save').click();
+        menuModal.classList.add('hidden');
+    });
+    document.getElementById('mm-reset')?.addEventListener('click', () => {
+        document.getElementById('btn-reset').click();
+        menuModal.classList.add('hidden');
+    });
+})();
 
 document.getElementById('engine-type-select')?.addEventListener('change', e => {
     gameState.engineType = e.target.value;
@@ -2878,6 +2898,41 @@ function updateEnvInfo() {
         }
         ammoEl.textContent = ammoText;
     }
+
+    // ── モバイルステータスバー同期 ──
+    const msbHpFill = document.getElementById('msb-hp-fill');
+    const msbHpText = document.getElementById('msb-hp-text');
+    const msbHiggs  = document.getElementById('msb-higgs');
+    const msbEnemies = document.getElementById('msb-enemies');
+    const msbAmmo   = document.getElementById('msb-ammo');
+    const msbNodes  = document.getElementById('msb-nodes');
+    if (player && player.hp > 0) {
+        const hpPct = Math.max(0, Math.round((player.hp / player.maxHp) * 100));
+        if (msbHpFill) msbHpFill.style.width = hpPct + '%';
+        if (msbHpText) msbHpText.textContent = hpPct + '%';
+        if (msbHiggs) msbHiggs.textContent = Math.round(getHiggsIntensity(player.x, player.y) * 100) + '%';
+        if (msbEnemies) msbEnemies.textContent = enemies.filter(e => e.visible).length || '?';
+        if (msbAmmo) {
+            const wTypeMsb = document.getElementById('weapon-select')?.value || 'kinetic';
+            if (wTypeMsb === 'kinetic') {
+                msbAmmo.textContent = player.kineticReloading ? 'RLD' : `${player.kineticAmmo}/${player.kineticMaxAmmo}`;
+                msbAmmo.style.color = player.kineticReloading ? '#ff4444' : '#ffaa00';
+            } else {
+                const rld = (wTypeMsb === 'missile' ? player.missileReloading : player.beamReloading);
+                msbAmmo.textContent = rld ? 'RLD' : 'RDY';
+                msbAmmo.style.color = rld ? '#ff4444' : '#00ff88';
+            }
+        }
+        if (msbNodes) {
+            const an = resourceNodes.filter(n => n.active).length;
+            msbNodes.textContent = `${an}/${resourceNodes.length}`;
+        }
+    }
+    // メニューモーダルのセクター/クレジットも同期
+    const mmSector = document.getElementById('mm-sector');
+    const mmCredits = document.getElementById('mm-credits');
+    if (mmSector) mmSector.textContent = `セクター: ${gameState.sector}`;
+    if (mmCredits) mmCredits.textContent = `クレジット: ${gameState.credits} SCR`;
 }
 
 // ============================================================
@@ -3105,7 +3160,9 @@ function gameLoop() {
             omniSonarCooldown--;
             const btnOmni = document.getElementById('btn-scan');
             if (btnOmni) {
-                btnOmni.textContent = omniSonarCooldown > 0 ? `全周囲ソナー (${Math.ceil(omniSonarCooldown/60)}s)` : '全周囲ソナー';
+                btnOmni.innerHTML = omniSonarCooldown > 0
+                    ? `<span class="aicon">◎</span><span class="alabel">${Math.ceil(omniSonarCooldown/60)}s</span>`
+                    : `<span class="aicon">◎</span><span class="alabel">SONAR</span>`;
                 btnOmni.disabled = omniSonarCooldown > 0;
             }
         }
@@ -3113,7 +3170,9 @@ function gameLoop() {
             dirSonarCooldown--;
             const btnDir = document.getElementById('btn-dir-sonar');
             if (btnDir) {
-                btnDir.textContent = dirSonarCooldown > 0 ? `指向性ソナー (${Math.ceil(dirSonarCooldown/60)}s)` : '指向性ソナー';
+                btnDir.innerHTML = dirSonarCooldown > 0
+                    ? `<span class="aicon">⟶</span><span class="alabel">${Math.ceil(dirSonarCooldown/60)}s</span>`
+                    : `<span class="aicon">⟶</span><span class="alabel">DIR</span>`;
                 btnDir.disabled = dirSonarCooldown > 0;
             }
         }
