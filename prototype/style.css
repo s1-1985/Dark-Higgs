@@ -1046,6 +1046,33 @@ input[type=range]::-webkit-slider-thumb {
         gap: 10px;
     }
     .prompt-content span { font-size: 11px; }
+
+    /* ─── タイトル/ロビー: モバイル対応 ─── */
+    #ship-select-lobby {
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 8px;
+    }
+    .lobby-container {
+        padding: 12px 8px;
+        width: 100%;
+        max-width: 100%;
+        overflow-y: auto;
+    }
+    .lobby-title { font-size: 16px; margin-bottom: 4px; }
+    .lobby-subtitle { font-size: 9px; margin-bottom: 8px; }
+    .mode-cards { flex-direction: column; gap: 6px; }
+    .mode-card { padding: 8px 10px; }
+    .mode-name { font-size: 11px; }
+    .mode-desc { font-size: 8px; }
+    .ship-cards { flex-direction: column; gap: 8px; align-items: center; }
+    .ship-card { width: min(320px, 90vw); padding: 10px; }
+    .ship-icon { font-size: 24px; }
+    .ship-name { font-size: 13px; }
+    .ship-desc { font-size: 9px; margin: 3px 0; }
+    .stat-row span { font-size: 8px; width: 24px; }
+    .ship-ability { font-size: 8px; }
+    .ship-select-btn { padding: 8px 12px; font-size: 10px; min-height: 36px; }
 }
 
 /* ═══════════════════════════════════════════
