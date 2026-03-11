@@ -273,11 +273,13 @@ function updateCameraFollowBtn() {
     const btn = document.getElementById('btn-camera-follow');
     if (!btn) return;
     if (cameraFollowPlayer) {
-        btn.textContent = '追従 ON';
-        btn.classList.add('active');
+        btn.classList.add('active-follow');
+        const lbl = document.getElementById('follow-label');
+        if (lbl) lbl.textContent = '追従 ON';
     } else {
-        btn.textContent = '追従 OFF';
-        btn.classList.remove('active');
+        btn.classList.remove('active-follow');
+        const lbl = document.getElementById('follow-label');
+        if (lbl) lbl.textContent = '追従 OFF';
     }
 }
 
@@ -2203,14 +2205,13 @@ document.getElementById('btn-attack-toggle')?.addEventListener('click', () => {
     autoAttackEnabled = !autoAttackEnabled;
     const btn = document.getElementById('btn-attack-toggle');
     if (btn) {
+        const atkLbl = document.getElementById('attack-label');
         if (autoAttackEnabled) {
-            btn.textContent = '攻撃\nON';
-            btn.style.background = 'rgba(0,180,60,0.25)';
+            if (atkLbl) atkLbl.textContent = '攻撃 ON';
             btn.style.borderColor = '#00b43c';
             btn.style.color = '#00ff66';
         } else {
-            btn.textContent = '攻撃\nOFF';
-            btn.style.background = 'rgba(180,0,0,0.25)';
+            if (atkLbl) atkLbl.textContent = '攻撃 OFF';
             btn.style.borderColor = '#b40000';
             btn.style.color = '#ff4444';
         }
@@ -2282,7 +2283,7 @@ const SENSOR_INFO = {
     if (!btn) return;
     btn.addEventListener('click', () => {
         currentSensor = s;
-        document.querySelectorAll('.sensor-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.sns-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         logMessage(`SENSOR: ${SENSOR_INFO[s].name}に切替。${SENSOR_INFO[s].tip}`, 'system-msg');
         playSound('ui');
