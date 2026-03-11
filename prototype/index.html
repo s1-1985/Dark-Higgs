@@ -107,31 +107,143 @@
                             </div>
                         </div>
                     </div>
-                    <div class="weapon-control" style="margin-top:4px;">
-                        <span>兵装</span>
-                        <select id="weapon-select" class="sci-fi-select">
-                            <option value="kinetic">KIN キネティック</option>
-                            <option value="missile">MSL ホーミング</option>
-                            <option value="beam">BEM パーティクル</option>
-                        </select>
+
+                    <!-- 兵装アイコン選択 (hidden select はgame.jsが参照) -->
+                    <select id="weapon-select" style="display:none">
+                        <option value="kinetic">kinetic</option>
+                        <option value="missile">missile</option>
+                        <option value="beam">beam</option>
+                    </select>
+                    <div class="isel-section">
+                        <span class="isel-label">WEAPON</span>
+                        <div class="isel-group" id="weapon-icon-group">
+                            <button class="isel-btn active" data-val="kinetic" title="キネティック弾 — 短距離・高速連射">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                                    <!-- キャノン砲身 -->
+                                    <rect x="2" y="8" width="6" height="8" rx="1" fill="currentColor" fill-opacity=".25"/>
+                                    <line x1="8" y1="9.5" x2="21" y2="9.5"/>
+                                    <line x1="8" y1="12" x2="21" y2="12"/>
+                                    <line x1="8" y1="14.5" x2="21" y2="14.5"/>
+                                    <circle cx="21.5" cy="9.5" r="1.2" fill="currentColor"/>
+                                    <circle cx="21.5" cy="12" r="1.2" fill="currentColor"/>
+                                    <circle cx="21.5" cy="14.5" r="1.2" fill="currentColor"/>
+                                </svg>
+                                <span>KIN</span>
+                            </button>
+                            <button class="isel-btn" data-val="missile" title="ホーミングミサイル — 中距離・追尾">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                                    <!-- ミサイル -->
+                                    <ellipse cx="13" cy="12" rx="7" ry="3" fill="currentColor" fill-opacity=".2"/>
+                                    <polygon points="20,12 17,9.5 17,14.5" fill="currentColor"/>
+                                    <polygon points="6,12 4,8.5 8,12" fill="currentColor" fill-opacity=".6"/>
+                                    <polygon points="6,12 4,15.5 8,12" fill="currentColor" fill-opacity=".6"/>
+                                    <circle cx="5.5" cy="12" r="2" fill="currentColor" fill-opacity=".4"/>
+                                </svg>
+                                <span>MSL</span>
+                            </button>
+                            <button class="isel-btn" data-val="beam" title="パーティクルビーム — 長距離・貫通">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                                    <!-- ビーム -->
+                                    <polygon points="4,10 4,14 7,12" fill="currentColor"/>
+                                    <line x1="7" y1="12" x2="22" y2="12" stroke-width="2.5"/>
+                                    <line x1="9" y1="12" x2="22" y2="8.5" stroke-width="0.8" stroke-opacity=".5"/>
+                                    <line x1="9" y1="12" x2="22" y2="15.5" stroke-width="0.8" stroke-opacity=".5"/>
+                                    <circle cx="22" cy="12" r="2" fill="currentColor" fill-opacity=".6"/>
+                                </svg>
+                                <span>BEM</span>
+                            </button>
+                        </div>
                     </div>
-                    <!-- エンジンタイプ -->
-                    <div class="weapon-control" style="margin-top:4px;">
-                        <span>エンジン</span>
-                        <select id="engine-type-select" class="sci-fi-select">
-                            <option value="thermonuclear">THR 熱核エンジン</option>
-                            <option value="pulse">PLS パルスエンジン</option>
-                            <option value="higgs">HGS ヒッグスエンジン</option>
-                            <option value="photon">PHT フォトンエンジン</option>
-                        </select>
+
+                    <!-- エンジンアイコン選択 -->
+                    <select id="engine-type-select" style="display:none">
+                        <option value="thermonuclear">thermonuclear</option>
+                        <option value="pulse">pulse</option>
+                        <option value="higgs">higgs</option>
+                        <option value="photon">photon</option>
+                    </select>
+                    <div class="isel-section">
+                        <span class="isel-label">ENGINE</span>
+                        <div class="isel-group" id="engine-icon-group">
+                            <button class="isel-btn active" data-val="thermonuclear" title="熱核エンジン — 高出力・熱源大">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                                    <circle cx="12" cy="12" r="4" fill="currentColor" fill-opacity=".25"/>
+                                    <line x1="12" y1="3" x2="12" y2="6.5"/><line x1="12" y1="17.5" x2="12" y2="21"/>
+                                    <line x1="3" y1="12" x2="6.5" y2="12"/><line x1="17.5" y1="12" x2="21" y2="12"/>
+                                    <line x1="5.6" y1="5.6" x2="7.8" y2="7.8"/><line x1="16.2" y1="16.2" x2="18.4" y2="18.4"/>
+                                    <line x1="18.4" y1="5.6" x2="16.2" y2="7.8"/><line x1="7.8" y1="16.2" x2="5.6" y2="18.4"/>
+                                </svg>
+                                <span>THR</span>
+                            </button>
+                            <button class="isel-btn" data-val="pulse" title="パルスエンジン — EM高・機動性重視">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="15,3 9,12 13,12 9,21"/>
+                                    <line x1="18" y1="7" x2="19.5" y2="7" stroke-width="1"/><line x1="19" y1="10" x2="21" y2="10" stroke-width="1"/>
+                                    <line x1="18" y1="14" x2="20" y2="14" stroke-width="1"/>
+                                </svg>
+                                <span>PLS</span>
+                            </button>
+                            <button class="isel-btn" data-val="higgs" title="ヒッグスエンジン — 低シグネチャ・隠密">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                                    <path d="M2,12 Q5,7 8,12 Q11,17 14,12 Q17,7 20,12 Q21,14 22,12"/>
+                                    <circle cx="2" cy="12" r="1.5" fill="currentColor"/>
+                                    <circle cx="22" cy="12" r="1.5" fill="currentColor"/>
+                                </svg>
+                                <span>HGS</span>
+                            </button>
+                            <button class="isel-btn" data-val="photon" title="フォトンエンジン — 光学大・EM低">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                                    <circle cx="12" cy="12" r="3.5" fill="currentColor" fill-opacity=".3"/>
+                                    <line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
+                                    <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
+                                    <line x1="4.9" y1="4.9" x2="7" y2="7"/><line x1="17" y1="17" x2="19.1" y2="19.1"/>
+                                    <line x1="19.1" y1="4.9" x2="17" y2="7"/><line x1="7" y1="17" x2="4.9" y2="19.1"/>
+                                    <line x1="4.9" y1="8" x2="6.5" y2="9.5"/><line x1="19.1" y1="8" x2="17.5" y2="9.5"/>
+                                    <line x1="4.9" y1="16" x2="6.5" y2="14.5"/><line x1="19.1" y1="16" x2="17.5" y2="14.5"/>
+                                </svg>
+                                <span>PHT</span>
+                            </button>
+                        </div>
                     </div>
-                    <!-- センサーモード -->
-                    <div class="sensor-row" style="margin-top:4px;">
-                        <span class="sensor-label">SNS:</span>
-                        <button class="btn sensor-btn active" id="sensor-heat" title="熱源センサー">🔥 HEAT</button>
-                        <button class="btn sensor-btn" id="sensor-optic" title="光学センサー">👁 OPT</button>
-                        <button class="btn sensor-btn" id="sensor-em" title="電磁波センサー">📡 EM</button>
-                        <button class="btn sensor-btn" id="sensor-higgs" title="ヒッグスセンサー">〰 HGS</button>
+
+                    <!-- センサーアイコン選択 -->
+                    <div class="isel-section">
+                        <span class="isel-label">SENSOR</span>
+                        <div class="isel-group">
+                            <button class="isel-btn sns-btn active" id="sensor-heat" title="熱源センサー — 推進熱・発砲熱検知">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M12,20 Q8,17 9.5,13 Q11,9 9,5.5 Q14.5,8 13,13 Q16,11 14.5,7.5 Q18,11 16,15 Q15,18 12,20Z" fill="currentColor" fill-opacity=".25"/>
+                                    <circle cx="12" cy="17" r="1.5" fill="currentColor" fill-opacity=".6"/>
+                                </svg>
+                                <span>HEAT</span>
+                            </button>
+                            <button class="isel-btn sns-btn" id="sensor-optic" title="光学センサー — 可視光・反射光検知">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+                                    <path d="M2,12 Q12,4 22,12 Q12,20 2,12Z" fill="currentColor" fill-opacity=".15"/>
+                                    <circle cx="12" cy="12" r="4"/>
+                                    <circle cx="12" cy="12" r="1.8" fill="currentColor"/>
+                                    <line x1="12" y1="2" x2="12" y2="4" stroke-width="1"/>
+                                    <line x1="12" y1="20" x2="12" y2="22" stroke-width="1"/>
+                                </svg>
+                                <span>OPT</span>
+                            </button>
+                            <button class="isel-btn sns-btn" id="sensor-em" title="電磁波センサー — EM放射・通信電波検知">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+                                    <circle cx="12" cy="12" r="1.8" fill="currentColor"/>
+                                    <path d="M8,8 a5.7,5.7 0 0,1 8,8"/>
+                                    <path d="M5.5,5.5 a9.2,9.2 0 0,1 13,13"/>
+                                    <path d="M3,3 a12.7,12.7 0 0,1 18,18"/>
+                                </svg>
+                                <span>EM</span>
+                            </button>
+                            <button class="isel-btn sns-btn" id="sensor-higgs" title="ヒッグスセンサー — ヒッグス場乱流・潜伏艦検知">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+                                    <path d="M2,10 Q5,6 8,10 Q11,14 14,10 Q17,6 20,10 Q22,8 22,10"/>
+                                    <path d="M2,14 Q5,10 8,14 Q11,18 14,14 Q17,10 20,14 Q22,12 22,14"/>
+                                </svg>
+                                <span>HGS</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -139,12 +251,59 @@
                 <div class="console-panel action-panel">
                     <div class="panel-header">ACTIONS</div>
                     <div class="action-grid">
-                        <button class="btn btn-info action-btn" id="btn-scan">全周囲<br>ソナー</button>
-                        <button class="btn btn-info action-btn" id="btn-dir-sonar">指向性<br>ソナー</button>
-                        <button class="btn btn-warning action-btn" id="btn-hack">電子戦<br>EW</button>
-                        <button class="btn btn-danger action-btn" id="btn-cancel">停止<br>STOP</button>
-                        <button class="btn btn-primary action-btn" id="btn-camera-follow">追従<br>OFF</button>
-                        <button class="btn action-btn" id="btn-attack-toggle" style="background:rgba(0,180,60,0.25);border-color:#00b43c;color:#00ff66;">攻撃<br>ON</button>
+                        <button class="act-icon-btn btn-info" id="btn-scan" title="全周囲ソナー">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                                <circle cx="12" cy="12" r="2.5" fill="currentColor" fill-opacity=".4"/>
+                                <path d="M5,12 a7,7 0 0,1 7,-7"/><path d="M2,12 a10,10 0 0,1 10,-10"/>
+                                <path d="M19,12 a7,7 0 0,1 -7,7"/><path d="M22,12 a10,10 0 0,1 -10,10"/>
+                                <line x1="12" y1="5" x2="12" y2="19" stroke-width=".6" stroke-opacity=".4"/>
+                                <line x1="5" y1="12" x2="19" y2="12" stroke-width=".6" stroke-opacity=".4"/>
+                            </svg>
+                            <span>SONAR</span>
+                        </button>
+                        <button class="act-icon-btn btn-info" id="btn-dir-sonar" title="指向性ソナー">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                                <circle cx="5" cy="12" r="2" fill="currentColor" fill-opacity=".5"/>
+                                <line x1="7" y1="12" x2="22" y2="12"/>
+                                <path d="M7,12 L20,6"/><path d="M7,12 L20,18"/>
+                                <path d="M13,9 a5,5 0 0,1 0,6" stroke-opacity=".5"/>
+                            </svg>
+                            <span>DIR</span>
+                        </button>
+                        <button class="act-icon-btn btn-warning" id="btn-hack" title="電子戦 EW">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="16,3 10,12 14,12 8,21"/>
+                                <path d="M18,7 a5,5 0 0,1 0,10" stroke-width="1.2"/>
+                                <path d="M20,5 a8,8 0 0,1 0,14" stroke-width="1" stroke-opacity=".5"/>
+                            </svg>
+                            <span>EW</span>
+                        </button>
+                        <button class="act-icon-btn btn-danger" id="btn-cancel" title="停止">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                                <rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor" fill-opacity=".2"/>
+                                <line x1="9" y1="9" x2="15" y2="15"/>
+                                <line x1="15" y1="9" x2="9" y2="15"/>
+                            </svg>
+                            <span>STOP</span>
+                        </button>
+                        <button class="act-icon-btn btn-primary" id="btn-camera-follow" title="自艦追従">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                                <circle cx="12" cy="12" r="5"/>
+                                <line x1="12" y1="2" x2="12" y2="7"/><line x1="12" y1="17" x2="12" y2="22"/>
+                                <line x1="2" y1="12" x2="7" y2="12"/><line x1="17" y1="12" x2="22" y2="12"/>
+                                <circle cx="12" cy="12" r="1.5" fill="currentColor"/>
+                            </svg>
+                            <span id="follow-label">追従 OFF</span>
+                        </button>
+                        <button class="act-icon-btn" id="btn-attack-toggle" title="攻撃ON/OFF" style="border-color:#00b43c;color:#00ff66;">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                                <circle cx="12" cy="12" r="7"/>
+                                <line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
+                                <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
+                                <circle cx="12" cy="12" r="2.5" fill="currentColor"/>
+                            </svg>
+                            <span id="attack-label">攻撃 ON</span>
+                        </button>
                     </div>
                 </div>
 
@@ -343,6 +502,38 @@
         </div>
     </div>
     <script src="game.js"></script>
+    <script>
+    // アイコンボタン ↔ hidden select の同期
+    function setupIconSelect(groupId, selectId) {
+        const group = document.getElementById(groupId);
+        const sel   = document.getElementById(selectId);
+        if (!group || !sel) return;
+        group.querySelectorAll('.isel-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                group.querySelectorAll('.isel-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                sel.value = btn.dataset.val;
+                sel.dispatchEvent(new Event('change'));
+            });
+        });
+    }
+    setupIconSelect('weapon-icon-group',  'weapon-select');
+    setupIconSelect('engine-icon-group',  'engine-type-select');
+
+    // 追従ボタンのラベル同期 (game.jsがボタンのtextContentを直接書き換えているのでここは補助のみ)
+    const followBtn = document.getElementById('btn-camera-follow');
+    if (followBtn) {
+        const origClick = followBtn.onclick;
+        followBtn.addEventListener('click', () => {
+            // game.js の click handler が btn-camera-follow のテキストを変えるが
+            // 新レイアウトでは span#follow-label を使うので追跡してミラーリング
+            requestAnimationFrame(() => {
+                const lbl = document.getElementById('follow-label');
+                if (lbl) lbl.textContent = followBtn.classList.contains('active-follow') ? '追従 ON' : '追従 OFF';
+            });
+        });
+    }
+    </script>
 </body>
 
 </html>
