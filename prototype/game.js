@@ -31,10 +31,10 @@ const DIR_SONAR_MAX_RANGE  = MAP_RADIUS * 2;                               // �
 const UPGRADE_MULT = [0, 1.0, 1.5, 2.0]; // Lv別性能倍率 (index=Lv)
 
 const ENGINE_TYPES = {
-    thermonuclear: { speedMult: 1.0,  heatMult: 1.5,  optMult: 0.3, emMult: 0.4, higgsSpeedBonus: 0.0 },
-    pulse:         { speedMult: 1.1,  heatMult: 0.9,  optMult: 0.7, emMult: 0.6, higgsSpeedBonus: 0.0 },
-    higgs:         { speedMult: 0.85, heatMult: 0.35, optMult: 0.2, emMult: 0.3, higgsSpeedBonus: 0.5 },
-    photon:        { speedMult: 1.3,  heatMult: 0.5,  optMult: 2.0, emMult: 0.4, higgsSpeedBonus: 0.0 }
+    thermonuclear: { speedMult: 1.0,  heatMult: 2.0,  optMult: 0.2,  emMult: 0.4,  higgsSpeedBonus: 0.0 },
+    pulse:         { speedMult: 1.2,  heatMult: 0.4,  optMult: 0.3,  emMult: 1.8,  higgsSpeedBonus: 0.0 },
+    higgs:         { speedMult: 0.85, heatMult: 0.08, optMult: 0.1,  emMult: 0.2,  higgsSpeedBonus: 0.6 },
+    photon:        { speedMult: 1.4,  heatMult: 0.0,  optMult: 3.0,  emMult: 0.2,  higgsSpeedBonus: 0.0 }
 };
 
 // ============================================================
@@ -202,9 +202,17 @@ function findHidingSpot(nearX, nearY, searchRadius) {
 function resizeCanvas() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
+    // Fix minimap canvas resolution to match CSS display size
+    const mmr = minimapCanvas.getBoundingClientRect();
+    if (mmr.width > 0 && mmr.height > 0) {
+        minimapCanvas.width = Math.floor(mmr.width);
+        minimapCanvas.height = Math.floor(mmr.height);
+    }
 }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
+// Defer one more resize call to ensure CSS layout is complete before reading getBoundingClientRect
+requestAnimationFrame(resizeCanvas);
 
 const camera = {
     x: 0,
@@ -773,6 +781,14 @@ class Ship {
         this.fireFlashTimer = 0;        // 発砲直後の可視フラッシュタイマー
         this.weaponType = 'kinetic';    // 最後に発射した武器種 (シグネチャ計算用)
         this.repositionLogged = false;  // 再配置ログ重複防止
+        if (!isPlayer) {
+            this.aiState = 'lurking';   // 'lurking' | 'gathering' | 'hunting' | 'combat'
+            this.huntTarget = null;      // {x,y} last known player position
+            this.huntTimer = 0;
+            this.gatherTarget = null;    // resource node being gathered
+            this.resourcePoints = 0;
+            this.droneSpawnTimer = 300 + Math.floor(Math.random() * 300); // carrier drone timer
+        }
         // マルチセンサーシグネチャ
         this.heatSig = 0;    // 熱源シグネチャ: 移動中に上昇
         this.opticalSig = 0; // 光学シグネチャ: 発砲フラッシュ・低ヒッグス時
@@ -796,6 +812,16 @@ class Ship {
         if (this.isPlayer) {
             // Track previous position for signature calculations
             this.prevX = this.x; this.prevY = this.y;
+
+            // Player signature calculation (used by enemy AI)
+            const _spd = Math.hypot(this.x - this.prevX, this.y - this.prevY);
+            const _engType = ENGINE_TYPES[gameState.engineType] || ENGINE_TYPES.thermonuclear;
+            const _hHere = getHiggsIntensity(this.x, this.y);
+            this.heatSig = Math.min(1, (_spd * 0.6 + genAlloc.engine / 100 * 0.25) * _engType.heatMult);
+            this.opticalSig = Math.min(1, (_spd * 0.05 + (this.weaponType === 'beam' ? 0.6 : 0)) * _engType.optMult);
+            this.emSig = Math.min(1, (genAlloc.sensors / 100 * 0.4 + genAlloc.ai / 100 * 0.35) * _engType.emMult);
+            this.higgsSig = Math.min(1, _spd * _hHere * 2.0 * (_engType.higgsSpeedBonus > 0 ? 1 : 0.3));
+
             // Speed defined by GEN engine allocation + 艦種補正 + ヒッグス減速
             const speedMult = { assault: 0.8, stealth: 1.4, carrier: 0.6 };
             const higgsSlowdown = 1 - getHiggsIntensity(this.x, this.y) * 0.45;
