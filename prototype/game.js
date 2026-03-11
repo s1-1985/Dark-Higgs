@@ -162,6 +162,144 @@ let genAlloc = { engine: 40, weapons: 30, sensors: 30, ai: 50 };
 let autoAttackEnabled = true;
 
 // ============================================================
+// 有視界システム — アメーバ形状視野 + ヒッグス連続濃度連動
+// ============================================================
+const BASE_VISION_RADIUS = 1200; // 0%ヒッグス時の基準視野半径 (ワールド単位)
+let playerVisionRadius = BASE_VISION_RADIUS;
+
+function computeVisionRadius() {
+    if (!player || player.hp <= 0) return BASE_VISION_RADIUS;
+    const h = getHiggsIntensity(player.x, player.y);
+    // ヒッグス0% → 100%視野、ヒッグス100% → 5%視野 (ほぼゼロ)
+    return BASE_VISION_RADIUS * Math.max(0.05, 1.0 - h * 0.95);
+}
+
+// アメーバ形状の頂点列を生成 (毎フレームアニメーション)
+function getAmoebaPoints(cx, cy, baseR, numPts, timeSec) {
+    const pts = [];
+    for (let i = 0; i < numPts; i++) {
+        const a = (i / numPts) * Math.PI * 2;
+        const noise =
+            Math.sin(a * 3 + timeSec * 0.8)  * 0.14 +
+            Math.sin(a * 5 - timeSec * 0.5)  * 0.08 +
+            Math.sin(a * 7 + timeSec * 0.35) * 0.04 +
+            Math.sin(a * 11 - timeSec * 0.2) * 0.02;
+        const r = baseR * (1.0 + noise);
+        pts.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r });
+    }
+    return pts;
+}
+
+function drawFogOfWar(ctx) {
+    if (!player || player.hp <= 0) return;
+
+    playerVisionRadius = computeVisionRadius();
+    const cx = player.x;
+    const cy = player.y;
+    const t = Date.now() * 0.001;
+    const NUM_PTS = 32;
+
+    // 霧の不透明度: ヒッグス高濃度で若干濃くなる
+    const hHere = getHiggsIntensity(cx, cy);
+    const fogAlpha = 0.88 + hHere * 0.08;
+
+    // 描画範囲: カメラビュー + マージン
+    const vw = canvas.width  / camera.zoom;
+    const vh = canvas.height / camera.zoom;
+    const mx = camera.x - 500;
+    const my = camera.y - 500;
+    const mw = vw + 1000;
+    const mh = vh + 1000;
+
+    const pts = getAmoebaPoints(cx, cy, playerVisionRadius, NUM_PTS, t);
+
+    // ── アメーバ穴付きフォグ (even-odd fill rule) ──
+    ctx.save();
+    ctx.beginPath();
+    // 外側 (大きい矩形)
+    ctx.moveTo(mx,      my);
+    ctx.lineTo(mx + mw, my);
+    ctx.lineTo(mx + mw, my + mh);
+    ctx.lineTo(mx,      my + mh);
+    ctx.closePath();
+    // 内側 (アメーバ穴) — スムーズな二次ベジェ曲線
+    ctx.moveTo((pts[NUM_PTS - 1].x + pts[0].x) / 2, (pts[NUM_PTS - 1].y + pts[0].y) / 2);
+    for (let i = 0; i < NUM_PTS; i++) {
+        const next = pts[(i + 1) % NUM_PTS];
+        ctx.quadraticCurveTo(pts[i].x, pts[i].y, (pts[i].x + next.x) / 2, (pts[i].y + next.y) / 2);
+    }
+    ctx.closePath();
+    ctx.fillStyle = `rgba(1,3,14,${fogAlpha.toFixed(3)})`;
+    ctx.fill('evenodd');
+
+    // ── ソフトエッジグラデーション (視野境界のフェード) ──
+    const innerR = playerVisionRadius * 0.78;
+    const outerR = playerVisionRadius * 1.18;
+    const edgeGrad = ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR);
+    edgeGrad.addColorStop(0, 'rgba(1,3,14,0)');
+    edgeGrad.addColorStop(1, `rgba(1,3,14,${fogAlpha.toFixed(3)})`);
+    ctx.beginPath();
+    ctx.arc(cx, cy, outerR * 1.05, 0, Math.PI * 2);
+    ctx.fillStyle = edgeGrad;
+    ctx.fill();
+
+    // ── 視野境界のグロウリング (微光) ──
+    ctx.beginPath();
+    ctx.arc(cx, cy, playerVisionRadius, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(0,255,180,${(0.08 + hHere * 0.04).toFixed(3)})`;
+    ctx.lineWidth = 2 / camera.zoom;
+    ctx.shadowColor = 'rgba(0,255,180,0.3)';
+    ctx.shadowBlur = 12;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    ctx.restore();
+}
+
+// 視野内の敵を自動ロックオン (毎フレーム呼び出し)
+function updateVisionLockOn() {
+    if (!player || player.hp <= 0) return;
+
+    const vr = playerVisionRadius;
+    enemies.forEach(e => {
+        if (e.hp <= 0) return;
+        const dist = Math.hypot(e.x - player.x, e.y - player.y);
+        if (dist <= vr) {
+            // 完全ロックオン: 視野内 — 高精度コンタクト、毎フレーム更新
+            e.inVision = true;
+            applyContact(e, 1.0, 90); // life=90 = 1.5秒 (更新されない間は維持)
+            e.displayX = e.x; // 位置ジッター無し
+            e.displayY = e.y;
+        } else {
+            e.inVision = false;
+        }
+    });
+
+    // autoAttack有効時: 視野内の敵の中から最近傍を自動ターゲット設定
+    if (autoAttackEnabled && !player.manualTarget) {
+        let closest = null;
+        let closestDist = Infinity;
+        enemies.forEach(e => {
+            if (e.hp <= 0 || !e.inVision) return;
+            const d = Math.hypot(e.x - player.x, e.y - player.y);
+            if (d < closestDist) { closestDist = d; closest = e; }
+        });
+        if (closest) {
+            player.targetEntity = closest;
+        } else if (!player.targetEntity || player.targetEntity.hp <= 0) {
+            // 視野内に敵なし → センサーコンタクト済みの敵を推定ロックオン
+            let bestContact = null;
+            let bestAcc = 0;
+            enemies.forEach(e => {
+                if (e.hp <= 0 || !e.visible) return;
+                if (e.contactAccuracy > bestAcc) { bestAcc = e.contactAccuracy; bestContact = e; }
+            });
+            player.targetEntity = bestContact;
+        }
+    }
+}
+
+// ============================================================
 // ヒッグス粒子強度計算 (Higgs Intensity)
 // ============================================================
 function getHiggsIntensity(x, y) {
@@ -305,6 +443,7 @@ canvas.addEventListener('mousedown', (e) => {
 
         if (clickedEnemy) {
             player.targetEntity = clickedEnemy;
+            player.manualTarget = true; // 手動ターゲット指定 (自動ロックオン上書き防止)
             createClickEffect(clickedEnemy.x, clickedEnemy.y, '#ff4d4d');
             logMessage(`TACTICAL: ターゲットをロック。射撃解を計算中...`, 'system-msg');
         }
@@ -324,6 +463,7 @@ canvas.addEventListener('dblclick', (e) => {
     const clickedEnemy = enemies.find(en => en.visible && Math.hypot(en.x - worldX, en.y - worldY) < en.radius * 2);
     if (!clickedEnemy) {
         player.targetEntity = null;
+        player.manualTarget = false; // 手動ターゲット解除
         player.setTarget(worldX, worldY);
         createClickEffect(worldX, worldY, '#00ffaa');
         const dist = Math.hypot(worldX - player.x, worldY - player.y);
@@ -485,6 +625,7 @@ canvas.addEventListener('touchend', (e) => {
         let clickedEnemy = enemies.find(en => en.visible && Math.hypot(en.x - worldX, en.y - worldY) < tapRadius(en));
         if (clickedEnemy) {
             player.targetEntity = clickedEnemy;
+            player.manualTarget = true;
             createClickEffect(clickedEnemy.x, clickedEnemy.y, '#ff4d4d');
             logMessage(`TACTICAL: ターゲットをロック。射撃解を計算中...`, 'system-msg');
         }
@@ -503,6 +644,13 @@ class Structure {
         this.hacked = false;
         this.discovered = false;
         this.color = type === 'colony' ? 'rgba(34, 68, 170, 0.5)' : 'rgba(85, 85, 85, 0.5)';
+        // 偽装ビーコン (ハッキング後)
+        this.decoyActive = false;
+        this.decoyTimer = 0;       // 偽装発信の残り時間 (フレーム数)
+        this.decoyType = null;     // 'colony' = 全センサー偽装, 'derelict' = 熱源移動偽装
+        this.decoyWaypoint = null; // 難破船: 偽装目標の移動先 {x, y}
+        this.decoyMoveX = 0;       // 移動偽装の現在位置
+        this.decoyMoveY = 0;
     }
     draw(ctx) {
         const t = Date.now();
@@ -571,7 +719,28 @@ class Structure {
             const r = 200 * ((t % 2000) / 2000);
             ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
             ctx.strokeStyle = `rgba(0, 170, 255, ${1 - r / 200})`;
-            ctx.lineWidth = 1; ctx.stroke();
+            ctx.lineWidth = 1 / camera.zoom; ctx.stroke();
+        }
+
+        // 偽装ビーコン エフェクト
+        if (this.decoyActive && this.decoyTimer > 0) {
+            const pulse = 0.5 + Math.sin(t * 0.008) * 0.5;
+            const col = this.decoyType === 'derelict' ? '255,80,0' : '255,50,200';
+            const bx = this.decoyType === 'derelict' ? this.decoyMoveX : this.x;
+            const by = this.decoyType === 'derelict' ? this.decoyMoveY : this.y;
+            ctx.save();
+            ctx.globalAlpha = pulse * 0.7;
+            ctx.fillStyle = `rgba(${col},0.9)`;
+            ctx.shadowColor = `rgba(${col},1)`; ctx.shadowBlur = 20;
+            ctx.beginPath(); ctx.arc(bx, by, 8, 0, Math.PI * 2); ctx.fill();
+            ctx.shadowBlur = 0;
+            // 拡散リング
+            const rr = 300 * ((t % 1500) / 1500);
+            ctx.beginPath(); ctx.arc(bx, by, rr, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(${col},${(1 - rr / 300) * 0.6})`;
+            ctx.lineWidth = 2 / camera.zoom;
+            ctx.stroke();
+            ctx.restore(); ctx.globalAlpha = 1;
         }
     }
 }
@@ -804,6 +973,10 @@ class Ship {
             this.gatherTarget = null;    // resource node being gathered
             this.resourcePoints = 0;
             this.droneSpawnTimer = 300 + Math.floor(Math.random() * 300); // carrier drone timer
+            this.inVision = false;       // 有視界システム: プレイヤーの視野内フラグ
+        }
+        if (isPlayer) {
+            this.manualTarget = false;   // 手動ターゲット指定フラグ (自動ロックオン上書き防止)
         }
         // 武器マガジン・リロードシステム (プレイヤー用)
         this.kineticAmmo = 8;
@@ -859,6 +1032,11 @@ class Ship {
             // 円形マップ境界検知
             if (Math.hypot(this.x - MAP_CX, this.y - MAP_CY) > MAP_RADIUS - 100 && !dialogOpen) {
                 showDialog();
+            }
+
+            // 手動ターゲットが死亡したらフラグをリセット
+            if (this.manualTarget && (!this.targetEntity || this.targetEntity.hp <= 0)) {
+                this.manualTarget = false;
             }
 
             // Attacking logic
@@ -1003,19 +1181,21 @@ class Ship {
             }
             this.prevHp = this.hp;
 
-            // ハッキング済み構造物への誘引 (EW対策)
+            // 偽装ビーコンへの誘引 (アクティブなデコイのみ)
             let decoyTarget = null;
+            let decoyPosX = 0, decoyPosY = 0;
             structures.forEach(s => {
-                if (s.hacked) {
-                    const d = Math.hypot(this.x - s.x, this.y - s.y);
-                    if (d < RADAR_RANGE * 5) decoyTarget = s;
-                }
+                if (!s.decoyActive || s.decoyTimer <= 0) return;
+                const dx = s.decoyType === 'derelict' ? s.decoyMoveX : s.x;
+                const dy = s.decoyType === 'derelict' ? s.decoyMoveY : s.y;
+                const d = Math.hypot(this.x - dx, this.y - dy);
+                if (d < RADAR_RANGE * 8) { decoyTarget = s; decoyPosX = dx; decoyPosY = dy; }
             });
             if (decoyTarget) {
                 // 囮に釣られている
-                const dDist = Math.hypot(decoyTarget.x - this.x, decoyTarget.y - this.y);
+                const dDist = Math.hypot(decoyPosX - this.x, decoyPosY - this.y);
                 if (dDist > 200) {
-                    const ta = Math.atan2(decoyTarget.y - this.y, decoyTarget.x - this.x);
+                    const ta = Math.atan2(decoyPosY - this.y, decoyPosX - this.x);
                     let diff = ta - this.angle;
                     while (diff < -Math.PI) diff += Math.PI * 2;
                     while (diff > Math.PI) diff -= Math.PI * 2;
@@ -1997,14 +2177,18 @@ function generateSector() {
     for (let i = 0; i < colonyCount; i++) {
         const a = (i / colonyCount) * Math.PI * 2 + Math.random() * 0.8;
         const r = 5000 + Math.random() * (MAP_RADIUS - 7000);
-        structures.push(new Structure(MAP_CX + Math.cos(a) * r, MAP_CY + Math.sin(a) * r, 'colony'));
+        const col = new Structure(MAP_CX + Math.cos(a) * r, MAP_CY + Math.sin(a) * r, 'colony');
+        col.discovered = true; // ゲーム開始時からミニマップに表示
+        structures.push(col);
     }
     for (let i = 0; i < 5; i++) {
         const sp = clampToMapCircle(
             MAP_CX + (Math.random() - 0.5) * MAP_RADIUS * 1.6,
             MAP_CY + (Math.random() - 0.5) * MAP_RADIUS * 1.6
         );
-        structures.push(new Structure(sp.x, sp.y, 'derelict'));
+        const der = new Structure(sp.x, sp.y, 'derelict');
+        der.discovered = true; // ゲーム開始時からミニマップに表示
+        structures.push(der);
     }
     for (let i = 0; i < 3; i++) {
         const a2 = Math.random() * Math.PI * 2, r2 = 4000 + Math.random() * (MAP_RADIUS - 6000);
@@ -2254,20 +2438,87 @@ document.getElementById('btn-dir-sonar').addEventListener('click', () => {
     playSound('ui');
 });
 document.getElementById('btn-hack').addEventListener('click', () => {
+    if (!player || player.hp <= 0) return;
     playSound('ui');
     let closest = null; let cd = Infinity;
     structures.forEach(s => {
         const d = Math.hypot(player.x - s.x, player.y - s.y);
-        // ヒッグス干渉を考慮した有効レンジを使用 (effectiveRadarRange)
-        if (d < cd && d < effectiveRadarRange) { cd = d; closest = s; }
+        if (d < cd && d < effectiveRadarRange * 1.5) { cd = d; closest = s; }
     });
-    if (closest && !closest.hacked) {
-        closest.hacked = true;
-        logMessage(`EW: 構造物をハイジャック完了しました。自軍の熱源反応を偽装し、敵を誘因します。`, 'system-msg');
-        createClickEffect(closest.x, closest.y, '#00aaff');
-    } else {
+    if (!closest) {
         logMessage(`EW: 有効範囲内にハッキング可能な対象がいません。`, 'warning-msg');
+        return;
     }
+
+    if (closest.type === 'colony') {
+        // ── 廃棄されたコロニー ──
+        if (!closest.hacked) {
+            closest.hacked = true;
+            createClickEffect(closest.x, closest.y, '#00aaff');
+            // HP回復 or リソース回収 (ランダム)
+            if (Math.random() < 0.5) {
+                const heal = Math.floor(player.maxHp * 0.25);
+                player.hp = Math.min(player.maxHp, player.hp + heal);
+                logMessage(`EW[コロニー]: ハッキング完了 — 医療ポッド起動。HP +${heal} 回復。`, 'system-msg');
+            } else {
+                const reward = 50 + gameState.sector * 20;
+                gameState.credits += reward;
+                updateTopUI();
+                logMessage(`EW[コロニー]: ハッキング完了 — 物資倉庫接収。+${reward} SCR 獲得。`, 'system-msg');
+            }
+        }
+        // 偽装ビーコン発動 (ハック済みでも再発動可)
+        closest.decoyActive = true;
+        closest.decoyTimer = 1800; // 30秒
+        closest.decoyType = 'colony';
+        logMessage(`EW[コロニー]: 全センサー偽装ビーコン発信中 (30秒)。熱源・EM・光学・ヒッグス全偽装。`, 'system-msg');
+        // S&D勝利進捗更新
+        const colonyNodes = structures.filter(s => s.type === 'colony');
+        if (gameState.mode === 'sd') {
+            const hackedCount = colonyNodes.filter(s => s.hacked).length;
+            const fill = document.getElementById('sd-progress-fill');
+            const text = document.getElementById('sd-progress-text');
+            if (fill) fill.style.width = `${(hackedCount / colonyNodes.length) * 100}%`;
+            if (text) text.textContent = `ノード: ${hackedCount}/${colonyNodes.length}`;
+        }
+    } else if (closest.type === 'derelict') {
+        // ── 難破船 ──
+        if (!closest.hacked) {
+            closest.hacked = true;
+            createClickEffect(closest.x, closest.y, '#00aaff');
+            // リソース回収 + ランダムLvアップ
+            const reward = 30 + gameState.sector * 15;
+            gameState.credits += reward;
+            updateTopUI();
+            const upgradeKeys = ['weapons', 'sensor', 'armor'];
+            const key = upgradeKeys[Math.floor(Math.random() * upgradeKeys.length)];
+            const MAX_UPGRADE_LV = 3;
+            if (gameState.upgrades[key] < MAX_UPGRADE_LV) {
+                gameState.upgrades[key]++;
+                if (key === 'sensor') RADAR_RANGE = BASE_RADAR_RANGE * UPGRADE_MULT[gameState.upgrades.sensor];
+                if (key === 'armor') {
+                    const hpBase = { assault: 3500, stealth: 700, carrier: 2500 };
+                    player.maxHp = (hpBase[gameState.shipType] || 2000) * UPGRADE_MULT[gameState.upgrades.armor];
+                }
+                const keyLabel = { weapons: '武装', sensor: 'センサー', armor: '装甲' };
+                logMessage(`EW[難破船]: ハッキング完了 — +${reward} SCR。${keyLabel[key]} Lv${gameState.upgrades[key]} に強化。`, 'system-msg');
+            } else {
+                logMessage(`EW[難破船]: ハッキング完了 — +${reward} SCR。(ランダムLvアップ: 既に最大Lv)`, 'system-msg');
+            }
+        }
+        // 熱源移動偽装発動 (ハック済みでも再発動可) — 最寄りウェイポイント方向へ
+        const decoyTarget = player.targetX && player.targetY
+            ? { x: player.targetX, y: player.targetY }
+            : { x: closest.x + (Math.random() - 0.5) * 8000, y: closest.y + (Math.random() - 0.5) * 8000 };
+        closest.decoyActive = true;
+        closest.decoyTimer = 1200; // 20秒
+        closest.decoyType = 'derelict';
+        closest.decoyMoveX = closest.x;
+        closest.decoyMoveY = closest.y;
+        closest.decoyWaypoint = decoyTarget;
+        logMessage(`EW[難破船]: 熱源偽装目標を発進。ウェイポイント方向へ移動する囮を展開 (20秒)。`, 'system-msg');
+    }
+    saveGame();
 });
 // ============================================================
 // センサーモード切替ハンドラ (heat / optic / em / higgs)
@@ -2482,19 +2733,20 @@ function drawPassiveAntenna(ctx) {
     ctx.save();
     ctx.translate(player.x, player.y);
     const alerting = passiveAlertTimer > 0;
-    const ringColor = alerting ? '255,170,0' : CR;
+    const ringColorA = alerting ? '255,170,0' : CR;
     const baseR = 60, maxR = 220;
+    const lw = 1.0 / camera.zoom; // ズーム不変の線幅 (スクリーンピクセル単位)
     for (let i = 0; i < 3; i++) {
         const phase = ((t / 2200) + i / 3) % 1;
         const r     = baseR + (maxR - baseR) * phase;
         const alpha = (1 - phase) * (alerting ? 0.65 : 0.35);
         ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(${ringColor},${alpha.toFixed(3)})`;
-        ctx.lineWidth = alerting ? 1.5 : 1;
+        ctx.strokeStyle = `rgba(${ringColorA},${alpha.toFixed(3)})`;
+        ctx.lineWidth = (alerting ? 1.5 : 1) * lw;
         ctx.stroke();
     }
     // コンパスティック
-    ctx.strokeStyle = `rgba(${CR},0.25)`; ctx.lineWidth = 1;
+    ctx.strokeStyle = `rgba(${CR},0.25)`; ctx.lineWidth = lw;
     for (let i = 0; i < 4; i++) {
         const a = (i / 4) * Math.PI * 2;
         ctx.beginPath();
@@ -2521,6 +2773,8 @@ function drawPassiveAntenna(ctx) {
             higgs: Math.PI           // 左 (西)
         };
         const ringSigVals = {};
+        // スレットリング: 有効センサー範囲の10倍まで検出 (環境シグネチャ感度に一致)
+        const ringDetectRange = Math.max(effectiveRadarRange * 10, 8000);
         ['heat','optic','em','higgs'].forEach(sName => {
             const sc2 = sensorConfig[sName];
             let tot = 0;
@@ -2528,7 +2782,7 @@ function drawPassiveAntenna(ctx) {
                 if (e.hp <= 0) return;
                 const dist = Math.hypot(e.x - player.x, e.y - player.y);
                 const hBlk = getHiggsIntensity((e.x + player.x)/2, (e.y + player.y)/2);
-                const att  = Math.max(0, 1 - dist / (effectiveRadarRange * 2));
+                const att  = Math.max(0, 1 - dist / ringDetectRange);
                 tot += sc2.sig(e) * att * (1 - hBlk * sc2.higgsMod);
             });
             ringSigVals[sName] = Math.min(1.0, tot);
@@ -2584,8 +2838,9 @@ function drawPassiveAntenna(ctx) {
             if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
         }
         ctx.closePath();
+        const ringLw = 1.0 / camera.zoom; // ズーム不変の線幅
         ctx.strokeStyle = `rgba(${ringColor},${idleAlpha.toFixed(3)})`;
-        ctx.lineWidth = 1.2;
+        ctx.lineWidth = 1.2 * ringLw;
         ctx.shadowColor = `rgba(${ringColor},0.6)`;
         ctx.shadowBlur  = 4 + maxRingSig * 12;
         ctx.stroke();
@@ -2607,7 +2862,7 @@ function drawPassiveAntenna(ctx) {
                 if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
             }
             ctx.strokeStyle = `rgba(${color},${(sig * 0.85).toFixed(3)})`;
-            ctx.lineWidth   = 1.5 + sig * 2.5;
+            ctx.lineWidth   = (1.5 + sig * 2.5) * ringLw;
             ctx.shadowColor = `rgba(${color},0.9)`;
             ctx.shadowBlur  = 8 * sig;
             ctx.stroke();
@@ -2617,10 +2872,10 @@ function drawPassiveAntenna(ctx) {
             const tickDir = dir + tSec * 0.08;
             const tickR = getRingRadius(tickDir);
             ctx.strokeStyle = `rgba(${color},${(0.4 + sig * 0.55).toFixed(3)})`;
-            ctx.lineWidth = 2;
+            ctx.lineWidth = 2 * ringLw;
             ctx.beginPath();
-            ctx.moveTo(Math.cos(tickDir) * (tickR + 3),  Math.sin(tickDir) * (tickR + 3));
-            ctx.lineTo(Math.cos(tickDir) * (tickR + 11), Math.sin(tickDir) * (tickR + 11));
+            ctx.moveTo(Math.cos(tickDir) * (tickR + 3 / camera.zoom),  Math.sin(tickDir) * (tickR + 3 / camera.zoom));
+            ctx.lineTo(Math.cos(tickDir) * (tickR + 11 / camera.zoom), Math.sin(tickDir) * (tickR + 11 / camera.zoom));
             ctx.stroke();
         });
 
@@ -3125,12 +3380,14 @@ function updateEnvSigCanvas() {
     ec.fillRect(0, 0, w, h);
 
     // 周囲の敵シグネチャを各センサータイプごとに合算
+    // 検出範囲: パッシブ検知と同じ全マップ範囲 (距離減衰のみ適用)
+    const envDetectRange = Math.max(effectiveRadarRange * 10, 8000);
     const envVals = { heat: 0, optic: 0, em: 0, higgs: 0 };
     enemies.forEach(e => {
         if (e.hp <= 0) return;
         const dist = Math.hypot(e.x - player.x, e.y - player.y);
         const higgsPath = getHiggsIntensity((e.x + player.x)/2, (e.y + player.y)/2);
-        const distAtten = Math.max(0, 1 - dist / (effectiveRadarRange * 3.0));
+        const distAtten = Math.max(0, 1 - dist / envDetectRange);
         ['heat', 'optic', 'em', 'higgs'].forEach(key => {
             const sc2 = sensorConfig[key];
             envVals[key] = Math.min(1, envVals[key] + sc2.sig(e) * distAtten * (1 - higgsPath * sc2.higgsMod));
@@ -3557,6 +3814,7 @@ function gameLoop() {
 
         // パッシブアンテナ検知チェック
         if (player && player.hp > 0) checkPassiveDetection();
+        if (player && player.hp > 0) updateVisionLockOn();
 
         // Process Enemy deaths
         for (let i = enemies.length - 1; i >= 0; i--) {
@@ -3600,6 +3858,28 @@ function gameLoop() {
                     (document.getElementById('sd-progress-text').textContent = `ノード: ${hackedCount}/${colonyNodes.length}`);
             }
         }
+
+        // ── 偽装ビーコン更新 ──
+        structures.forEach(s => {
+            if (!s.decoyActive || s.decoyTimer <= 0) return;
+            s.decoyTimer--;
+            if (s.decoyTimer <= 0) {
+                s.decoyActive = false;
+                logMessage(`EW: 偽装ビーコン終了 (${s.type === 'colony' ? 'コロニー' : '難破船'})`, 'system-msg');
+                return;
+            }
+            if (s.decoyType === 'derelict' && s.decoyWaypoint) {
+                // 移動偽装: ウェイポイントへ向けて毎フレーム移動
+                const dx = s.decoyWaypoint.x - s.decoyMoveX;
+                const dy = s.decoyWaypoint.y - s.decoyMoveY;
+                const dist = Math.hypot(dx, dy);
+                if (dist > 5) {
+                    const spd = 1.2; // 偽装目標の移動速度
+                    s.decoyMoveX += (dx / dist) * spd;
+                    s.decoyMoveY += (dy / dist) * spd;
+                }
+            }
+        });
 
         // Projectiles
         for (let i = projectiles.length - 1; i >= 0; i--) {
@@ -3722,23 +4002,28 @@ function gameLoop() {
         structures.forEach(s => s.draw(ctx));
         drawTargetLine(ctx);
 
-        // リソースノード描画 (HIGGSセンサー使用中かつセンサー有効範囲内のみ可視 — 設計仕様)
-        if (currentSensor === 'higgs' && player && player.hp > 0) {
-            // HIGGSセンサーはrangeScale=1.2倍で広い探知範囲を持つ
+        // リソースノード描画 — ゲーム開始時から常時表示
+        // HIGGSセンサー使用中は高輝度で強調表示、通常時は低輝度で常時表示
+        if (player && player.hp > 0) {
             const higgsNodeRange = effectiveRadarRange * 1.2;
+            const isHiggsMode = currentSensor === 'higgs';
             resourceNodes.forEach(n => {
                 if (!n.active) return;
-                // センサー有効範囲外は不可視
-                if (Math.hypot(n.x - player.x, n.y - player.y) > higgsNodeRange) return;
-                const t = Date.now();
-                const pulse = 0.5 + Math.sin(t * 0.003 + n.x * 0.001) * 0.3;
-                const spin = (t * 0.0008 + n.x * 0.0003) % (Math.PI * 2);
+                const distToNode = Math.hypot(n.x - player.x, n.y - player.y);
+                // HIGGSセンサーはセンサー範囲外を不可視にするが、常時表示モードは全体可視
+                const inHiggsRange = distToNode <= higgsNodeRange;
+                const t2 = Date.now();
+                const pulse = 0.5 + Math.sin(t2 * 0.003 + n.x * 0.001) * 0.3;
+                const spin = (t2 * 0.0008 + n.x * 0.0003) % (Math.PI * 2);
+                // 通常時は薄く、HIGGSセンサー有効範囲内は鮮明
+                const brightness = isHiggsMode && inHiggsRange ? (0.3 + pulse * 0.4) : 0.08 + pulse * 0.04;
+                const glowIntensity = isHiggsMode && inHiggsRange ? 20 : 4;
                 ctx.save();
                 ctx.translate(n.x, n.y);
                 ctx.rotate(spin);
-                ctx.globalAlpha = 0.15 + pulse * 0.12;
+                ctx.globalAlpha = brightness;
                 ctx.fillStyle = '#50c8ff';
-                ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = 20;
+                ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = glowIntensity;
                 // Crystal hexagon
                 ctx.beginPath();
                 for (let i = 0; i < 6; i++) {
@@ -3748,7 +4033,7 @@ function gameLoop() {
                 }
                 ctx.closePath(); ctx.fill();
                 // Inner highlight
-                ctx.globalAlpha = 0.08 + pulse * 0.06;
+                ctx.globalAlpha = brightness * 0.5;
                 ctx.fillStyle = '#fff';
                 ctx.beginPath();
                 for (let i = 0; i < 6; i++) {
@@ -3787,6 +4072,9 @@ function gameLoop() {
 
         enemies.forEach(e => e.draw(ctx));
         if (player && player.hp > 0) player.draw(ctx);
+
+        // ── 有視界フォグオブウォー (アメーバ形状視野) ──
+        if (player && player.hp > 0) drawFogOfWar(ctx);
 
         // ── 武器射程サークルインジケータ (ワールド空間) ──
         if (player && player.hp > 0) {
