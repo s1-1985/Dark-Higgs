@@ -2468,16 +2468,17 @@ function drawMinimap() {
         if (e.visible && e.hp > 0) { minimapCtx.beginPath(); minimapCtx.arc(e.x * mmScale + offX, e.y * mmScale + offY, 2, 0, Math.PI * 2); minimapCtx.fill(); }
     });
 
-    // リソースノード (ヒッグスセンサー使用中のみミニマップ表示)
-    if (currentSensor === 'higgs') {
-        minimapCtx.fillStyle = '#50c8ff';
-        resourceNodes.forEach(n => {
-            if (!n.active) return;
-            minimapCtx.beginPath();
-            minimapCtx.arc(n.x * mmScale + offX, n.y * mmScale + offY, 2.5, 0, Math.PI * 2);
-            minimapCtx.fill();
-        });
-    }
+    // リソースノード (常時ミニマップ表示; HIGGSセンサーで明るく)
+    resourceNodes.forEach(n => {
+        if (!n.active) return;
+        minimapCtx.fillStyle = currentSensor === 'higgs' ? '#50c8ff' : 'rgba(80,200,255,0.4)';
+        minimapCtx.shadowColor = '#50c8ff';
+        minimapCtx.shadowBlur = currentSensor === 'higgs' ? 6 : 2;
+        minimapCtx.beginPath();
+        minimapCtx.arc(n.x * mmScale + offX, n.y * mmScale + offY, currentSensor === 'higgs' ? 4 : 2.5, 0, Math.PI * 2);
+        minimapCtx.fill();
+        minimapCtx.shadowBlur = 0;
+    });
 
     // クリップ解除後に円形境界線
     minimapCtx.restore();
@@ -3091,7 +3092,7 @@ function drawHUDOverlay(ctx) {
             if (e.hp <= 0) return;
             const dist = Math.hypot(e.x - player.x, e.y - player.y);
             const higgsPath = getHiggsIntensity((e.x + player.x)/2, (e.y + player.y)/2);
-            const distAtten = Math.max(0, 1 - dist / (effectiveRadarRange * 2.5));
+            const distAtten = Math.max(0, 1 - dist / (Math.max(effectiveRadarRange * 10, 8000)));
             const sig = sc2.sig(e) * distAtten * (1 - higgsPath * sc2.higgsMod);
             totalSig += sig;
             if (sig > 0.05 && e.detectionState && e.detectionState !== 'unaware') {
@@ -3099,14 +3100,23 @@ function drawHUDOverlay(ctx) {
             }
         });
         totalSig = Math.min(1.0, totalSig);
-        if (totalSig < 0.05) return;
-        const baseR = 28 + si * 12; // screen pixels
+        if (totalSig < 0.02) return;
+        const baseR = 55 + si * 18; // screen pixels (大きく)
         const colInfo = sensorColors2[sName];
         const pulse2 = 0.55 + Math.sin(t * 0.003 + si * 1.5) * 0.45;
-        const baseAlpha = totalSig * pulse2;
+        const baseAlpha = Math.min(1.0, totalSig * pulse2 * 1.4); // 明るく
 
         ctx.save();
         ctx.translate(psx, psy);
+
+        // 背景フルリング (薄く常時表示)
+        ctx.beginPath();
+        ctx.arc(0, 0, baseR, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(${colInfo.rgb},${(baseAlpha * 0.25).toFixed(3)})`;
+        ctx.lineWidth = 2;
+        ctx.shadowColor = colInfo.hex; ctx.shadowBlur = 6 * totalSig;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
 
         // リングを小弧に分割して描画 (敵方角付近を膨らませる)
         const segments = 72; // 360/5度
@@ -3119,26 +3129,26 @@ function drawHUDOverlay(ctx) {
                 let diff = segA - ea;
                 while (diff < -Math.PI) diff += Math.PI * 2;
                 while (diff >  Math.PI) diff -= Math.PI * 2;
-                if (Math.abs(diff) < 0.35) { nearEnemy = true; break; }
+                if (Math.abs(diff) < 0.4) { nearEnemy = true; break; }
             }
-            const r = nearEnemy ? baseR + 8 : baseR;
-            const lw = nearEnemy ? (2.5 + totalSig * 2.5) : (1.0 + totalSig * 1.0);
-            const alpha = nearEnemy ? Math.min(1, baseAlpha * 1.5) : baseAlpha * 0.4;
+            const r = nearEnemy ? baseR + 20 : baseR;
+            const lw = nearEnemy ? (5 + totalSig * 4) : (2 + totalSig * 1.5);
+            const alpha = nearEnemy ? Math.min(1, baseAlpha * 1.8) : baseAlpha * 0.5;
             ctx.beginPath();
             ctx.arc(0, 0, r, segA - segAngle * 0.5, segA + segAngle * 0.5);
             ctx.strokeStyle = `rgba(${colInfo.rgb},${alpha.toFixed(3)})`;
             ctx.lineWidth = lw;
             ctx.shadowColor = colInfo.hex;
-            ctx.shadowBlur = nearEnemy ? 25 * totalSig : 0;
+            ctx.shadowBlur = nearEnemy ? 35 * totalSig : 0;
             ctx.stroke();
         }
         ctx.shadowBlur = 0;
 
         // 外側の薄いリング (2本目)
         ctx.beginPath();
-        ctx.arc(0, 0, baseR + 4, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(${colInfo.rgb},${(baseAlpha * 0.15).toFixed(3)})`;
-        ctx.lineWidth = 1;
+        ctx.arc(0, 0, baseR + 6, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(${colInfo.rgb},${(baseAlpha * 0.2).toFixed(3)})`;
+        ctx.lineWidth = 1.5;
         ctx.stroke();
 
         ctx.restore();
@@ -3361,38 +3371,52 @@ function gameLoop() {
         structures.forEach(s => s.draw(ctx));
         drawTargetLine(ctx);
 
-        // リソースノード描画 (HIGGSセンサー使用中かつセンサー有効範囲内のみ可視 — 設計仕様)
-        if (currentSensor === 'higgs' && player && player.hp > 0) {
-            // HIGGSセンサーはrangeScale=1.2倍で広い探知範囲を持つ
-            const higgsNodeRange = effectiveRadarRange * 1.2;
+        // リソースノード描画 (全センサーで常時表示; HIGGSで最大輝度)
+        if (player && player.hp > 0) {
+            const higgsNodeRange = effectiveRadarRange * 6;
+            const isHiggsSnsr = currentSensor === 'higgs';
             resourceNodes.forEach(n => {
                 if (!n.active) return;
-                // センサー有効範囲外は不可視
-                if (Math.hypot(n.x - player.x, n.y - player.y) > higgsNodeRange) return;
+                const distToNode = Math.hypot(n.x - player.x, n.y - player.y);
                 const t = Date.now();
-                const pulse = 0.5 + Math.sin(t * 0.003 + n.x * 0.001) * 0.3;
+                const pulse = 0.5 + Math.sin(t * 0.003 + n.x * 0.001) * 0.5;
                 const spin = (t * 0.0008 + n.x * 0.0003) % (Math.PI * 2);
+                // HIGGSセンサー: フル輝度。他センサー: センサー範囲外は暗め
+                const inRange = distToNode < higgsNodeRange;
+                const brightness = isHiggsSnsr
+                    ? (0.5 + pulse * 0.5)
+                    : (inRange ? 0.15 + pulse * 0.12 : 0.04 + pulse * 0.04);
                 ctx.save();
                 ctx.translate(n.x, n.y);
                 ctx.rotate(spin);
-                ctx.globalAlpha = 0.15 + pulse * 0.12;
+                // 外側グロー
+                ctx.globalAlpha = brightness * 0.5;
                 ctx.fillStyle = '#50c8ff';
-                ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = 20;
-                // Crystal hexagon
+                ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = isHiggsSnsr ? 40 : 15;
+                ctx.beginPath(); ctx.arc(0, 0, 26, 0, Math.PI * 2); ctx.fill();
+                // 外リング
+                ctx.globalAlpha = brightness * 0.35;
+                ctx.strokeStyle = '#80e0ff'; ctx.lineWidth = 1.5 / camera.zoom;
+                ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.stroke();
+                // メインクリスタル六角形
+                ctx.globalAlpha = brightness;
+                ctx.fillStyle = '#50c8ff';
+                ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = isHiggsSnsr ? 25 : 10;
                 ctx.beginPath();
                 for (let i = 0; i < 6; i++) {
                     const a = (i / 6) * Math.PI * 2;
-                    const px = Math.cos(a) * 6, py = Math.sin(a) * 6;
+                    const px = Math.cos(a) * 16, py = Math.sin(a) * 16;
                     if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
                 }
                 ctx.closePath(); ctx.fill();
-                // Inner highlight
-                ctx.globalAlpha = 0.08 + pulse * 0.06;
-                ctx.fillStyle = '#fff';
+                // インナーコア (白)
+                ctx.globalAlpha = brightness * 0.9;
+                ctx.fillStyle = '#ffffff';
+                ctx.shadowBlur = 8;
                 ctx.beginPath();
                 for (let i = 0; i < 6; i++) {
                     const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
-                    const px = Math.cos(a) * 3, py = Math.sin(a) * 3;
+                    const px = Math.cos(a) * 7, py = Math.sin(a) * 7;
                     if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
                 }
                 ctx.closePath(); ctx.fill();
@@ -3426,6 +3450,38 @@ function gameLoop() {
 
         enemies.forEach(e => e.draw(ctx));
         if (player && player.hp > 0) player.draw(ctx);
+
+        // ── 有視界境界リング (ワールド空間) ──
+        // Higgs濃度に関わらず常時表示し、有視界の境界を明示する
+        if (player && player.hp > 0) {
+            const higgsHere = getHiggsIntensity(player.x, player.y);
+            const visionRingR = effectiveRadarRange;
+            const t2 = Date.now();
+            const vpulse = 0.5 + Math.sin(t2 * 0.0015) * 0.5;
+            // 濃度が高いほど赤寄り
+            const vRingColor = higgsHere > 0.6 ? '#ff4444' : (higgsHere > 0.3 ? '#ffaa44' : '#00ffaa');
+            ctx.save();
+            // 外側グロー
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, visionRingR, 0, Math.PI * 2);
+            ctx.strokeStyle = vRingColor;
+            ctx.lineWidth = 3 / camera.zoom;
+            ctx.globalAlpha = 0.12 + vpulse * 0.08;
+            ctx.shadowColor = vRingColor; ctx.shadowBlur = 0;
+            ctx.stroke();
+            // メインリング (破線)
+            ctx.setLineDash([30 / camera.zoom, 20 / camera.zoom]);
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, visionRingR, 0, Math.PI * 2);
+            ctx.strokeStyle = vRingColor;
+            ctx.lineWidth = 1.5 / camera.zoom;
+            ctx.globalAlpha = 0.3 + vpulse * 0.2;
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.shadowBlur = 0;
+            ctx.globalAlpha = 1;
+            ctx.restore();
+        }
 
         // ── 武器射程サークルインジケータ (ワールド空間) ──
         if (player && player.hp > 0) {
