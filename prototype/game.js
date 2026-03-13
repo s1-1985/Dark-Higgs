@@ -150,6 +150,7 @@ let particles = [];
 let debris = [];
 let bgStars = [];
 let bgMist = [];
+let spaceBgCanvas = null; // 事前生成の宇宙背景テクスチャ
 let scrapDrops = [];
 let stations = [];
 let higgsWakes = [];    // ヒッグスウェイク軌跡 {x, y, intensity, life}
@@ -170,8 +171,9 @@ let playerVisionRadius = BASE_VISION_RADIUS;
 function computeVisionRadius() {
     if (!player || player.hp <= 0) return BASE_VISION_RADIUS;
     const h = getHiggsIntensity(player.x, player.y);
-    // ヒッグス0% → 100%視野、ヒッグス100% → 5%視野 (ほぼゼロ)
-    return BASE_VISION_RADIUS * Math.max(0.05, 1.0 - h * 0.95);
+    // ヒッグス0% → フル視野、ヒッグス100% → 最低500uは確保
+    const MIN_RADIUS = 500;
+    return Math.max(MIN_RADIUS, BASE_VISION_RADIUS * (1 - h * 0.65));
 }
 
 // アメーバ形状の頂点列を生成 (毎フレームアニメーション)
@@ -199,9 +201,13 @@ function drawFogOfWar(ctx) {
     const t = Date.now() * 0.001;
     const NUM_PTS = 32;
 
-    // 霧の不透明度: ヒッグス高濃度で若干濃くなる
+    // 霧の不透明度: ヒッグス高濃度で濃くなる
     const hHere = getHiggsIntensity(cx, cy);
-    const fogAlpha = 0.88 + hHere * 0.08;
+    const fogAlpha = 0.86 + hHere * 0.10;
+    // ヒッグス雲の中ではティール〜青みがかった霧色
+    const fogR = Math.round(1  + hHere * 4);
+    const fogG = Math.round(3  + hHere * 22);
+    const fogB = Math.round(14 + hHere * 32);
 
     // 描画範囲: カメラビュー + マージン
     const vw = canvas.width  / camera.zoom;
@@ -229,15 +235,16 @@ function drawFogOfWar(ctx) {
         ctx.quadraticCurveTo(pts[i].x, pts[i].y, (pts[i].x + next.x) / 2, (pts[i].y + next.y) / 2);
     }
     ctx.closePath();
-    ctx.fillStyle = `rgba(1,3,14,${fogAlpha.toFixed(3)})`;
+    ctx.fillStyle = `rgba(${fogR},${fogG},${fogB},${fogAlpha.toFixed(3)})`;
     ctx.fill('evenodd');
 
     // ── ソフトエッジグラデーション (視野境界のフェード) ──
-    const innerR = playerVisionRadius * 0.78;
-    const outerR = playerVisionRadius * 1.18;
-    const edgeGrad = ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR);
-    edgeGrad.addColorStop(0, 'rgba(1,3,14,0)');
-    edgeGrad.addColorStop(1, `rgba(1,3,14,${fogAlpha.toFixed(3)})`);
+    // ヒッグス高濃度では内側クリア領域が狭く、外側フェード帯が広くなる
+    const innerR = playerVisionRadius * (0.78 - hHere * 0.18);
+    const outerR = playerVisionRadius * (1.18 + hHere * 0.5);
+    const edgeGrad = ctx.createRadialGradient(cx, cy, Math.max(1, innerR), cx, cy, outerR);
+    edgeGrad.addColorStop(0, 'rgba(0,0,0,0)');
+    edgeGrad.addColorStop(1, `rgba(${fogR},${fogG},${fogB},${fogAlpha.toFixed(3)})`);
     ctx.beginPath();
     ctx.arc(cx, cy, outerR * 1.05, 0, Math.PI * 2);
     ctx.fillStyle = edgeGrad;
@@ -297,6 +304,145 @@ function updateVisionLockOn() {
             player.targetEntity = bestContact;
         }
     }
+}
+
+// ============================================================
+// 宇宙背景テクスチャ生成 (ゲーム開始時に1回だけ実行、ランダムシード)
+// ============================================================
+function generateSpaceBackground() {
+    const TEX = 2048;
+    spaceBgCanvas = document.createElement('canvas');
+    spaceBgCanvas.width  = TEX;
+    spaceBgCanvas.height = TEX;
+    const bc = spaceBgCanvas.getContext('2d');
+
+    // 簡易LCG乱数 (Math.random()で毎回異なるシード)
+    let _s = (Math.random() * 0xffffffff) >>> 0;
+    const rng = () => { _s = (_s * 1664525 + 1013904223) >>> 0; return _s / 4294967296; };
+
+    // 1. ベースグラジェント (暗い深宇宙ブルー)
+    const bg = bc.createLinearGradient(0, 0, TEX * 0.7, TEX);
+    bg.addColorStop(0,   '#020816');
+    bg.addColorStop(0.3, '#010610');
+    bg.addColorStop(0.6, '#030a1a');
+    bg.addColorStop(1,   '#020714');
+    bc.fillStyle = bg;
+    bc.fillRect(0, 0, TEX, TEX);
+
+    // 2. 大型星雲バンド (画像の乳白色天の川風)
+    const bands = [
+        { x: rng()*TEX, y: rng()*TEX, rx: 600+rng()*500, ry: 200+rng()*200,
+          rot: rng()*Math.PI, col: `${12+rng()*20|0},${100+rng()*80|0},${150+rng()*60|0}`, a: 0.18 },
+        { x: rng()*TEX, y: rng()*TEX, rx: 500+rng()*400, ry: 160+rng()*160,
+          rot: rng()*Math.PI, col: `${40+rng()*30|0},${60+rng()*60|0},${160+rng()*60|0}`,  a: 0.14 },
+        { x: rng()*TEX, y: rng()*TEX, rx: 400+rng()*400, ry: 180+rng()*150,
+          rot: rng()*Math.PI, col: `${60+rng()*40|0},${20+rng()*30|0},${140+rng()*60|0}`,  a: 0.12 },
+    ];
+    bands.forEach(b => {
+        bc.save();
+        bc.translate(b.x, b.y);
+        bc.rotate(b.rot);
+        bc.scale(1, b.ry / b.rx);
+        const g = bc.createRadialGradient(0, 0, 0, 0, 0, b.rx);
+        g.addColorStop(0,    `rgba(${b.col},${(b.a).toFixed(3)})`);
+        g.addColorStop(0.35, `rgba(${b.col},${(b.a*0.7).toFixed(3)})`);
+        g.addColorStop(0.7,  `rgba(${b.col},${(b.a*0.25).toFixed(3)})`);
+        g.addColorStop(1,    'rgba(0,0,0,0)');
+        bc.fillStyle = g;
+        bc.beginPath(); bc.arc(0, 0, b.rx, 0, Math.PI*2); bc.fill();
+        bc.restore();
+    });
+
+    // 3. 小型星雲クラスター
+    for (let i = 0; i < 18; i++) {
+        const x = rng()*TEX, y = rng()*TEX;
+        const r = 60 + rng()*180;
+        const palettes = [
+            `${10+rng()*20|0},${160+rng()*80|0},${200+rng()*55|0}`,   // teal-cyan
+            `${60+rng()*40|0},${20+rng()*30|0},${180+rng()*60|0}`,    // purple-blue
+            `${20+rng()*20|0},${80+rng()*60|0},${160+rng()*50|0}`,    // blue
+            `${0+rng()*15|0},${140+rng()*80|0},${160+rng()*60|0}`,    // deep teal
+        ];
+        const col = palettes[Math.floor(rng()*palettes.length)];
+        const a = 0.08 + rng()*0.16;
+        const g = bc.createRadialGradient(x, y, 0, x, y, r);
+        g.addColorStop(0,   `rgba(${col},${a})`);
+        g.addColorStop(0.5, `rgba(${col},${(a*0.5).toFixed(3)})`);
+        g.addColorStop(1,   'rgba(0,0,0,0)');
+        bc.fillStyle = g;
+        bc.beginPath(); bc.arc(x, y, r, 0, Math.PI*2); bc.fill();
+    }
+
+    // 4. 星 (数千個、3種類)
+    //  dim background stars
+    for (let i = 0; i < 6000; i++) {
+        const x = rng()*TEX, y = rng()*TEX;
+        const v = rng();
+        bc.globalAlpha = 0.08 + rng()*0.22;
+        bc.fillStyle = v < 0.6 ? '#c8d8ff' : (v < 0.85 ? '#ffffff' : '#ffd8aa');
+        bc.fillRect(x, y, 0.8, 0.8);
+    }
+    //  medium stars
+    for (let i = 0; i < 1800; i++) {
+        const x = rng()*TEX, y = rng()*TEX;
+        const v = rng();
+        bc.globalAlpha = 0.25 + rng()*0.55;
+        bc.fillStyle = v < 0.5 ? '#ddeeff' : (v < 0.75 ? '#ffffff' : (v < 0.9 ? '#aaccff' : '#ffcc88'));
+        const sz = 0.9 + rng()*0.6;
+        bc.fillRect(x, y, sz, sz);
+    }
+    //  bright foreground stars (with glow)
+    for (let i = 0; i < 200; i++) {
+        const x = rng()*TEX, y = rng()*TEX;
+        const sz = 1.5 + rng()*2.0;
+        const v = rng();
+        const col = v < 0.55 ? '#ffffff' : (v < 0.75 ? '#aaccff' : (v < 0.9 ? '#ffddaa' : '#cc99ff'));
+        bc.globalAlpha = 0.7 + rng()*0.3;
+        bc.shadowColor = col; bc.shadowBlur = 6;
+        bc.fillStyle = col;
+        bc.fillRect(x, y, sz, sz);
+        // 十字フレア
+        bc.globalAlpha = 0.2;
+        bc.fillRect(x - sz*3, y + sz*0.3, sz*8, sz*0.4);
+        bc.fillRect(x + sz*0.3, y - sz*3, sz*0.4, sz*8);
+        bc.shadowBlur = 0;
+    }
+    bc.globalAlpha = 1;
+
+    // 5. 明るい巨星 1〜2個 (画像の右上の星風)
+    const starCount = 1 + (rng() < 0.5 ? 1 : 0);
+    for (let si = 0; si < starCount; si++) {
+        const sx = 200 + rng()*(TEX-400), sy = 100 + rng()*(TEX-400);
+        const sr = 60 + rng()*100;
+        // 紫〜赤〜白の後光
+        const haloCol = rng() < 0.5 ? '180,80,200' : '200,60,100';
+        const hg = bc.createRadialGradient(sx, sy, 0, sx, sy, sr);
+        hg.addColorStop(0,    `rgba(${haloCol},0.25)`);
+        hg.addColorStop(0.4,  `rgba(${haloCol},0.10)`);
+        hg.addColorStop(0.7,  `rgba(${haloCol},0.04)`);
+        hg.addColorStop(1,    'rgba(0,0,0,0)');
+        bc.fillStyle = hg; bc.beginPath(); bc.arc(sx, sy, sr, 0, Math.PI*2); bc.fill();
+        // 白いコア
+        const cg = bc.createRadialGradient(sx, sy, 0, sx, sy, 12);
+        cg.addColorStop(0,   'rgba(255,255,255,1)');
+        cg.addColorStop(0.3, 'rgba(220,240,255,0.8)');
+        cg.addColorStop(1,   'rgba(0,0,0,0)');
+        bc.fillStyle = cg; bc.beginPath(); bc.arc(sx, sy, 12, 0, Math.PI*2); bc.fill();
+        // 光芒 (4本)
+        for (let ray = 0; ray < 4; ray++) {
+            const a = ray * Math.PI/2;
+            bc.save();
+            bc.translate(sx, sy); bc.rotate(a);
+            const rg = bc.createLinearGradient(0,0,sr*1.8,0);
+            rg.addColorStop(0,   'rgba(255,255,255,0.6)');
+            rg.addColorStop(0.3, 'rgba(200,230,255,0.15)');
+            rg.addColorStop(1,   'rgba(0,0,0,0)');
+            bc.fillStyle = rg;
+            bc.beginPath(); bc.moveTo(0,-3); bc.lineTo(sr*1.8,0); bc.lineTo(0,3); bc.closePath(); bc.fill();
+            bc.restore();
+        }
+    }
+    bc.globalAlpha = 1;
 }
 
 // ============================================================
@@ -2106,6 +2252,9 @@ function generateSector() {
     // センサーLvによるレーダー基本範囲の反映
     RADAR_RANGE = BASE_RADAR_RANGE * UPGRADE_MULT[gameState.upgrades.sensor];
 
+    // 宇宙背景テクスチャ生成 (毎セクター異なるランダム配置)
+    generateSpaceBackground();
+
     // Environmental Background
     bgStars = [];
     // 星の色: 青白(O/B型)・白(A型)・淡黄(F/G型)・橙赤(K/M型)・青紫(Wolf-Rayet)
@@ -3151,78 +3300,51 @@ minimapCanvas.addEventListener('touchend', () => { isMinimapDragging = false; })
 function drawBackground(ctx) {
     const vw = canvas.width / camera.zoom;
     const vh = canvas.height / camera.zoom;
-
-    // Deep space base fill — 深宇宙の漆黒に極微細な青みを加える
-    ctx.fillStyle = 'rgb(1,3,14)';
-    ctx.fillRect(camera.x, camera.y, vw, vh);
-
-    // Multi-layer parallax stars
-    const parallaxes = [0.10, 0.28, 0.58];
-    const now = Date.now() * 0.001;
     const cx = camera.x, cy = camera.y;
+    const now = Date.now() * 0.001;
 
-    bgStars.forEach(s => {
-        const px = parallaxes[s.layer];
-        const sx = s.x - cx * px;
-        const sy = s.y - cy * px;
-        // Cull off-screen
-        if (sx < cx - 20 || sx > cx + vw + 20 || sy < cy - 20 || sy > cy + vh + 20) return;
+    // 宇宙背景テクスチャ (事前生成、ゲーム毎に異なる星雲配置)
+    if (spaceBgCanvas) {
+        ctx.drawImage(spaceBgCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
+    } else {
+        ctx.fillStyle = 'rgb(1,3,14)';
+        ctx.fillRect(cx, cy, vw, vh);
+    }
 
-        let twinkle = s.alpha;
-        if (s.layer >= 1) {
-            twinkle = s.alpha * (0.60 + Math.sin(now * (0.8 + s.twinkle * 0.5) + s.twinkle) * 0.40);
-        }
-        ctx.globalAlpha = Math.max(0, twinkle);
-        ctx.fillStyle = s.color;
-
-        if (s.isBright) {
-            // 明るい近景星: グロー + 十字フレア
-            ctx.shadowColor = s.color;
-            ctx.shadowBlur = 12;
-            ctx.fillRect(sx, sy, s.size, s.size);
-            ctx.shadowBlur = 0;
-            ctx.globalAlpha = twinkle * 0.30;
-            ctx.fillRect(sx - s.size * 2.5, sy + s.size * 0.3, s.size * 7, s.size * 0.35);
-            ctx.fillRect(sx + s.size * 0.3, sy - s.size * 2.5, s.size * 0.35, s.size * 7);
-        } else if (s.layer === 2 && s.size > 1.8) {
-            ctx.shadowColor = s.color;
-            ctx.shadowBlur = 5;
-            ctx.fillRect(sx, sy, s.size, s.size);
-            ctx.shadowBlur = 0;
-        } else {
-            ctx.fillRect(sx, sy, s.size, s.size);
-        }
-    });
-    ctx.globalAlpha = 1;
-
-    // Nebula / Higgs mist clouds — 鮮やかな星雲・ヒッグス場を可視化
+    // Higgs mist clouds — 密度別カラーで可視化
+    // density < 0.30 : 淡いブルー    0.30-0.50 : ティール
+    // density 0.50-0.70 : シアン     0.70-0.85 : 青紫
+    // density 0.85+   : 深いインディゴ
     bgMist.forEach(m => {
-        const isHiggs = m.density > 0.45;
+        const d = m.density;
         const pulse = 0.80 + Math.sin(now * 0.35 + (m.phase || 0)) * 0.20;
-        let baseAlpha = isHiggs ? 0.13 * pulse : 0.035 + m.density * 0.03;
+        let col, baseAlpha;
+        if (d >= 0.85) {
+            col = '100,20,200';  baseAlpha = 0.18 * pulse;
+        } else if (d >= 0.70) {
+            col = '40,80,220';   baseAlpha = 0.15 * pulse;
+        } else if (d >= 0.50) {
+            col = '0,200,240';   baseAlpha = 0.13 * pulse;
+        } else if (d >= 0.30) {
+            col = '20,120,160';  baseAlpha = 0.08 * pulse;
+        } else {
+            col = '15,40,100';   baseAlpha = 0.04 + d * 0.04;
+        }
         const g = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.r);
-        const col = isHiggs ? '40,210,255' : m.color;
-        g.addColorStop(0,    `rgba(${col},${Math.min(0.55, baseAlpha * 2.5).toFixed(3)})`);
+        g.addColorStop(0,    `rgba(${col},${Math.min(0.60, baseAlpha * 2.5).toFixed(3)})`);
         g.addColorStop(0.25, `rgba(${col},${(baseAlpha * 1.2).toFixed(3)})`);
         g.addColorStop(0.60, `rgba(${col},${(baseAlpha * 0.45).toFixed(3)})`);
         g.addColorStop(1,    'rgba(0,0,0,0)');
         ctx.fillStyle = g;
         ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2); ctx.fill();
 
-        // 高密度コアに輝点を追加
-        if (isHiggs) {
+        // 高密度コアに輝点
+        if (d >= 0.45) {
             const cg = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.r * 0.22);
-            cg.addColorStop(0, `rgba(90,245,255,${(0.09 * pulse).toFixed(3)})`);
+            cg.addColorStop(0, `rgba(${col},${(0.12 * pulse).toFixed(3)})`);
             cg.addColorStop(1, 'rgba(0,0,0,0)');
             ctx.fillStyle = cg;
             ctx.beginPath(); ctx.arc(m.x, m.y, m.r * 0.22, 0, Math.PI * 2); ctx.fill();
-        } else if (m.density > 0.30) {
-            // 中密度星雲: 内側に輝きコアを追加
-            const mc = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.r * 0.18);
-            mc.addColorStop(0, `rgba(${m.color},${(0.06 * pulse).toFixed(3)})`);
-            mc.addColorStop(1, 'rgba(0,0,0,0)');
-            ctx.fillStyle = mc;
-            ctx.beginPath(); ctx.arc(m.x, m.y, m.r * 0.18, 0, Math.PI * 2); ctx.fill();
         }
     });
 
