@@ -169,11 +169,8 @@ const BASE_VISION_RADIUS = 1200; // 0%ヒッグス時の基準視野半径 (ワ�
 let playerVisionRadius = BASE_VISION_RADIUS;
 
 function computeVisionRadius() {
-    if (!player || player.hp <= 0) return BASE_VISION_RADIUS;
-    const h = getHiggsIntensity(player.x, player.y);
-    // ヒッグス0% → フル視野、ヒッグス100% → 最低500uは確保
-    const MIN_RADIUS = 500;
-    return Math.max(MIN_RADIUS, BASE_VISION_RADIUS * (1 - h * 0.65));
+    // 霧・視野制限を無効化 — 常にマップ全体が有視界
+    return FIELD_SIZE;
 }
 
 // アメーバ形状の頂点列を生成 (毎フレームアニメーション)
@@ -4282,7 +4279,7 @@ function gameLoop() {
             ctx.setLineDash([]);
             ctx.globalAlpha = 1;
             ctx.restore();
-            drawFogOfWar(ctx);
+            // drawFogOfWar(ctx); // 視野制限を無効化
         }
 
         // ── 武器射程サークルインジケータ (ワールド空間) ──
