@@ -229,9 +229,10 @@ body {
 }
 
 .right-panel {
-    flex: 1;
+    flex: 0 0 200px;
     border-right: none;
     min-width: 160px;
+    max-width: 220px;
 }
 
 .panel-header {
@@ -359,7 +360,7 @@ input[type=range]::-webkit-slider-thumb {
 
 #passive-indicator {
     font-size: 8px;
-    color: #333;
+    color: #888;
     letter-spacing: 1px;
     transition: color 0.3s, text-shadow 0.3s;
 }
@@ -676,7 +677,7 @@ input[type=range]::-webkit-slider-thumb {
 .isel-label {
     font-family: 'Orbitron', monospace;
     font-size: 7px;
-    color: #444;
+    color: #88aacc;
     letter-spacing: 1px;
     width: 44px;
     flex-shrink: 0;
@@ -783,7 +784,7 @@ input[type=range]::-webkit-slider-thumb {
     justify-content: space-between;
     align-items: center;
     font-size: 9px;
-    color: #666;
+    color: #9bb;
     margin-bottom: 2px;
     font-family: 'Orbitron', monospace;
     letter-spacing: 0.5px;

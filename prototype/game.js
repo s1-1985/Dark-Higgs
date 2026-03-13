@@ -805,6 +805,7 @@ class Structure {
         if (this.type === 'colony') {
             ctx.save();
             ctx.translate(this.x, this.y);
+            ctx.scale(1 / camera.zoom, 1 / camera.zoom); // 常に画面上で固定サイズ
             ctx.strokeStyle = hColor || 'rgba(60,100,220,0.9)';
             ctx.fillStyle = hColor ? 'rgba(0,100,200,0.25)' : 'rgba(34,68,170,0.25)';
             ctx.lineWidth = 2;
@@ -839,6 +840,7 @@ class Structure {
             // Derelict wreckage
             ctx.save();
             ctx.translate(this.x, this.y);
+            ctx.scale(1 / camera.zoom, 1 / camera.zoom); // 常に画面上で固定サイズ
             ctx.strokeStyle = hColor || 'rgba(140,115,80,0.9)';
             ctx.fillStyle = hColor ? 'rgba(0,100,200,0.2)' : 'rgba(70,60,45,0.55)';
             ctx.lineWidth = 2;
@@ -1155,14 +1157,13 @@ class Ship {
         if (this.fireCooldown > 0) this.fireCooldown--;
 
         if (this.isPlayer) {
-            // Track previous position for signature calculations
-            this.prevX = this.x; this.prevY = this.y;
-
-            // Player signature calculation (used by enemy AI)
-            const _spd = Math.hypot(this.x - this.prevX, this.y - this.prevY);
+            // Player signature calculation (speed = distance moved since last frame)
+            const _spd = Math.hypot(this.x - (this.prevX ?? this.x), this.y - (this.prevY ?? this.y));
             const _engType = ENGINE_TYPES[gameState.engineType] || ENGINE_TYPES.thermonuclear;
             const _hHere = getHiggsIntensity(this.x, this.y);
-            this.heatSig = Math.min(1, (_spd * 0.6 + genAlloc.engine / 100 * 0.25) * _engType.heatMult);
+            const _isMoving = _spd > 0.1;
+            // 停止中はエンジン熱シグネチャなし (機関停止でステルス可能)
+            this.heatSig = _isMoving ? Math.min(1, (_spd * 0.6 + genAlloc.engine / 100 * 0.25) * _engType.heatMult) : 0;
             this.opticalSig = Math.min(1, (_spd * 0.05 + (this.weaponType === 'beam' ? 0.6 : 0)) * _engType.optMult);
             this.emSig = Math.min(1, (genAlloc.sensors / 100 * 0.4 + genAlloc.ai / 100 * 0.35) * _engType.emMult);
             this.higgsSig = Math.min(1, _spd * _hHere * 2.0 * (_engType.higgsSpeedBonus > 0 ? 1 : 0.3));
@@ -1294,6 +1295,9 @@ class Ship {
                     this.angle += diff * 0.02; // slow turn
                 } else this.state = 'idle';
             }
+
+            // 前フレーム位置を保存 (次フレームの速度計算用)
+            this.prevX = this.x; this.prevY = this.y;
 
             // UI
             const hpP = Math.max(0, (this.hp / this.maxHp) * 100);
@@ -2182,7 +2186,7 @@ function updateDrawEffects(ctx) {
                 ctx.beginPath(); ctx.arc(ef.x, ef.y, ef.r, 0, Math.PI*2);
                 ctx.strokeStyle = ef.c; ctx.globalAlpha = Math.max(0, ef.a);
                 // 太いライン + 強いglow
-                ctx.lineWidth = 5; ctx.shadowColor = 'rgba(0,255,220,1)'; ctx.shadowBlur = 30;
+                ctx.lineWidth = 5 / camera.zoom; ctx.shadowColor = 'rgba(0,255,220,1)'; ctx.shadowBlur = 30;
                 ctx.stroke(); ctx.shadowBlur = 0;
                 ctx.globalAlpha = 1;
             }
@@ -2885,32 +2889,7 @@ function drawPassiveAntenna(ctx) {
         ctx.restore(); ctx.globalAlpha = 1;
     }
 
-    // パッシブアンテナビジュアル: 小さい多重パルスリング
-    ctx.save();
-    ctx.translate(player.x, player.y);
-    const alerting = passiveAlertTimer > 0;
-    const ringColorA = alerting ? '255,170,0' : CR;
-    const baseR = 60, maxR = 220;
-    const lw = 1.0 / camera.zoom; // ズーム不変の線幅 (スクリーンピクセル単位)
-    for (let i = 0; i < 3; i++) {
-        const phase = ((t / 2200) + i / 3) % 1;
-        const r     = baseR + (maxR - baseR) * phase;
-        const alpha = (1 - phase) * (alerting ? 0.65 : 0.35);
-        ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(${ringColorA},${alpha.toFixed(3)})`;
-        ctx.lineWidth = (alerting ? 1.5 : 1) * lw;
-        ctx.stroke();
-    }
-    // コンパスティック
-    ctx.strokeStyle = `rgba(${CR},0.25)`; ctx.lineWidth = lw;
-    for (let i = 0; i < 4; i++) {
-        const a = (i / 4) * Math.PI * 2;
-        ctx.beginPath();
-        ctx.moveTo(Math.cos(a) * (baseR - 12), Math.sin(a) * (baseR - 12));
-        ctx.lineTo(Math.cos(a) * (baseR + 12), Math.sin(a) * (baseR + 12));
-        ctx.stroke();
-    }
-    ctx.restore();
+    // パッシブアンテナビジュアル: 不要 (スレットリングで代替)
 
     // スレットリング: 自機周囲に常に浮かぶ形状変化リング
     // 普段は穏やかな多角形。環境シグネチャ受信により各センサー方向に変形する。
@@ -2951,11 +2930,11 @@ function drawPassiveAntenna(ctx) {
         });
 
         // リングの各点の半径を計算
-        // 値がゼロでも常に可視: 穏やかな呼吸アニメ
-        const BASE_R   = 62;
-        const MAX_BULGE = 32;
+        // ズームに関係なく画面上で固定サイズ (screen-space)
+        const BASE_R   = 180 / camera.zoom;
+        const MAX_BULGE = 100 / camera.zoom;
         const N_POINTS  = 80;
-        const idleBreath = Math.sin(tSec * 0.7) * 2.5;
+        const idleBreath = Math.sin(tSec * 0.7) * (3 / camera.zoom);
 
         const getRingRadius = (angle) => {
             let r = BASE_R + idleBreath;
@@ -2981,6 +2960,17 @@ function drawPassiveAntenna(ctx) {
 
         ctx.save();
         ctx.translate(player.x, player.y);
+
+        // ── "THREAT SENSORS" ラベル (リング上部) ──────────────
+        {
+            const labelAngle = -Math.PI / 2; // 真上
+            const labelR = BASE_R + idleBreath + 20 / camera.zoom;
+            ctx.fillStyle = `rgba(${RING_SENSOR_COLORS[maxRingName]},${(0.18 + maxRingSig * 0.22).toFixed(3)})`;
+            ctx.font = `bold ${Math.round(8 / camera.zoom)}px Orbitron, monospace`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('THREAT SENSORS', Math.cos(labelAngle) * labelR, Math.sin(labelAngle) * labelR);
+        }
 
         // ── ベースリング (常に表示) ──────────────────────────
         const idleAlpha = 0.22 + maxRingSig * 0.15;
@@ -3024,15 +3014,23 @@ function drawPassiveAntenna(ctx) {
             ctx.stroke();
             ctx.shadowBlur = 0;
 
-            // センサー方向のティックマーカー
+            // センサー方向のティックマーカー + ラベル
             const tickDir = dir + tSec * 0.08;
             const tickR = getRingRadius(tickDir);
             ctx.strokeStyle = `rgba(${color},${(0.4 + sig * 0.55).toFixed(3)})`;
             ctx.lineWidth = 2 * ringLw;
             ctx.beginPath();
             ctx.moveTo(Math.cos(tickDir) * (tickR + 3 / camera.zoom),  Math.sin(tickDir) * (tickR + 3 / camera.zoom));
-            ctx.lineTo(Math.cos(tickDir) * (tickR + 11 / camera.zoom), Math.sin(tickDir) * (tickR + 11 / camera.zoom));
+            ctx.lineTo(Math.cos(tickDir) * (tickR + 14 / camera.zoom), Math.sin(tickDir) * (tickR + 14 / camera.zoom));
             ctx.stroke();
+            // センサー名ラベル
+            const SENSOR_NAMES = { heat: 'HEAT', optic: 'OPT', em: 'EM', higgs: 'HGS' };
+            const labelDist = tickR + 26 / camera.zoom;
+            ctx.fillStyle = `rgba(${color},${(0.3 + sig * 0.6).toFixed(3)})`;
+            ctx.font = `bold ${Math.round(9 / camera.zoom)}px Orbitron, monospace`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(SENSOR_NAMES[sName], Math.cos(tickDir) * labelDist, Math.sin(tickDir) * labelDist);
         });
 
         ctx.restore();
@@ -3402,7 +3400,7 @@ function updateSigCanvas() {
     const engType = ENGINE_TYPES[gameState.engineType]||ENGINE_TYPES.thermonuclear;
     const hHere = getHiggsIntensity(player.x, player.y);
     const currentVals = {
-        heat:  Math.min(1, (spd * 0.6 + genAlloc.engine/100*0.25) * engType.heatMult),
+        heat:  spd > 0.1 ? Math.min(1, (spd * 0.6 + genAlloc.engine/100*0.25) * engType.heatMult) : 0,
         optic: Math.min(1, player.opticalSig||0),
         em:    Math.min(1, (genAlloc.sensors/100*0.4 + genAlloc.ai/100*0.35) * engType.emMult),
         higgs: Math.min(1, spd * hHere * 2.0 * (engType.higgsSpeedBonus>0 ? 1 : 0.3))
@@ -4261,7 +4259,7 @@ function gameLoop() {
         enemies.forEach(e => e.draw(ctx));
         if (player && player.hp > 0) player.draw(ctx);
 
-        // ── 有視界境界リング + フォグオブウォー ──
+        // ── レーダー範囲リング + ラベル ──
         if (player && player.hp > 0) {
             const higgsHere = getHiggsIntensity(player.x, player.y);
             const visionRingR = effectiveRadarRange;
@@ -4277,28 +4275,40 @@ function gameLoop() {
             ctx.globalAlpha = 0.3 + vpulse * 0.2;
             ctx.stroke();
             ctx.setLineDash([]);
+            // レーダー範囲ラベル (右側)
+            ctx.font = `bold ${Math.round(8 / camera.zoom)}px Orbitron, monospace`;
+            ctx.fillStyle = vRingColor;
+            ctx.globalAlpha = 0.35 + vpulse * 0.1;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('RADAR', player.x + visionRingR + 6 / camera.zoom, player.y);
             ctx.globalAlpha = 1;
             ctx.restore();
             // drawFogOfWar(ctx); // 視野制限を無効化
         }
 
-        // ── 武器射程サークルインジケータ (ワールド空間) ──
+        // ── 武器射程サークルインジケータ + ラベル (ワールド空間) ──
         if (player && player.hp > 0) {
             const wTypeCircle = document.getElementById('weapon-select') ? document.getElementById('weapon-select').value : 'kinetic';
-            // 射程値 (drawTargetLine付近のwRange定義と整合)
             const wRangeCircle = wTypeCircle === 'missile' ? 2200 : (wTypeCircle === 'beam' ? 8000 : 800);
             const wRangeColor = wTypeCircle === 'missile' ? '#ffaa00' : (wTypeCircle === 'beam' ? '#00aaff' : '#88ff44');
+            const wLabel = wTypeCircle === 'missile' ? 'MISSILE' : (wTypeCircle === 'beam' ? 'BEAM' : 'KINETIC');
             ctx.save();
             ctx.beginPath();
             ctx.arc(player.x, player.y, wRangeCircle, 0, Math.PI * 2);
-            ctx.setLineDash([20, 20]);
+            ctx.setLineDash([20 / camera.zoom, 20 / camera.zoom]);
             ctx.strokeStyle = wRangeColor;
             ctx.lineWidth = 1.5 / camera.zoom;
             ctx.globalAlpha = 0.25;
-            ctx.shadowColor = wRangeColor;
-            ctx.shadowBlur = 0;
             ctx.stroke();
             ctx.setLineDash([]);
+            // 武器射程ラベル (上部)
+            ctx.font = `bold ${Math.round(8 / camera.zoom)}px Orbitron, monospace`;
+            ctx.fillStyle = wRangeColor;
+            ctx.globalAlpha = 0.35;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(`WEAPON RANGE — ${wLabel}`, player.x, player.y - wRangeCircle - 4 / camera.zoom);
             ctx.globalAlpha = 1;
             ctx.restore();
         }
