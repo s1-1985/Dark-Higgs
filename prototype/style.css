@@ -665,64 +665,114 @@ input[type=range]::-webkit-slider-thumb {
 }
 
 /* ============================================================
-   センサーモード選択ボタン (じゃんけん方式)
+   アイコン選択グループ (兵装・エンジン・センサー)
    ============================================================ */
-.sensor-row {
+.isel-section {
     display: flex;
     align-items: center;
-    justify-content: center;
     gap: 5px;
-    margin-bottom: 5px;
+    margin-top: 4px;
 }
-.sensor-label {
-    font-size: 9px;
-    color: #666;
-    white-space: nowrap;
-}
-.sensor-btn {
-    padding: 3px 9px;
-    font-size: 9px;
+.isel-label {
     font-family: 'Orbitron', monospace;
-    border: 1px solid #333;
-    background: rgba(0, 0, 0, 0.6);
-    color: #555;
+    font-size: 7px;
+    color: #444;
+    letter-spacing: 1px;
+    width: 44px;
+    flex-shrink: 0;
+    text-align: right;
+}
+.isel-group {
+    display: flex;
+    gap: 4px;
+    flex-wrap: nowrap;
+}
+.isel-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    padding: 4px 2px 3px;
+    background: rgba(0,0,0,0.5);
+    border: 1px solid #282e38;
+    color: #3a4050;
     cursor: pointer;
-    transition: all 0.2s;
-    min-width: 55px;
+    transition: all 0.15s;
+    border-radius: 3px;
+    gap: 2px;
+}
+.isel-btn svg {
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+}
+.isel-btn span {
+    font-family: 'Orbitron', monospace;
+    font-size: 6px;
     letter-spacing: 0.5px;
+    line-height: 1;
 }
-.sensor-btn:hover {
-    color: #999;
+.isel-btn:hover {
     border-color: #555;
+    color: #778;
+    background: rgba(255,255,255,0.05);
 }
-/* HEAT アクティブ */
-#sensor-heat.active {
-    border-color: #ff6600;
-    color: #ff8833;
-    box-shadow: 0 0 8px rgba(255, 100, 0, 0.5);
-    background: rgba(255, 80, 0, 0.1);
+
+/* 兵装アクティブ */
+#weapon-icon-group .isel-btn[data-val="kinetic"].active { border-color:#ff4d4d; color:#ff6060; background:rgba(255,60,60,.1); box-shadow:0 0 8px rgba(255,60,60,.35); }
+#weapon-icon-group .isel-btn[data-val="missile"].active { border-color:#ffaa00; color:#ffcc44; background:rgba(255,170,0,.1);  box-shadow:0 0 8px rgba(255,170,0,.35); }
+#weapon-icon-group .isel-btn[data-val="beam"].active    { border-color:#4da6ff; color:#70c0ff; background:rgba(77,166,255,.1); box-shadow:0 0 8px rgba(77,166,255,.35); }
+
+/* エンジンアクティブ */
+#engine-icon-group .isel-btn[data-val="thermonuclear"].active { border-color:#ff6600; color:#ff8833; background:rgba(255,100,0,.1);   box-shadow:0 0 8px rgba(255,100,0,.35); }
+#engine-icon-group .isel-btn[data-val="pulse"].active         { border-color:#cc44ff; color:#dd66ff; background:rgba(200,50,255,.1);  box-shadow:0 0 8px rgba(180,50,255,.35); }
+#engine-icon-group .isel-btn[data-val="higgs"].active         { border-color:#50c8ff; color:#80ddff; background:rgba(50,180,255,.1);  box-shadow:0 0 8px rgba(50,200,255,.35); }
+#engine-icon-group .isel-btn[data-val="photon"].active        { border-color:#ffffaa; color:#ffff88; background:rgba(255,255,100,.08); box-shadow:0 0 8px rgba(255,255,80,.35); }
+
+/* センサーアクティブ */
+#sensor-heat.active  { border-color:#ff6600; color:#ff8833; background:rgba(255,80,0,.12);   box-shadow:0 0 8px rgba(255,100,0,.45); }
+#sensor-optic.active { border-color:#00ffaa; color:#00ffcc; background:rgba(0,255,170,.08);  box-shadow:0 0 8px rgba(0,255,170,.45); }
+#sensor-em.active    { border-color:#cc44ff; color:#dd66ff; background:rgba(180,50,255,.1);  box-shadow:0 0 8px rgba(200,68,255,.45); }
+#sensor-higgs.active { border-color:#50c8ff; color:#80ddff; background:rgba(50,180,255,.1);  box-shadow:0 0 8px rgba(80,200,255,.45); }
+
+/* ============================================================
+   アクションボタン (コンパクト SVGアイコン)
+   ============================================================ */
+.act-icon-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 5px 3px 4px;
+    background: rgba(0,0,0,0.55);
+    border: 1px solid #282e38;
+    color: #3a4a5a;
+    cursor: pointer;
+    border-radius: 3px;
+    gap: 3px;
+    transition: all 0.15s;
+    min-height: 50px;
+    font-family: 'Orbitron', monospace;
 }
-/* OPTIC アクティブ */
-#sensor-optic.active {
-    border-color: #00ffaa;
-    color: #00ffcc;
-    box-shadow: 0 0 8px rgba(0, 255, 170, 0.5);
-    background: rgba(0, 255, 170, 0.08);
-}
-/* EM アクティブ */
-#sensor-em.active {
-    border-color: #cc44ff;
-    color: #dd66ff;
-    box-shadow: 0 0 8px rgba(200, 68, 255, 0.5);
-    background: rgba(180, 50, 255, 0.1);
-}
-/* HIGGS アクティブ */
-#sensor-higgs.active {
-    border-color: #50c8ff;
-    color: #80ddff;
-    box-shadow: 0 0 8px rgba(80, 200, 255, 0.5);
-    background: rgba(50, 180, 255, 0.1);
-}
+.act-icon-btn svg { width: 26px; height: 26px; }
+.act-icon-btn span { font-size: 7px; letter-spacing: 0.5px; line-height: 1; }
+.act-icon-btn:hover { background: rgba(255,255,255,0.07); }
+.act-icon-btn.btn-info    { border-color:#1a3d6a; color:#4da6ff; }
+.act-icon-btn.btn-info:hover    { border-color:#4da6ff; box-shadow:0 0 10px rgba(77,166,255,.4); }
+.act-icon-btn.btn-warning { border-color:#5a3a00; color:#ffaa00; }
+.act-icon-btn.btn-warning:hover { border-color:#ffaa00; box-shadow:0 0 10px rgba(255,170,0,.4); }
+.act-icon-btn.btn-danger  { border-color:#5a1a1a; color:#ff4d4d; }
+.act-icon-btn.btn-danger:hover  { border-color:#ff4d4d; box-shadow:0 0 10px rgba(255,77,77,.4); }
+.act-icon-btn.btn-primary { border-color:#0a3a2a; color:#00ffaa; }
+.act-icon-btn.btn-primary:hover { border-color:#00ffaa; box-shadow:0 0 10px rgba(0,255,170,.4); }
+.act-icon-btn.active-follow { border-color:#00ffaa !important; color:#00ffaa !important; background:rgba(0,255,170,.12) !important; box-shadow:0 0 10px rgba(0,255,170,.5) !important; }
+
+/* ============================================================
+   センサーモード選択ボタン (じゃんけん方式)
+   ============================================================ */
+/* (sensor-btn styles moved to isel-btn / sns-btn section above) */
 
 /* GEN配分スライダー */
 .gen-control {
@@ -1158,15 +1208,16 @@ input[type=range]::-webkit-slider-thumb {
         gap: 4px;
         margin-top: 0;
     }
-    .action-btn {
-        padding: 5px 2px;
-        min-height: 38px;
+    .act-icon-btn {
+        min-height: 42px;
+        padding: 4px 2px 3px;
     }
-    .action-btn:last-child {
-        grid-column: auto; /* 最終ボタンの全幅スパン解除 */
-    }
-    .aicon { font-size: 16px; }
-    .alabel { font-size: 7px; }
+    .act-icon-btn svg { width: 22px; height: 22px; }
+    .act-icon-btn span { font-size: 6px; }
+    /* アイコン選択: モバイルでは小さく */
+    .isel-btn { width: 34px; height: 34px; }
+    .isel-btn svg { width: 18px; height: 18px; }
+    .isel-btn span { font-size: 5.5px; }
 
     .panel-header { font-size: 9px; margin-bottom: 2px; letter-spacing: 0.5px; }
 

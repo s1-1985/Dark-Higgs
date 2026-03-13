@@ -162,6 +162,144 @@ let genAlloc = { engine: 40, weapons: 30, sensors: 30, ai: 50 };
 let autoAttackEnabled = true;
 
 // ============================================================
+// 有視界システム — アメーバ形状視野 + ヒッグス連続濃度連動
+// ============================================================
+const BASE_VISION_RADIUS = 1200; // 0%ヒッグス時の基準視野半径 (ワールド単位)
+let playerVisionRadius = BASE_VISION_RADIUS;
+
+function computeVisionRadius() {
+    if (!player || player.hp <= 0) return BASE_VISION_RADIUS;
+    const h = getHiggsIntensity(player.x, player.y);
+    // ヒッグス0% → 100%視野、ヒッグス100% → 5%視野 (ほぼゼロ)
+    return BASE_VISION_RADIUS * Math.max(0.05, 1.0 - h * 0.95);
+}
+
+// アメーバ形状の頂点列を生成 (毎フレームアニメーション)
+function getAmoebaPoints(cx, cy, baseR, numPts, timeSec) {
+    const pts = [];
+    for (let i = 0; i < numPts; i++) {
+        const a = (i / numPts) * Math.PI * 2;
+        const noise =
+            Math.sin(a * 3 + timeSec * 0.8)  * 0.14 +
+            Math.sin(a * 5 - timeSec * 0.5)  * 0.08 +
+            Math.sin(a * 7 + timeSec * 0.35) * 0.04 +
+            Math.sin(a * 11 - timeSec * 0.2) * 0.02;
+        const r = baseR * (1.0 + noise);
+        pts.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r });
+    }
+    return pts;
+}
+
+function drawFogOfWar(ctx) {
+    if (!player || player.hp <= 0) return;
+
+    playerVisionRadius = computeVisionRadius();
+    const cx = player.x;
+    const cy = player.y;
+    const t = Date.now() * 0.001;
+    const NUM_PTS = 32;
+
+    // 霧の不透明度: ヒッグス高濃度で若干濃くなる
+    const hHere = getHiggsIntensity(cx, cy);
+    const fogAlpha = 0.88 + hHere * 0.08;
+
+    // 描画範囲: カメラビュー + マージン
+    const vw = canvas.width  / camera.zoom;
+    const vh = canvas.height / camera.zoom;
+    const mx = camera.x - 500;
+    const my = camera.y - 500;
+    const mw = vw + 1000;
+    const mh = vh + 1000;
+
+    const pts = getAmoebaPoints(cx, cy, playerVisionRadius, NUM_PTS, t);
+
+    // ── アメーバ穴付きフォグ (even-odd fill rule) ──
+    ctx.save();
+    ctx.beginPath();
+    // 外側 (大きい矩形)
+    ctx.moveTo(mx,      my);
+    ctx.lineTo(mx + mw, my);
+    ctx.lineTo(mx + mw, my + mh);
+    ctx.lineTo(mx,      my + mh);
+    ctx.closePath();
+    // 内側 (アメーバ穴) — スムーズな二次ベジェ曲線
+    ctx.moveTo((pts[NUM_PTS - 1].x + pts[0].x) / 2, (pts[NUM_PTS - 1].y + pts[0].y) / 2);
+    for (let i = 0; i < NUM_PTS; i++) {
+        const next = pts[(i + 1) % NUM_PTS];
+        ctx.quadraticCurveTo(pts[i].x, pts[i].y, (pts[i].x + next.x) / 2, (pts[i].y + next.y) / 2);
+    }
+    ctx.closePath();
+    ctx.fillStyle = `rgba(1,3,14,${fogAlpha.toFixed(3)})`;
+    ctx.fill('evenodd');
+
+    // ── ソフトエッジグラデーション (視野境界のフェード) ──
+    const innerR = playerVisionRadius * 0.78;
+    const outerR = playerVisionRadius * 1.18;
+    const edgeGrad = ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR);
+    edgeGrad.addColorStop(0, 'rgba(1,3,14,0)');
+    edgeGrad.addColorStop(1, `rgba(1,3,14,${fogAlpha.toFixed(3)})`);
+    ctx.beginPath();
+    ctx.arc(cx, cy, outerR * 1.05, 0, Math.PI * 2);
+    ctx.fillStyle = edgeGrad;
+    ctx.fill();
+
+    // ── 視野境界のグロウリング (微光) ──
+    ctx.beginPath();
+    ctx.arc(cx, cy, playerVisionRadius, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(0,255,180,${(0.08 + hHere * 0.04).toFixed(3)})`;
+    ctx.lineWidth = 2 / camera.zoom;
+    ctx.shadowColor = 'rgba(0,255,180,0.3)';
+    ctx.shadowBlur = 12;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    ctx.restore();
+}
+
+// 視野内の敵を自動ロックオン (毎フレーム呼び出し)
+function updateVisionLockOn() {
+    if (!player || player.hp <= 0) return;
+
+    const vr = playerVisionRadius;
+    enemies.forEach(e => {
+        if (e.hp <= 0) return;
+        const dist = Math.hypot(e.x - player.x, e.y - player.y);
+        if (dist <= vr) {
+            // 完全ロックオン: 視野内 — 高精度コンタクト、毎フレーム更新
+            e.inVision = true;
+            applyContact(e, 1.0, 90); // life=90 = 1.5秒 (更新されない間は維持)
+            e.displayX = e.x; // 位置ジッター無し
+            e.displayY = e.y;
+        } else {
+            e.inVision = false;
+        }
+    });
+
+    // autoAttack有効時: 視野内の敵の中から最近傍を自動ターゲット設定
+    if (autoAttackEnabled && !player.manualTarget) {
+        let closest = null;
+        let closestDist = Infinity;
+        enemies.forEach(e => {
+            if (e.hp <= 0 || !e.inVision) return;
+            const d = Math.hypot(e.x - player.x, e.y - player.y);
+            if (d < closestDist) { closestDist = d; closest = e; }
+        });
+        if (closest) {
+            player.targetEntity = closest;
+        } else if (!player.targetEntity || player.targetEntity.hp <= 0) {
+            // 視野内に敵なし → センサーコンタクト済みの敵を推定ロックオン
+            let bestContact = null;
+            let bestAcc = 0;
+            enemies.forEach(e => {
+                if (e.hp <= 0 || !e.visible) return;
+                if (e.contactAccuracy > bestAcc) { bestAcc = e.contactAccuracy; bestContact = e; }
+            });
+            player.targetEntity = bestContact;
+        }
+    }
+}
+
+// ============================================================
 // ヒッグス粒子強度計算 (Higgs Intensity)
 // ============================================================
 function getHiggsIntensity(x, y) {
@@ -276,11 +414,13 @@ function updateCameraFollowBtn() {
     const btn = document.getElementById('btn-camera-follow');
     if (!btn) return;
     if (cameraFollowPlayer) {
-        btn.innerHTML = '<span class="aicon">⊕</span><span class="alabel">FOL ON</span>';
-        btn.classList.add('active');
+        btn.classList.add('active-follow');
+        const lbl = document.getElementById('follow-label');
+        if (lbl) lbl.textContent = '追従 ON';
     } else {
-        btn.innerHTML = '<span class="aicon">⊕</span><span class="alabel">FOL</span>';
-        btn.classList.remove('active');
+        btn.classList.remove('active-follow');
+        const lbl = document.getElementById('follow-label');
+        if (lbl) lbl.textContent = '追従 OFF';
     }
 }
 
@@ -306,6 +446,7 @@ canvas.addEventListener('mousedown', (e) => {
 
         if (clickedEnemy) {
             player.targetEntity = clickedEnemy;
+            player.manualTarget = true; // 手動ターゲット指定 (自動ロックオン上書き防止)
             createClickEffect(clickedEnemy.x, clickedEnemy.y, '#ff4d4d');
             logMessage(`TACTICAL: ターゲットをロック。射撃解を計算中...`, 'system-msg');
         }
@@ -325,6 +466,7 @@ canvas.addEventListener('dblclick', (e) => {
     const clickedEnemy = enemies.find(en => en.visible && Math.hypot(en.x - worldX, en.y - worldY) < en.radius * 2);
     if (!clickedEnemy) {
         player.targetEntity = null;
+        player.manualTarget = false; // 手動ターゲット解除
         player.setTarget(worldX, worldY);
         createClickEffect(worldX, worldY, '#00ffaa');
         const dist = Math.hypot(worldX - player.x, worldY - player.y);
@@ -486,6 +628,7 @@ canvas.addEventListener('touchend', (e) => {
         let clickedEnemy = enemies.find(en => en.visible && Math.hypot(en.x - worldX, en.y - worldY) < tapRadius(en));
         if (clickedEnemy) {
             player.targetEntity = clickedEnemy;
+            player.manualTarget = true;
             createClickEffect(clickedEnemy.x, clickedEnemy.y, '#ff4d4d');
             logMessage(`TACTICAL: ターゲットをロック。射撃解を計算中...`, 'system-msg');
         }
@@ -504,6 +647,13 @@ class Structure {
         this.hacked = false;
         this.discovered = false;
         this.color = type === 'colony' ? 'rgba(34, 68, 170, 0.5)' : 'rgba(85, 85, 85, 0.5)';
+        // 偽装ビーコン (ハッキング後)
+        this.decoyActive = false;
+        this.decoyTimer = 0;       // 偽装発信の残り時間 (フレーム数)
+        this.decoyType = null;     // 'colony' = 全センサー偽装, 'derelict' = 熱源移動偽装
+        this.decoyWaypoint = null; // 難破船: 偽装目標の移動先 {x, y}
+        this.decoyMoveX = 0;       // 移動偽装の現在位置
+        this.decoyMoveY = 0;
     }
     draw(ctx) {
         const t = Date.now();
@@ -572,7 +722,28 @@ class Structure {
             const r = 200 * ((t % 2000) / 2000);
             ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
             ctx.strokeStyle = `rgba(0, 170, 255, ${1 - r / 200})`;
-            ctx.lineWidth = 1; ctx.stroke();
+            ctx.lineWidth = 1 / camera.zoom; ctx.stroke();
+        }
+
+        // 偽装ビーコン エフェクト
+        if (this.decoyActive && this.decoyTimer > 0) {
+            const pulse = 0.5 + Math.sin(t * 0.008) * 0.5;
+            const col = this.decoyType === 'derelict' ? '255,80,0' : '255,50,200';
+            const bx = this.decoyType === 'derelict' ? this.decoyMoveX : this.x;
+            const by = this.decoyType === 'derelict' ? this.decoyMoveY : this.y;
+            ctx.save();
+            ctx.globalAlpha = pulse * 0.7;
+            ctx.fillStyle = `rgba(${col},0.9)`;
+            ctx.shadowColor = `rgba(${col},1)`; ctx.shadowBlur = 20;
+            ctx.beginPath(); ctx.arc(bx, by, 8, 0, Math.PI * 2); ctx.fill();
+            ctx.shadowBlur = 0;
+            // 拡散リング
+            const rr = 300 * ((t % 1500) / 1500);
+            ctx.beginPath(); ctx.arc(bx, by, rr, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(${col},${(1 - rr / 300) * 0.6})`;
+            ctx.lineWidth = 2 / camera.zoom;
+            ctx.stroke();
+            ctx.restore(); ctx.globalAlpha = 1;
         }
     }
 }
@@ -805,6 +976,10 @@ class Ship {
             this.gatherTarget = null;    // resource node being gathered
             this.resourcePoints = 0;
             this.droneSpawnTimer = 300 + Math.floor(Math.random() * 300); // carrier drone timer
+            this.inVision = false;       // 有視界システム: プレイヤーの視野内フラグ
+        }
+        if (isPlayer) {
+            this.manualTarget = false;   // 手動ターゲット指定フラグ (自動ロックオン上書き防止)
         }
         // 武器マガジン・リロードシステム (プレイヤー用)
         this.kineticAmmo = 8;
@@ -860,6 +1035,11 @@ class Ship {
             // 円形マップ境界検知
             if (Math.hypot(this.x - MAP_CX, this.y - MAP_CY) > MAP_RADIUS - 100 && !dialogOpen) {
                 showDialog();
+            }
+
+            // 手動ターゲットが死亡したらフラグをリセット
+            if (this.manualTarget && (!this.targetEntity || this.targetEntity.hp <= 0)) {
+                this.manualTarget = false;
             }
 
             // Attacking logic
@@ -1004,19 +1184,21 @@ class Ship {
             }
             this.prevHp = this.hp;
 
-            // ハッキング済み構造物への誘引 (EW対策)
+            // 偽装ビーコンへの誘引 (アクティブなデコイのみ)
             let decoyTarget = null;
+            let decoyPosX = 0, decoyPosY = 0;
             structures.forEach(s => {
-                if (s.hacked) {
-                    const d = Math.hypot(this.x - s.x, this.y - s.y);
-                    if (d < RADAR_RANGE * 5) decoyTarget = s;
-                }
+                if (!s.decoyActive || s.decoyTimer <= 0) return;
+                const dx = s.decoyType === 'derelict' ? s.decoyMoveX : s.x;
+                const dy = s.decoyType === 'derelict' ? s.decoyMoveY : s.y;
+                const d = Math.hypot(this.x - dx, this.y - dy);
+                if (d < RADAR_RANGE * 8) { decoyTarget = s; decoyPosX = dx; decoyPosY = dy; }
             });
             if (decoyTarget) {
                 // 囮に釣られている
-                const dDist = Math.hypot(decoyTarget.x - this.x, decoyTarget.y - this.y);
+                const dDist = Math.hypot(decoyPosX - this.x, decoyPosY - this.y);
                 if (dDist > 200) {
-                    const ta = Math.atan2(decoyTarget.y - this.y, decoyTarget.x - this.x);
+                    const ta = Math.atan2(decoyPosY - this.y, decoyPosX - this.x);
                     let diff = ta - this.angle;
                     while (diff < -Math.PI) diff += Math.PI * 2;
                     while (diff > Math.PI) diff -= Math.PI * 2;
@@ -1258,16 +1440,39 @@ class Ship {
 
         // Exhaust particle logic
         if (this.state === 'moving' || (this.targetEntity && Math.hypot(this.targetEntity.x - this.x, this.targetEntity.y - this.y) > 200)) {
-            if (Math.random() < 0.5) {
-                const exX = this.x - Math.cos(this.angle) * this.radius;
-                const exY = this.y - Math.sin(this.angle) * this.radius;
-                particles.push({
-                    x: exX + (Math.random() - 0.5) * 10, y: exY + (Math.random() - 0.5) * 10,
-                    vx: -Math.cos(this.angle) * (1 + Math.random()), vy: -Math.sin(this.angle) * (1 + Math.random()),
-                    life: 1.0, decay: 0.05,
-                    color: this.isPlayer ? '#00ffaa' : '#ffaa00'
+            if (this.isPlayer) {
+                // 攻撃型戦艦 - 上下2基のスラスター排気 (多層構造)
+                const fwdX = Math.cos(this.angle), fwdY = Math.sin(this.angle);
+                const perpX = -Math.sin(this.angle), perpY = Math.cos(this.angle);
+                const vr = this.radius * 2.8;
+                // スラスター口の位置 (ローカル座標 -> ワールド座標)
+                const thrusterSlots = [
+                    { lx: -vr * 0.85, ly: -vr * 0.38 }, // 上スラスター
+                    { lx: -vr * 0.85, ly:  vr * 0.38 }, // 下スラスター
+                ];
+                const LAYERS = [
+                    { spread: 0.10, color: '#ffffff', size: 3.2, speed: 4.5, decay: 0.055 },
+                    { spread: 0.18, color: '#80e8ff', size: 2.6, speed: 3.8, decay: 0.045 },
+                    { spread: 0.28, color: '#0088ff', size: 2.0, speed: 3.0, decay: 0.038 },
+                    { spread: 0.40, color: '#001850', size: 1.4, speed: 2.2, decay: 0.030 },
+                ];
+                thrusterSlots.forEach(slot => {
+                    const wx = this.x + slot.lx * fwdX + slot.ly * perpX;
+                    const wy = this.y + slot.lx * fwdY + slot.ly * perpY;
+                    LAYERS.forEach(layer => {
+                        if (Math.random() > 0.75) return; // 間引き
+                        const drift = (Math.random() - 0.5) * vr * layer.spread;
+                        particles.push({
+                            x: wx + perpX * drift, y: wy + perpY * drift,
+                            vx: -fwdX * (layer.speed + Math.random() * 1.5) + perpX * drift * 0.1,
+                            vy: -fwdY * (layer.speed + Math.random() * 1.5) + perpY * drift * 0.1,
+                            life: 1.0, decay: layer.decay + Math.random() * 0.015,
+                            size: layer.size, color: layer.color
+                        });
+                    });
                 });
             }
+            // 敵艦: エンジン排気エフェクトは非表示 (スタルス設計 — センサー検知のみで捕捉)
         }
 
         // ============================================================
@@ -1373,49 +1578,239 @@ class Ship {
         if (isFlashing) ctx.globalAlpha = 1.0;
 
         if (this.isPlayer) {
-            const r = this.radius;
-            // Engine glow at rear
-            const eng = ctx.createRadialGradient(-r * 0.7, 0, 0, -r * 0.7, 0, r * 0.9);
-            eng.addColorStop(0, 'rgba(0,255,170,0.55)');
-            eng.addColorStop(1, 'rgba(0,255,170,0)');
-            ctx.fillStyle = eng;
-            ctx.beginPath(); ctx.arc(-r * 0.7, 0, r * 0.9, 0, Math.PI * 2); ctx.fill();
+            // ============================================================
+            // 攻撃型戦艦 (俯瞰トップダウン)
+            // ============================================================
+            const vr = this.radius * 2.8; // ビジュアルスケール (当たり判定はthis.radius)
+            const thrPulse = 0.65 + Math.sin(Date.now() * 0.008) * 0.35;
 
-            ctx.shadowColor = '#00ffaa'; ctx.shadowBlur = 15;
-            ctx.fillStyle = '#00ffaa';
-            // Main hull
+            // ── スラスター炎グロー (船体の後ろに描く) ──────────
+            const thrOffsets = [-vr * 0.38, vr * 0.38];
+            thrOffsets.forEach(yo => {
+                const tg = ctx.createRadialGradient(-vr * 0.88, yo, 0, -vr * 0.88, yo, vr * 0.48);
+                tg.addColorStop(0,   `rgba(180,240,255,${(0.95 * thrPulse).toFixed(3)})`);
+                tg.addColorStop(0.3, `rgba(0,140,255,${(0.55 * thrPulse).toFixed(3)})`);
+                tg.addColorStop(1,   'rgba(0,10,50,0)');
+                ctx.fillStyle = tg;
+                ctx.beginPath();
+                ctx.ellipse(-vr * 0.88, yo, vr * 0.48, vr * 0.13, 0, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // ── エンジンポッド (船尾) ────────────────────────────
+            ctx.fillStyle = '#3e4455';
+            // 上ポッド
             ctx.beginPath();
-            ctx.moveTo(r * 1.1, 0);
-            ctx.lineTo(r * 0.25, -r * 0.35);
-            ctx.lineTo(-r * 0.5, -r * 0.28);
-            ctx.lineTo(-r * 0.85, 0);
-            ctx.lineTo(-r * 0.5, r * 0.28);
-            ctx.lineTo(r * 0.25, r * 0.35);
+            ctx.moveTo(-vr * 0.10, -vr * 0.22);
+            ctx.lineTo(-vr * 0.48, -vr * 0.22);
+            ctx.lineTo(-vr * 0.88, -vr * 0.52);
+            ctx.lineTo(-vr * 0.70, -vr * 0.58);
+            ctx.lineTo(-vr * 0.08, -vr * 0.40);
             ctx.closePath(); ctx.fill();
-            // Top wing
+            // 下ポッド
             ctx.beginPath();
-            ctx.moveTo(r * 0.1, -r * 0.35);
-            ctx.lineTo(-r * 0.25, -r * 1.05);
-            ctx.lineTo(-r * 0.6, -r * 0.75);
-            ctx.lineTo(-r * 0.5, -r * 0.28);
+            ctx.moveTo(-vr * 0.10,  vr * 0.22);
+            ctx.lineTo(-vr * 0.48,  vr * 0.22);
+            ctx.lineTo(-vr * 0.88,  vr * 0.52);
+            ctx.lineTo(-vr * 0.70,  vr * 0.58);
+            ctx.lineTo(-vr * 0.08,  vr * 0.40);
             ctx.closePath(); ctx.fill();
-            // Bottom wing
+            // ポッドのアウトライン
+            ctx.strokeStyle = '#555e70'; ctx.lineWidth = 0.7;
             ctx.beginPath();
-            ctx.moveTo(r * 0.1, r * 0.35);
-            ctx.lineTo(-r * 0.25, r * 1.05);
-            ctx.lineTo(-r * 0.6, r * 0.75);
-            ctx.lineTo(-r * 0.5, r * 0.28);
-            ctx.closePath(); ctx.fill();
-            // Cockpit tinted glass
-            ctx.fillStyle = 'rgba(0,80,60,0.85)';
-            ctx.strokeStyle = '#00ffaa'; ctx.lineWidth = 1;
+            ctx.moveTo(-vr * 0.10, -vr * 0.22);
+            ctx.lineTo(-vr * 0.48, -vr * 0.22);
+            ctx.lineTo(-vr * 0.88, -vr * 0.52);
+            ctx.lineTo(-vr * 0.70, -vr * 0.58);
+            ctx.lineTo(-vr * 0.08, -vr * 0.40);
+            ctx.stroke();
             ctx.beginPath();
-            ctx.moveTo(r * 0.75, 0);
-            ctx.lineTo(r * 0.2, -r * 0.22);
-            ctx.lineTo(-r * 0.1, 0);
-            ctx.lineTo(r * 0.2, r * 0.22);
-            ctx.closePath(); ctx.fill(); ctx.stroke();
+            ctx.moveTo(-vr * 0.10,  vr * 0.22);
+            ctx.lineTo(-vr * 0.48,  vr * 0.22);
+            ctx.lineTo(-vr * 0.88,  vr * 0.52);
+            ctx.lineTo(-vr * 0.70,  vr * 0.58);
+            ctx.lineTo(-vr * 0.08,  vr * 0.40);
+            ctx.stroke();
+
+            // ── メインハル ────────────────────────────────────────
+            const hullGrad = ctx.createLinearGradient(-vr * 0.9, 0, vr * 1.05, 0);
+            hullGrad.addColorStop(0,   '#353c4a');
+            hullGrad.addColorStop(0.3, '#50586a');
+            hullGrad.addColorStop(0.6, '#636e82');
+            hullGrad.addColorStop(1,   '#464e5e');
+            ctx.fillStyle = hullGrad;
+            ctx.shadowColor = 'rgba(0,0,0,0.7)'; ctx.shadowBlur = 8;
+            ctx.beginPath();
+            ctx.moveTo( vr * 1.05,  0);
+            ctx.lineTo( vr * 0.62, -vr * 0.20);
+            ctx.lineTo( vr * 0.18, -vr * 0.22);
+            ctx.lineTo(-vr * 0.10, -vr * 0.22);
+            ctx.lineTo(-vr * 0.48, -vr * 0.22);
+            ctx.lineTo(-vr * 0.85,  0);
+            ctx.lineTo(-vr * 0.48,  vr * 0.22);
+            ctx.lineTo(-vr * 0.10,  vr * 0.22);
+            ctx.lineTo( vr * 0.18,  vr * 0.22);
+            ctx.lineTo( vr * 0.62,  vr * 0.20);
+            ctx.closePath();
+            ctx.fill();
             ctx.shadowBlur = 0;
+
+            // ハルアウトライン
+            ctx.strokeStyle = '#6a7488'; ctx.lineWidth = 0.9;
+            ctx.beginPath();
+            ctx.moveTo( vr * 1.05,  0);
+            ctx.lineTo( vr * 0.62, -vr * 0.20);
+            ctx.lineTo( vr * 0.18, -vr * 0.22);
+            ctx.lineTo(-vr * 0.10, -vr * 0.22);
+            ctx.lineTo(-vr * 0.48, -vr * 0.22);
+            ctx.lineTo(-vr * 0.85,  0);
+            ctx.lineTo(-vr * 0.48,  vr * 0.22);
+            ctx.lineTo(-vr * 0.10,  vr * 0.22);
+            ctx.lineTo( vr * 0.18,  vr * 0.22);
+            ctx.lineTo( vr * 0.62,  vr * 0.20);
+            ctx.closePath();
+            ctx.stroke();
+
+            // ── パネルライン ────────────────────────────────────
+            ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.lineWidth = 0.6;
+            // 縦断面ライン
+            [ vr * 0.18, -vr * 0.10, -vr * 0.48 ].forEach(xf => {
+                const hw = xf > 0 ? vr * 0.21 : vr * 0.21;
+                ctx.beginPath();
+                ctx.moveTo(xf, -hw); ctx.lineTo(xf, hw);
+                ctx.stroke();
+            });
+            // 中心縦ライン
+            ctx.beginPath();
+            ctx.moveTo(-vr * 0.85, 0); ctx.lineTo(vr * 0.85, 0);
+            ctx.stroke();
+            // 斜めリブライン
+            ctx.beginPath();
+            ctx.moveTo( vr * 0.62, -vr * 0.20); ctx.lineTo( vr * 0.18, -vr * 0.22);
+            ctx.moveTo( vr * 0.62,  vr * 0.20); ctx.lineTo( vr * 0.18,  vr * 0.22);
+            ctx.stroke();
+
+            // ── 上部構造物 (艦橋) ───────────────────────────────
+            ctx.fillStyle = '#404858';
+            ctx.strokeStyle = '#5a6475'; ctx.lineWidth = 0.7;
+            ctx.beginPath();
+            ctx.moveTo( vr * 0.30, -vr * 0.13);
+            ctx.lineTo(-vr * 0.08, -vr * 0.16);
+            ctx.lineTo(-vr * 0.28, -vr * 0.13);
+            ctx.lineTo(-vr * 0.28,  vr * 0.13);
+            ctx.lineTo(-vr * 0.08,  vr * 0.16);
+            ctx.lineTo( vr * 0.30,  vr * 0.13);
+            ctx.closePath();
+            ctx.fill(); ctx.stroke();
+
+            // ── 前部砲塔 ──────────────────────────────────────────
+            ctx.fillStyle = '#303844';
+            ctx.strokeStyle = '#4a5260'; ctx.lineWidth = 0.7;
+            ctx.beginPath();
+            ctx.arc(vr * 0.50, -vr * 0.06, vr * 0.095, 0, Math.PI * 2);
+            ctx.fill(); ctx.stroke();
+            // 砲身 (連装)
+            ctx.strokeStyle = '#8090a8'; ctx.lineWidth = 1.6;
+            [-vr * 0.035, vr * 0.035].forEach(by => {
+                ctx.beginPath();
+                ctx.moveTo(vr * 0.54, -vr * 0.06 + by);
+                ctx.lineTo(vr * 0.76, -vr * 0.06 + by);
+                ctx.stroke();
+            });
+            // 砲塔ハイライト
+            ctx.fillStyle = 'rgba(255,255,255,0.08)';
+            ctx.beginPath();
+            ctx.arc(vr * 0.48, -vr * 0.085, vr * 0.045, 0, Math.PI * 2);
+            ctx.fill();
+
+            // ── 後部砲塔 ─────────────────────────────────────────
+            ctx.fillStyle = '#303844';
+            ctx.strokeStyle = '#4a5260'; ctx.lineWidth = 0.7;
+            ctx.beginPath();
+            ctx.arc(-vr * 0.12, 0, vr * 0.082, 0, Math.PI * 2);
+            ctx.fill(); ctx.stroke();
+            // 砲身
+            ctx.strokeStyle = '#8090a8'; ctx.lineWidth = 1.4;
+            [-vr * 0.030, vr * 0.030].forEach(by => {
+                ctx.beginPath();
+                ctx.moveTo(-vr * 0.08, by);
+                ctx.lineTo( vr * 0.12, by);
+                ctx.stroke();
+            });
+
+            // ── ミサイルポッド (上側面前方) ────────────────────
+            ctx.fillStyle = '#252c36';
+            ctx.strokeStyle = '#3a4250'; ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            ctx.rect(vr * 0.08, -vr * 0.245, vr * 0.17, vr * 0.07);
+            ctx.fill(); ctx.stroke();
+            // 弾頭 (4発)
+            ctx.fillStyle = '#aa2828';
+            [0, 1, 2, 3].forEach(mi => {
+                ctx.beginPath();
+                ctx.arc(vr * 0.12 + mi * vr * 0.038, -vr * 0.215, 1.6, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            // 下側ポッド (対称)
+            ctx.fillStyle = '#252c36';
+            ctx.strokeStyle = '#3a4250'; ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            ctx.rect(vr * 0.08, vr * 0.175, vr * 0.17, vr * 0.07);
+            ctx.fill(); ctx.stroke();
+            ctx.fillStyle = '#aa2828';
+            [0, 1, 2, 3].forEach(mi => {
+                ctx.beginPath();
+                ctx.arc(vr * 0.12 + mi * vr * 0.038, vr * 0.205, 1.6, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // ── スラスターノズル ─────────────────────────────────
+            thrOffsets.forEach(yo => {
+                ctx.fillStyle = '#121820';
+                ctx.strokeStyle = '#283040'; ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.ellipse(-vr * 0.84, yo, vr * 0.085, vr * 0.072, 0, 0, Math.PI * 2);
+                ctx.fill(); ctx.stroke();
+                // ノズル内グロー
+                const nGrad = ctx.createRadialGradient(-vr * 0.84, yo, 0, -vr * 0.84, yo, vr * 0.07);
+                nGrad.addColorStop(0,  `rgba(140,210,255,${(0.9 * thrPulse).toFixed(3)})`);
+                nGrad.addColorStop(0.5,`rgba(0,80,200,${(0.4 * thrPulse).toFixed(3)})`);
+                nGrad.addColorStop(1,  'rgba(0,0,20,0)');
+                ctx.fillStyle = nGrad;
+                ctx.beginPath();
+                ctx.ellipse(-vr * 0.84, yo, vr * 0.075, vr * 0.062, 0, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // ── 戦闘ダメージ跡 ─────────────────────────────────
+            ctx.strokeStyle = 'rgba(10,8,5,0.5)'; ctx.lineWidth = 0.9;
+            [
+                [ vr * 0.30,  vr * 0.10,  vr * 0.44,  vr * 0.18],
+                [-vr * 0.25, -vr * 0.09, -vr * 0.14,  vr * 0.02],
+                [ vr * 0.40, -vr * 0.16,  vr * 0.52, -vr * 0.08],
+            ].forEach(([x1, y1, x2, y2]) => {
+                ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+            });
+
+            // ── グリーンアクセントライト ───────────────────────
+            const lPulse = 0.55 + Math.sin(Date.now() * 0.003) * 0.45;
+            const accentLights = [
+                { x:  vr * 0.82,  y:  0 },
+                { x:  vr * 0.18,  y: -vr * 0.225 },
+                { x:  vr * 0.18,  y:  vr * 0.225 },
+                { x: -vr * 0.42,  y: -vr * 0.225 },
+                { x: -vr * 0.42,  y:  vr * 0.225 },
+                { x: -vr * 0.72,  y: -vr * 0.44 },
+                { x: -vr * 0.72,  y:  vr * 0.44 },
+            ];
+            ctx.shadowColor = '#00ff60';
+            accentLights.forEach(l => {
+                ctx.globalAlpha = lPulse * 0.85;
+                ctx.shadowBlur  = 5;
+                ctx.fillStyle   = '#30ff70';
+                ctx.beginPath(); ctx.arc(l.x, l.y, 1.6, 0, Math.PI * 2); ctx.fill();
+            });
+            ctx.shadowBlur = 0; ctx.globalAlpha = 1;
         } else {
             // 敵は発砲フラッシュ中は大きく赤く光る
             const r = isFlashing ? this.radius * 1.5 : this.radius;
@@ -1483,14 +1878,18 @@ class Ship {
         }
 
         if (this.isPlayer) {
-            ctx.beginPath(); ctx.arc(0, 0, this.radius * 1.5, 0, Math.PI * 2);
-            ctx.strokeStyle = 'rgba(0,255,170,0.4)'; ctx.stroke();
+            // 選択リング (ビジュアル半径に合わせて拡大)
+            const vr2 = this.radius * 2.8;
+            ctx.beginPath(); ctx.arc(0, 0, vr2 * 1.05, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(0,200,255,0.20)'; ctx.lineWidth = 1; ctx.stroke();
+            // クロスヘア
+            const cx2 = vr2 * 1.18, cx1 = vr2 * 1.06;
             ctx.beginPath();
-            ctx.moveTo(-40, 0); ctx.lineTo(-20, 0);
-            ctx.moveTo(40, 0); ctx.lineTo(20, 0);
-            ctx.moveTo(0, -40); ctx.lineTo(0, -20);
-            ctx.moveTo(0, 40); ctx.lineTo(0, 20);
-            ctx.strokeStyle = 'rgba(0,255,170,0.8)'; ctx.stroke();
+            ctx.moveTo(-cx2, 0); ctx.lineTo(-cx1, 0);
+            ctx.moveTo( cx2, 0); ctx.lineTo( cx1, 0);
+            ctx.moveTo(0, -cx2); ctx.lineTo(0, -cx1);
+            ctx.moveTo(0,  cx2); ctx.lineTo(0,  cx1);
+            ctx.strokeStyle = 'rgba(0,200,255,0.55)'; ctx.lineWidth = 1.2; ctx.stroke();
         }
         ctx.restore();
         ctx.globalAlpha = 1;
@@ -1554,7 +1953,10 @@ function updateDrawDebrisParticles(ctx) {
         if (p.life <= 0) { particles.splice(i, 1); continue; }
         ctx.fillStyle = p.color;
         ctx.globalAlpha = p.life;
-        ctx.beginPath(); ctx.arc(p.x, p.y, 2, 0, Math.PI * 2); ctx.fill();
+        ctx.shadowColor = p.color;
+        ctx.shadowBlur  = (p.size || 2) > 2.5 ? 5 : 0;
+        ctx.beginPath(); ctx.arc(p.x, p.y, (p.size || 2) * p.life * 0.6 + (p.size || 2) * 0.4, 0, Math.PI * 2); ctx.fill();
+        ctx.shadowBlur  = 0;
         ctx.globalAlpha = 1;
     }
 
@@ -1768,14 +2170,18 @@ function generateSector() {
     for (let i = 0; i < colonyCount; i++) {
         const a = (i / colonyCount) * Math.PI * 2 + Math.random() * 0.8;
         const r = 5000 + Math.random() * (MAP_RADIUS - 7000);
-        structures.push(new Structure(MAP_CX + Math.cos(a) * r, MAP_CY + Math.sin(a) * r, 'colony'));
+        const col = new Structure(MAP_CX + Math.cos(a) * r, MAP_CY + Math.sin(a) * r, 'colony');
+        col.discovered = true; // ゲーム開始時からミニマップに表示
+        structures.push(col);
     }
     for (let i = 0; i < 5; i++) {
         const sp = clampToMapCircle(
             MAP_CX + (Math.random() - 0.5) * MAP_RADIUS * 1.6,
             MAP_CY + (Math.random() - 0.5) * MAP_RADIUS * 1.6
         );
-        structures.push(new Structure(sp.x, sp.y, 'derelict'));
+        const der = new Structure(sp.x, sp.y, 'derelict');
+        der.discovered = true; // ゲーム開始時からミニマップに表示
+        structures.push(der);
     }
     for (let i = 0; i < 3; i++) {
         const a2 = Math.random() * Math.PI * 2, r2 = 4000 + Math.random() * (MAP_RADIUS - 6000);
@@ -1976,14 +2382,13 @@ document.getElementById('btn-attack-toggle')?.addEventListener('click', () => {
     autoAttackEnabled = !autoAttackEnabled;
     const btn = document.getElementById('btn-attack-toggle');
     if (btn) {
+        const atkLbl = document.getElementById('attack-label');
         if (autoAttackEnabled) {
-            btn.innerHTML = '<span class="aicon">⚔</span><span class="alabel">ATK ON</span>';
-            btn.style.background = 'rgba(0,180,60,0.25)';
+            if (atkLbl) atkLbl.textContent = '攻撃 ON';
             btn.style.borderColor = '#00b43c';
             btn.style.color = '#00ff66';
         } else {
-            btn.innerHTML = '<span class="aicon">⚔</span><span class="alabel">ATK OFF</span>';
-            btn.style.background = 'rgba(180,0,0,0.25)';
+            if (atkLbl) atkLbl.textContent = '攻撃 OFF';
             btn.style.borderColor = '#b40000';
             btn.style.color = '#ff4444';
         }
@@ -2043,20 +2448,87 @@ document.getElementById('btn-dir-sonar').addEventListener('click', () => {
     playSound('ui');
 });
 document.getElementById('btn-hack').addEventListener('click', () => {
+    if (!player || player.hp <= 0) return;
     playSound('ui');
     let closest = null; let cd = Infinity;
     structures.forEach(s => {
         const d = Math.hypot(player.x - s.x, player.y - s.y);
-        // ヒッグス干渉を考慮した有効レンジを使用 (effectiveRadarRange)
-        if (d < cd && d < effectiveRadarRange) { cd = d; closest = s; }
+        if (d < cd && d < effectiveRadarRange * 1.5) { cd = d; closest = s; }
     });
-    if (closest && !closest.hacked) {
-        closest.hacked = true;
-        logMessage(`EW: 構造物をハイジャック完了しました。自軍の熱源反応を偽装し、敵を誘因します。`, 'system-msg');
-        createClickEffect(closest.x, closest.y, '#00aaff');
-    } else {
+    if (!closest) {
         logMessage(`EW: 有効範囲内にハッキング可能な対象がいません。`, 'warning-msg');
+        return;
     }
+
+    if (closest.type === 'colony') {
+        // ── 廃棄されたコロニー ──
+        if (!closest.hacked) {
+            closest.hacked = true;
+            createClickEffect(closest.x, closest.y, '#00aaff');
+            // HP回復 or リソース回収 (ランダム)
+            if (Math.random() < 0.5) {
+                const heal = Math.floor(player.maxHp * 0.25);
+                player.hp = Math.min(player.maxHp, player.hp + heal);
+                logMessage(`EW[コロニー]: ハッキング完了 — 医療ポッド起動。HP +${heal} 回復。`, 'system-msg');
+            } else {
+                const reward = 50 + gameState.sector * 20;
+                gameState.credits += reward;
+                updateTopUI();
+                logMessage(`EW[コロニー]: ハッキング完了 — 物資倉庫接収。+${reward} SCR 獲得。`, 'system-msg');
+            }
+        }
+        // 偽装ビーコン発動 (ハック済みでも再発動可)
+        closest.decoyActive = true;
+        closest.decoyTimer = 1800; // 30秒
+        closest.decoyType = 'colony';
+        logMessage(`EW[コロニー]: 全センサー偽装ビーコン発信中 (30秒)。熱源・EM・光学・ヒッグス全偽装。`, 'system-msg');
+        // S&D勝利進捗更新
+        const colonyNodes = structures.filter(s => s.type === 'colony');
+        if (gameState.mode === 'sd') {
+            const hackedCount = colonyNodes.filter(s => s.hacked).length;
+            const fill = document.getElementById('sd-progress-fill');
+            const text = document.getElementById('sd-progress-text');
+            if (fill) fill.style.width = `${(hackedCount / colonyNodes.length) * 100}%`;
+            if (text) text.textContent = `ノード: ${hackedCount}/${colonyNodes.length}`;
+        }
+    } else if (closest.type === 'derelict') {
+        // ── 難破船 ──
+        if (!closest.hacked) {
+            closest.hacked = true;
+            createClickEffect(closest.x, closest.y, '#00aaff');
+            // リソース回収 + ランダムLvアップ
+            const reward = 30 + gameState.sector * 15;
+            gameState.credits += reward;
+            updateTopUI();
+            const upgradeKeys = ['weapons', 'sensor', 'armor'];
+            const key = upgradeKeys[Math.floor(Math.random() * upgradeKeys.length)];
+            const MAX_UPGRADE_LV = 3;
+            if (gameState.upgrades[key] < MAX_UPGRADE_LV) {
+                gameState.upgrades[key]++;
+                if (key === 'sensor') RADAR_RANGE = BASE_RADAR_RANGE * UPGRADE_MULT[gameState.upgrades.sensor];
+                if (key === 'armor') {
+                    const hpBase = { assault: 3500, stealth: 700, carrier: 2500 };
+                    player.maxHp = (hpBase[gameState.shipType] || 2000) * UPGRADE_MULT[gameState.upgrades.armor];
+                }
+                const keyLabel = { weapons: '武装', sensor: 'センサー', armor: '装甲' };
+                logMessage(`EW[難破船]: ハッキング完了 — +${reward} SCR。${keyLabel[key]} Lv${gameState.upgrades[key]} に強化。`, 'system-msg');
+            } else {
+                logMessage(`EW[難破船]: ハッキング完了 — +${reward} SCR。(ランダムLvアップ: 既に最大Lv)`, 'system-msg');
+            }
+        }
+        // 熱源移動偽装発動 (ハック済みでも再発動可) — 最寄りウェイポイント方向へ
+        const decoyTarget = player.targetX && player.targetY
+            ? { x: player.targetX, y: player.targetY }
+            : { x: closest.x + (Math.random() - 0.5) * 8000, y: closest.y + (Math.random() - 0.5) * 8000 };
+        closest.decoyActive = true;
+        closest.decoyTimer = 1200; // 20秒
+        closest.decoyType = 'derelict';
+        closest.decoyMoveX = closest.x;
+        closest.decoyMoveY = closest.y;
+        closest.decoyWaypoint = decoyTarget;
+        logMessage(`EW[難破船]: 熱源偽装目標を発進。ウェイポイント方向へ移動する囮を展開 (20秒)。`, 'system-msg');
+    }
+    saveGame();
 });
 // ============================================================
 // センサーモード切替ハンドラ (heat / optic / em / higgs)
@@ -2072,7 +2544,7 @@ const SENSOR_INFO = {
     if (!btn) return;
     btn.addEventListener('click', () => {
         currentSensor = s;
-        document.querySelectorAll('.sensor-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.sns-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         logMessage(`SENSOR: ${SENSOR_INFO[s].name}に切替。${SENSOR_INFO[s].tip}`, 'system-msg');
         playSound('ui');
@@ -2271,19 +2743,20 @@ function drawPassiveAntenna(ctx) {
     ctx.save();
     ctx.translate(player.x, player.y);
     const alerting = passiveAlertTimer > 0;
-    const ringColor = alerting ? '255,170,0' : CR;
+    const ringColorA = alerting ? '255,170,0' : CR;
     const baseR = 60, maxR = 220;
+    const lw = 1.0 / camera.zoom; // ズーム不変の線幅 (スクリーンピクセル単位)
     for (let i = 0; i < 3; i++) {
         const phase = ((t / 2200) + i / 3) % 1;
         const r     = baseR + (maxR - baseR) * phase;
         const alpha = (1 - phase) * (alerting ? 0.65 : 0.35);
         ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(${ringColor},${alpha.toFixed(3)})`;
-        ctx.lineWidth = alerting ? 1.5 : 1;
+        ctx.strokeStyle = `rgba(${ringColorA},${alpha.toFixed(3)})`;
+        ctx.lineWidth = (alerting ? 1.5 : 1) * lw;
         ctx.stroke();
     }
     // コンパスティック
-    ctx.strokeStyle = `rgba(${CR},0.25)`; ctx.lineWidth = 1;
+    ctx.strokeStyle = `rgba(${CR},0.25)`; ctx.lineWidth = lw;
     for (let i = 0; i < 4; i++) {
         const a = (i / 4) * Math.PI * 2;
         ctx.beginPath();
@@ -2293,76 +2766,225 @@ function drawPassiveAntenna(ctx) {
     }
     ctx.restore();
 
-    // MGS4スレットリング: 受信シグネチャをセンサー別に自機周りに可視化
+    // スレットリング: 自機周囲に常に浮かぶ形状変化リング
+    // 普段は穏やかな多角形。環境シグネチャ受信により各センサー方向に変形する。
     if (player && player.hp > 0) {
-        const sensorColors = {
+        const tRing = Date.now();
+        const tSec  = tRing * 0.001;
+
+        // 各センサーの受信シグネチャ集計
+        const RING_SENSOR_COLORS = {
             heat: '255,80,0', optic: '0,255,170', em: '180,50,255', higgs: '80,200,255'
         };
-        const sensorNames = ['heat', 'optic', 'em', 'higgs'];
-        sensorNames.forEach((sName, si) => {
+        const RING_SENSOR_DIRS = {
+            heat: -Math.PI * 0.5,    // 上 (北)
+            optic: 0,                // 右 (東)
+            em: Math.PI * 0.5,       // 下 (南)
+            higgs: Math.PI           // 左 (西)
+        };
+        const ringSigVals = {};
+        // スレットリング: 有効センサー範囲の10倍まで検出 (環境シグネチャ感度に一致)
+        const ringDetectRange = Math.max(effectiveRadarRange * 10, 8000);
+        ['heat','optic','em','higgs'].forEach(sName => {
             const sc2 = sensorConfig[sName];
-            let totalSig = 0;
+            let tot = 0;
             enemies.forEach(e => {
                 if (e.hp <= 0) return;
                 const dist = Math.hypot(e.x - player.x, e.y - player.y);
-                const higgsBlock = getHiggsIntensity((e.x + player.x)/2, (e.y + player.y)/2);
-                const distAtten = Math.max(0, 1 - dist / (effectiveRadarRange * 2));
-                const attenuated = sc2.sig(e) * distAtten * (1 - higgsBlock * sc2.higgsMod);
-                totalSig += attenuated;
+                const hBlk = getHiggsIntensity((e.x + player.x)/2, (e.y + player.y)/2);
+                const att  = Math.max(0, 1 - dist / ringDetectRange);
+                tot += sc2.sig(e) * att * (1 - hBlk * sc2.higgsMod);
             });
-            totalSig = Math.min(1.0, totalSig);
-            if (totalSig < 0.05) return;
-            const baseRadius = 80 + si * 35;
-            const color = sensorColors[sName];
-            const alpha = totalSig * 0.7;
-            const t2 = Date.now();
-            const pulse = 0.6 + Math.sin(t2 * 0.003 + si * 1.5) * 0.4;
-            ctx.save();
-            ctx.translate(player.x, player.y);
+            ringSigVals[sName] = Math.min(1.0, tot);
+        });
+
+        // 優勢センサーの色を決定
+        let maxRingSig = 0, maxRingName = 'heat';
+        ['heat','optic','em','higgs'].forEach(n => {
+            if (ringSigVals[n] > maxRingSig) { maxRingSig = ringSigVals[n]; maxRingName = n; }
+        });
+
+        // リングの各点の半径を計算
+        // 値がゼロでも常に可視: 穏やかな呼吸アニメ
+        const BASE_R   = 62;
+        const MAX_BULGE = 32;
+        const N_POINTS  = 80;
+        const idleBreath = Math.sin(tSec * 0.7) * 2.5;
+
+        const getRingRadius = (angle) => {
+            let r = BASE_R + idleBreath;
+            // 緩やかな回転オフセットで生き生きとした印象
+            const rot = tSec * 0.08;
+            ['heat','optic','em','higgs'].forEach(sName => {
+                const sig = ringSigVals[sName];
+                if (sig < 0.01) return;
+                const dir = RING_SENSOR_DIRS[sName];
+                let diff = angle - (dir + rot);
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                while (diff >  Math.PI) diff -= Math.PI * 2;
+                // ガウシアンローブ: センサー方向に向かって膨らむ
+                const lobe    = Math.exp(-diff * diff * 1.6) * sig * sig * MAX_BULGE;
+                // 小さいリップル
+                const ripple  = Math.cos(diff * 5 + tSec * 2.5) * sig * 3.0 * Math.exp(-diff * diff * 4);
+                r += lobe + ripple;
+            });
+            // 全体的な微細振動
+            r += Math.sin(angle * 4 + tSec * 1.2) * 1.5;
+            return r;
+        };
+
+        ctx.save();
+        ctx.translate(player.x, player.y);
+
+        // ── ベースリング (常に表示) ──────────────────────────
+        const idleAlpha = 0.22 + maxRingSig * 0.15;
+        const ringColor = RING_SENSOR_COLORS[maxRingName];
+
+        ctx.beginPath();
+        for (let i = 0; i <= N_POINTS; i++) {
+            const ang = (i / N_POINTS) * Math.PI * 2;
+            const rr  = getRingRadius(ang);
+            const x = Math.cos(ang) * rr, y = Math.sin(ang) * rr;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        const ringLw = 1.0 / camera.zoom; // ズーム不変の線幅
+        ctx.strokeStyle = `rgba(${ringColor},${idleAlpha.toFixed(3)})`;
+        ctx.lineWidth = 1.2 * ringLw;
+        ctx.shadowColor = `rgba(${ringColor},0.6)`;
+        ctx.shadowBlur  = 4 + maxRingSig * 12;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        // ── 各センサーの活性セグメントを色付きで強調 ──────────
+        ['heat','optic','em','higgs'].forEach(sName => {
+            const sig = ringSigVals[sName];
+            if (sig < 0.04) return;
+            const color    = RING_SENSOR_COLORS[sName];
+            const dir      = RING_SENSOR_DIRS[sName];
+            const halfSpan = Math.PI * (0.35 + sig * 0.4);
+            const segN = 24;
             ctx.beginPath();
-            ctx.arc(0, 0, baseRadius * (0.9 + totalSig * 0.1), 0, Math.PI * 2);
-            ctx.strokeStyle = `rgba(${color},${(alpha * pulse).toFixed(3)})`;
-            ctx.lineWidth = 2 + totalSig * 2;
-            ctx.shadowColor = `rgba(${color},0.8)`;
-            ctx.shadowBlur = 8 * totalSig;
+            for (let i = 0; i <= segN; i++) {
+                const ang = (dir - halfSpan) + (i / segN) * halfSpan * 2;
+                const rr  = getRingRadius(ang);
+                const x = Math.cos(ang) * rr, y = Math.sin(ang) * rr;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            }
+            ctx.strokeStyle = `rgba(${color},${(sig * 0.85).toFixed(3)})`;
+            ctx.lineWidth   = (1.5 + sig * 2.5) * ringLw;
+            ctx.shadowColor = `rgba(${color},0.9)`;
+            ctx.shadowBlur  = 8 * sig;
             ctx.stroke();
             ctx.shadowBlur = 0;
-            const dotCount = Math.max(1, Math.round(totalSig * 8));
-            ctx.fillStyle = `rgba(${color},${alpha})`;
-            for (let d = 0; d < dotCount; d++) {
-                const a = (d / dotCount) * Math.PI * 2 + (t2 * 0.0005);
-                const r = baseRadius;
-                ctx.beginPath();
-                ctx.arc(Math.cos(a)*r, Math.sin(a)*r, 2, 0, Math.PI*2);
-                ctx.fill();
-            }
-            ctx.restore();
+
+            // センサー方向のティックマーカー
+            const tickDir = dir + tSec * 0.08;
+            const tickR = getRingRadius(tickDir);
+            ctx.strokeStyle = `rgba(${color},${(0.4 + sig * 0.55).toFixed(3)})`;
+            ctx.lineWidth = 2 * ringLw;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(tickDir) * (tickR + 3 / camera.zoom),  Math.sin(tickDir) * (tickR + 3 / camera.zoom));
+            ctx.lineTo(Math.cos(tickDir) * (tickR + 11 / camera.zoom), Math.sin(tickDir) * (tickR + 11 / camera.zoom));
+            ctx.stroke();
         });
+
+        ctx.restore();
     }
 
-    // 指向性ソナーコーン描画
+    // 指向性ソナーコーン描画 (強化版)
     if (dirSonarVisual && dirSonarVisual.life > 0) {
         const sv = dirSonarVisual;
+        const sonarNow = Date.now() * 0.001;
         ctx.save();
         ctx.translate(player.x, player.y);
         ctx.rotate(sv.angle);
-        ctx.globalAlpha = sv.life * 0.25;
+
+        // ── レイヤー1: グラデーション塗り ───────────────────
+        const coneGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, sv.range);
+        coneGrad.addColorStop(0,   `rgba(0,255,220,${(sv.life * 0.35).toFixed(3)})`);
+        coneGrad.addColorStop(0.5, `rgba(0,255,220,${(sv.life * 0.12).toFixed(3)})`);
+        coneGrad.addColorStop(1,   'rgba(0,255,220,0)');
         ctx.beginPath();
         ctx.moveTo(0, 0);
-        ctx.arc(0, 0, sv.range * camera.zoom < 3 ? sv.range : sv.range, -sv.halfAngle, sv.halfAngle);
+        ctx.arc(0, 0, sv.range, -sv.halfAngle, sv.halfAngle);
         ctx.closePath();
-        ctx.fillStyle = `rgba(${CR},0.5)`;
+        ctx.fillStyle = coneGrad;
         ctx.fill();
-        ctx.globalAlpha = sv.life * 0.7;
-        ctx.strokeStyle = `rgba(${CR},0.9)`;
-        ctx.lineWidth = 1;
+
+        // ── レイヤー2: 輝くコーンエッジライン ───────────────
+        ctx.shadowColor = 'rgba(0,255,220,1)';
+        ctx.shadowBlur  = 8 * sv.life;
+        ctx.strokeStyle = `rgba(0,255,220,${(sv.life * 0.95).toFixed(3)})`;
+        ctx.lineWidth   = 1.8;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(-sv.halfAngle) * sv.range, Math.sin(-sv.halfAngle) * sv.range);
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(sv.halfAngle) * sv.range, Math.sin(sv.halfAngle) * sv.range);
         ctx.stroke();
+
+        // ── レイヤー3: 外縁アーク ────────────────────────────
+        ctx.strokeStyle = `rgba(0,255,220,${(sv.life * 0.6).toFixed(3)})`;
+        ctx.lineWidth   = 1.2;
+        ctx.shadowBlur  = 4 * sv.life;
+        ctx.beginPath();
+        ctx.arc(0, 0, sv.range, -sv.halfAngle, sv.halfAngle);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        // ── レイヤー4: 拡張リングパルス (3本) ──────────────
+        const ringSpeed = 0.9;
+        for (let ri = 0; ri < 3; ri++) {
+            const phase   = (sonarNow * ringSpeed + ri * (1 / 3)) % 1;
+            const ringR   = phase * sv.range;
+            const ringAlpha = sv.life * (1 - phase) * 0.55;
+            if (ringAlpha <= 0.01) continue;
+            ctx.strokeStyle = `rgba(0,255,220,${ringAlpha.toFixed(3)})`;
+            ctx.lineWidth   = 1;
+            ctx.beginPath();
+            ctx.arc(0, 0, ringR, -sv.halfAngle, sv.halfAngle);
+            ctx.stroke();
+        }
+
+        // ── レイヤー5: スキャンライン (コーン内を往復) ──────
+        if (sv.life > 0.15) {
+            const sweepT    = (sonarNow * 1.2) % 1;
+            const pingback  = sweepT < 0.5 ? sweepT * 2 : 2 - sweepT * 2; // 往復
+            const sweepAng  = -sv.halfAngle + pingback * sv.halfAngle * 2;
+            ctx.shadowColor = 'rgba(120,255,255,1)';
+            ctx.shadowBlur  = 10;
+            ctx.strokeStyle = `rgba(120,255,255,${(sv.life * 0.9).toFixed(3)})`;
+            ctx.lineWidth   = 2;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(Math.cos(sweepAng) * sv.range, Math.sin(sweepAng) * sv.range);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            // スキャン先端の輝点
+            ctx.fillStyle = `rgba(255,255,255,${(sv.life * 0.8).toFixed(3)})`;
+            ctx.shadowColor = 'rgba(0,255,220,1)';
+            ctx.shadowBlur  = 12;
+            ctx.beginPath();
+            ctx.arc(Math.cos(sweepAng) * sv.range, Math.sin(sweepAng) * sv.range, 3, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+
+        // ── 発射元の輝き ────────────────────────────────────
+        ctx.shadowColor = 'rgba(0,255,220,1)';
+        ctx.shadowBlur  = 14 * sv.life;
+        ctx.fillStyle   = `rgba(0,255,220,${(sv.life * 0.7).toFixed(3)})`;
+        ctx.beginPath();
+        ctx.arc(0, 0, 5 * sv.life, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
         ctx.restore();
         ctx.globalAlpha = 1;
-        // 指向性ソナーの速度: 遅くしてフェードアウト (life減少量を1/3に)
+
         dirSonarVisual.life -= 0.004;
         if (dirSonarVisual.life <= 0) {
-            // 簡略化: 指向性ソナーもフィルエフェクトとして残す (arcで近似)
             effects.push({ type: 'sonar-fill', x: player.x, y: player.y, r: sv.range, a: 0.12, c: `rgba(0,255,220,1)`, life: 240 });
             dirSonarVisual = null;
         }
@@ -2654,7 +3276,7 @@ function updateSigCanvas() {
     const sc = sigCanvas.getContext('2d');
     const w = sigCanvas.width, h = sigCanvas.height;
     sc.clearRect(0, 0, w, h);
-    sc.fillStyle = 'rgba(0,5,12,0.9)';
+    sc.fillStyle = 'rgba(0,5,12,0.95)';
     sc.fillRect(0, 0, w, h);
 
     const spd = Math.hypot(player.x-(player.prevX||player.x), player.y-(player.prevY||player.y));
@@ -2668,10 +3290,10 @@ function updateSigCanvas() {
     };
 
     const sigs = [
-        { key: 'heat',  color: '#ff6600', label: 'H', freq: 2.1 },
-        { key: 'optic', color: '#00ffaa', label: 'O', freq: 3.4 },
-        { key: 'em',    color: '#cc44ff', label: 'E', freq: 1.8 },
-        { key: 'higgs', color: '#50c8ff', label: 'G', freq: 4.0 }
+        { key: 'heat',  color: '#ff6600', rgb: '255,102,0',   label: 'H', baseFreq: 1.8 },
+        { key: 'optic', color: '#00ffaa', rgb: '0,255,170',   label: 'O', baseFreq: 2.6 },
+        { key: 'em',    color: '#cc44ff', rgb: '204,68,255',  label: 'E', baseFreq: 1.3 },
+        { key: 'higgs', color: '#50c8ff', rgb: '80,200,255',  label: 'G', baseFreq: 4.0 }
     ];
 
     sigs.forEach(sig => {
@@ -2679,16 +3301,15 @@ function updateSigCanvas() {
         if (_sigHistory[sig.key].length > _SIG_HIST_LEN) _sigHistory[sig.key].shift();
     });
 
-    const t = Date.now() * 0.002;
+    const nowSec = Date.now() * 0.001;
     const rowH = h / 4;
 
     sigs.forEach((sig, i) => {
         const cy = (i + 0.5) * rowH;
         const v = currentVals[sig.key];
-        const hist = _sigHistory[sig.key];
 
         // グリッド線
-        sc.strokeStyle = 'rgba(255,255,255,0.08)';
+        sc.strokeStyle = 'rgba(255,255,255,0.07)';
         sc.lineWidth = 0.5;
         sc.beginPath(); sc.moveTo(0, cy); sc.lineTo(w, cy); sc.stroke();
 
@@ -2697,25 +3318,52 @@ function updateSigCanvas() {
         sc.font = 'bold 7px monospace';
         sc.fillText(sig.label, 2, cy + 3);
 
-        // 波形 (履歴+サインノイズ)
-        sc.shadowColor = sig.color;
-        sc.shadowBlur = v > 0.1 ? 4 : 0;
-        sc.strokeStyle = sig.color;
-        sc.lineWidth = 1.2;
-        sc.beginPath();
         const xStart = 10;
-        const xEnd = w - 2;
-        const histLen = hist.length;
+        const xEnd = w - 6;
+
+        // 波の高さ = v * rowH * 0.43 (値が大きいほど振幅大)
+        // 波の間隔 = baseFreq + v*9 (値が大きいほど密)
+        // スクロール速度も値に比例
+        // sqrt スケーリング: 微小シグネチャでも視覚的に明確な波形を表示
+        const amp   = Math.sqrt(v) * rowH * 0.38;
+        const freq  = sig.baseFreq + v * 9.0;
+        const scroll = nowSec * (1.5 + v * 4.0);
+
+        // 常時ベースライン波形 (値ゼロでも動く)
+        const idleAmp  = rowH * 0.06;
+        const idleFreq = 0.8;
+
+        sc.save();
+        sc.shadowColor = sig.color;
+        sc.shadowBlur  = v > 0.02 ? 5 : 2;
+        sc.strokeStyle = sig.color;
+        sc.lineWidth   = v > 0.02 ? 1.4 : 0.9;
+        sc.globalAlpha = 0.35 + v * 0.65;
+        sc.beginPath();
         for (let x = xStart; x <= xEnd; x++) {
-            const progress = (x - xStart) / (xEnd - xStart);
-            const histIdx = Math.floor(progress * (histLen - 1));
-            const hVal = hist[histIdx] || 0;
-            const noise = Math.sin(t * sig.freq + progress * 14 + i) * 0.15;
-            const y = cy - (hVal + noise * hVal) * rowH * 0.42;
+            const t = (x - xStart) / (xEnd - xStart);
+            // 主波形 + 第2高調波
+            const wave  = amp  * Math.sin(2 * Math.PI * (t * freq  - scroll))
+                        + amp  * 0.28 * Math.sin(2 * Math.PI * (t * freq * 2.1 - scroll * 1.05))
+                        + idleAmp * Math.sin(2 * Math.PI * (t * idleFreq - nowSec * 0.6));
+            const y = cy - wave;
             if (x === xStart) sc.moveTo(x, y); else sc.lineTo(x, y);
         }
         sc.stroke();
-        sc.shadowBlur = 0;
+
+        // 走査線先端を明るく (右端の輝点)
+        const tipX = xEnd;
+        const tipT = 1.0;
+        const tipWave = amp * Math.sin(2 * Math.PI * (tipT * freq - scroll))
+                      + amp * 0.28 * Math.sin(2 * Math.PI * (tipT * freq * 2.1 - scroll * 1.05))
+                      + idleAmp * Math.sin(2 * Math.PI * (tipT * idleFreq - nowSec * 0.6));
+        sc.shadowBlur = v > 0.05 ? 8 : 2;
+        sc.fillStyle = '#ffffff';
+        sc.globalAlpha = 0.5 + v * 0.5;
+        sc.beginPath();
+        sc.arc(tipX, cy - tipWave, v > 0.05 ? 1.8 : 1.0, 0, Math.PI * 2);
+        sc.fill();
+        sc.restore();
     });
 
     // 右端に現在値バー
@@ -2744,12 +3392,14 @@ function updateEnvSigCanvas() {
     ec.fillRect(0, 0, w, h);
 
     // 周囲の敵シグネチャを各センサータイプごとに合算
+    // 検出範囲: パッシブ検知と同じ全マップ範囲 (距離減衰のみ適用)
+    const envDetectRange = Math.max(effectiveRadarRange * 10, 8000);
     const envVals = { heat: 0, optic: 0, em: 0, higgs: 0 };
     enemies.forEach(e => {
         if (e.hp <= 0) return;
         const dist = Math.hypot(e.x - player.x, e.y - player.y);
         const higgsPath = getHiggsIntensity((e.x + player.x)/2, (e.y + player.y)/2);
-        const distAtten = Math.max(0, 1 - dist / (effectiveRadarRange * 3.0));
+        const distAtten = Math.max(0, 1 - dist / envDetectRange);
         ['heat', 'optic', 'em', 'higgs'].forEach(key => {
             const sc2 = sensorConfig[key];
             envVals[key] = Math.min(1, envVals[key] + sc2.sig(e) * distAtten * (1 - higgsPath * sc2.higgsMod));
@@ -2757,10 +3407,10 @@ function updateEnvSigCanvas() {
     });
 
     const sigs = [
-        { key: 'heat',  color: '#ff6600', label: 'H', freq: 2.1 },
-        { key: 'optic', color: '#ffee00', label: 'O', freq: 3.4 },
-        { key: 'em',    color: '#cc44ff', label: 'E', freq: 1.8 },
-        { key: 'higgs', color: '#00ffff', label: 'G', freq: 4.0 }
+        { key: 'heat',  color: '#ff6600', label: 'H', baseFreq: 1.8 },
+        { key: 'optic', color: '#ffee00', label: 'O', baseFreq: 2.6 },
+        { key: 'em',    color: '#cc44ff', label: 'E', baseFreq: 1.3 },
+        { key: 'higgs', color: '#00ffff', label: 'G', baseFreq: 4.0 }
     ];
 
     sigs.forEach(sig => {
@@ -2768,16 +3418,15 @@ function updateEnvSigCanvas() {
         if (_envSigHistory[sig.key].length > ENV_SIG_HIST_LEN) _envSigHistory[sig.key].shift();
     });
 
-    const t = Date.now() * 0.002;
+    const nowSec = Date.now() * 0.001;
     const rowH = h / 4;
 
     sigs.forEach((sig, i) => {
         const cy = (i + 0.5) * rowH;
         const v = envVals[sig.key];
-        const hist = _envSigHistory[sig.key];
 
         // グリッド線
-        ec.strokeStyle = 'rgba(255,255,255,0.08)';
+        ec.strokeStyle = 'rgba(255,255,255,0.07)';
         ec.lineWidth = 0.5;
         ec.beginPath(); ec.moveTo(0, cy); ec.lineTo(w, cy); ec.stroke();
 
@@ -2786,25 +3435,45 @@ function updateEnvSigCanvas() {
         ec.font = 'bold 7px monospace';
         ec.fillText(sig.label, 2, cy + 3);
 
-        // 波形 (履歴+サインノイズ)
-        ec.shadowColor = sig.color;
-        ec.shadowBlur = v > 0.1 ? 4 : 0;
-        ec.strokeStyle = sig.color;
-        ec.lineWidth = 1.2;
-        ec.beginPath();
         const xStart = 10;
-        const xEnd = w - 2;
-        const histLen = hist.length;
+        const xEnd = w - 6;
+
+        // sqrt スケーリング: 微小シグネチャでも視覚的に明確な波形を表示
+        const amp    = Math.sqrt(v) * rowH * 0.38;
+        const freq   = sig.baseFreq + v * 9.0;
+        const scroll = nowSec * (1.5 + v * 4.0) + i * 2.1; // 位相オフセット
+
+        const idleAmp  = rowH * 0.06;
+        const idleFreq = 0.7 + i * 0.2;
+
+        ec.save();
+        ec.shadowColor = sig.color;
+        ec.shadowBlur  = v > 0.02 ? 5 : 2;
+        ec.strokeStyle = sig.color;
+        ec.lineWidth   = v > 0.02 ? 1.4 : 0.9;
+        ec.globalAlpha = 0.35 + v * 0.65;
+        ec.beginPath();
         for (let x = xStart; x <= xEnd; x++) {
-            const progress = (x - xStart) / (xEnd - xStart);
-            const histIdx = Math.floor(progress * (histLen - 1));
-            const hVal = hist[histIdx] || 0;
-            const noise = Math.sin(t * sig.freq + progress * 14 + i) * 0.15;
-            const y = cy - (hVal + noise * hVal) * rowH * 0.42;
+            const t = (x - xStart) / (xEnd - xStart);
+            const wave = amp * Math.sin(2 * Math.PI * (t * freq - scroll))
+                       + amp * 0.28 * Math.sin(2 * Math.PI * (t * freq * 2.1 - scroll * 1.05))
+                       + idleAmp * Math.sin(2 * Math.PI * (t * idleFreq - nowSec * 0.5));
+            const y = cy - wave;
             if (x === xStart) ec.moveTo(x, y); else ec.lineTo(x, y);
         }
         ec.stroke();
-        ec.shadowBlur = 0;
+
+        // 走査線先端輝点
+        const tipWave = amp * Math.sin(2 * Math.PI * (1.0 * freq - scroll))
+                      + amp * 0.28 * Math.sin(2 * Math.PI * (1.0 * freq * 2.1 - scroll * 1.05))
+                      + idleAmp * Math.sin(2 * Math.PI * (1.0 * idleFreq - nowSec * 0.5));
+        ec.shadowBlur = v > 0.05 ? 8 : 2;
+        ec.fillStyle = '#ffffff';
+        ec.globalAlpha = 0.5 + v * 0.5;
+        ec.beginPath();
+        ec.arc(xEnd, cy - tipWave, v > 0.05 ? 1.8 : 1.0, 0, Math.PI * 2);
+        ec.fill();
+        ec.restore();
     });
 
     // 右端に現在値バー
@@ -3206,6 +3875,7 @@ function gameLoop() {
 
         // パッシブアンテナ検知チェック
         if (player && player.hp > 0) checkPassiveDetection();
+        if (player && player.hp > 0) updateVisionLockOn();
 
         // Process Enemy deaths
         for (let i = enemies.length - 1; i >= 0; i--) {
@@ -3249,6 +3919,28 @@ function gameLoop() {
                     (document.getElementById('sd-progress-text').textContent = `ノード: ${hackedCount}/${colonyNodes.length}`);
             }
         }
+
+        // ── 偽装ビーコン更新 ──
+        structures.forEach(s => {
+            if (!s.decoyActive || s.decoyTimer <= 0) return;
+            s.decoyTimer--;
+            if (s.decoyTimer <= 0) {
+                s.decoyActive = false;
+                logMessage(`EW: 偽装ビーコン終了 (${s.type === 'colony' ? 'コロニー' : '難破船'})`, 'system-msg');
+                return;
+            }
+            if (s.decoyType === 'derelict' && s.decoyWaypoint) {
+                // 移動偽装: ウェイポイントへ向けて毎フレーム移動
+                const dx = s.decoyWaypoint.x - s.decoyMoveX;
+                const dy = s.decoyWaypoint.y - s.decoyMoveY;
+                const dist = Math.hypot(dx, dy);
+                if (dist > 5) {
+                    const spd = 1.2; // 偽装目標の移動速度
+                    s.decoyMoveX += (dx / dist) * spd;
+                    s.decoyMoveY += (dy / dist) * spd;
+                }
+            }
+        });
 
         // Projectiles
         for (let i = projectiles.length - 1; i >= 0; i--) {
@@ -3381,7 +4073,6 @@ function gameLoop() {
                 const t = Date.now();
                 const pulse = 0.5 + Math.sin(t * 0.003 + n.x * 0.001) * 0.5;
                 const spin = (t * 0.0008 + n.x * 0.0003) % (Math.PI * 2);
-                // HIGGSセンサー: フル輝度。他センサー: センサー範囲外は暗め
                 const inRange = distToNode < higgsNodeRange;
                 const brightness = isHiggsSnsr
                     ? (0.5 + pulse * 0.5)
@@ -3451,25 +4142,14 @@ function gameLoop() {
         enemies.forEach(e => e.draw(ctx));
         if (player && player.hp > 0) player.draw(ctx);
 
-        // ── 有視界境界リング (ワールド空間) ──
-        // Higgs濃度に関わらず常時表示し、有視界の境界を明示する
+        // ── 有視界境界リング + フォグオブウォー ──
         if (player && player.hp > 0) {
             const higgsHere = getHiggsIntensity(player.x, player.y);
             const visionRingR = effectiveRadarRange;
             const t2 = Date.now();
             const vpulse = 0.5 + Math.sin(t2 * 0.0015) * 0.5;
-            // 濃度が高いほど赤寄り
             const vRingColor = higgsHere > 0.6 ? '#ff4444' : (higgsHere > 0.3 ? '#ffaa44' : '#00ffaa');
             ctx.save();
-            // 外側グロー
-            ctx.beginPath();
-            ctx.arc(player.x, player.y, visionRingR, 0, Math.PI * 2);
-            ctx.strokeStyle = vRingColor;
-            ctx.lineWidth = 3 / camera.zoom;
-            ctx.globalAlpha = 0.12 + vpulse * 0.08;
-            ctx.shadowColor = vRingColor; ctx.shadowBlur = 0;
-            ctx.stroke();
-            // メインリング (破線)
             ctx.setLineDash([30 / camera.zoom, 20 / camera.zoom]);
             ctx.beginPath();
             ctx.arc(player.x, player.y, visionRingR, 0, Math.PI * 2);
@@ -3478,9 +4158,9 @@ function gameLoop() {
             ctx.globalAlpha = 0.3 + vpulse * 0.2;
             ctx.stroke();
             ctx.setLineDash([]);
-            ctx.shadowBlur = 0;
             ctx.globalAlpha = 1;
             ctx.restore();
+            drawFogOfWar(ctx);
         }
 
         // ── 武器射程サークルインジケータ (ワールド空間) ──
