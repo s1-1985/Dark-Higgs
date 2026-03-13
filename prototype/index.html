@@ -21,11 +21,12 @@
             <!-- Top Bar (New feature for Save & Currency) -->
             <div id="top-bar">
                 <span id="sector-display">セクター: 1</span>
-                <div>
+                <div id="top-bar-desktop">
                     <span id="currency-display">クレジット: 0 CR</span>
                     <button class="btn btn-primary btn-small" id="btn-save">データ保存 (ローカル)</button>
                     <button class="btn btn-primary btn-small" id="btn-reset">リセット</button>
                 </div>
+                <button class="btn btn-small" id="mobile-menu-btn">≡</button>
             </div>
 
             <!-- Minimap -->
@@ -48,21 +49,33 @@
             <!-- Bottom Console -->
             <div id="bottom-console">
 
+                <!-- モバイル用コンパクトステータスバー (モバイルのみ表示) -->
+                <div id="mobile-status-bar">
+                    <div class="msb-hp-wrap">
+                        <div class="msb-hp-bar"><div id="msb-hp-fill" class="msb-hp-fill"></div></div>
+                        <span id="msb-hp-text" class="msb-val" style="color:#00ffaa;">100%</span>
+                    </div>
+                    <span class="msb-sep">H:<span id="msb-higgs" class="msb-val">--</span></span>
+                    <span class="msb-sep">敵:<span id="msb-enemies" class="msb-val" style="color:#ffaa00;">--</span></span>
+                    <span class="msb-sep">弾:<span id="msb-ammo" class="msb-val" style="color:#ffaa00;">--</span></span>
+                    <span class="msb-sep">ノード:<span id="msb-nodes" class="msb-val" style="color:#00ffaa;">--</span></span>
+                </div>
+
                 <!-- 左: 艦体ステータス -->
                 <div class="console-panel left-panel">
                     <div class="panel-header">SHIP STATUS</div>
                     <div class="status-bar"><div class="hp-fill" style="width:100%"></div></div>
                     <div class="status-text">船体耐久度: 100%</div>
-                    <div style="margin-top:6px; font-family:'Orbitron',monospace; font-size:10px; color:#aaa;">
+                    <div class="status-detail" style="margin-top:6px; font-family:'Orbitron',monospace; font-size:10px; color:#aaa;">
                         敵性: <span id="hostile-count" style="color:#ffaa00;">不明</span>
                     </div>
-                    <div style="margin-top:2px; font-family:'Orbitron',monospace; font-size:10px; color:#aaa;">
+                    <div class="status-detail" style="margin-top:2px; font-family:'Orbitron',monospace; font-size:10px; color:#aaa;">
                         Higgs: <span id="env-higgs" class="highlight-text">---</span>
                     </div>
-                    <div style="margin-top:2px; font-family:'Orbitron',monospace; font-size:9px; color:#aaa;">
+                    <div class="status-detail" style="margin-top:2px; font-family:'Orbitron',monospace; font-size:9px; color:#aaa;">
                         弾: <span id="ammo-display" style="color:#ffaa00;">---</span>
                     </div>
-                    <div style="margin-top:2px; font-family:'Orbitron',monospace; font-size:10px; color:#aaa;">
+                    <div class="status-detail" style="margin-top:2px; font-family:'Orbitron',monospace; font-size:10px; color:#aaa;">
                         ノード: <span id="env-nodes" class="highlight-text">---</span>
                     </div>
                     <div style="margin-top:4px; font-family:'Orbitron',monospace; font-size:9px; color:#aaa;">
@@ -500,6 +513,23 @@
             </div>
 
         </div>
+
+        <!-- Mobile Menu Modal -->
+        <div id="mobile-menu-modal" class="hidden">
+            <div class="mm-box">
+                <div class="mm-header">COMMAND</div>
+                <div class="mm-info">
+                    <div id="mm-sector" class="mm-row">セクター: 1</div>
+                    <div id="mm-credits" class="mm-row">クレジット: 0 SCR</div>
+                </div>
+                <div class="mm-btns">
+                    <button class="btn btn-primary btn-small" id="mm-save">データ保存</button>
+                    <button class="btn btn-danger btn-small" id="mm-reset">リセット</button>
+                    <button class="btn btn-small" id="mm-close">閉じる</button>
+                </div>
+            </div>
+        </div>
+
     </div>
     <script src="game.js"></script>
     <script>

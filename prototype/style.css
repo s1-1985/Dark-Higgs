@@ -939,84 +939,233 @@ input[type=range]::-webkit-slider-thumb {
 }
 
 /* ============================================================
+   モバイルステータスバー / モバイルメニュー (デスクトップでは非表示)
+   ============================================================ */
+#mobile-status-bar {
+    display: none;
+}
+#mobile-menu-btn {
+    display: none;
+}
+#mobile-menu-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: auto;
+    backdrop-filter: blur(6px);
+}
+#mobile-menu-modal.hidden { display: none !important; }
+.mm-box {
+    background: rgba(5,12,20,0.97);
+    border: 1px solid rgba(0,255,170,0.5);
+    border-radius: 8px;
+    padding: 20px 24px;
+    min-width: 240px;
+    box-shadow: 0 0 30px rgba(0,255,170,0.2);
+}
+.mm-header {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    color: #00ffaa;
+    letter-spacing: 4px;
+    margin-bottom: 14px;
+    text-align: center;
+}
+.mm-info { margin-bottom: 14px; }
+.mm-row {
+    font-family: 'Orbitron', monospace;
+    font-size: 11px;
+    color: #ccc;
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.mm-btns {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* アクションボタンアイコン構造 (デスクトップ) */
+.action-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+}
+.aicon {
+    font-size: 14px;
+    line-height: 1.2;
+}
+.alabel {
+    font-size: 8px;
+    letter-spacing: 0.5px;
+}
+
+/* ============================================================
    モバイル対応 (スマートフォン) - 完全刷新
    ============================================================ */
 @media (max-width: 768px) {
 
-    /* ─── TOP BAR: 40px固定 ─── */
+    /* ─── TOP BAR: コンパクト化 ─── */
     #top-bar {
         padding: 4px 8px;
-        height: 40px;
-        min-height: 40px;
+        height: 36px;
+        min-height: 36px;
     }
     #top-bar span {
         font-size: 10px;
         letter-spacing: 0.5px;
     }
-    #top-bar div { gap: 5px; }
-    #top-bar .btn {
-        padding: 3px 7px;
-        font-size: 8px;
-        min-height: 30px;
+    #top-bar-desktop { display: none !important; }
+    #mobile-menu-btn {
+        display: flex !important;
+        align-items: center;
+        justify-content: center;
+        padding: 4px 10px;
+        font-size: 14px;
+        min-height: 28px;
+        border-color: rgba(0,255,170,0.5);
+        color: #00ffaa;
         letter-spacing: 0;
     }
 
-    /* ─── MINIMAP: 110x110 左上 ─── */
+    /* ─── MINIMAP: 100x100 左上 ─── */
     #minimap-container {
-        width: 110px;
-        height: 110px;
-        top: 44px;
+        width: 100px;
+        height: 100px;
+        top: 40px;
         left: 6px;
         border-width: 1px;
     }
     .minimap-label { font-size: 7px; letter-spacing: 1px; }
 
-    /* ─── LOG PANEL: モバイルでは小さく ─── */
+    /* ─── LOG PANEL: コンパクト ─── */
     #log-panel {
-        top: 44px;
+        top: 40px;
         right: 4px;
-        width: 200px;
-        max-height: 120px;
-        font-size: 8px;
+        width: 195px;
+        max-height: 110px;
     }
     #log-header { padding: 3px 6px; font-size: 7px; }
     .message { font-size: 7px; padding: 2px 6px; }
 
-    /* ─── BOTTOM CONSOLE: モバイル横スクロール ─── */
+    /* ─── BOTTOM CONSOLE: 2カラムグリッド ─── */
     #bottom-console {
-        bottom: 0;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: auto auto auto auto;
         height: auto;
-        flex-direction: row;
-        padding: 4px 0;
+        padding: 0;
         gap: 0;
-        overflow-x: auto;
-        overflow-y: hidden;
-        -webkit-overflow-scrolling: touch;
+        overflow: hidden;
     }
 
-    /* 左ステータスパネル */
-    .left-panel {
-        width: 110px;
-        min-width: 100px;
+    /* モバイルステータスバー: 1行全幅 (row1) */
+    #mobile-status-bar {
+        display: flex;
+        align-items: center;
+        grid-column: 1 / -1;
+        grid-row: 1;
         padding: 3px 8px;
-        flex-shrink: 0;
-    }
-    .left-panel .status-text { font-size: 8px; }
-
-    /* 中央コントロール */
-    .center-panel {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 3px;
-        padding: 3px 8px;
-        border-right: 1px solid rgba(255,255,255,0.1);
-        min-width: 220px;
-        flex-shrink: 0;
-    }
-    .weapon-control {
         gap: 6px;
+        background: rgba(0,255,170,0.05);
+        border-bottom: 1px solid rgba(0,255,170,0.15);
+        font-family: 'Orbitron', monospace;
         font-size: 9px;
-        flex-wrap: nowrap;
+        color: #999;
+        overflow: hidden;
+        white-space: nowrap;
+    }
+    .msb-hp-wrap {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+    }
+    .msb-hp-bar {
+        width: 40px;
+        height: 5px;
+        background: #222;
+        border: 1px solid #444;
+        border-radius: 2px;
+        overflow: hidden;
+        flex-shrink: 0;
+    }
+    .msb-hp-fill {
+        height: 100%;
+        background: #00ffaa;
+        box-shadow: 0 0 4px #00ffaa;
+        transition: width 0.3s;
+        width: 100%;
+    }
+    .msb-val { color: #00ffaa; }
+    .msb-sep {
+        color: #666;
+        flex-shrink: 0;
+    }
+
+    /* SHIP STATUS: 左上 (row2 col1) */
+    .left-panel {
+        grid-column: 1;
+        grid-row: 2;
+        width: auto;
+        min-width: 0;
+        padding: 3px 6px;
+        border-right: 1px solid rgba(0,255,170,0.15);
+        border-bottom: 1px solid rgba(0,255,170,0.15);
+    }
+    .left-panel .panel-header { display: none; }
+    .left-panel .status-bar { margin-bottom: 2px; height: 5px; }
+    .left-panel .status-text { font-size: 7px; margin-bottom: 2px; }
+    .status-detail { display: none !important; }
+
+    /* 環境情報: 右上 (row2 col2) - モバイルで表示! */
+    .right-panel {
+        display: flex !important;
+        grid-column: 2;
+        grid-row: 2;
+        width: auto;
+        min-width: 0;
+        padding: 3px 6px;
+        border-right: none;
+        border-bottom: 1px solid rgba(0,255,170,0.15);
+    }
+    .right-panel .panel-header { display: none; }
+    .right-panel .env-info > div:not(:has(canvas)):not(:has(#env-sig-canvas)) { display: none; }
+
+    /* GEN + 武器/エンジン/センサー: 全幅 (row3) */
+    .center-panel {
+        grid-column: 1 / -1;
+        grid-row: 3;
+        width: auto;
+        min-width: 0;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 3px;
+        padding: 3px 6px;
+        border-right: none;
+        border-bottom: 1px solid rgba(0,255,170,0.15);
+    }
+    /* GEN配分: コンパクトに */
+    .gen-control {
+        flex: 0 0 auto;
+        min-width: 140px;
+    }
+    .gen-header { font-size: 8px; margin-bottom: 1px; }
+    .gen-slider { height: 8px; border-radius: 4px; }
+    .gen-slider::-webkit-slider-thumb { width: 18px; height: 18px; }
+
+    /* 武器/エンジン選択 */
+    .weapon-control {
+        gap: 4px;
+        font-size: 8px;
         justify-content: flex-start;
         align-items: center;
     }
@@ -1024,38 +1173,40 @@ input[type=range]::-webkit-slider-thumb {
         white-space: nowrap;
         flex-shrink: 0;
         font-size: 8px;
+        min-width: 30px;
     }
-
-    /* スライダー: タッチしやすく */
-    input[type=range] {
-        flex: 1;
-        min-width: 80px;
-        height: 10px;
-        border-radius: 5px;
-    }
-    input[type=range]::-webkit-slider-thumb {
-        width: 22px;
-        height: 22px;
-    }
-
     .sci-fi-select {
         flex: 1;
-        font-size: 9px;
-        padding: 4px 3px;
-        min-height: 28px;
-        width: 130px;
+        font-size: 8px;
+        padding: 3px 2px;
+        min-height: 26px;
+        width: auto;
+        min-width: 80px;
+    }
+    /* センサーボタン */
+    .sensor-row {
+        gap: 3px;
+        margin-bottom: 2px;
+    }
+    .sensor-btn {
+        padding: 3px 5px;
+        font-size: 8px;
+        min-width: 40px;
     }
 
-    /* アクションパネル */
+    /* アクションボタン: 全幅 (row4) */
     .action-panel {
-        width: 160px;
-        min-width: 148px;
-        flex-shrink: 0;
+        grid-column: 1 / -1;
+        grid-row: 4;
+        width: auto;
+        min-width: 0;
         padding: 3px 6px;
     }
+    .action-panel .panel-header { display: none; }
     .action-grid {
-        grid-template-columns: 1fr 1fr;
-        gap: 3px;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 4px;
+        margin-top: 0;
     }
     .act-icon-btn {
         min-height: 42px;
@@ -1068,10 +1219,7 @@ input[type=range]::-webkit-slider-thumb {
     .isel-btn svg { width: 18px; height: 18px; }
     .isel-btn span { font-size: 5.5px; }
 
-    /* 環境情報パネル: 非表示(スペース節約) */
-    .right-panel { display: none !important; }
-    .panel-header { font-size: 9px; margin-bottom: 3px; letter-spacing: 0.5px; }
-
+    .panel-header { font-size: 9px; margin-bottom: 2px; letter-spacing: 0.5px; }
 
     /* ─── ダイアログ ─── */
     .dialog-box {
