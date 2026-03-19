@@ -1140,51 +1140,42 @@ input[type=range]::-webkit-slider-thumb {
     .right-panel .panel-header { display: none; }
     .right-panel .env-info > div:not(:has(canvas)):not(:has(#env-sig-canvas)) { display: none; }
 
-    /* GEN + 武器/エンジン/センサー: 全幅 (row3) */
+    /* GEN + 武器/エンジン/センサー: 全幅 (row3) — 2列グリッド */
     .center-panel {
         grid-column: 1 / -1;
         grid-row: 3;
         width: auto;
         min-width: 0;
-        flex-direction: row;
-        flex-wrap: wrap;
-        align-items: flex-start;
-        gap: 3px;
-        padding: 3px 6px;
+        display: grid !important;
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: auto;
+        align-items: start;
+        gap: 0;
+        padding: 0;
         border-right: none;
         border-bottom: 1px solid rgba(0,255,170,0.15);
     }
-    /* GEN配分: コンパクトに */
+    /* GEN配分: 左半分 */
     .gen-control {
-        flex: 0 0 auto;
-        min-width: 140px;
+        grid-column: 1;
+        grid-row: 1;
+        padding: 3px 6px;
+        border-right: 1px solid rgba(0,255,170,0.15);
+        min-width: 0;
     }
     .gen-header { font-size: 8px; margin-bottom: 1px; }
     .gen-slider { height: 8px; border-radius: 4px; }
     .gen-slider::-webkit-slider-thumb { width: 18px; height: 18px; }
 
-    /* 武器/エンジン選択 */
-    .weapon-control {
-        gap: 4px;
-        font-size: 8px;
-        justify-content: flex-start;
-        align-items: center;
+    /* WEAPON/ENGINE/SENSOR アイコン群: 右半分 (縦積み) */
+    .isel-section {
+        grid-column: 2;
+        padding: 2px 4px;
+        border-bottom: 1px solid rgba(0,255,170,0.08);
+        min-width: 0;
     }
-    .weapon-control span {
-        white-space: nowrap;
-        flex-shrink: 0;
-        font-size: 8px;
-        min-width: 30px;
-    }
-    .sci-fi-select {
-        flex: 1;
-        font-size: 8px;
-        padding: 3px 2px;
-        min-height: 26px;
-        width: auto;
-        min-width: 80px;
-    }
-    /* センサーボタン */
+    .isel-section:last-of-type { border-bottom: none; }
+    /* センサーボタン (legacy fallback) */
     .sensor-row {
         gap: 3px;
         margin-bottom: 2px;
@@ -1195,30 +1186,30 @@ input[type=range]::-webkit-slider-thumb {
         min-width: 40px;
     }
 
-    /* アクションボタン: 全幅 (row4) */
+    /* アクションボタン: 全幅 (row4) — 高さ半分 */
     .action-panel {
         grid-column: 1 / -1;
         grid-row: 4;
         width: auto;
         min-width: 0;
-        padding: 3px 6px;
+        padding: 2px 4px;
     }
     .action-panel .panel-header { display: none; }
     .action-grid {
         grid-template-columns: repeat(6, 1fr);
-        gap: 4px;
+        gap: 2px;
         margin-top: 0;
     }
     .act-icon-btn {
-        min-height: 42px;
-        padding: 4px 2px 3px;
+        min-height: 28px;
+        padding: 2px 2px 2px;
     }
-    .act-icon-btn svg { width: 22px; height: 22px; }
-    .act-icon-btn span { font-size: 6px; }
+    .act-icon-btn svg { width: 16px; height: 16px; }
+    .act-icon-btn span { font-size: 5.5px; }
     /* アイコン選択: モバイルでは小さく */
-    .isel-btn { width: 34px; height: 34px; }
-    .isel-btn svg { width: 18px; height: 18px; }
-    .isel-btn span { font-size: 5.5px; }
+    .isel-btn { width: 30px; height: 30px; }
+    .isel-btn svg { width: 16px; height: 16px; }
+    .isel-btn span { font-size: 5px; }
 
     .panel-header { font-size: 9px; margin-bottom: 2px; letter-spacing: 0.5px; }
 

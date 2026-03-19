@@ -802,10 +802,12 @@ class Structure {
         const t = Date.now();
         const hColor = this.hacked ? '#00aaff' : null;
 
+        // Adaptive icon scale: full size at zoom>=0.5, shrinks when zoomed far out
+        const _iconS = Math.max(8, Math.min(28, camera.zoom * 56)) / (camera.zoom * 28);
         if (this.type === 'colony') {
             ctx.save();
             ctx.translate(this.x, this.y);
-            ctx.scale(1 / camera.zoom, 1 / camera.zoom); // 常に画面上で固定サイズ
+            ctx.scale(_iconS, _iconS);
             ctx.strokeStyle = hColor || 'rgba(60,100,220,0.9)';
             ctx.fillStyle = hColor ? 'rgba(0,100,200,0.25)' : 'rgba(34,68,170,0.25)';
             ctx.lineWidth = 2;
@@ -840,7 +842,7 @@ class Structure {
             // Derelict wreckage
             ctx.save();
             ctx.translate(this.x, this.y);
-            ctx.scale(1 / camera.zoom, 1 / camera.zoom); // 常に画面上で固定サイズ
+            ctx.scale(_iconS, _iconS);
             ctx.strokeStyle = hColor || 'rgba(140,115,80,0.9)';
             ctx.fillStyle = hColor ? 'rgba(0,100,200,0.2)' : 'rgba(70,60,45,0.55)';
             ctx.lineWidth = 2;
@@ -869,6 +871,20 @@ class Structure {
             ctx.strokeStyle = `rgba(0, 170, 255, ${1 - r / 200})`;
             ctx.lineWidth = 1 / camera.zoom; ctx.stroke();
         }
+
+        // Name label (same adaptive scale as icon)
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.scale(_iconS, _iconS);
+        const _lColor = this.type === 'colony' ? (this.hacked ? '#00ffcc' : '#6699ff') : (this.hacked ? '#00ffcc' : '#bb9966');
+        const _lText  = this.type === 'colony' ? (this.hacked ? 'COLONY [HACKED]' : 'COLONY NODE') : (this.hacked ? 'DERELICT [HACKED]' : 'DERELICT');
+        ctx.fillStyle = _lColor;
+        ctx.font = 'bold 11px Orbitron, monospace';
+        ctx.textAlign = 'center';
+        ctx.shadowColor = _lColor; ctx.shadowBlur = 8;
+        ctx.fillText(_lText, 0, -46);
+        ctx.shadowBlur = 0;
+        ctx.restore();
 
         // 偽装ビーコン エフェクト
         if (this.decoyActive && this.decoyTimer > 0) {
@@ -939,13 +955,16 @@ class Station {
 
         ctx.restore();
 
-        // Label
+        // Label (adaptive font size so it remains readable at all zoom levels)
+        ctx.save();
+        const _stnFontPx = Math.max(9, Math.min(16, camera.zoom * 16)) / camera.zoom;
+        ctx.font = `bold ${_stnFontPx.toFixed(1)}px Orbitron, monospace`;
         ctx.fillStyle = '#4da6ff';
-        ctx.font = 'bold 16px Orbitron';
         ctx.textAlign = 'center';
         ctx.shadowBlur = 10; ctx.shadowColor = '#4da6ff';
         ctx.fillText("中立補給ステーション", this.x, this.y - 130);
         ctx.shadowBlur = 0;
+        ctx.restore();
     }
 }
 
@@ -1162,11 +1181,16 @@ class Ship {
             const _engType = ENGINE_TYPES[gameState.engineType] || ENGINE_TYPES.thermonuclear;
             const _hHere = getHiggsIntensity(this.x, this.y);
             const _isMoving = _spd > 0.1;
-            // 停止中はエンジン熱シグネチャなし (機関停止でステルス可能)
-            this.heatSig = _isMoving ? Math.min(1, (_spd * 0.6 + genAlloc.engine / 100 * 0.25) * _engType.heatMult) : 0;
-            this.opticalSig = Math.min(1, (_spd * 0.05 + (this.weaponType === 'beam' ? 0.6 : 0)) * _engType.optMult);
-            this.emSig = Math.min(1, (genAlloc.sensors / 100 * 0.4 + genAlloc.ai / 100 * 0.35) * _engType.emMult);
-            this.higgsSig = Math.min(1, _spd * _hHere * 2.0 * (_engType.higgsSpeedBonus > 0 ? 1 : 0.3));
+            const _ep = genAlloc.engine / 100;
+            // エンジン別シグネチャ: 停止中はエンジン由来のシグネチャなし
+            // 熱核: 熱放射が主  パルス: EM放射が主  Higgs: ヒッグス乱流が主  Photon: 光学が主
+            const _photonBonus  = (gameState.engineType === 'photon'  && _isMoving) ? _ep * 0.6 : 0;
+            const _pulseBonus   = (gameState.engineType === 'pulse'   && _isMoving) ? _ep * 0.5 : 0;
+            const _higgsEngBonus = (gameState.engineType === 'higgs'  && _isMoving) ? _ep * _hHere : 0;
+            this.heatSig    = _isMoving ? Math.min(1, (_spd * 0.5 + _ep * 0.35) * _engType.heatMult) : 0;
+            this.opticalSig = Math.min(1, (_spd * 0.04 + _photonBonus + (this.weaponType === 'beam' ? 0.6 : 0)) * Math.max(1, _engType.optMult));
+            this.emSig      = Math.min(1, (genAlloc.sensors / 100 * 0.4 + genAlloc.ai / 100 * 0.35 + _pulseBonus) * _engType.emMult);
+            this.higgsSig   = Math.min(1, _spd * _hHere * 1.5 * (_engType.higgsSpeedBonus > 0 ? 1 : 0.3) + _higgsEngBonus);
 
             // Speed defined by GEN engine allocation + 艦種補正 + ヒッグス減速
             const speedMult = { assault: 0.8, stealth: 1.4, carrier: 0.6 };
@@ -2835,7 +2859,8 @@ function drawPassiveAntenna(ctx) {
     if (!player || player.hp <= 0) return;
 
     const higgsAtPlayer = getHiggsIntensity(player.x, player.y);
-    effectiveRadarRange = RADAR_RANGE * (1 - higgsAtPlayer * 0.65) * (1 + genAlloc.sensors / 100 * 0.5);
+    // センサー100%で2倍のレーダー範囲
+    effectiveRadarRange = RADAR_RANGE * (1 - higgsAtPlayer * 0.65) * (1 + genAlloc.sensors / 100 * 1.0);
 
     const sc = sensorConfig[currentSensor];
     const CR = sc.r;
@@ -2899,7 +2924,7 @@ function drawPassiveAntenna(ctx) {
 
         // 各センサーの受信シグネチャ集計
         const RING_SENSOR_COLORS = {
-            heat: '255,80,0', optic: '0,255,170', em: '180,50,255', higgs: '80,200,255'
+            heat: '255,120,0', optic: '0,255,140', em: '210,60,255', higgs: '0,230,255'
         };
         const RING_SENSOR_DIRS = {
             heat: -Math.PI * 0.5,    // 上 (北)
@@ -2909,7 +2934,7 @@ function drawPassiveAntenna(ctx) {
         };
         const ringSigVals = {};
         // スレットリング: 有効センサー範囲の10倍まで検出 (環境シグネチャ感度に一致)
-        const ringDetectRange = Math.max(effectiveRadarRange * 10, 8000);
+        const ringDetectRange = FIELD_SIZE; // 全マップ対象 (距離で減衰)
         ['heat','optic','em','higgs'].forEach(sName => {
             const sc2 = sensorConfig[sName];
             let tot = 0;
@@ -2973,7 +2998,7 @@ function drawPassiveAntenna(ctx) {
         }
 
         // ── ベースリング (常に表示) ──────────────────────────
-        const idleAlpha = 0.22 + maxRingSig * 0.15;
+        const idleAlpha = 0.55 + maxRingSig * 0.35; // 明るく
         const ringColor = RING_SENSOR_COLORS[maxRingName];
 
         ctx.beginPath();
@@ -2986,9 +3011,9 @@ function drawPassiveAntenna(ctx) {
         ctx.closePath();
         const ringLw = 1.0 / camera.zoom; // ズーム不変の線幅
         ctx.strokeStyle = `rgba(${ringColor},${idleAlpha.toFixed(3)})`;
-        ctx.lineWidth = 1.2 * ringLw;
-        ctx.shadowColor = `rgba(${ringColor},0.6)`;
-        ctx.shadowBlur  = 4 + maxRingSig * 12;
+        ctx.lineWidth = 1.8 * ringLw;
+        ctx.shadowColor = `rgba(${ringColor},0.9)`;
+        ctx.shadowBlur  = 8 + maxRingSig * 20;
         ctx.stroke();
         ctx.shadowBlur = 0;
 
@@ -3246,6 +3271,34 @@ function drawMinimap() {
         minimapCtx.shadowBlur = 0;
     });
 
+    // ソナーリング & 探知コンタクト (ミニマップ上)
+    effects.forEach(ef => {
+        if (ef.type === 'sonar' || ef.type === 'sonar-boundary') {
+            const mx = ef.x * mmScale + offX, my = ef.y * mmScale + offY;
+            const mr = ef.r * mmScale;
+            minimapCtx.beginPath();
+            minimapCtx.arc(mx, my, Math.max(1, mr), 0, Math.PI * 2);
+            minimapCtx.strokeStyle = `rgba(0,255,220,${(ef.a * 0.8).toFixed(3)})`;
+            minimapCtx.lineWidth = ef.type === 'sonar' ? 1.5 : 1;
+            minimapCtx.shadowColor = 'rgba(0,255,220,0.8)'; minimapCtx.shadowBlur = 4;
+            minimapCtx.stroke();
+            minimapCtx.shadowBlur = 0;
+        }
+    });
+    // ソナー探知済みコンタクトをミニマップに表示
+    if (player && player.hp > 0) {
+        enemies.forEach(e => {
+            if (e.hp <= 0 || !e.visible || e.contactLife <= 0) return;
+            const mx = (e.displayX || e.x) * mmScale + offX;
+            const my = (e.displayY || e.y) * mmScale + offY;
+            const lifeA = Math.min(1, e.contactLife / 120);
+            minimapCtx.fillStyle = `rgba(255,80,80,${lifeA})`;
+            minimapCtx.shadowColor = '#ff4444'; minimapCtx.shadowBlur = 4;
+            minimapCtx.beginPath(); minimapCtx.arc(mx, my, 3, 0, Math.PI * 2); minimapCtx.fill();
+            minimapCtx.shadowBlur = 0;
+        });
+    }
+
     // クリップ解除後に円形境界線
     minimapCtx.restore();
     minimapCtx.beginPath();
@@ -3399,11 +3452,12 @@ function updateSigCanvas() {
     const spd = Math.hypot(player.x-(player.prevX||player.x), player.y-(player.prevY||player.y));
     const engType = ENGINE_TYPES[gameState.engineType]||ENGINE_TYPES.thermonuclear;
     const hHere = getHiggsIntensity(player.x, player.y);
+    // Ship.update()で計算済みの自機シグネチャをそのまま使用
     const currentVals = {
-        heat:  spd > 0.1 ? Math.min(1, (spd * 0.6 + genAlloc.engine/100*0.25) * engType.heatMult) : 0,
-        optic: Math.min(1, player.opticalSig||0),
-        em:    Math.min(1, (genAlloc.sensors/100*0.4 + genAlloc.ai/100*0.35) * engType.emMult),
-        higgs: Math.min(1, spd * hHere * 2.0 * (engType.higgsSpeedBonus>0 ? 1 : 0.3))
+        heat:  player.heatSig  || 0,
+        optic: player.opticalSig || 0,
+        em:    player.emSig    || 0,
+        higgs: player.higgsSig || 0
     };
 
     const sigs = [
@@ -3510,7 +3564,7 @@ function updateEnvSigCanvas() {
 
     // 周囲の敵シグネチャを各センサータイプごとに合算
     // 検出範囲: パッシブ検知と同じ全マップ範囲 (距離減衰のみ適用)
-    const envDetectRange = Math.max(effectiveRadarRange * 10, 8000);
+    const envDetectRange = FIELD_SIZE; // 環境SIGは全マップ対象 (距離で減衰)
     const envVals = { heat: 0, optic: 0, em: 0, higgs: 0 };
     enemies.forEach(e => {
         if (e.hp <= 0) return;
@@ -4120,16 +4174,16 @@ function gameLoop() {
             if (!n.active) continue;
             if (player && player.hp > 0) {
                 const d = Math.hypot(player.x - n.x, player.y - n.y);
-                if (d < player.radius + 40) {
+                if (d < player.radius + 300) {
                     // 収集！
                     n.active = false;
                     n.emFlashTimer = 180; // 3秒間EMスパイク
                     // EMスパイク: EM状態が高まった状態を記録 (敵に見える)
-                    gameState.credits += 30; // リソース価値 (仮: 将来はアップグレードポイントに)
+                    gameState.credits += 150; // ヒッグスクリスタル採取報酬
                     updateTopUI();
                     playSound('ui');
-                    effects.push({ x: n.x, y: n.y, r: 0, maxR: 80, a: 1, c: '#50c8ff', type: 'circle' });
-                    logMessage(`HIGGS: ヒッグス凝縮点を採取 (+30 SCR)。EMスパイク発生中 — 敵に検知される可能性あり。`, 'system-msg');
+                    effects.push({ x: n.x, y: n.y, r: 0, maxR: 800, a: 1, c: '#50c8ff', type: 'circle' });
+                    logMessage(`HIGGS: ヒッグス凝縮クリスタル採取 (+150 SCR)。EMスパイク発生中 — 敵に検知される可能性あり。`, 'system-msg');
                     createClickEffect(n.x, n.y, '#50c8ff');
                 }
             }
@@ -4152,6 +4206,19 @@ function gameLoop() {
                 prompt.classList.add('active');
             } else {
                 prompt.classList.remove('active');
+            }
+        }
+
+        // Structure proximity hint (EW/Hack notification)
+        if (player && player.hp > 0) {
+            const _hackRange = 800;
+            const _nearStruct = structures.find(s => Math.hypot(player.x - s.x, player.y - s.y) < _hackRange);
+            if (_nearStruct) {
+                if (!window._hackNotifiedSet) window._hackNotifiedSet = new Set();
+                if (!window._hackNotifiedSet.has(_nearStruct.id || _nearStruct.name)) {
+                    window._hackNotifiedSet.add(_nearStruct.id || _nearStruct.name);
+                    logMessage(`[EW] ${_nearStruct.name || '構造物'} を検出 — EW/HACKボタンでハッキング可能`);
+                }
             }
         }
 
@@ -4230,6 +4297,21 @@ function gameLoop() {
                 ctx.closePath(); ctx.fill();
                 ctx.shadowBlur = 0;
                 ctx.restore();
+                // Crystal name label (adaptive scale)
+                if (inRange || isHiggsSnsr) {
+                    const _cIconS = Math.max(8, Math.min(28, camera.zoom * 56)) / (camera.zoom * 28);
+                    ctx.save();
+                    ctx.translate(n.x, n.y);
+                    ctx.scale(_cIconS, _cIconS);
+                    ctx.globalAlpha = brightness;
+                    ctx.fillStyle = '#80e8ff';
+                    ctx.font = 'bold 10px Orbitron, monospace';
+                    ctx.textAlign = 'center';
+                    ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = 6;
+                    ctx.fillText('HIGGS CRYSTAL', 0, -36);
+                    ctx.shadowBlur = 0;
+                    ctx.restore();
+                }
                 ctx.globalAlpha = 1;
             });
         }
@@ -4298,14 +4380,17 @@ function gameLoop() {
             ctx.arc(player.x, player.y, wRangeCircle, 0, Math.PI * 2);
             ctx.setLineDash([20 / camera.zoom, 20 / camera.zoom]);
             ctx.strokeStyle = wRangeColor;
-            ctx.lineWidth = 1.5 / camera.zoom;
-            ctx.globalAlpha = 0.25;
+            ctx.lineWidth = 2 / camera.zoom;
+            ctx.globalAlpha = 0.55;
+            ctx.shadowColor = wRangeColor;
+            ctx.shadowBlur = 6;
             ctx.stroke();
+            ctx.shadowBlur = 0;
             ctx.setLineDash([]);
             // 武器射程ラベル (上部)
             ctx.font = `bold ${Math.round(8 / camera.zoom)}px Orbitron, monospace`;
             ctx.fillStyle = wRangeColor;
-            ctx.globalAlpha = 0.35;
+            ctx.globalAlpha = 0.65;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'bottom';
             ctx.fillText(`WEAPON RANGE — ${wLabel}`, player.x, player.y - wRangeCircle - 4 / camera.zoom);
