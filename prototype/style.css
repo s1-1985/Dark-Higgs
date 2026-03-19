@@ -1140,85 +1140,83 @@ input[type=range]::-webkit-slider-thumb {
     .right-panel .panel-header { display: none; }
     .right-panel .env-info > div:not(:has(canvas)):not(:has(#env-sig-canvas)) { display: none; }
 
-    /* GEN + 武器/エンジン/センサー: 全幅 (row3) */
+    /* GEN + 武器/エンジン/センサー: 全幅 (row3) — 2列グリッド */
     .center-panel {
         grid-column: 1 / -1;
         grid-row: 3;
+        display: grid !important;
+        grid-template-columns: 1fr 1fr;
+        align-items: stretch;
+        gap: 0;
+        padding: 0;
         width: auto;
-        min-width: 0;
-        flex-direction: row;
-        flex-wrap: wrap;
-        align-items: flex-start;
-        gap: 3px;
-        padding: 3px 6px;
+        min-width: 0 !important;
+        flex: none;
         border-right: none;
         border-bottom: 1px solid rgba(0,255,170,0.15);
     }
-    /* GEN配分: コンパクトに */
+    .center-panel .panel-header { display: none; }
+    /* hidden select は grid に影響しないよう明示 */
+    .center-panel > select { display: none !important; }
+
+    /* GEN配分: 左半分 (全行スパン) */
     .gen-control {
-        flex: 0 0 auto;
-        min-width: 140px;
+        grid-column: 1;
+        grid-row: 1 / span 3;
+        padding: 3px 6px;
+        border-right: 1px solid rgba(0,255,170,0.15);
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
     }
     .gen-header { font-size: 8px; margin-bottom: 1px; }
     .gen-slider { height: 8px; border-radius: 4px; }
     .gen-slider::-webkit-slider-thumb { width: 18px; height: 18px; }
+    .gen-row { gap: 2px; }
+    .gen-label { font-size: 7px !important; min-width: 22px !important; width: 22px !important; }
+    .gen-val { font-size: 7px !important; min-width: 22px !important; }
 
-    /* 武器/エンジン選択 */
-    .weapon-control {
-        gap: 4px;
-        font-size: 8px;
-        justify-content: flex-start;
-        align-items: center;
+    /* WEAPON/ENGINE/SENSOR アイコン群: 右半分 (縦積み) */
+    .isel-section {
+        grid-column: 2;
+        padding: 1px 3px;
+        border-bottom: 1px solid rgba(0,255,170,0.08);
+        min-width: 0;
+        margin-top: 0 !important;
     }
-    .weapon-control span {
-        white-space: nowrap;
-        flex-shrink: 0;
-        font-size: 8px;
-        min-width: 30px;
-    }
-    .sci-fi-select {
-        flex: 1;
-        font-size: 8px;
-        padding: 3px 2px;
-        min-height: 26px;
-        width: auto;
-        min-width: 80px;
-    }
+    .isel-section:last-of-type { border-bottom: none; }
+    .isel-label { font-size: 6px !important; width: 32px !important; min-width: 32px !important; }
+    .isel-group { gap: 2px !important; flex-wrap: wrap; }
+
     /* センサーボタン */
-    .sensor-row {
-        gap: 3px;
-        margin-bottom: 2px;
-    }
-    .sensor-btn {
-        padding: 3px 5px;
-        font-size: 8px;
-        min-width: 40px;
-    }
+    .sensor-row { gap: 3px; margin-bottom: 2px; }
+    .sensor-btn { padding: 3px 5px; font-size: 8px; min-width: 40px; }
 
-    /* アクションボタン: 全幅 (row4) */
+    /* アクションボタン: 全幅 (row4) — 高さ半分 */
     .action-panel {
         grid-column: 1 / -1;
         grid-row: 4;
         width: auto;
         min-width: 0;
-        padding: 3px 6px;
+        padding: 2px 4px;
     }
     .action-panel .panel-header { display: none; }
     .action-grid {
         grid-template-columns: repeat(6, 1fr);
-        gap: 4px;
+        gap: 2px;
         margin-top: 0;
     }
     .act-icon-btn {
-        min-height: 42px;
-        padding: 4px 2px 3px;
+        min-height: 28px;
+        padding: 2px 2px 2px;
     }
-    .act-icon-btn svg { width: 22px; height: 22px; }
-    .act-icon-btn span { font-size: 6px; }
+    .act-icon-btn svg { width: 16px; height: 16px; }
+    .act-icon-btn span { font-size: 5.5px; }
     /* アイコン選択: モバイルでは小さく */
-    .isel-btn { width: 34px; height: 34px; }
-    .isel-btn svg { width: 18px; height: 18px; }
-    .isel-btn span { font-size: 5.5px; }
+    .isel-btn { width: 28px; height: 28px; }
+    .isel-btn svg { width: 14px; height: 14px; }
+    .isel-btn span { font-size: 5px; }
 
     .panel-header { font-size: 9px; margin-bottom: 2px; letter-spacing: 0.5px; }
 
