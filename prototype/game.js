@@ -802,8 +802,8 @@ class Structure {
         const t = Date.now();
         const hColor = this.hacked ? '#00aaff' : null;
 
-        // Adaptive icon scale: full size at zoom>=0.5, shrinks when zoomed far out
-        const _iconS = Math.max(8, Math.min(28, camera.zoom * 56)) / (camera.zoom * 28);
+        // Adaptive icon scale: full size at zoom>=1, shrinks proportionally below
+        const _iconS = Math.max(4, Math.min(28, camera.zoom * 28)) / (camera.zoom * 28);
         if (this.type === 'colony') {
             ctx.save();
             ctx.translate(this.x, this.y);
@@ -2813,7 +2813,7 @@ function fireOmniSonar() {
         : `SONAR[全周囲] Lv${sensorLv}: 有効範囲 ${rStr}u 内に反応なし`,
         'system-msg');
     // ソナー伝播速度を遅く (1/3)、色はシアン系で鮮やかに
-    effects.push({ x: player.x, y: player.y, r: 0, maxR: omniRange, a: 0.9, c: `rgba(0,255,220,1)`, type: 'sonar', speed: omniRange/180 });
+    effects.push({ x: player.x, y: player.y, r: 0, maxR: omniRange, a: 0.9, c: `rgba(0,255,220,1)`, type: 'sonar', speed: omniRange/60 });
     effects.push({ x: player.x, y: player.y, r: omniRange, maxR: omniRange, a: 0.5, c: `rgba(${sc.r},0.8)`, type: 'sonar-boundary', life: 60 });
 }
 
@@ -2923,8 +2923,9 @@ function drawPassiveAntenna(ctx) {
         const tSec  = tRing * 0.001;
 
         // 各センサーの受信シグネチャ集計
+        // ベースリングは常に白。各センサーセグメントのみ色付き。
         const RING_SENSOR_COLORS = {
-            heat: '255,120,0', optic: '0,255,140', em: '210,60,255', higgs: '0,230,255'
+            heat: '255,160,60', optic: '60,255,180', em: '230,100,255', higgs: '60,240,255'
         };
         const RING_SENSOR_DIRS = {
             heat: -Math.PI * 0.5,    // 上 (北)
@@ -2990,16 +2991,15 @@ function drawPassiveAntenna(ctx) {
         {
             const labelAngle = -Math.PI / 2; // 真上
             const labelR = BASE_R + idleBreath + 20 / camera.zoom;
-            ctx.fillStyle = `rgba(${RING_SENSOR_COLORS[maxRingName]},${(0.18 + maxRingSig * 0.22).toFixed(3)})`;
+            ctx.fillStyle = `rgba(255,255,255,${(0.3 + maxRingSig * 0.4).toFixed(3)})`;
             ctx.font = `bold ${Math.round(8 / camera.zoom)}px Orbitron, monospace`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText('THREAT SENSORS', Math.cos(labelAngle) * labelR, Math.sin(labelAngle) * labelR);
         }
 
-        // ── ベースリング (常に表示) ──────────────────────────
-        const idleAlpha = 0.55 + maxRingSig * 0.35; // 明るく
-        const ringColor = RING_SENSOR_COLORS[maxRingName];
+        // ── ベースリング (常に白で表示) ────────────────────────
+        const idleAlpha = 0.7 + maxRingSig * 0.3;
 
         ctx.beginPath();
         for (let i = 0; i <= N_POINTS; i++) {
@@ -3009,11 +3009,11 @@ function drawPassiveAntenna(ctx) {
             if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
         }
         ctx.closePath();
-        const ringLw = 1.0 / camera.zoom; // ズーム不変の線幅
-        ctx.strokeStyle = `rgba(${ringColor},${idleAlpha.toFixed(3)})`;
-        ctx.lineWidth = 1.8 * ringLw;
-        ctx.shadowColor = `rgba(${ringColor},0.9)`;
-        ctx.shadowBlur  = 8 + maxRingSig * 20;
+        const ringLw = 1.0 / camera.zoom;
+        ctx.strokeStyle = `rgba(255,255,255,${idleAlpha.toFixed(3)})`;
+        ctx.lineWidth = 2.0 * ringLw;
+        ctx.shadowColor = 'rgba(255,255,255,0.95)';
+        ctx.shadowBlur  = 10 + maxRingSig * 25;
         ctx.stroke();
         ctx.shadowBlur = 0;
 
@@ -4299,7 +4299,7 @@ function gameLoop() {
                 ctx.restore();
                 // Crystal name label (adaptive scale)
                 if (inRange || isHiggsSnsr) {
-                    const _cIconS = Math.max(8, Math.min(28, camera.zoom * 56)) / (camera.zoom * 28);
+                    const _cIconS = Math.max(4, Math.min(28, camera.zoom * 28)) / (camera.zoom * 28);
                     ctx.save();
                     ctx.translate(n.x, n.y);
                     ctx.scale(_cIconS, _cIconS);
