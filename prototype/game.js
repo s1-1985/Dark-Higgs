@@ -3364,6 +3364,9 @@ function drawBackground(ctx) {
     // density 0.50-0.70 : シアン     0.70-0.85 : 青紫
     // density 0.85+   : 深いインディゴ
     bgMist.forEach(m => {
+        // Viewport culling — skip mists entirely off-screen
+        if (m.x + m.r < cx || m.x - m.r > cx + vw ||
+            m.y + m.r < cy || m.y - m.r > cy + vh) return;
         const d = m.density;
         const pulse = 0.80 + Math.sin(now * 0.35 + (m.phase || 0)) * 0.20;
         let col, baseAlpha;
