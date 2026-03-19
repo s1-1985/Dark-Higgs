@@ -142,6 +142,7 @@ document.getElementById('btn-reset').addEventListener('click', () => {
 // Core Entities
 let player;
 let gameLoopRunning = false;
+let _frameCount = 0;
 let enemies = [];
 let projectiles = [];
 let structures = [];
@@ -3013,7 +3014,7 @@ function drawPassiveAntenna(ctx) {
         ctx.strokeStyle = `rgba(255,255,255,${idleAlpha.toFixed(3)})`;
         ctx.lineWidth = 2.0 * ringLw;
         ctx.shadowColor = 'rgba(255,255,255,0.95)';
-        ctx.shadowBlur  = 10 + maxRingSig * 25;
+        ctx.shadowBlur  = 6 + maxRingSig * 12;
         ctx.stroke();
         ctx.shadowBlur = 0;
 
@@ -3035,7 +3036,7 @@ function drawPassiveAntenna(ctx) {
             ctx.strokeStyle = `rgba(${color},${(sig * 0.85).toFixed(3)})`;
             ctx.lineWidth   = (1.5 + sig * 2.5) * ringLw;
             ctx.shadowColor = `rgba(${color},0.9)`;
-            ctx.shadowBlur  = 8 * sig;
+            ctx.shadowBlur  = 4 * sig;
             ctx.stroke();
             ctx.shadowBlur = 0;
 
@@ -3083,7 +3084,7 @@ function drawPassiveAntenna(ctx) {
 
         // ── レイヤー2: 輝くコーンエッジライン ───────────────
         ctx.shadowColor = 'rgba(0,255,220,1)';
-        ctx.shadowBlur  = 8 * sv.life;
+        ctx.shadowBlur  = 4 * sv.life;
         ctx.strokeStyle = `rgba(0,255,220,${(sv.life * 0.95).toFixed(3)})`;
         ctx.lineWidth   = 1.8;
         ctx.beginPath();
@@ -3096,7 +3097,7 @@ function drawPassiveAntenna(ctx) {
         // ── レイヤー3: 外縁アーク ────────────────────────────
         ctx.strokeStyle = `rgba(0,255,220,${(sv.life * 0.6).toFixed(3)})`;
         ctx.lineWidth   = 1.2;
-        ctx.shadowBlur  = 4 * sv.life;
+        ctx.shadowBlur  = 2 * sv.life;
         ctx.beginPath();
         ctx.arc(0, 0, sv.range, -sv.halfAngle, sv.halfAngle);
         ctx.stroke();
@@ -3122,7 +3123,7 @@ function drawPassiveAntenna(ctx) {
             const pingback  = sweepT < 0.5 ? sweepT * 2 : 2 - sweepT * 2; // 往復
             const sweepAng  = -sv.halfAngle + pingback * sv.halfAngle * 2;
             ctx.shadowColor = 'rgba(120,255,255,1)';
-            ctx.shadowBlur  = 10;
+            ctx.shadowBlur  = 5;
             ctx.strokeStyle = `rgba(120,255,255,${(sv.life * 0.9).toFixed(3)})`;
             ctx.lineWidth   = 2;
             ctx.beginPath();
@@ -3133,7 +3134,7 @@ function drawPassiveAntenna(ctx) {
             // スキャン先端の輝点
             ctx.fillStyle = `rgba(255,255,255,${(sv.life * 0.8).toFixed(3)})`;
             ctx.shadowColor = 'rgba(0,255,220,1)';
-            ctx.shadowBlur  = 12;
+            ctx.shadowBlur  = 6;
             ctx.beginPath();
             ctx.arc(Math.cos(sweepAng) * sv.range, Math.sin(sweepAng) * sv.range, 3, 0, Math.PI * 2);
             ctx.fill();
@@ -3142,7 +3143,7 @@ function drawPassiveAntenna(ctx) {
 
         // ── 発射元の輝き ────────────────────────────────────
         ctx.shadowColor = 'rgba(0,255,220,1)';
-        ctx.shadowBlur  = 14 * sv.life;
+        ctx.shadowBlur  = 7 * sv.life;
         ctx.fillStyle   = `rgba(0,255,220,${(sv.life * 0.7).toFixed(3)})`;
         ctx.beginPath();
         ctx.arc(0, 0, 5 * sv.life, 0, Math.PI * 2);
@@ -4000,6 +4001,7 @@ function drawHUDOverlay(ctx) {
 
 function gameLoop() {
     try {
+        _frameCount++;
         // ヒッグス自然成長 (Battle Royale的ゾーン圧縮 — 時間経過で濃度上昇)
         // 全ミスト密度を毎フレーム微増、最大0.95まで
         if (player && player.hp > 0 && Math.random() < 0.004) { // ~4フレームに1回更新
@@ -4250,12 +4252,21 @@ function gameLoop() {
         structures.forEach(s => s.draw(ctx));
         drawTargetLine(ctx);
 
+        // ズームアウト時はshadowBlurをスキップ (描画コスト削減)
+        const _blurEnabled = camera.zoom >= 0.12;
+        // ビューポート境界 (ワールド座標)
+        const _vpX = camera.x, _vpY = camera.y;
+        const _vpW = canvas.width / camera.zoom, _vpH = canvas.height / camera.zoom;
+
         // リソースノード描画 (全センサーで常時表示; HIGGSで最大輝度)
         if (player && player.hp > 0) {
             const higgsNodeRange = effectiveRadarRange * 6;
             const isHiggsSnsr = currentSensor === 'higgs';
             resourceNodes.forEach(n => {
                 if (!n.active) return;
+                // ビューポートカリング
+                if (n.x < _vpX - 60 || n.x > _vpX + _vpW + 60 ||
+                    n.y < _vpY - 60 || n.y > _vpY + _vpH + 60) return;
                 const distToNode = Math.hypot(n.x - player.x, n.y - player.y);
                 const t = Date.now();
                 const pulse = 0.5 + Math.sin(t * 0.003 + n.x * 0.001) * 0.5;
@@ -4270,7 +4281,7 @@ function gameLoop() {
                 // 外側グロー
                 ctx.globalAlpha = brightness * 0.5;
                 ctx.fillStyle = '#50c8ff';
-                ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = isHiggsSnsr ? 40 : 15;
+                if (_blurEnabled) { ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = isHiggsSnsr ? 20 : 8; }
                 ctx.beginPath(); ctx.arc(0, 0, 26, 0, Math.PI * 2); ctx.fill();
                 // 外リング
                 ctx.globalAlpha = brightness * 0.35;
@@ -4279,7 +4290,7 @@ function gameLoop() {
                 // メインクリスタル六角形
                 ctx.globalAlpha = brightness;
                 ctx.fillStyle = '#50c8ff';
-                ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = isHiggsSnsr ? 25 : 10;
+                if (_blurEnabled) { ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = isHiggsSnsr ? 12 : 5; }
                 ctx.beginPath();
                 for (let i = 0; i < 6; i++) {
                     const a = (i / 6) * Math.PI * 2;
@@ -4290,7 +4301,7 @@ function gameLoop() {
                 // インナーコア (白)
                 ctx.globalAlpha = brightness * 0.9;
                 ctx.fillStyle = '#ffffff';
-                ctx.shadowBlur = 8;
+                if (_blurEnabled) ctx.shadowBlur = 4;
                 ctx.beginPath();
                 for (let i = 0; i < 6; i++) {
                     const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
@@ -4310,7 +4321,7 @@ function gameLoop() {
                     ctx.fillStyle = '#80e8ff';
                     ctx.font = 'bold 10px Orbitron, monospace';
                     ctx.textAlign = 'center';
-                    ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = 6;
+                    if (_blurEnabled) { ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = 4; }
                     ctx.fillText('HIGGS CRYSTAL', 0, -36);
                     ctx.shadowBlur = 0;
                     ctx.restore();
@@ -4404,8 +4415,9 @@ function gameLoop() {
         ctx.restore();
 
         drawHUDOverlay(ctx);
-        drawMinimap();
-        updateEnvInfo();
+        if (_frameCount % 2 === 0) updateSigCanvas();
+        if (_frameCount % 3 === 0) drawMinimap();
+        if (_frameCount % 10 === 0) updateEnvInfo();
 
         requestAnimationFrame(gameLoop);
     } catch (err) {
