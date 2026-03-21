@@ -476,9 +476,9 @@ function generateSpaceBackground() {
 // ヒッグス粒子強度計算 (Higgs Intensity)
 // ============================================================
 function getHiggsIntensity(x, y) {
-    // フレームキャッシュ: 200単位グリッドに量子化して重複計算を排除
+    // フレームキャッシュ: 500単位グリッドに量子化 (200→500で6倍少ないキャッシュミス)
     if (_higgsCacheFrame !== _frameCount) { _higgsCache.clear(); _higgsCacheFrame = _frameCount; }
-    const key = (Math.round(x / 200) * 100000 + Math.round(y / 200)) | 0;
+    const key = (Math.round(x / 500) * 100000 + Math.round(y / 500)) | 0;
     let v = _higgsCache.get(key);
     if (v !== undefined) return v;
     let total = 0;
@@ -1782,6 +1782,26 @@ class Ship {
         // 発砲フラッシュ中は全不透明
         const isFlashing = !this.isPlayer && this.fireFlashTimer > 0;
         if (isFlashing) ctx.globalAlpha = 1.0;
+
+        // ── LOD: 画面上のサイズが小さい時は超簡略描画 ──────────
+        // zoom*radius*5.6 = 画面上の直径(CSSピクセル)。12px未満は詳細不要
+        const _screenDiam = camera.zoom * this.radius * 5.6;
+        if (_screenDiam < 12) {
+            const r = this.radius * (_screenDiam < 6 ? 1.5 : 1.0);
+            if (this.isPlayer) {
+                ctx.fillStyle = '#00ffaa';
+                ctx.beginPath();
+                ctx.moveTo(r, 0); ctx.lineTo(-r * 0.7, -r * 0.6); ctx.lineTo(-r * 0.7, r * 0.6);
+                ctx.closePath(); ctx.fill();
+            } else {
+                ctx.fillStyle = isFlashing ? '#ff8888' : '#ff4d4d';
+                ctx.beginPath();
+                ctx.moveTo(r, 0); ctx.lineTo(0, -r * 0.7); ctx.lineTo(-r, 0); ctx.lineTo(0, r * 0.7);
+                ctx.closePath(); ctx.fill();
+            }
+            ctx.restore();
+            return;
+        }
 
         if (this.isPlayer) {
             // ============================================================
@@ -4125,8 +4145,8 @@ function gameLoop() {
             }
         });
 
-        // パッシブアンテナ検知チェック
-        if (player && player.hp > 0) checkPassiveDetection();
+        // パッシブアンテナ検知チェック (2フレームごとで十分、人間の反応時間>100ms)
+        if (player && player.hp > 0 && _frameCount % 2 === 0) checkPassiveDetection();
         if (player && player.hp > 0) updateVisionLockOn();
 
         // Process Enemy deaths
