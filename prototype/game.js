@@ -6,11 +6,30 @@ const minimapCanvas = document.getElementById('minimapCanvas');
 const minimapCtx = minimapCanvas.getContext('2d');
 
 // ── パフォーマンスデバッグフラグ ──────────────────────────────
-// true にすると対象機能をオフにしてFPSへの影響を確認できる
 const PERF_DISABLE_THREAT_RING = false;   // スレットリング描画をオフ
 const PERF_DISABLE_SHADOW_BLUR  = false;  // shadowBlur を全オフ (モバイルで最も重い)
 const PERF_DISABLE_BG           = false;  // 背景描画をオフ
-const PERF_SHOW_FPS             = true;   // 画面左上にFPS表示
+const PERF_SHOW_FPS             = true;   // FPS表示
+// ─────────────────────────────────────────────────────────────
+
+// ── モバイル自動検出 & shadowBlur全オフ ──────────────────────
+// shadowBlurはCanvas 2Dで最も重いAPI。モバイルGPUでは1フレームの
+// コストの大半を占める。コード中90箇所に散在するため、
+// プロトタイプを一括パッチして全オフにする。
+const _isMobile = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0)
+                || (window.innerWidth <= 768);
+if (_isMobile || PERF_DISABLE_SHADOW_BLUR) {
+    Object.defineProperty(CanvasRenderingContext2D.prototype, 'shadowBlur', {
+        get: () => 0,
+        set: () => {},   // 全てのshadowBlur代入を無視
+        configurable: true
+    });
+    Object.defineProperty(CanvasRenderingContext2D.prototype, 'shadowColor', {
+        get: () => 'transparent',
+        set: () => {},
+        configurable: true
+    });
+}
 // ─────────────────────────────────────────────────────────────
 
 const MAP_RADIUS = 35000;
@@ -4477,13 +4496,19 @@ function gameLoop() {
         if (_frameCount % 10 === 0) updateEnvInfo();
 
         // FPS表示 (デバッグ用)
+        // 注: (6,6)はtop-bar(z-index:10)の裏に隠れるためキャンバス中央下寄りに表示
         if (PERF_SHOW_FPS) {
             ctx.save();
-            ctx.font = 'bold 11px monospace';
-            ctx.fillStyle = _fpsDisplay >= 50 ? '#00ff88' : (_fpsDisplay >= 30 ? '#ffaa00' : '#ff4444');
-            ctx.textAlign = 'left';
+            const _fpsColor = _fpsDisplay >= 50 ? '#00ff88' : (_fpsDisplay >= 30 ? '#ffaa00' : '#ff4444');
+            const _fpsX = canvas.width / 2, _fpsY = canvas.height * 0.42;
+            // 背景
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(_fpsX - 36, _fpsY - 2, 72, 22);
+            ctx.font = 'bold 14px monospace';
+            ctx.fillStyle = _fpsColor;
+            ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
-            ctx.fillText(`FPS: ${_fpsDisplay}`, 6, 6);
+            ctx.fillText(`FPS: ${_fpsDisplay}`, _fpsX, _fpsY);
             ctx.restore();
         }
 
