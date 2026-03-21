@@ -3044,30 +3044,27 @@ function drawPassiveAntenna(ctx) {
         });
 
         // リングの各点の半径を計算
-        // ズームに関係なく画面上で固定サイズ (screen-space)
-        const BASE_R   = 180 / camera.zoom;
+        const BASE_R    = 180 / camera.zoom;
         const MAX_BULGE = 100 / camera.zoom;
-        const N_POINTS  = 36;
+        const N_POINTS  = 18;  // 36→18: 視覚差なし、計算半減
         const idleBreath = Math.sin(tSec * 0.7) * (3 / camera.zoom);
+        const _rot = tSec * 0.08; // ループ外で事前計算
 
         const getRingRadius = (angle) => {
             let r = BASE_R + idleBreath;
-            // 緩やかな回転オフセットで生き生きとした印象
-            const rot = tSec * 0.08;
-            ['heat','optic','em','higgs'].forEach(sName => {
+            // センサー毎のローブ加算 (whileループ→if文に変更)
+            const _sensorKeys = ['heat','optic','em','higgs'];
+            for (let _si = 0; _si < 4; _si++) {
+                const sName = _sensorKeys[_si];
                 const sig = ringSigVals[sName];
-                if (sig < 0.01) return;
-                const dir = RING_SENSOR_DIRS[sName];
-                let diff = angle - (dir + rot);
-                while (diff < -Math.PI) diff += Math.PI * 2;
-                while (diff >  Math.PI) diff -= Math.PI * 2;
-                // ガウシアンローブ: センサー方向に向かって膨らむ
-                const lobe    = Math.exp(-diff * diff * 1.6) * sig * sig * MAX_BULGE;
-                // 小さいリップル
-                const ripple  = Math.cos(diff * 5 + tSec * 2.5) * sig * 3.0 * Math.exp(-diff * diff * 4);
+                if (sig < 0.01) continue;
+                let diff = angle - (RING_SENSOR_DIRS[sName] + _rot);
+                if (diff < -Math.PI) diff += Math.PI * 2;
+                else if (diff > Math.PI) diff -= Math.PI * 2;
+                const lobe   = Math.exp(-diff * diff * 1.6) * sig * sig * MAX_BULGE;
+                const ripple = Math.cos(diff * 5 + tSec * 2.5) * sig * 3.0 * Math.exp(-diff * diff * 4);
                 r += lobe + ripple;
-            });
-            // 全体的な微細振動
+            }
             r += Math.sin(angle * 4 + tSec * 1.2) * 1.5;
             return r;
         };
@@ -3079,72 +3076,75 @@ function drawPassiveAntenna(ctx) {
         {
             const labelAngle = -Math.PI / 2; // 真上
             const labelR = BASE_R + idleBreath + 20 / camera.zoom;
-            ctx.fillStyle = `rgba(255,255,255,${(0.3 + maxRingSig * 0.4).toFixed(3)})`;
+            ctx.globalAlpha = 0.3 + maxRingSig * 0.4;
+            ctx.fillStyle = '#ffffff';
             ctx.font = `bold ${Math.round(8 / camera.zoom)}px Orbitron, monospace`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText('THREAT SENSORS', Math.cos(labelAngle) * labelR, Math.sin(labelAngle) * labelR);
+            ctx.globalAlpha = 1;
         }
 
         // ── ベースリング (常に白で表示) ────────────────────────
         const idleAlpha = 0.7 + maxRingSig * 0.3;
+        const ringLw = 1.0 / camera.zoom;
 
+        ctx.globalAlpha = idleAlpha;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2.0 * ringLw;
         ctx.beginPath();
+        const _angStep = (Math.PI * 2) / N_POINTS;
         for (let i = 0; i <= N_POINTS; i++) {
-            const ang = (i / N_POINTS) * Math.PI * 2;
+            const ang = i * _angStep;
             const rr  = getRingRadius(ang);
-            const x = Math.cos(ang) * rr, y = Math.sin(ang) * rr;
-            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            if (i === 0) ctx.moveTo(Math.cos(ang) * rr, Math.sin(ang) * rr);
+            else ctx.lineTo(Math.cos(ang) * rr, Math.sin(ang) * rr);
         }
         ctx.closePath();
-        const ringLw = 1.0 / camera.zoom;
-        ctx.strokeStyle = `rgba(255,255,255,${idleAlpha.toFixed(3)})`;
-        ctx.lineWidth = 2.0 * ringLw;
-        ctx.shadowColor = 'rgba(255,255,255,0.95)';
-        ctx.shadowBlur  = 2 + maxRingSig * 3;
         ctx.stroke();
-        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
 
         // ── 各センサーの活性セグメントを色付きで強調 ──────────
+        const SENSOR_NAMES = { heat: 'HEAT', optic: 'OPT', em: 'EM', higgs: 'HGS' };
+        const RING_SENSOR_HEX = { heat: '#ffa03c', optic: '#3cffb4', em: '#e664ff', higgs: '#3cf0ff' };
         ['heat','optic','em','higgs'].forEach(sName => {
             const sig = ringSigVals[sName];
             if (sig < 0.04) return;
-            const color    = RING_SENSOR_COLORS[sName];
+            const hex      = RING_SENSOR_HEX[sName];
             const dir      = RING_SENSOR_DIRS[sName];
             const halfSpan = Math.PI * (0.35 + sig * 0.4);
-            const segN = 24;
+            const segN = 12;  // 24→12: 視覚差なし、計算半減
+            ctx.globalAlpha = sig * 0.85;
+            ctx.strokeStyle = hex;
+            ctx.lineWidth   = (1.5 + sig * 2.5) * ringLw;
             ctx.beginPath();
             for (let i = 0; i <= segN; i++) {
                 const ang = (dir - halfSpan) + (i / segN) * halfSpan * 2;
                 const rr  = getRingRadius(ang);
-                const x = Math.cos(ang) * rr, y = Math.sin(ang) * rr;
-                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                if (i === 0) ctx.moveTo(Math.cos(ang) * rr, Math.sin(ang) * rr);
+                else ctx.lineTo(Math.cos(ang) * rr, Math.sin(ang) * rr);
             }
-            ctx.strokeStyle = `rgba(${color},${(sig * 0.85).toFixed(3)})`;
-            ctx.lineWidth   = (1.5 + sig * 2.5) * ringLw;
-            ctx.shadowColor = `rgba(${color},0.9)`;
-            ctx.shadowBlur  = sig;
             ctx.stroke();
-            ctx.shadowBlur = 0;
 
             // センサー方向のティックマーカー + ラベル
-            const tickDir = dir + tSec * 0.08;
+            const tickDir = dir + _rot;
             const tickR = getRingRadius(tickDir);
-            ctx.strokeStyle = `rgba(${color},${(0.4 + sig * 0.55).toFixed(3)})`;
+            ctx.globalAlpha = 0.4 + sig * 0.55;
+            ctx.strokeStyle = hex;
             ctx.lineWidth = 2 * ringLw;
             ctx.beginPath();
             ctx.moveTo(Math.cos(tickDir) * (tickR + 3 / camera.zoom),  Math.sin(tickDir) * (tickR + 3 / camera.zoom));
             ctx.lineTo(Math.cos(tickDir) * (tickR + 14 / camera.zoom), Math.sin(tickDir) * (tickR + 14 / camera.zoom));
             ctx.stroke();
-            // センサー名ラベル
-            const SENSOR_NAMES = { heat: 'HEAT', optic: 'OPT', em: 'EM', higgs: 'HGS' };
             const labelDist = tickR + 26 / camera.zoom;
-            ctx.fillStyle = `rgba(${color},${(0.3 + sig * 0.6).toFixed(3)})`;
+            ctx.globalAlpha = 0.3 + sig * 0.6;
+            ctx.fillStyle = hex;
             ctx.font = `bold ${Math.round(9 / camera.zoom)}px Orbitron, monospace`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(SENSOR_NAMES[sName], Math.cos(tickDir) * labelDist, Math.sin(tickDir) * labelDist);
         });
+        ctx.globalAlpha = 1;
 
         ctx.restore();
     }
