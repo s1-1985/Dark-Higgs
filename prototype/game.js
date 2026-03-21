@@ -337,7 +337,7 @@ function updateVisionLockOn() {
 // 宇宙背景テクスチャ生成 (ゲーム開始時に1回だけ実行、ランダムシード)
 // ============================================================
 function generateSpaceBackground() {
-    const TEX = 512;
+    const TEX = 1024; // 512→1024: 引き伸ばし時の粗さ改善（生成は1回のみ）
     spaceBgCanvas = document.createElement('canvas');
     spaceBgCanvas.width  = TEX;
     spaceBgCanvas.height = TEX;
@@ -2386,9 +2386,9 @@ function generateSector() {
     // サイズを512に抑える: 4096x4096=64MBは生成に数秒かかりモバイルをフリーズさせるため
     setTimeout(() => {
         const mc = document.createElement('canvas');
-        mc.width = mc.height = 512;
+        mc.width = mc.height = 768; // 512→768: Higgsフォグの輪郭が少し鮮明に
         const mx = mc.getContext('2d');
-        const scale = 512 / FIELD_SIZE;
+        const scale = 768 / FIELD_SIZE;
         bgMist.forEach(m => {
             const d = m.density;
             let col;
@@ -3044,8 +3044,10 @@ function drawPassiveAntenna(ctx) {
         });
 
         // リングの各点の半径を計算
-        const BASE_R    = 180 / camera.zoom;
-        const MAX_BULGE = 100 / camera.zoom;
+        // 画面上で約90px半径に固定 (ズームアウト時に肥大化しないようクランプ)
+        const _ringScreenR = Math.min(110, Math.max(55, 90));
+        const BASE_R    = _ringScreenR / camera.zoom;
+        const MAX_BULGE = (50 / camera.zoom);
         const N_POINTS  = 18;  // 36→18: 視覚差なし、計算半減
         const idleBreath = Math.sin(tSec * 0.7) * (3 / camera.zoom);
         const _rot = tSec * 0.08; // ループ外で事前計算
@@ -3442,6 +3444,8 @@ function drawBackground(ctx) {
 
     // 宇宙背景テクスチャ (事前生成、ゲーム毎に異なる星雲配置)
     if (spaceBgCanvas) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(spaceBgCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
     } else {
         ctx.fillStyle = 'rgb(1,3,14)';
@@ -3449,11 +3453,10 @@ function drawBackground(ctx) {
     }
 
     // Higgs mist clouds — 密度別カラーで可視化
-    // density < 0.30 : 淡いブルー    0.30-0.50 : ティール
-    // density 0.50-0.70 : シアン     0.70-0.85 : 青紫
-    // density 0.85+   : 深いインディゴ
     // bgMist: オフスクリーンキャンバスに事前焼き付け済み → drawImageで一発描画
     if (bgMistCanvas) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(bgMistCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
     }
 
