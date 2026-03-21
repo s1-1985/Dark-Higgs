@@ -254,7 +254,7 @@ function drawFogOfWar(ctx) {
     ctx.strokeStyle = `rgba(0,255,180,${(0.08 + hHere * 0.04).toFixed(3)})`;
     ctx.lineWidth = 2 / camera.zoom;
     ctx.shadowColor = 'rgba(0,255,180,0.3)';
-    ctx.shadowBlur = 12;
+    ctx.shadowBlur = 3;
     ctx.stroke();
     ctx.shadowBlur = 0;
 
@@ -396,7 +396,7 @@ function generateSpaceBackground() {
         const v = rng();
         const col = v < 0.55 ? '#ffffff' : (v < 0.75 ? '#aaccff' : (v < 0.9 ? '#ffddaa' : '#cc99ff'));
         bc.globalAlpha = 0.7 + rng()*0.3;
-        bc.shadowColor = col; bc.shadowBlur = 6;
+        bc.shadowColor = col; bc.shadowBlur = 2;
         bc.fillStyle = col;
         bc.fillRect(x, y, sz, sz);
         // 十字フレア
@@ -812,7 +812,7 @@ class Structure {
             ctx.strokeStyle = hColor || 'rgba(60,100,220,0.9)';
             ctx.fillStyle = hColor ? 'rgba(0,100,200,0.25)' : 'rgba(34,68,170,0.25)';
             ctx.lineWidth = 2;
-            ctx.shadowColor = hColor || '#2244aa'; ctx.shadowBlur = 10;
+            ctx.shadowColor = hColor || '#2244aa'; ctx.shadowBlur = 3;
             // Octagonal body
             ctx.beginPath();
             for (let i = 0; i < 8; i++) {
@@ -832,7 +832,7 @@ class Structure {
             for (let i = 0; i < 4; i++) {
                 const a = (i / 4) * Math.PI * 2 + rAngle;
                 ctx.fillStyle = hColor ? '#00ffaa' : '#4466cc';
-                ctx.shadowBlur = 6;
+                ctx.shadowBlur = 2;
                 ctx.beginPath();
                 ctx.arc(Math.cos(a) * 36, Math.sin(a) * 36, 4, 0, Math.PI * 2);
                 ctx.fill();
@@ -847,7 +847,7 @@ class Structure {
             ctx.strokeStyle = hColor || 'rgba(140,115,80,0.9)';
             ctx.fillStyle = hColor ? 'rgba(0,100,200,0.2)' : 'rgba(70,60,45,0.55)';
             ctx.lineWidth = 2;
-            ctx.shadowColor = hColor || '#554433'; ctx.shadowBlur = 6;
+            ctx.shadowColor = hColor || '#554433'; ctx.shadowBlur = 2;
             // Irregular hull fragment
             ctx.beginPath();
             ctx.moveTo(-6, -18); ctx.lineTo(13, -9);
@@ -882,7 +882,7 @@ class Structure {
         ctx.fillStyle = _lColor;
         ctx.font = 'bold 11px Orbitron, monospace';
         ctx.textAlign = 'center';
-        ctx.shadowColor = _lColor; ctx.shadowBlur = 8;
+        ctx.shadowColor = _lColor; ctx.shadowBlur = 3;
         ctx.fillText(_lText, 0, -46);
         ctx.shadowBlur = 0;
         ctx.restore();
@@ -896,7 +896,7 @@ class Structure {
             ctx.save();
             ctx.globalAlpha = pulse * 0.7;
             ctx.fillStyle = `rgba(${col},0.9)`;
-            ctx.shadowColor = `rgba(${col},1)`; ctx.shadowBlur = 20;
+            ctx.shadowColor = `rgba(${col},1)`; ctx.shadowBlur = 5;
             ctx.beginPath(); ctx.arc(bx, by, 8, 0, Math.PI * 2); ctx.fill();
             ctx.shadowBlur = 0;
             // 拡散リング
@@ -962,7 +962,7 @@ class Station {
         ctx.font = `bold ${_stnFontPx.toFixed(1)}px Orbitron, monospace`;
         ctx.fillStyle = '#4da6ff';
         ctx.textAlign = 'center';
-        ctx.shadowBlur = 10; ctx.shadowColor = '#4da6ff';
+        ctx.shadowBlur = 3; ctx.shadowColor = '#4da6ff';
         ctx.fillText("中立補給ステーション", this.x, this.y - 130);
         ctx.shadowBlur = 0;
         ctx.restore();
@@ -1081,7 +1081,7 @@ class Projectile {
             ctx.moveTo(-3, 2.5); ctx.lineTo(-7, 5); ctx.lineTo(-6, 2.5);
             ctx.closePath(); ctx.fill();
             // Exhaust
-            ctx.shadowColor = '#ff8800'; ctx.shadowBlur = 8;
+            ctx.shadowColor = '#ff8800'; ctx.shadowBlur = 3;
             ctx.fillStyle = '#ff9900';
             ctx.beginPath();
             ctx.moveTo(-6, -1.2); ctx.lineTo(-12, 0); ctx.lineTo(-6, 1.2);
@@ -1811,7 +1811,7 @@ class Ship {
             hullGrad.addColorStop(0.6, '#636e82');
             hullGrad.addColorStop(1,   '#464e5e');
             ctx.fillStyle = hullGrad;
-            ctx.shadowColor = 'rgba(0,0,0,0.7)'; ctx.shadowBlur = 8;
+            ctx.shadowColor = 'rgba(0,0,0,0.7)'; ctx.shadowBlur = 3;
             ctx.beginPath();
             ctx.moveTo( vr * 1.05,  0);
             ctx.lineTo( vr * 0.62, -vr * 0.20);
@@ -2108,7 +2108,7 @@ class Ship {
                 ctx.fillStyle = '#ff8888';
                 ctx.font = 'bold 11px Orbitron';
                 ctx.textAlign = 'center';
-                ctx.shadowColor = '#ff4d4d'; ctx.shadowBlur = 6;
+                ctx.shadowColor = '#ff4d4d'; ctx.shadowBlur = 2;
                 ctx.fillText(`HOSTILE [${gameState.sector}]`, dispX, dispY - 35);
                 ctx.shadowBlur = 0;
             }
@@ -2188,7 +2188,7 @@ function updateDrawEffects(ctx) {
             ctx.font = 'bold 18px Orbitron';
             ctx.fillStyle = ef.c;
             ctx.globalAlpha = ef.life;
-            ctx.shadowColor = ef.c; ctx.shadowBlur = 8;
+            ctx.shadowColor = ef.c; ctx.shadowBlur = 3;
             ctx.textAlign = 'center';
             ctx.fillText(ef.text, ef.x, ef.y);
             ctx.shadowBlur = 0;
@@ -2211,7 +2211,7 @@ function updateDrawEffects(ctx) {
                 ctx.beginPath(); ctx.arc(ef.x, ef.y, ef.r, 0, Math.PI*2);
                 ctx.strokeStyle = ef.c; ctx.globalAlpha = Math.max(0, ef.a);
                 // 太いライン + 強いglow
-                ctx.lineWidth = 5 / camera.zoom; ctx.shadowColor = 'rgba(0,255,220,1)'; ctx.shadowBlur = 30;
+                ctx.lineWidth = 5 / camera.zoom; ctx.shadowColor = 'rgba(0,255,220,1)'; ctx.shadowBlur = 5;
                 ctx.stroke(); ctx.shadowBlur = 0;
                 ctx.globalAlpha = 1;
             }
@@ -2278,8 +2278,10 @@ function generateSector() {
     // センサーLvによるレーダー基本範囲の反映
     RADAR_RANGE = BASE_RADAR_RANGE * UPGRADE_MULT[gameState.upgrades.sensor];
 
-    // 宇宙背景テクスチャ生成 (毎セクター異なるランダム配置)
-    generateSpaceBackground();
+    // 宇宙背景テクスチャ生成 (非同期化: UIスレッドをブロックしないようsetTimeoutで遅延実行)
+    // → 艦種選択→プレイ画面の切り替えが即座になる (2048×2048の同期描画は10秒以上かかる)
+    spaceBgCanvas = null;
+    setTimeout(() => generateSpaceBackground(), 0);
 
     // Environmental Background
     bgStars = [];
@@ -2875,7 +2877,7 @@ function drawPassiveAntenna(ctx) {
             if (Math.hypot(n.x - player.x, n.y - player.y) > sensorRange) return;
             const intensity = n.emFlashTimer / 180;
             ctx.save(); ctx.globalAlpha = intensity * 0.9;
-            ctx.fillStyle = '#cc44ff'; ctx.shadowColor = '#cc44ff'; ctx.shadowBlur = 20 * intensity;
+            ctx.fillStyle = '#cc44ff'; ctx.shadowColor = '#cc44ff'; ctx.shadowBlur = 5 * intensity;
             ctx.beginPath(); ctx.arc(n.x, n.y, 7 * intensity, 0, Math.PI * 2); ctx.fill();
             ctx.shadowBlur = 0; ctx.restore(); ctx.globalAlpha = 1;
         });
@@ -2892,7 +2894,7 @@ function drawPassiveAntenna(ctx) {
             if (!n.active || Math.hypot(n.x - player.x, n.y - player.y) > sensorRange) return;
             const pulse = 0.6 + Math.sin(t * 0.004) * 0.4;
             ctx.save(); ctx.globalAlpha = pulse;
-            ctx.fillStyle = '#fff'; ctx.shadowColor = `rgba(${CR},1)`; ctx.shadowBlur = 15;
+            ctx.fillStyle = '#fff'; ctx.shadowColor = `rgba(${CR},1)`; ctx.shadowBlur = 4;
             ctx.beginPath(); ctx.arc(n.x, n.y, 5, 0, Math.PI * 2); ctx.fill();
             ctx.shadowBlur = 0; ctx.globalAlpha = 0.3;
             ctx.strokeStyle = `rgba(${CR},0.8)`; ctx.lineWidth = 1;
@@ -3199,7 +3201,7 @@ function drawMinimap() {
         const mx = st.x * mmScale + offX, my = st.y * mmScale + offY;
         if (st.discovered || st.hacked) {
             minimapCtx.fillStyle = st.hacked ? '#00aaff' : (st.type === 'colony' ? '#ffaa00' : '#888888');
-            minimapCtx.shadowColor = minimapCtx.fillStyle; minimapCtx.shadowBlur = 4;
+            minimapCtx.shadowColor = minimapCtx.fillStyle; minimapCtx.shadowBlur = 2;
             minimapCtx.beginPath();
             minimapCtx.moveTo(mx, my - 4); minimapCtx.lineTo(mx + 4, my);
             minimapCtx.lineTo(mx, my + 4); minimapCtx.lineTo(mx - 4, my);
@@ -3216,7 +3218,7 @@ function drawMinimap() {
         const mx = stn.x * mmScale + offX, my = stn.y * mmScale + offY;
         if (stn.discovered) {
             minimapCtx.fillStyle = '#00ffff';
-            minimapCtx.shadowColor = '#00ffff'; minimapCtx.shadowBlur = 6;
+            minimapCtx.shadowColor = '#00ffff'; minimapCtx.shadowBlur = 2;
             minimapCtx.beginPath();
             for (let i = 0; i < 6; i++) {
                 const a = (i/6)*Math.PI*2;
@@ -3241,7 +3243,7 @@ function drawMinimap() {
         minimapCtx.lineWidth = 1.5;
         minimapCtx.beginPath(); minimapCtx.arc(px, py, 7 + pulse * 2, 0, Math.PI * 2); minimapCtx.stroke();
         // Bright center
-        minimapCtx.shadowColor = '#00ffaa'; minimapCtx.shadowBlur = 6;
+        minimapCtx.shadowColor = '#00ffaa'; minimapCtx.shadowBlur = 2;
         minimapCtx.fillStyle = '#ffffff';
         minimapCtx.beginPath(); minimapCtx.arc(px, py, 4, 0, Math.PI * 2); minimapCtx.fill();
         minimapCtx.shadowBlur = 0;
@@ -3281,7 +3283,7 @@ function drawMinimap() {
             minimapCtx.arc(mx, my, Math.max(1, mr), 0, Math.PI * 2);
             minimapCtx.strokeStyle = `rgba(0,255,220,${(ef.a * 0.8).toFixed(3)})`;
             minimapCtx.lineWidth = ef.type === 'sonar' ? 1.5 : 1;
-            minimapCtx.shadowColor = 'rgba(0,255,220,0.8)'; minimapCtx.shadowBlur = 4;
+            minimapCtx.shadowColor = 'rgba(0,255,220,0.8)'; minimapCtx.shadowBlur = 2;
             minimapCtx.stroke();
             minimapCtx.shadowBlur = 0;
         }
@@ -3294,7 +3296,7 @@ function drawMinimap() {
             const my = (e.displayY || e.y) * mmScale + offY;
             const lifeA = Math.min(1, e.contactLife / 120);
             minimapCtx.fillStyle = `rgba(255,80,80,${lifeA})`;
-            minimapCtx.shadowColor = '#ff4444'; minimapCtx.shadowBlur = 4;
+            minimapCtx.shadowColor = '#ff4444'; minimapCtx.shadowBlur = 2;
             minimapCtx.beginPath(); minimapCtx.arc(mx, my, 3, 0, Math.PI * 2); minimapCtx.fill();
             minimapCtx.shadowBlur = 0;
         });
@@ -3510,7 +3512,7 @@ function updateSigCanvas() {
 
         sc.save();
         sc.shadowColor = sig.color;
-        sc.shadowBlur  = v > 0.02 ? 5 : 2;
+        sc.shadowBlur  = v > 0.02 ? 2 : 1;
         sc.strokeStyle = sig.color;
         sc.lineWidth   = v > 0.02 ? 1.4 : 0.9;
         sc.globalAlpha = 0.35 + v * 0.65;
@@ -3532,7 +3534,7 @@ function updateSigCanvas() {
         const tipWave = amp * Math.sin(2 * Math.PI * (tipT * freq - scroll))
                       + amp * 0.28 * Math.sin(2 * Math.PI * (tipT * freq * 2.1 - scroll * 1.05))
                       + idleAmp * Math.sin(2 * Math.PI * (tipT * idleFreq - nowSec * 0.6));
-        sc.shadowBlur = v > 0.05 ? 8 : 2;
+        sc.shadowBlur = v > 0.05 ? 3 : 1;
         sc.fillStyle = '#ffffff';
         sc.globalAlpha = 0.5 + v * 0.5;
         sc.beginPath();
@@ -3831,7 +3833,7 @@ function drawHUDOverlay(ctx) {
     ctx.save();
     ctx.translate(psx, psy);
     ctx.rotate(player.angle);
-    ctx.shadowColor = '#00ffaa'; ctx.shadowBlur = 12;
+    ctx.shadowColor = '#00ffaa'; ctx.shadowBlur = 3;
     ctx.fillStyle = '#00ffaa';
     ctx.beginPath();
     ctx.moveTo(mS, 0);
@@ -3869,15 +3871,15 @@ function drawHUDOverlay(ctx) {
         const rot = t * 0.0008;
         const r = 16;
         // 外リング
-        ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 2; ctx.shadowColor = '#00ffff'; ctx.shadowBlur = 12;
+        ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 2; ctx.shadowColor = '#00ffff'; ctx.shadowBlur = 3;
         ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
         // 内側ダイヤ
-        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.shadowBlur = 6;
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.shadowBlur = 2;
         ctx.beginPath();
         ctx.moveTo(0, -r * 0.5); ctx.lineTo(r * 0.5, 0); ctx.lineTo(0, r * 0.5); ctx.lineTo(-r * 0.5, 0);
         ctx.closePath(); ctx.stroke();
         // 回転腕
-        ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 1.5; ctx.shadowBlur = 8;
+        ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 1.5; ctx.shadowBlur = 3;
         for (let arm = 0; arm < 4; arm++) {
             const a = arm * Math.PI / 2 + rot;
             ctx.beginPath();
@@ -3903,7 +3905,7 @@ function drawHUDOverlay(ctx) {
         ctx.save();
         ctx.translate(esx, esy);
         // ダイヤマーカー
-        ctx.shadowColor = col; ctx.shadowBlur = 8;
+        ctx.shadowColor = col; ctx.shadowBlur = 3;
         ctx.fillStyle = col;
         ctx.globalAlpha = 0.8 + Math.sin(t * 0.008) * 0.2;
         ctx.beginPath();
@@ -3958,7 +3960,7 @@ function drawHUDOverlay(ctx) {
         ctx.arc(0, 0, baseR, 0, Math.PI * 2);
         ctx.strokeStyle = `rgba(${colInfo.rgb},${(baseAlpha * 0.25).toFixed(3)})`;
         ctx.lineWidth = 2;
-        ctx.shadowColor = colInfo.hex; ctx.shadowBlur = 6 * totalSig;
+        ctx.shadowColor = colInfo.hex; ctx.shadowBlur = 2 * totalSig;
         ctx.stroke();
         ctx.shadowBlur = 0;
 
@@ -4337,7 +4339,7 @@ function gameLoop() {
             ctx.globalAlpha = Math.min(1, s.life * 2); // フェードアウト (lifeが0.5を下回ると透過開始)
             ctx.translate(s.x, s.y);
             ctx.rotate(angle);
-            ctx.fillStyle = '#00ffaa'; ctx.shadowColor = '#00ffaa'; ctx.shadowBlur = 10;
+            ctx.fillStyle = '#00ffaa'; ctx.shadowColor = '#00ffaa'; ctx.shadowBlur = 3;
             ctx.fillRect(-3, -3, 6, 6);
             ctx.shadowBlur = 0;
             ctx.fillStyle = '#fff';
@@ -4397,7 +4399,7 @@ function gameLoop() {
             ctx.lineWidth = 2 / camera.zoom;
             ctx.globalAlpha = 0.55;
             ctx.shadowColor = wRangeColor;
-            ctx.shadowBlur = 6;
+            ctx.shadowBlur = 2;
             ctx.stroke();
             ctx.shadowBlur = 0;
             ctx.setLineDash([]);
