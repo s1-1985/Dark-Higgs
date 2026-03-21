@@ -152,6 +152,7 @@ let debris = [];
 let bgStars = [];
 let bgMist = [];
 let spaceBgCanvas = null; // 事前生成の宇宙背景テクスチャ
+let bgMistCanvas = null;  // bgMist事前焼き付けキャンバス
 let scrapDrops = [];
 let stations = [];
 let higgsWakes = [];    // ヒッグスウェイク軌跡 {x, y, intensity, life}
@@ -308,7 +309,7 @@ function updateVisionLockOn() {
 // 宇宙背景テクスチャ生成 (ゲーム開始時に1回だけ実行、ランダムシード)
 // ============================================================
 function generateSpaceBackground() {
-    const TEX = 2048;
+    const TEX = 512;
     spaceBgCanvas = document.createElement('canvas');
     spaceBgCanvas.width  = TEX;
     spaceBgCanvas.height = TEX;
@@ -2280,7 +2281,6 @@ function generateSector() {
 
     // 宇宙背景テクスチャ生成 (非同期化: UIスレッドをブロックしないようsetTimeoutで遅延実行)
     // → 艦種選択→プレイ画面の切り替えが即座になる (2048×2048の同期描画は10秒以上かかる)
-    spaceBgCanvas = null;
     setTimeout(() => generateSpaceBackground(), 0);
 
     // Environmental Background
@@ -2316,19 +2316,45 @@ function generateSector() {
         });
     }
     bgMist = [];
+    bgMistCanvas = null;
     // 星雲色: 紫・青・赤紫・緑青・琥珀 — より鮮やかな値
     const mistColors = ['70,20,140','25,60,160','130,20,70','10,90,110','80,50,10','15,110,80'];
-    for (let i = 0; i < 100; i++) {
+    for (let i = 0; i < 30; i++) {
         const density = Math.random() * 0.65 + 0.1;
         bgMist.push({
             x: Math.random() * FIELD_SIZE, y: Math.random() * FIELD_SIZE,
             r: Math.random() * 5000 + 2000,
             color: mistColors[Math.floor(Math.random() * mistColors.length)],
             density,
-            // 各雲に個別パルス位相を持たせる
             phase: Math.random() * Math.PI * 2
         });
     }
+    // bgMistをオフスクリーンキャンバスに事前焼き付け (毎フレームのcreateRadialGradientを排除)
+    setTimeout(() => {
+        const mc = document.createElement('canvas');
+        mc.width = mc.height = 4096; // FIELD_SIZE相当
+        const mx = mc.getContext('2d');
+        const scale = 4096 / FIELD_SIZE;
+        bgMist.forEach(m => {
+            const d = m.density;
+            let col;
+            if (d >= 0.85)      col = '100,20,200';
+            else if (d >= 0.70) col = '40,80,220';
+            else if (d >= 0.50) col = '0,200,240';
+            else if (d >= 0.30) col = '20,120,160';
+            else                col = '15,40,100';
+            const baseAlpha = d >= 0.85 ? 0.18 : d >= 0.70 ? 0.15 : d >= 0.50 ? 0.13 : d >= 0.30 ? 0.08 : 0.04 + d * 0.04;
+            const sx = m.x * scale, sy = m.y * scale, sr = m.r * scale;
+            const g = mx.createRadialGradient(sx, sy, 0, sx, sy, sr);
+            g.addColorStop(0,    `rgba(${col},${Math.min(0.60, baseAlpha * 2.5).toFixed(3)})`);
+            g.addColorStop(0.25, `rgba(${col},${(baseAlpha * 1.2).toFixed(3)})`);
+            g.addColorStop(0.60, `rgba(${col},${(baseAlpha * 0.45).toFixed(3)})`);
+            g.addColorStop(1,    'rgba(0,0,0,0)');
+            mx.fillStyle = g;
+            mx.beginPath(); mx.arc(sx, sy, sr, 0, Math.PI * 2); mx.fill();
+        });
+        bgMistCanvas = mc;
+    }, 50);
 
     // 敵を円形マップ内のヒッグス濃度の高い場所に配置
     const spawnAngle = Math.random() * Math.PI * 2;
@@ -2962,7 +2988,7 @@ function drawPassiveAntenna(ctx) {
         // ズームに関係なく画面上で固定サイズ (screen-space)
         const BASE_R   = 180 / camera.zoom;
         const MAX_BULGE = 100 / camera.zoom;
-        const N_POINTS  = 80;
+        const N_POINTS  = 36;
         const idleBreath = Math.sin(tSec * 0.7) * (3 / camera.zoom);
 
         const getRingRadius = (angle) => {
@@ -3016,7 +3042,7 @@ function drawPassiveAntenna(ctx) {
         ctx.strokeStyle = `rgba(255,255,255,${idleAlpha.toFixed(3)})`;
         ctx.lineWidth = 2.0 * ringLw;
         ctx.shadowColor = 'rgba(255,255,255,0.95)';
-        ctx.shadowBlur  = 6 + maxRingSig * 12;
+        ctx.shadowBlur  = 2 + maxRingSig * 3;
         ctx.stroke();
         ctx.shadowBlur = 0;
 
@@ -3038,7 +3064,7 @@ function drawPassiveAntenna(ctx) {
             ctx.strokeStyle = `rgba(${color},${(sig * 0.85).toFixed(3)})`;
             ctx.lineWidth   = (1.5 + sig * 2.5) * ringLw;
             ctx.shadowColor = `rgba(${color},0.9)`;
-            ctx.shadowBlur  = 4 * sig;
+            ctx.shadowBlur  = sig;
             ctx.stroke();
             ctx.shadowBlur = 0;
 
@@ -3366,41 +3392,10 @@ function drawBackground(ctx) {
     // density < 0.30 : 淡いブルー    0.30-0.50 : ティール
     // density 0.50-0.70 : シアン     0.70-0.85 : 青紫
     // density 0.85+   : 深いインディゴ
-    bgMist.forEach(m => {
-        // Viewport culling — skip mists entirely off-screen
-        if (m.x + m.r < cx || m.x - m.r > cx + vw ||
-            m.y + m.r < cy || m.y - m.r > cy + vh) return;
-        const d = m.density;
-        const pulse = 0.80 + Math.sin(now * 0.35 + (m.phase || 0)) * 0.20;
-        let col, baseAlpha;
-        if (d >= 0.85) {
-            col = '100,20,200';  baseAlpha = 0.18 * pulse;
-        } else if (d >= 0.70) {
-            col = '40,80,220';   baseAlpha = 0.15 * pulse;
-        } else if (d >= 0.50) {
-            col = '0,200,240';   baseAlpha = 0.13 * pulse;
-        } else if (d >= 0.30) {
-            col = '20,120,160';  baseAlpha = 0.08 * pulse;
-        } else {
-            col = '15,40,100';   baseAlpha = 0.04 + d * 0.04;
-        }
-        const g = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.r);
-        g.addColorStop(0,    `rgba(${col},${Math.min(0.60, baseAlpha * 2.5).toFixed(3)})`);
-        g.addColorStop(0.25, `rgba(${col},${(baseAlpha * 1.2).toFixed(3)})`);
-        g.addColorStop(0.60, `rgba(${col},${(baseAlpha * 0.45).toFixed(3)})`);
-        g.addColorStop(1,    'rgba(0,0,0,0)');
-        ctx.fillStyle = g;
-        ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2); ctx.fill();
-
-        // 高密度コアに輝点
-        if (d >= 0.45) {
-            const cg = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.r * 0.22);
-            cg.addColorStop(0, `rgba(${col},${(0.12 * pulse).toFixed(3)})`);
-            cg.addColorStop(1, 'rgba(0,0,0,0)');
-            ctx.fillStyle = cg;
-            ctx.beginPath(); ctx.arc(m.x, m.y, m.r * 0.22, 0, Math.PI * 2); ctx.fill();
-        }
-    });
+    // bgMist: オフスクリーンキャンバスに事前焼き付け済み → drawImageで一発描画
+    if (bgMistCanvas) {
+        ctx.drawImage(bgMistCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
+    }
 
     // Sparse coordinate grid (large cells)
     const gridSize = 2000;
