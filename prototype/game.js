@@ -143,6 +143,7 @@ document.getElementById('btn-reset').addEventListener('click', () => {
 let player;
 let gameLoopRunning = false;
 let _frameCount = 0;
+let _higgsCache = new Map(), _higgsCacheFrame = -1;
 let enemies = [];
 let projectiles = [];
 let structures = [];
@@ -448,15 +449,20 @@ function generateSpaceBackground() {
 // ヒッグス粒子強度計算 (Higgs Intensity)
 // ============================================================
 function getHiggsIntensity(x, y) {
+    // フレームキャッシュ: 200単位グリッドに量子化して重複計算を排除
+    if (_higgsCacheFrame !== _frameCount) { _higgsCache.clear(); _higgsCacheFrame = _frameCount; }
+    const key = (Math.round(x / 200) * 100000 + Math.round(y / 200)) | 0;
+    let v = _higgsCache.get(key);
+    if (v !== undefined) return v;
     let total = 0;
-    bgMist.forEach(m => {
+    for (let i = 0; i < bgMist.length; i++) {
+        const m = bgMist[i];
         const dist = Math.hypot(x - m.x, y - m.y);
-        if (dist < m.r) {
-            const falloff = 1 - (dist / m.r);
-            total += falloff * (m.density || 0.3);
-        }
-    });
-    return Math.min(1.0, total);
+        if (dist < m.r) total += (1 - dist / m.r) * (m.density || 0.3);
+    }
+    v = total > 1.0 ? 1.0 : total;
+    _higgsCache.set(key, v);
+    return v;
 }
 
 // ヒッグス濃度の高い隠れ場所を探す (ジエンド戦スタイルAI用)
@@ -2963,19 +2969,24 @@ function drawPassiveAntenna(ctx) {
             higgs: Math.PI           // 左 (西)
         };
         const ringSigVals = {};
-        // スレットリング: 有効センサー範囲の10倍まで検出 (環境シグネチャ感度に一致)
-        const ringDetectRange = FIELD_SIZE; // 全マップ対象 (距離で減衰)
+        const ringDetectRange = FIELD_SIZE;
+        // enemy毎のhiggsBlk・distを事前計算 (4センサーループで再利用)
+        const _eCache = enemies.map(e => {
+            if (e.hp <= 0) return null;
+            return {
+                e,
+                dist: Math.hypot(e.x - player.x, e.y - player.y),
+                hBlk: getHiggsIntensity((e.x + player.x)/2, (e.y + player.y)/2)
+            };
+        }).filter(Boolean);
         ['heat','optic','em','higgs'].forEach(sName => {
             const sc2 = sensorConfig[sName];
             let tot = 0;
-            enemies.forEach(e => {
-                if (e.hp <= 0) return;
-                const dist = Math.hypot(e.x - player.x, e.y - player.y);
-                const hBlk = getHiggsIntensity((e.x + player.x)/2, (e.y + player.y)/2);
-                const att  = Math.max(0, 1 - dist / ringDetectRange);
-                tot += sc2.sig(e) * att * (1 - hBlk * sc2.higgsMod);
-            });
-            ringSigVals[sName] = Math.min(1.0, tot);
+            for (const c of _eCache) {
+                const att = Math.max(0, 1 - c.dist / ringDetectRange);
+                tot += sc2.sig(c.e) * att * (1 - c.hBlk * sc2.higgsMod);
+            }
+            ringSigVals[sName] = tot > 1.0 ? 1.0 : tot;
         });
 
         // 優勢センサーの色を決定
@@ -3206,17 +3217,12 @@ function drawMinimap() {
     minimapCtx.arc(cxM, cyM, rM, 0, Math.PI * 2);
     minimapCtx.clip();
 
-    // ヒッグス濃度オーバーレイ
-    bgMist.forEach(m => {
-        if (m.density <= 0.45) return;
-        const mx = m.x * mmScale + offX, my = m.y * mmScale + offY, mr = m.r * mmScale;
-        const g = minimapCtx.createRadialGradient(mx, my, 0, mx, my, mr);
-        g.addColorStop(0,   `rgba(40,200,255,${(m.density * 0.35).toFixed(2)})`);
-        g.addColorStop(0.5, `rgba(40,200,255,${(m.density * 0.12).toFixed(2)})`);
-        g.addColorStop(1,   'rgba(0,0,0,0)');
-        minimapCtx.fillStyle = g;
-        minimapCtx.beginPath(); minimapCtx.arc(mx, my, mr, 0, Math.PI * 2); minimapCtx.fill();
-    });
+    // ヒッグス濃度オーバーレイ: bgMistCanvasを縮小drawImageで代替 (毎回createRadialGradientせず)
+    if (bgMistCanvas) {
+        minimapCtx.globalAlpha = 0.35;
+        minimapCtx.drawImage(bgMistCanvas, offX, offY, FIELD_SIZE * mmScale, FIELD_SIZE * mmScale);
+        minimapCtx.globalAlpha = 1;
+    }
 
     // Viewport
     minimapCtx.strokeStyle = 'rgba(255,255,0,0.5)'; minimapCtx.lineWidth = 1;
@@ -3924,22 +3930,26 @@ function drawHUDOverlay(ctx) {
         em:    { rgb: '204,68,255',  hex: '#cc44ff' },
         higgs: { rgb: '0,255,255',   hex: '#00ffff' }
     };
+    // enemy毎のhiggsPath・dist・角度を事前計算 (4センサーループで再利用)
+    const _hudRange = Math.max(effectiveRadarRange * 10, 8000);
+    const _hudECache = enemies.filter(e => e.hp > 0).map(e => ({
+        e,
+        dist:    Math.hypot(e.x - player.x, e.y - player.y),
+        hPath:   getHiggsIntensity((e.x + player.x)/2, (e.y + player.y)/2),
+        angle:   Math.atan2(e.y - player.y, e.x - player.x)
+    }));
     ['heat','optic','em','higgs'].forEach((sName, si) => {
         const sc2 = sensorConfig[sName];
         let totalSig = 0;
-        // 敵の方角リストを収集
         const enemyAngles = [];
-        enemies.forEach(e => {
-            if (e.hp <= 0) return;
-            const dist = Math.hypot(e.x - player.x, e.y - player.y);
-            const higgsPath = getHiggsIntensity((e.x + player.x)/2, (e.y + player.y)/2);
-            const distAtten = Math.max(0, 1 - dist / (Math.max(effectiveRadarRange * 10, 8000)));
-            const sig = sc2.sig(e) * distAtten * (1 - higgsPath * sc2.higgsMod);
+        for (const c of _hudECache) {
+            const distAtten = Math.max(0, 1 - c.dist / _hudRange);
+            const sig = sc2.sig(c.e) * distAtten * (1 - c.hPath * sc2.higgsMod);
             totalSig += sig;
-            if (sig > 0.05 && e.detectionState && e.detectionState !== 'unaware') {
-                enemyAngles.push(Math.atan2(e.y - player.y, e.x - player.x));
+            if (sig > 0.05 && c.e.detectionState && c.e.detectionState !== 'unaware') {
+                enemyAngles.push(c.angle);
             }
-        });
+        }
         totalSig = Math.min(1.0, totalSig);
         if (totalSig < 0.02) return;
         const baseR = 55 + si * 18; // screen pixels (大きく)
@@ -3959,18 +3969,17 @@ function drawHUDOverlay(ctx) {
         ctx.stroke();
         ctx.shadowBlur = 0;
 
-        // リングを小弧に分割して描画 (敵方角付近を膨らませる)
-        const segments = 72; // 360/5度
+        // リングを小弧に分割して描画 (敵方角付近を膨らませる) — 24セグメントに削減
+        const segments = 24;
         const segAngle = (Math.PI * 2) / segments;
         for (let seg = 0; seg < segments; seg++) {
             const segA = seg * segAngle;
-            // この弧が敵方向に近いか判定
             let nearEnemy = false;
             for (const ea of enemyAngles) {
                 let diff = segA - ea;
                 while (diff < -Math.PI) diff += Math.PI * 2;
                 while (diff >  Math.PI) diff -= Math.PI * 2;
-                if (Math.abs(diff) < 0.4) { nearEnemy = true; break; }
+                if (Math.abs(diff) < 0.55) { nearEnemy = true; break; }
             }
             const r = nearEnemy ? baseR + 20 : baseR;
             const lw = nearEnemy ? (5 + totalSig * 4) : (2 + totalSig * 1.5);
@@ -3979,11 +3988,8 @@ function drawHUDOverlay(ctx) {
             ctx.arc(0, 0, r, segA - segAngle * 0.5, segA + segAngle * 0.5);
             ctx.strokeStyle = `rgba(${colInfo.rgb},${alpha.toFixed(3)})`;
             ctx.lineWidth = lw;
-            ctx.shadowColor = colInfo.hex;
-            ctx.shadowBlur = nearEnemy ? 35 * totalSig : 0;
             ctx.stroke();
         }
-        ctx.shadowBlur = 0;
 
         // 外側の薄いリング (2本目)
         ctx.beginPath();
@@ -4007,25 +4013,29 @@ function gameLoop() {
             });
         }
 
-        // ソナークールダウン更新
+        // ソナークールダウン更新 — 表示は秒単位で変化する時のみ更新 (毎フレームinnerHTML禁止)
         if (omniSonarCooldown > 0) {
             omniSonarCooldown--;
-            const btnOmni = document.getElementById('btn-scan');
-            if (btnOmni) {
-                btnOmni.innerHTML = omniSonarCooldown > 0
-                    ? `<span class="aicon">◎</span><span class="alabel">${Math.ceil(omniSonarCooldown/60)}s</span>`
-                    : `<span class="aicon">◎</span><span class="alabel">SONAR</span>`;
-                btnOmni.disabled = omniSonarCooldown > 0;
+            if (omniSonarCooldown % 60 === 0 || omniSonarCooldown === 0) {
+                const btnOmni = document.getElementById('btn-scan');
+                if (btnOmni) {
+                    btnOmni.innerHTML = omniSonarCooldown > 0
+                        ? `<span class="aicon">◎</span><span class="alabel">${Math.ceil(omniSonarCooldown/60)}s</span>`
+                        : `<span class="aicon">◎</span><span class="alabel">SONAR</span>`;
+                    btnOmni.disabled = omniSonarCooldown > 0;
+                }
             }
         }
         if (dirSonarCooldown > 0) {
             dirSonarCooldown--;
-            const btnDir = document.getElementById('btn-dir-sonar');
-            if (btnDir) {
-                btnDir.innerHTML = dirSonarCooldown > 0
-                    ? `<span class="aicon">⟶</span><span class="alabel">${Math.ceil(dirSonarCooldown/60)}s</span>`
-                    : `<span class="aicon">⟶</span><span class="alabel">DIR</span>`;
-                btnDir.disabled = dirSonarCooldown > 0;
+            if (dirSonarCooldown % 60 === 0 || dirSonarCooldown === 0) {
+                const btnDir = document.getElementById('btn-dir-sonar');
+                if (btnDir) {
+                    btnDir.innerHTML = dirSonarCooldown > 0
+                        ? `<span class="aicon">⟶</span><span class="alabel">${Math.ceil(dirSonarCooldown/60)}s</span>`
+                        : `<span class="aicon">⟶</span><span class="alabel">DIR</span>`;
+                    btnDir.disabled = dirSonarCooldown > 0;
+                }
             }
         }
         if (passiveAlertTimer > 0) passiveAlertTimer--;
