@@ -5,6 +5,14 @@ const ctx = canvas.getContext('2d');
 const minimapCanvas = document.getElementById('minimapCanvas');
 const minimapCtx = minimapCanvas.getContext('2d');
 
+// ── パフォーマンスデバッグフラグ ──────────────────────────────
+// true にすると対象機能をオフにしてFPSへの影響を確認できる
+const PERF_DISABLE_THREAT_RING = false;   // スレットリング描画をオフ
+const PERF_DISABLE_SHADOW_BLUR  = false;  // shadowBlur を全オフ (モバイルで最も重い)
+const PERF_DISABLE_BG           = false;  // 背景描画をオフ
+const PERF_SHOW_FPS             = true;   // 画面左上にFPS表示
+// ─────────────────────────────────────────────────────────────
+
 const MAP_RADIUS = 35000;
 const MAP_CX = MAP_RADIUS;
 const MAP_CY = MAP_RADIUS;
@@ -2336,11 +2344,12 @@ function generateSector() {
         });
     }
     // bgMistをオフスクリーンキャンバスに事前焼き付け (毎フレームのcreateRadialGradientを排除)
+    // サイズを512に抑える: 4096x4096=64MBは生成に数秒かかりモバイルをフリーズさせるため
     setTimeout(() => {
         const mc = document.createElement('canvas');
-        mc.width = mc.height = 4096; // FIELD_SIZE相当
+        mc.width = mc.height = 512;
         const mx = mc.getContext('2d');
-        const scale = 4096 / FIELD_SIZE;
+        const scale = 512 / FIELD_SIZE;
         bgMist.forEach(m => {
             const d = m.density;
             let col;
@@ -3381,10 +3390,16 @@ minimapCanvas.addEventListener('touchend', () => { isMinimapDragging = false; })
 
 // Background grid system
 function drawBackground(ctx) {
+    if (PERF_DISABLE_BG) {
+        const vw = canvas.width / camera.zoom;
+        const vh = canvas.height / camera.zoom;
+        ctx.fillStyle = 'rgb(1,3,14)';
+        ctx.fillRect(camera.x, camera.y, vw, vh);
+        return;
+    }
     const vw = canvas.width / camera.zoom;
     const vh = canvas.height / camera.zoom;
     const cx = camera.x, cy = camera.y;
-    const now = Date.now() * 0.001;
 
     // 宇宙背景テクスチャ (事前生成、ゲーム毎に異なる星雲配置)
     if (spaceBgCanvas) {
@@ -3418,24 +3433,28 @@ function drawBackground(ctx) {
     }
     ctx.stroke();
 
-    // 円形マップ境界 (外側を暗くして境界を強調)
-    ctx.save();
-    // 境界ライン
-    ctx.beginPath();
-    ctx.arc(MAP_CX, MAP_CY, MAP_RADIUS, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(0,255,170,0.18)';
-    ctx.lineWidth = 80;
-    ctx.stroke();
-    ctx.strokeStyle = 'rgba(0,255,170,0.5)';
-    ctx.lineWidth = 3;
-    ctx.stroke();
-    // マップ外を暗く塗り潰す (クリッピングの逆)
-    ctx.beginPath();
-    ctx.rect(cx, cy, vw, vh);
-    ctx.arc(MAP_CX, MAP_CY, MAP_RADIUS + 2, 0, Math.PI * 2, true);
-    ctx.fillStyle = 'rgba(0,0,5,0.92)';
-    ctx.fill();
-    ctx.restore();
+    // 円形マップ境界 — ビューポートが境界に近い場合のみ描画 (毎フレームのarc計算削減)
+    const _camCenterX = cx + vw * 0.5, _camCenterY = cy + vh * 0.5;
+    const _distToEdge = Math.abs(Math.hypot(_camCenterX - MAP_CX, _camCenterY - MAP_CY) - MAP_RADIUS);
+    if (_distToEdge < Math.max(vw, vh) * 0.8 + 500) {
+        ctx.save();
+        // 境界ライン
+        ctx.beginPath();
+        ctx.arc(MAP_CX, MAP_CY, MAP_RADIUS, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(0,255,170,0.18)';
+        ctx.lineWidth = 80;
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(0,255,170,0.5)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        // マップ外を暗く塗り潰す (クリッピングの逆)
+        ctx.beginPath();
+        ctx.rect(cx, cy, vw, vh);
+        ctx.arc(MAP_CX, MAP_CY, MAP_RADIUS + 2, 0, Math.PI * 2, true);
+        ctx.fillStyle = 'rgba(0,0,5,0.92)';
+        ctx.fill();
+        ctx.restore();
+    }
 }
 
 // オシロスコープ風シグネチャ表示
@@ -3518,12 +3537,19 @@ function updateSigCanvas() {
         sc.lineWidth   = v > 0.02 ? 1.4 : 0.9;
         sc.globalAlpha = 0.35 + v * 0.65;
         sc.beginPath();
-        for (let x = xStart; x <= xEnd; x++) {
-            const t = (x - xStart) / (xEnd - xStart);
-            // 主波形 + 第2高調波
-            const wave  = amp  * Math.sin(2 * Math.PI * (t * freq  - scroll))
-                        + amp  * 0.28 * Math.sin(2 * Math.PI * (t * freq * 2.1 - scroll * 1.05))
-                        + idleAmp * Math.sin(2 * Math.PI * (t * idleFreq - nowSec * 0.6));
+        // ループを2pxステップに (Math.sin()コスト半減、視覚差なし)
+        const _tScale   = 1 / (xEnd - xStart);
+        const _piFreq   = 2 * Math.PI * freq;
+        const _piFreq21 = 2 * Math.PI * freq * 2.1;
+        const _piIdle   = 2 * Math.PI * idleFreq;
+        const _phOff    = scroll * 2 * Math.PI;
+        const _phOff2   = scroll * 1.05 * 2 * Math.PI;
+        const _idleOff  = nowSec * 0.6 * 2 * Math.PI;
+        for (let x = xStart; x <= xEnd; x += 2) {
+            const t = (x - xStart) * _tScale;
+            const wave = amp * Math.sin(t * _piFreq - _phOff)
+                       + amp * 0.28 * Math.sin(t * _piFreq21 - _phOff2)
+                       + idleAmp * Math.sin(t * _piIdle - _idleOff);
             const y = cy - wave;
             if (x === xStart) sc.moveTo(x, y); else sc.lineTo(x, y);
         }
@@ -3631,11 +3657,19 @@ function updateEnvSigCanvas() {
         ec.lineWidth   = v > 0.02 ? 1.4 : 0.9;
         ec.globalAlpha = 0.35 + v * 0.65;
         ec.beginPath();
-        for (let x = xStart; x <= xEnd; x++) {
-            const t = (x - xStart) / (xEnd - xStart);
-            const wave = amp * Math.sin(2 * Math.PI * (t * freq - scroll))
-                       + amp * 0.28 * Math.sin(2 * Math.PI * (t * freq * 2.1 - scroll * 1.05))
-                       + idleAmp * Math.sin(2 * Math.PI * (t * idleFreq - nowSec * 0.5));
+        // ステップ2でサンプリング (視覚的に同等、Math.sin()コストを半減)
+        const tScale   = 1 / (xEnd - xStart);
+        const piFreq   = 2 * Math.PI * freq;
+        const piFreq21 = 2 * Math.PI * freq * 2.1;
+        const piIdle   = 2 * Math.PI * idleFreq;
+        const phaseOff = scroll * 2 * Math.PI;
+        const phaseOff2 = scroll * 1.05 * 2 * Math.PI;
+        const idleOff  = nowSec * 0.5 * 2 * Math.PI;
+        for (let x = xStart; x <= xEnd; x += 2) {
+            const t = (x - xStart) * tScale;
+            const wave = amp * Math.sin(t * piFreq - phaseOff)
+                       + amp * 0.28 * Math.sin(t * piFreq21 - phaseOff2)
+                       + idleAmp * Math.sin(t * piIdle - idleOff);
             const y = cy - wave;
             if (x === xStart) ec.moveTo(x, y); else ec.lineTo(x, y);
         }
@@ -3713,7 +3747,7 @@ function updateEnvInfo() {
         sigEl.textContent = bars;
         sigEl.style.color = maxSig > 0.6 ? '#ff4d4d' : (maxSig > 0.3 ? '#ffaa00' : '#888');
     }
-    updateSigCanvas();
+    // updateSigCanvas は gameLoop から毎2フレームで呼ばれるためここでは省略 (二重呼び出し防止)
     updateEnvSigCanvas();
 
     // GEN配分情報 (リソースノード数)
@@ -3923,6 +3957,7 @@ function drawHUDOverlay(ctx) {
     });
 
     // ── MGS4スレットリング改善版 (スクリーン空間) ──
+    if (PERF_DISABLE_THREAT_RING) return; // デバッグ用: スレットリングをオフ
     // 鮮やかな色に変更: heat→#ff6600, optic→#ffee00, em→#cc44ff, higgs→#00ffff
     const sensorColors2 = {
         heat:  { rgb: '255,102,0',   hex: '#ff6600' },
@@ -3960,51 +3995,66 @@ function drawHUDOverlay(ctx) {
         ctx.save();
         ctx.translate(psx, psy);
 
-        // 背景フルリング (薄く常時表示)
+        // 背景フルリング (薄く常時表示) — toFixed削除: globalAlpha使用でstring生成ゼロ
+        ctx.globalAlpha = baseAlpha * 0.25;
         ctx.beginPath();
         ctx.arc(0, 0, baseR, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(${colInfo.rgb},${(baseAlpha * 0.25).toFixed(3)})`;
+        ctx.strokeStyle = colInfo.hex;
         ctx.lineWidth = 2;
-        ctx.shadowColor = colInfo.hex; ctx.shadowBlur = 2 * totalSig;
+        if (!PERF_DISABLE_SHADOW_BLUR) { ctx.shadowColor = colInfo.hex; ctx.shadowBlur = 2 * totalSig; }
         ctx.stroke();
         ctx.shadowBlur = 0;
 
-        // リングを小弧に分割して描画 (敵方角付近を膨らませる) — 24セグメントに削減
+        // リングを小弧に分割して描画 (敵方角付近を膨らませる) — 24セグメント
         const segments = 24;
         const segAngle = (Math.PI * 2) / segments;
+        const alphaFar  = baseAlpha * 0.5;
+        const alphaNear = Math.min(1, baseAlpha * 1.8);
         for (let seg = 0; seg < segments; seg++) {
             const segA = seg * segAngle;
             let nearEnemy = false;
             for (const ea of enemyAngles) {
                 let diff = segA - ea;
-                while (diff < -Math.PI) diff += Math.PI * 2;
-                while (diff >  Math.PI) diff -= Math.PI * 2;
-                if (Math.abs(diff) < 0.55) { nearEnemy = true; break; }
+                if (diff < -Math.PI) diff += Math.PI * 2;
+                else if (diff > Math.PI) diff -= Math.PI * 2;
+                if (diff > -0.55 && diff < 0.55) { nearEnemy = true; break; }
             }
-            const r = nearEnemy ? baseR + 20 : baseR;
-            const lw = nearEnemy ? (5 + totalSig * 4) : (2 + totalSig * 1.5);
-            const alpha = nearEnemy ? Math.min(1, baseAlpha * 1.8) : baseAlpha * 0.5;
+            ctx.globalAlpha = nearEnemy ? alphaNear : alphaFar;
             ctx.beginPath();
-            ctx.arc(0, 0, r, segA - segAngle * 0.5, segA + segAngle * 0.5);
-            ctx.strokeStyle = `rgba(${colInfo.rgb},${alpha.toFixed(3)})`;
-            ctx.lineWidth = lw;
+            ctx.arc(0, 0, nearEnemy ? baseR + 20 : baseR, segA - segAngle * 0.5, segA + segAngle * 0.5);
+            ctx.lineWidth = nearEnemy ? (5 + totalSig * 4) : (2 + totalSig * 1.5);
             ctx.stroke();
         }
+        ctx.globalAlpha = 1;
 
         // 外側の薄いリング (2本目)
+        ctx.globalAlpha = baseAlpha * 0.2;
         ctx.beginPath();
         ctx.arc(0, 0, baseR + 6, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(${colInfo.rgb},${(baseAlpha * 0.2).toFixed(3)})`;
         ctx.lineWidth = 1.5;
         ctx.stroke();
+        ctx.globalAlpha = 1;
 
         ctx.restore();
     });
 }
 
+// FPS計測用
+let _fpsLastTime = 0, _fpsFrameCount = 0, _fpsDisplay = 0;
+
 function gameLoop() {
     try {
         _frameCount++;
+        // FPS計測
+        if (PERF_SHOW_FPS) {
+            const now = performance.now();
+            _fpsFrameCount++;
+            if (now - _fpsLastTime >= 1000) {
+                _fpsDisplay = _fpsFrameCount;
+                _fpsFrameCount = 0;
+                _fpsLastTime = now;
+            }
+        }
         // ヒッグス自然成長 (Battle Royale的ゾーン圧縮 — 時間経過で濃度上昇)
         // 全ミスト密度を毎フレーム微増、最大0.95まで
         if (player && player.hp > 0 && Math.random() < 0.004) { // ~4フレームに1回更新
@@ -4259,8 +4309,8 @@ function gameLoop() {
         structures.forEach(s => s.draw(ctx));
         drawTargetLine(ctx);
 
-        // ズームアウト時はshadowBlurをスキップ (描画コスト削減)
-        const _blurEnabled = camera.zoom >= 0.12;
+        // ズームアウト時 or デバッグフラグでshadowBlurをスキップ (描画コスト削減)
+        const _blurEnabled = !PERF_DISABLE_SHADOW_BLUR && camera.zoom >= 0.12;
         // ビューポート境界 (ワールド座標)
         const _vpX = camera.x, _vpY = camera.y;
         const _vpW = canvas.width / camera.zoom, _vpH = canvas.height / camera.zoom;
@@ -4425,6 +4475,17 @@ function gameLoop() {
         if (_frameCount % 2 === 0) updateSigCanvas();
         if (_frameCount % 3 === 0) drawMinimap();
         if (_frameCount % 10 === 0) updateEnvInfo();
+
+        // FPS表示 (デバッグ用)
+        if (PERF_SHOW_FPS) {
+            ctx.save();
+            ctx.font = 'bold 11px monospace';
+            ctx.fillStyle = _fpsDisplay >= 50 ? '#00ff88' : (_fpsDisplay >= 30 ? '#ffaa00' : '#ff4444');
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            ctx.fillText(`FPS: ${_fpsDisplay}`, 6, 6);
+            ctx.restore();
+        }
 
         requestAnimationFrame(gameLoop);
     } catch (err) {
