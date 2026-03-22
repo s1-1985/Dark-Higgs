@@ -1056,16 +1056,20 @@ input[type=range]::-webkit-slider-thumb {
     #log-header { padding: 3px 6px; font-size: 7px; }
     .message { font-size: 7px; padding: 2px 6px; }
 
-    /* ─── BOTTOM CONSOLE: 4行構成 ─── */
+    /* ─── BOTTOM CONSOLE: 3行構成 (SIGキャンバス行廃止・アクション常時表示) ─── */
     #bottom-console {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        grid-template-rows: auto auto auto auto;
+        grid-template-rows: auto auto auto;
         height: auto;
         padding: 0 0 env(safe-area-inset-bottom, 0px) 0;
         gap: 0;
         overflow: visible;
     }
+
+    /* SIGキャンバスパネル: モバイルでは非表示 (行数削減) */
+    .left-panel  { display: none !important; }
+    .right-panel { display: none !important; }
 
     /* Row1: モバイルステータスバー (全幅) */
     #mobile-status-bar {
@@ -1111,42 +1115,13 @@ input[type=range]::-webkit-slider-thumb {
         flex-shrink: 0;
     }
 
-    /* Row2: 自機SIG (左) | 環境SIG (右) — キャンバスのみコンパクト表示 */
-    .left-panel {
-        display: block !important;
-        grid-column: 1;
-        grid-row: 2;
-        width: auto;
-        min-width: 0;
-        padding: 2px 4px;
-        border-right: 1px solid rgba(0,255,170,0.12);
-        border-bottom: 1px solid rgba(0,255,170,0.12);
-    }
-    /* キャンバス以外を非表示、SIGキャンバスを40pxに */
-    .left-panel > *:not(canvas) { display: none !important; }
-    #sig-canvas { height: 40px !important; display: block !important; }
-
-    .right-panel {
-        display: block !important;
-        grid-column: 2;
-        grid-row: 2;
-        width: auto;
-        min-width: 0;
-        padding: 2px 4px;
-        border-right: none;
-        border-bottom: 1px solid rgba(0,255,170,0.12);
-    }
-    /* テキスト要素を非表示、環境SIGキャンバスを40pxに */
-    .right-panel .env-info > div { display: none !important; }
-    #env-sig-canvas { height: 40px !important; display: block !important; }
-
-    /* Row3: GEN配分 (左) | 兵装/エンジン/センサー (右) */
+    /* Row2: GEN配分 (左) | 兵装/エンジン/センサー (右) */
     .center-panel {
         grid-column: 1 / -1;
-        grid-row: 3;
+        grid-row: 2;
         display: grid !important;
-        grid-template-columns: auto 1fr;
-        align-items: center;
+        grid-template-columns: 138px 1fr;
+        align-items: stretch;
         gap: 0;
         padding: 0;
         width: auto;
@@ -1158,46 +1133,55 @@ input[type=range]::-webkit-slider-thumb {
     .center-panel .panel-header { display: none; }
     .center-panel > select { display: none !important; }
 
-    /* GEN配分: 左カラム */
+    /* GEN配分: 左カラム — 3行分スパン・overflow: hidden で被り防止 */
     .gen-control {
         grid-column: 1;
-        grid-row: 1;
-        padding: 3px 6px;
+        grid-row: 1 / span 3;
+        padding: 3px 5px 3px 6px;
         border-right: 1px solid rgba(0,255,170,0.12);
         min-width: 0;
+        width: 138px;
+        box-sizing: border-box;
+        overflow: hidden;
         display: flex;
         flex-direction: column;
         justify-content: center;
-        width: 130px;
     }
-    .gen-header { font-size: 8px; margin-bottom: 1px; }
-    .gen-slider { height: 8px; border-radius: 4px; }
-    .gen-slider::-webkit-slider-thumb { width: 18px; height: 18px; }
+    .gen-header { font-size: 7px; margin-bottom: 2px; }
+    .gen-slider { height: 6px; border-radius: 3px; }
+    .gen-slider::-webkit-slider-thumb { width: 13px; height: 13px; }
     .gen-row { gap: 2px; }
-    .gen-label { font-size: 7px !important; min-width: 22px !important; width: 22px !important; }
-    .gen-val { font-size: 7px !important; min-width: 22px !important; }
+    .gen-label { font-size: 6px !important; min-width: 20px !important; width: 20px !important; flex-shrink: 0; }
+    .gen-val   { font-size: 6px !important; width: 24px !important; min-width: 0 !important; flex-shrink: 0; overflow: hidden; text-align: right; }
 
     /* 兵装/エンジン/センサー選択: 右カラム (縦積み) */
     .isel-section {
         grid-column: 2;
-        padding: 1px 3px;
+        padding: 2px 3px;
         border-bottom: 1px solid rgba(0,255,170,0.08);
         min-width: 0;
         margin-top: 0 !important;
         display: flex;
         align-items: center;
+        overflow: hidden;
     }
     .isel-section:last-of-type { border-bottom: none; }
-    .isel-label { font-size: 6px !important; width: 30px !important; min-width: 30px !important; flex-shrink: 0; }
+    .isel-label { font-size: 6px !important; width: 28px !important; min-width: 28px !important; flex-shrink: 0; }
     .isel-group { gap: 3px !important; flex-wrap: nowrap; overflow: hidden; }
 
-    /* Row4: アクションボタン (全幅、1行) */
+    /* isel-btn サイズ (高さ縮小でRow2全体を圧縮) */
+    .isel-btn { width: 30px; height: 26px; padding: 2px 2px; }
+    .isel-btn svg { width: 14px; height: 14px; }
+    .isel-btn span { font-size: 5.5px; }
+
+    /* Row3: アクションボタン (全幅・1行6個・常時表示) */
     .action-panel {
         grid-column: 1 / -1;
-        grid-row: 4;
+        grid-row: 3;
         width: auto;
         min-width: 0;
-        padding: 2px 4px 2px;
+        padding: 2px 4px;
+        border-top: 1px solid rgba(0,255,170,0.18);
     }
     .action-panel .panel-header { display: none; }
     .action-grid {
@@ -1206,16 +1190,11 @@ input[type=range]::-webkit-slider-thumb {
         margin-top: 0;
     }
     .act-icon-btn {
-        min-height: 36px;
-        padding: 4px 2px;
+        min-height: 34px;
+        padding: 3px 2px;
     }
-    .act-icon-btn svg { width: 18px; height: 18px; }
+    .act-icon-btn svg { width: 17px; height: 17px; }
     .act-icon-btn span { font-size: 6px; }
-
-    /* isel-btn サイズ */
-    .isel-btn { width: 32px; height: 30px; padding: 3px 2px; }
-    .isel-btn svg { width: 16px; height: 16px; }
-    .isel-btn span { font-size: 5.5px; }
 
     .panel-header { font-size: 9px; margin-bottom: 2px; letter-spacing: 0.5px; }
 
