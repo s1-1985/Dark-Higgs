@@ -1057,20 +1057,17 @@ input[type=range]::-webkit-slider-thumb {
     #log-header { padding: 3px 6px; font-size: 7px; }
     .message { font-size: 7px; padding: 2px 6px; }
 
-    /* ─── BOTTOM CONSOLE: 3行構成 (SIGキャンバス行廃止・アクション常時表示) ─── */
+    /* ─── BOTTOM CONSOLE: 4行構成・全要素表示 ─── */
+    /* 100dvh修正により合計~140pxが確実に画面内に収まる        */
     #bottom-console {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        grid-template-rows: auto auto auto;
+        grid-template-rows: auto auto auto auto;
         height: auto;
         padding: 0 0 env(safe-area-inset-bottom, 0px) 0;
         gap: 0;
         overflow: visible;
     }
-
-    /* SIGキャンバスパネル: モバイルでは非表示 (行数削減) */
-    .left-panel  { display: none !important; }
-    .right-panel { display: none !important; }
 
     /* Row1: モバイルステータスバー (全幅) */
     #mobile-status-bar {
@@ -1078,7 +1075,7 @@ input[type=range]::-webkit-slider-thumb {
         align-items: center;
         grid-column: 1 / -1;
         grid-row: 1;
-        padding: 3px 8px;
+        padding: 2px 8px;
         gap: 6px;
         background: rgba(0,255,170,0.05);
         border-bottom: 1px solid rgba(0,255,170,0.15);
@@ -1088,40 +1085,46 @@ input[type=range]::-webkit-slider-thumb {
         overflow: hidden;
         white-space: nowrap;
     }
-    .msb-hp-wrap {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        flex-shrink: 0;
-    }
+    .msb-hp-wrap { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
     .msb-hp-bar {
-        width: 40px;
-        height: 5px;
-        background: #222;
-        border: 1px solid #444;
-        border-radius: 2px;
-        overflow: hidden;
-        flex-shrink: 0;
+        width: 36px; height: 5px;
+        background: #222; border: 1px solid #444; border-radius: 2px; overflow: hidden; flex-shrink: 0;
     }
-    .msb-hp-fill {
-        height: 100%;
-        background: #00ffaa;
-        box-shadow: 0 0 4px #00ffaa;
-        transition: width 0.3s;
-        width: 100%;
-    }
+    .msb-hp-fill { height: 100%; background: #00ffaa; box-shadow: 0 0 4px #00ffaa; transition: width 0.3s; width: 100%; }
     .msb-val { color: #00ffaa; }
-    .msb-sep {
-        color: #666;
-        flex-shrink: 0;
-    }
+    .msb-sep { color: #666; flex-shrink: 0; }
 
-    /* Row2: GEN配分 (左) | 兵装/エンジン/センサー (右) */
+    /* Row2: 自機SIG (左) | 環境SIG (右) — 20px高でコンパクト表示 */
+    .left-panel {
+        display: block !important;
+        grid-column: 1; grid-row: 2;
+        width: auto; min-width: 0;
+        padding: 1px 3px;
+        border-right: 1px solid rgba(0,255,170,0.12);
+        border-bottom: 1px solid rgba(0,255,170,0.12);
+        overflow: hidden;
+    }
+    .left-panel > *:not(canvas) { display: none !important; }
+    #sig-canvas { height: 20px !important; display: block !important; width: 100% !important; }
+
+    .right-panel {
+        display: block !important;
+        grid-column: 2; grid-row: 2;
+        width: auto; min-width: 0;
+        padding: 1px 3px;
+        border-right: none;
+        border-bottom: 1px solid rgba(0,255,170,0.12);
+        overflow: hidden;
+    }
+    .right-panel .env-info > div { display: none !important; }
+    #env-sig-canvas { height: 20px !important; display: block !important; width: 100% !important; }
+
+    /* Row3: GEN配分 (左) | 兵装/エンジン/センサー (右) */
     .center-panel {
         grid-column: 1 / -1;
-        grid-row: 2;
+        grid-row: 3;
         display: grid !important;
-        grid-template-columns: 138px 1fr;
+        grid-template-columns: 132px 1fr;
         align-items: stretch;
         gap: 0;
         padding: 0;
@@ -1134,22 +1137,25 @@ input[type=range]::-webkit-slider-thumb {
     .center-panel .panel-header { display: none; }
     .center-panel > select { display: none !important; }
 
-    /* GEN配分: 左カラム — 3行分スパン・overflow:hidden で被り防止 */
+    /* GEN配分: 左カラム — 全スライダー表示・3行分スパン */
     .gen-control {
         grid-column: 1;
         grid-row: 1 / span 3;
         padding: 2px 4px 2px 5px;
         border-right: 1px solid rgba(0,255,170,0.12);
-        min-width: 0;
-        width: 138px;
+        width: 132px;
         box-sizing: border-box;
         overflow: hidden;
         display: flex;
         flex-direction: column;
         justify-content: center;
     }
-    /* GAINスライダー: モバイルでは非表示 (高さ節約) */
-    .gen-control > div:last-child { display: none !important; }
+    /* セパレーターdivのmargin/paddingを最小化してGEN全体を圧縮 */
+    .gen-control > div:nth-child(3),
+    .gen-control > div:nth-child(4) {
+        margin-top: 2px !important;
+        padding-top: 2px !important;
+    }
     .gen-header { font-size: 6px; margin-bottom: 1px; }
     .gen-slider { height: 5px; border-radius: 3px; }
     .gen-slider::-webkit-slider-thumb { width: 11px; height: 11px; }
@@ -1172,18 +1178,15 @@ input[type=range]::-webkit-slider-thumb {
     .isel-section:last-of-type { border-bottom: none; }
     .isel-label { font-size: 5.5px !important; width: 26px !important; min-width: 26px !important; flex-shrink: 0; }
     .isel-group { gap: 2px !important; flex-wrap: nowrap; overflow: hidden; }
-
-    /* isel-btn: 高さ22pxまで縮小 */
     .isel-btn { width: 28px; height: 22px; padding: 1px 2px; }
     .isel-btn svg { width: 13px; height: 13px; }
     .isel-btn span { font-size: 5px; }
 
-    /* Row3: アクションボタン (全幅・1行6個・常時表示) */
+    /* Row4: アクションボタン (全幅・1行6個・常時表示) */
     .action-panel {
         grid-column: 1 / -1;
-        grid-row: 3;
-        width: auto;
-        min-width: 0;
+        grid-row: 4;
+        width: auto; min-width: 0;
         padding: 2px 3px;
         border-top: 1px solid rgba(0,255,170,0.18);
     }
@@ -1193,10 +1196,7 @@ input[type=range]::-webkit-slider-thumb {
         gap: 3px;
         margin-top: 0;
     }
-    .act-icon-btn {
-        min-height: 30px;
-        padding: 2px 1px;
-    }
+    .act-icon-btn { min-height: 30px; padding: 2px 1px; }
     .act-icon-btn svg { width: 15px; height: 15px; }
     .act-icon-btn span { font-size: 5.5px; }
 
