@@ -4518,18 +4518,16 @@ function gameLoop() {
         if (_frameCount % 3 === 0) drawMinimap();
         if (_frameCount % 10 === 0) updateEnvInfo();
 
-        // FPS表示 (デバッグ用)
-        // 注: (6,6)はtop-bar(z-index:10)の裏に隠れるためキャンバス中央下寄りに表示
+        // FPS表示 (デバッグ用) — 左下コーナー・コンソール上方
         if (PERF_SHOW_FPS) {
             ctx.save();
             const _fpsColor = _fpsDisplay >= 50 ? '#00ff88' : (_fpsDisplay >= 30 ? '#ffaa00' : '#ff4444');
-            const _fpsX = canvas.width / 2, _fpsY = canvas.height * 0.42;
-            // 背景
-            ctx.fillStyle = 'rgba(0,0,0,0.6)';
-            ctx.fillRect(_fpsX - 36, _fpsY - 2, 72, 22);
-            ctx.font = 'bold 14px monospace';
+            const _fpsX = 8, _fpsY = canvas.height - 195;
+            ctx.fillStyle = 'rgba(0,0,0,0.55)';
+            ctx.fillRect(_fpsX - 2, _fpsY - 2, 58, 18);
+            ctx.font = 'bold 11px monospace';
             ctx.fillStyle = _fpsColor;
-            ctx.textAlign = 'center';
+            ctx.textAlign = 'left';
             ctx.textBaseline = 'top';
             ctx.fillText(`FPS: ${_fpsDisplay}`, _fpsX, _fpsY);
             ctx.restore();

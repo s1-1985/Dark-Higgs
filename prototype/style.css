@@ -12,6 +12,7 @@ body {
     overflow: hidden;
     width: 100vw;
     height: 100vh;
+    height: 100dvh; /* Chrome Android: アドレスバー表示時の100vhバグ修正 */
 }
 
 #game-container {
@@ -1133,11 +1134,11 @@ input[type=range]::-webkit-slider-thumb {
     .center-panel .panel-header { display: none; }
     .center-panel > select { display: none !important; }
 
-    /* GEN配分: 左カラム — 3行分スパン・overflow: hidden で被り防止 */
+    /* GEN配分: 左カラム — 3行分スパン・overflow:hidden で被り防止 */
     .gen-control {
         grid-column: 1;
         grid-row: 1 / span 3;
-        padding: 3px 5px 3px 6px;
+        padding: 2px 4px 2px 5px;
         border-right: 1px solid rgba(0,255,170,0.12);
         min-width: 0;
         width: 138px;
@@ -1147,17 +1148,20 @@ input[type=range]::-webkit-slider-thumb {
         flex-direction: column;
         justify-content: center;
     }
-    .gen-header { font-size: 7px; margin-bottom: 2px; }
-    .gen-slider { height: 6px; border-radius: 3px; }
-    .gen-slider::-webkit-slider-thumb { width: 13px; height: 13px; }
-    .gen-row { gap: 2px; }
+    /* GAINスライダー: モバイルでは非表示 (高さ節約) */
+    .gen-control > div:last-child { display: none !important; }
+    .gen-header { font-size: 6px; margin-bottom: 1px; }
+    .gen-slider { height: 5px; border-radius: 3px; }
+    .gen-slider::-webkit-slider-thumb { width: 11px; height: 11px; }
+    .gen-sliders { gap: 1px; }
+    .gen-row { gap: 2px; margin: 0; }
     .gen-label { font-size: 6px !important; min-width: 20px !important; width: 20px !important; flex-shrink: 0; }
-    .gen-val   { font-size: 6px !important; width: 24px !important; min-width: 0 !important; flex-shrink: 0; overflow: hidden; text-align: right; }
+    .gen-val   { font-size: 6px !important; width: 22px !important; min-width: 0 !important; flex-shrink: 0; overflow: hidden; text-align: right; }
 
     /* 兵装/エンジン/センサー選択: 右カラム (縦積み) */
     .isel-section {
         grid-column: 2;
-        padding: 2px 3px;
+        padding: 1px 3px;
         border-bottom: 1px solid rgba(0,255,170,0.08);
         min-width: 0;
         margin-top: 0 !important;
@@ -1166,13 +1170,13 @@ input[type=range]::-webkit-slider-thumb {
         overflow: hidden;
     }
     .isel-section:last-of-type { border-bottom: none; }
-    .isel-label { font-size: 6px !important; width: 28px !important; min-width: 28px !important; flex-shrink: 0; }
-    .isel-group { gap: 3px !important; flex-wrap: nowrap; overflow: hidden; }
+    .isel-label { font-size: 5.5px !important; width: 26px !important; min-width: 26px !important; flex-shrink: 0; }
+    .isel-group { gap: 2px !important; flex-wrap: nowrap; overflow: hidden; }
 
-    /* isel-btn サイズ (高さ縮小でRow2全体を圧縮) */
-    .isel-btn { width: 30px; height: 26px; padding: 2px 2px; }
-    .isel-btn svg { width: 14px; height: 14px; }
-    .isel-btn span { font-size: 5.5px; }
+    /* isel-btn: 高さ22pxまで縮小 */
+    .isel-btn { width: 28px; height: 22px; padding: 1px 2px; }
+    .isel-btn svg { width: 13px; height: 13px; }
+    .isel-btn span { font-size: 5px; }
 
     /* Row3: アクションボタン (全幅・1行6個・常時表示) */
     .action-panel {
@@ -1180,7 +1184,7 @@ input[type=range]::-webkit-slider-thumb {
         grid-row: 3;
         width: auto;
         min-width: 0;
-        padding: 2px 4px;
+        padding: 2px 3px;
         border-top: 1px solid rgba(0,255,170,0.18);
     }
     .action-panel .panel-header { display: none; }
@@ -1190,11 +1194,11 @@ input[type=range]::-webkit-slider-thumb {
         margin-top: 0;
     }
     .act-icon-btn {
-        min-height: 34px;
-        padding: 3px 2px;
+        min-height: 30px;
+        padding: 2px 1px;
     }
-    .act-icon-btn svg { width: 17px; height: 17px; }
-    .act-icon-btn span { font-size: 6px; }
+    .act-icon-btn svg { width: 15px; height: 15px; }
+    .act-icon-btn span { font-size: 5.5px; }
 
     .panel-header { font-size: 9px; margin-bottom: 2px; letter-spacing: 0.5px; }
 
