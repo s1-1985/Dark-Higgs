@@ -203,8 +203,20 @@ function loadSprite(key, src) {
     img.onerror = () => { /* 失敗時はフォールバック描画のまま */ };
     img.src = src;
 }
-loadSprite('ship_assault', 'assets/ship_assault.png'); // 自機(攻撃型) 俯瞰・艦首+X
-loadSprite('node_higgs',   'assets/node_higgs.png');   // ヒッグスリソースノード
+// 自機3種 (俯瞰・艦首+X)
+loadSprite('ship_assault', 'assets/ship_assault.png');
+loadSprite('ship_stealth', 'assets/ship_stealth.png');
+loadSprite('ship_carrier', 'assets/ship_carrier.png');
+// 敵4種 (this.type に対応: corvette/fighter/destroyer/carrier、ドローンはfighter)
+loadSprite('enemy_corvette',  'assets/enemy_corvette.png');
+loadSprite('enemy_fighter',   'assets/enemy_fighter.png');
+loadSprite('enemy_destroyer', 'assets/enemy_destroyer.png');
+loadSprite('enemy_carrier',   'assets/enemy_carrier.png');
+// 建造物2種
+loadSprite('structure_colony',   'assets/structure_colony.png');
+loadSprite('structure_derelict', 'assets/structure_derelict.png');
+// リソースノード
+loadSprite('node_higgs', 'assets/node_higgs.png');
 
 // ============================================================
 // 有視界システム — アメーバ形状視野 + ヒッグス連続濃度連動
@@ -878,7 +890,27 @@ class Structure {
 
         // Adaptive icon scale: full size at zoom>=1, shrinks proportionally below
         const _iconS = Math.max(4, Math.min(28, camera.zoom * 28)) / (camera.zoom * 28);
-        if (this.type === 'colony') {
+        const _struSpr = SPRITES['structure_' + this.type];
+        if (_struSpr && _struSpr.naturalWidth) {
+            // ── 生成スプライト (Nano Banana Pro) ──
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            ctx.scale(_iconS, _iconS);
+            const _sw = this.type === 'colony' ? 84 : 52;
+            const _sh = _sw * (_struSpr.naturalHeight / _struSpr.naturalWidth);
+            ctx.globalAlpha = this.hacked ? 1 : 0.95;
+            ctx.drawImage(_struSpr, -_sw / 2, -_sh / 2, _sw, _sh);
+            if (this.hacked) {
+                // ハック済み: 青シアンのティント (lighter合成で発光)
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.globalAlpha = 0.30;
+                ctx.fillStyle = '#00aaff';
+                ctx.beginPath(); ctx.arc(0, 0, _sw * 0.5, 0, Math.PI * 2); ctx.fill();
+                ctx.globalCompositeOperation = 'source-over';
+            }
+            ctx.globalAlpha = 1;
+            ctx.restore();
+        } else if (this.type === 'colony') {
             ctx.save();
             ctx.translate(this.x, this.y);
             ctx.scale(_iconS, _iconS);
@@ -1863,9 +1895,10 @@ class Ship {
             });
 
             // ── 生成スプライト (Nano Banana Pro) があればハル描画を差し替え ──
-            // スラスター炎グローは上で描画済み(船体の後ろ)。スプライトをその上に重ねる。
-            if (SPRITES.ship_assault && SPRITES.ship_assault.naturalWidth) {
-                const img = SPRITES.ship_assault;
+            // 艦種(gameState.shipType)別スプライトを選択。スラスター炎グローは上で描画済み(船体の後ろ)。
+            const _pSpr = SPRITES['ship_' + (gameState.shipType || 'assault')];
+            if (_pSpr && _pSpr.naturalWidth) {
+                const img = _pSpr;
                 const dw = vr * 2.35;                                  // 全長(X方向)
                 const dh = dw * (img.naturalHeight / img.naturalWidth); // アスペクト維持
                 ctx.drawImage(img, -dw * 0.5, -dh * 0.5, dw, dh);
@@ -2090,6 +2123,24 @@ class Ship {
         } else {
             // 敵は発砲フラッシュ中は大きく赤く光る
             const r = isFlashing ? this.radius * 1.5 : this.radius;
+
+            // ── 生成スプライト (Nano Banana Pro) があれば差し替え ──
+            const _eSpr = SPRITES['enemy_' + this.type];
+            if (_eSpr && _eSpr.naturalWidth) {
+                const dw = r * 2.8, dh = dw * (_eSpr.naturalHeight / _eSpr.naturalWidth);
+                if (isFlashing) {
+                    // 発砲フラッシュ: 赤グロー (shadowBlur不使用、放射グラデで代替)
+                    const fg = ctx.createRadialGradient(0, 0, 0, 0, 0, dw * 0.75);
+                    fg.addColorStop(0, 'rgba(255,90,90,0.85)');
+                    fg.addColorStop(1, 'rgba(255,0,0,0)');
+                    ctx.fillStyle = fg;
+                    ctx.beginPath(); ctx.arc(0, 0, dw * 0.75, 0, Math.PI * 2); ctx.fill();
+                }
+                ctx.drawImage(_eSpr, -dw * 0.5, -dh * 0.5, dw, dh);
+                ctx.restore();
+                return;
+            }
+
             ctx.fillStyle = isFlashing ? '#ff8888' : '#ff4d4d';
             ctx.shadowColor = '#ff4d4d';
             ctx.shadowBlur = isFlashing ? 40 : 15;
