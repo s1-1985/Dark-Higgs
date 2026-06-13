@@ -44,6 +44,12 @@ let omniSonarCooldown = 0;
 let dirSonarCooldown = 0;
 let passiveAlertTimer = 0;
 let passiveCheckTimer = 0;
+// パッシブ方位ウェッジ: 計測時のワールド位置にアンカーした方位扇形。
+// 強信号=狭い確信、弱信号=広いボケ。移動して2回計測→三角測量で敵位置が絞れる。
+// { ox, oy, angle, halfWidth, range, quality, color, life, maxLife }
+let passiveBearings = [];
+const PASSIVE_BEARING_LIFE = 480;  // 8秒フェード (@60fps)
+const PASSIVE_BEARING_MAX  = 8;    // 同時表示上限 (古いものから破棄)
 let mouseWorldX = MAP_CX;
 let mouseWorldY = MAP_CY;
 let dirSonarVisual = null; // { angle, halfAngle, range, life }
@@ -1201,6 +1207,10 @@ class Ship {
             this.resourcePoints = 0;
             this.droneSpawnTimer = 300 + Math.floor(Math.random() * 300); // carrier drone timer
             this.inVision = false;       // 有視界システム: プレイヤーの視野内フラグ
+            // センサー制約型AI: 探知中のみ更新される最終既知位置(+速度)。
+            // 接触を断つと古い予測のまま撃つ→ステルス/沈黙で回避できる (プレイヤーと対称)。
+            this.playerLastKnownPos = null; // {x, y, vx, vy}
+            this.contactFreshness = 0;      // 1.0=今フレーム探知, 喪失で減衰
         }
         if (isPlayer) {
             this.manualTarget = false;   // 手動ターゲット指定フラグ (自動ロックオン上書き防止)
@@ -1506,6 +1516,18 @@ class Ship {
                 }
             }
 
+            // センサー制約型: 探知中のみ最終既知位置を更新。喪失後は古い予測が凍結される。
+            if (playerSigDetected && player && player.hp > 0) {
+                this.playerLastKnownPos = {
+                    x: player.x, y: player.y,
+                    vx: player.x - (player.prevX ?? player.x),
+                    vy: player.y - (player.prevY ?? player.y)
+                };
+                this.contactFreshness = 1.0;
+            } else {
+                this.contactFreshness = Math.max(0, this.contactFreshness - 0.02);
+            }
+
             // 探知時: 状態遷移
             if (playerSigDetected && this.aiState !== 'combat') {
                 this.huntTarget = { x: player.x + (Math.random()-0.5)*300, y: player.y + (Math.random()-0.5)*300 };
@@ -1551,15 +1573,32 @@ class Ship {
                 const fireRange = 700 + gameState.sector * 25;
                 this.speed = Math.min(2.0, 0.9 + gameState.sector * 0.08);
 
-                if (distToPlayer < fireRange && this.fireCooldown <= 0 && player && player.hp > 0) {
-                    const ta = Math.atan2(player.y - this.y, player.x - this.x);
+                // センサー制約型照準: 実プレイヤーではなく「最終既知位置」へ撃つ。
+                // 接触が新しいほど速度ぶんリード外挿、喪失するほど古い点で凍結 → 移動/沈黙で外れる。
+                const lk = this.playerLastKnownPos;
+                const lead = this.contactFreshness * 40; // 鮮度に応じた外挿フレーム (最大40)
+                const aimX = lk ? lk.x + lk.vx * lead : (player ? player.x : this.x);
+                const aimY = lk ? lk.y + lk.vy * lead : (player ? player.y : this.y);
+                const distToBelief = Math.hypot(aimX - this.x, aimY - this.y);
+
+                if (distToBelief < fireRange && this.fireCooldown <= 0 && player && player.hp > 0) {
+                    const ta = Math.atan2(aimY - this.y, aimX - this.x);
                     let diff = ta - this.angle;
                     while (diff < -Math.PI) diff += Math.PI * 2;
                     while (diff > Math.PI) diff -= Math.PI * 2;
                     this.angle += diff * 0.1;
                     const wType = gameState.sector <= 2 ? 'kinetic' : (gameState.sector <= 4 ? 'missile' : 'beam');
                     this.weaponType = wType;
-                    projectiles.push(new Projectile(this.x, this.y, player, false, wType));
+                    // 信じている照準点に向けて発射。kinetic/missileは飛翔体の命中判定が
+                    // 実プレイヤーとのズレを自然に処理する。beamは即着弾のため、照準点が
+                    // 実プレイヤーに十分近い時だけ実弾化し、外れていれば空撃ち(無害)にする。
+                    const aimTarget = { x: aimX, y: aimY, hp: 1 };
+                    let projTarget = aimTarget;
+                    if (wType === 'beam') {
+                        const missDist = Math.hypot(player.x - aimX, player.y - aimY);
+                        projTarget = (missDist < player.radius * 2.2) ? player : aimTarget;
+                    }
+                    projectiles.push(new Projectile(this.x, this.y, projTarget, false, wType));
                     playSound('shoot');
                     this.fireCooldown = 150;
                     this.fireFlashTimer = 120;
@@ -1568,8 +1607,9 @@ class Ship {
                     effects.push({ x: this.x, y: this.y, r: 0, maxR: 200, a: 0.9, c: '#ff4d4d', type: 'circle' });
                     logMessage(`WARNING: 敵艦発砲 — ${sigLabel[wType]||''}シグネチャ捕捉。`, 'warning-msg');
                     this.postFireCooldown = 280;
-                } else if (distToPlayer > fireRange * 0.8 && player && player.hp > 0) {
-                    const ta = Math.atan2(player.y - this.y, player.x - this.x);
+                } else if (distToBelief > fireRange * 0.8) {
+                    // 信じている位置へ接近 (実プレイヤーではなく予測点を追う)
+                    const ta = Math.atan2(aimY - this.y, aimX - this.x);
                     let diff = ta - this.angle;
                     while (diff < -Math.PI) diff += Math.PI * 2;
                     while (diff > Math.PI) diff -= Math.PI * 2;
@@ -2349,6 +2389,7 @@ function generateSector() {
     dirSonarCooldown = 0;
     dirSonarVisual = null;
     dirSonarPendingFire = false;
+    passiveBearings = [];
     player = new Ship(MAP_CX, MAP_CY, true);
     player.generatorOutput = genAlloc.engine;
     enemies = []; structures = []; projectiles = []; effects = []; particles = []; debris = []; scrapDrops = [];
@@ -2851,21 +2892,113 @@ const sensorConfig = {
 // ============================================================
 function checkPassiveDetection() {
     passiveCheckTimer++;
-    if (passiveCheckTimer < 120) return;
+    if (passiveCheckTimer < 120) return; // 2秒ごとに1計測
     passiveCheckTimer = 0;
+    if (!player || player.hp <= 0) return;
 
     const sc = sensorConfig[currentSensor];
-    let detected = false;
-    enemies.forEach(e => {
-        if (e.hp <= 0) return;
-        if (sc.sig(e) > sc.threshold * 0.5) detected = true;
-    });
+    const thr = sc.threshold;
+    // スレットリング/敵探知モデルと対称な距離・ヒッグス減衰でシグネチャを評価。
+    const range = Math.max(effectiveRadarRange * 10, 8000);
+    // センサー配分 → 方位精度 (高いほど扇が鋭く・揺らぎが小さい)
+    const sensorPrec = 0.45 + (genAlloc.sensors / 100) * 0.55; // 0.45..1.0
 
-    if (detected) {
-        passiveAlertTimer = 180;
-        logMessage(`PASSIVE: 不明シグネチャを検知 ─ ${sc.label}放射源。位置・方向不明。`, 'warning-msg');
-        const ind = document.getElementById('passive-indicator');
-        if (ind) { ind.classList.add('alert'); setTimeout(() => ind.classList.remove('alert'), 3000); }
+    // 検知できた敵ごとに減衰後シグネチャと方位を集計
+    const contacts = [];
+    for (const e of enemies) {
+        if (e.hp <= 0) continue;
+        const dist = Math.hypot(e.x - player.x, e.y - player.y);
+        const hPath = getHiggsIntensity((e.x + player.x) / 2, (e.y + player.y) / 2);
+        const distAtten = Math.max(0, 1 - dist / range);
+        const sig = sc.sig(e) * distAtten * (1 - hPath * sc.higgsMod);
+        if (sig > thr * 0.5) {
+            contacts.push({ e, sig, angle: Math.atan2(e.y - player.y, e.x - player.x) });
+        }
+    }
+    if (contacts.length === 0) return;
+
+    // 強い順に最大2件だけ方位ウェッジ化 (画面を埋めない)
+    contacts.sort((a, b) => b.sig - a.sig);
+    const picks = contacts.slice(0, 2);
+
+    const colorRgb = sc.r; // 'r,g,b' 文字列
+    let strongestDeg = 0, strongestWidthDeg = 0, strongest = -1;
+    for (const c of picks) {
+        // 閾値超過分を 0..1 の確信度へ。センサー精度で更に補正。
+        const conf = Math.max(0, Math.min(1, (c.sig - thr * 0.5) / (1 - thr * 0.5)));
+        const quality = Math.min(1, conf * sensorPrec * 1.35);
+        // 強信号=狭い (約7°)、弱信号=広いボケ (約49°)
+        const halfWidth = 0.86 - quality * 0.74;
+        // 扇の中心を真方位から少しだけ揺らす (弱いほど大きくズレる)。
+        // ズレは halfWidth 内に収まるので、別位置からの2計測で交差が真値付近に絞れる。
+        const noise = (Math.random() - 0.5) * 2 * halfWidth * 0.55;
+        const angle = c.angle + noise;
+        passiveBearings.push({
+            ox: player.x, oy: player.y,
+            angle, halfWidth, range,
+            quality, color: colorRgb,
+            life: PASSIVE_BEARING_LIFE, maxLife: PASSIVE_BEARING_LIFE
+        });
+        if (c.sig > strongest) {
+            strongest = c.sig;
+            // コンパス方位 (0°=上/北, 時計回り) — ログ表示用
+            strongestDeg = Math.round((Math.atan2(c.e.x - player.x, -(c.e.y - player.y)) * 180 / Math.PI + 360) % 360);
+            strongestWidthDeg = Math.round(halfWidth * 180 / Math.PI);
+        }
+    }
+    // 上限超過分は古いものから破棄
+    while (passiveBearings.length > PASSIVE_BEARING_MAX) passiveBearings.shift();
+
+    passiveAlertTimer = 180;
+    logMessage(`PASSIVE: ${sc.label}放射源 ─ 方位 ${strongestDeg}° ±${strongestWidthDeg}°（移動して再計測→三角測量）`, 'warning-msg');
+    const ind = document.getElementById('passive-indicator');
+    if (ind) { ind.classList.add('alert'); setTimeout(() => ind.classList.remove('alert'), 3000); }
+}
+
+// パッシブ方位ウェッジ描画 (ワールド空間)。計測位置にアンカーした扇形をフェード表示。
+function drawPassiveBearings(ctx) {
+    if (passiveBearings.length === 0) return;
+    const invZoom = 1 / camera.zoom;
+    for (let i = passiveBearings.length - 1; i >= 0; i--) {
+        const b = passiveBearings[i];
+        b.life--;
+        if (b.life <= 0) { passiveBearings.splice(i, 1); continue; }
+        const lifeT = b.life / b.maxLife;        // 1→0
+        const a0 = b.angle - b.halfWidth;
+        const a1 = b.angle + b.halfWidth;
+        const R = b.range;
+        const col = b.color;
+        ctx.save();
+        // 扇形フィル (弱信号ほど広い半透明のボケ) — shadowBlur不使用(モバイル配慮)
+        ctx.globalAlpha = 0.10 * lifeT * (0.4 + b.quality * 0.6);
+        ctx.beginPath();
+        ctx.moveTo(b.ox, b.oy);
+        ctx.arc(b.ox, b.oy, R, a0, a1);
+        ctx.closePath();
+        ctx.fillStyle = `rgb(${col})`;
+        ctx.fill();
+        // 扇の両エッジ
+        ctx.globalAlpha = 0.45 * lifeT;
+        ctx.strokeStyle = `rgb(${col})`;
+        ctx.lineWidth = 1.2 * invZoom;
+        ctx.beginPath();
+        ctx.moveTo(b.ox, b.oy); ctx.lineTo(b.ox + Math.cos(a0) * R, b.oy + Math.sin(a0) * R);
+        ctx.moveTo(b.ox, b.oy); ctx.lineTo(b.ox + Math.cos(a1) * R, b.oy + Math.sin(a1) * R);
+        ctx.stroke();
+        // 中心方位線 (破線)
+        ctx.globalAlpha = 0.6 * lifeT;
+        ctx.setLineDash([14 * invZoom, 10 * invZoom]);
+        ctx.beginPath();
+        ctx.moveTo(b.ox, b.oy);
+        ctx.lineTo(b.ox + Math.cos(b.angle) * R, b.oy + Math.sin(b.angle) * R);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // 計測位置マーカー (小円) — 移動による三角測量の起点を可視化
+        ctx.globalAlpha = 0.5 * lifeT;
+        ctx.beginPath();
+        ctx.arc(b.ox, b.oy, 6 * invZoom, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
     }
 }
 
@@ -4585,6 +4718,9 @@ function gameLoop() {
             ctx.globalAlpha = 1;
             ctx.restore();
         }
+
+        // ── パッシブ方位ウェッジ (ワールド空間・三角測量用) ──
+        if (player && player.hp > 0) drawPassiveBearings(ctx);
 
         ctx.restore();
 
