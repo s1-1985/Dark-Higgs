@@ -80,6 +80,38 @@ const ENGINE_THRUST = {
 };
 
 // ============================================================
+// スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
+// 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
+// ============================================================
+const SPRITE_FILES = {
+    assault:    'assets/ship_assault.png',
+    stealth:    'assets/ship_stealth.png',
+    carrier:    'assets/ship_carrier.png',
+    e_corvette: 'assets/enemy_corvette.png',
+    e_fighter:  'assets/enemy_fighter.png',
+    e_destroyer:'assets/enemy_destroyer.png',
+    e_carrier:  'assets/enemy_carrier.png',
+    node_higgs: 'assets/node_higgs.png',
+    colony:     'assets/structure_colony.png',
+    derelict:   'assets/structure_derelict.png'
+};
+const SPRITES = {};
+for (const k in SPRITE_FILES) {
+    const img = new Image();
+    img.src = SPRITE_FILES[k];
+    SPRITES[k] = img;
+}
+// 敵タイプ → スプライトキー
+const ENEMY_SPRITE_KEY = { corvette: 'e_corvette', fighter: 'e_fighter', destroyer: 'e_destroyer', carrier: 'e_carrier' };
+function spriteReady(img) { return img && img.complete && img.naturalWidth > 0; }
+// 既に translate(x,y)+rotate(angle) 済みのコンテキストへ、中心合わせ・最長辺=targetLen で描画
+function drawSpriteCentered(ctx, img, targetLen) {
+    const iw = img.naturalWidth, ih = img.naturalHeight;
+    const s = targetLen / Math.max(iw, ih);
+    ctx.drawImage(img, -iw * s / 2, -ih * s / 2, iw * s, ih * s);
+}
+
+// ============================================================
 // マルチセンサーシステム (じゃんけん方式)
 // heat: 移動中の熱源検出  optic: 発砲フラッシュ検出  em: 潜伏中受動放射検出
 // ============================================================
@@ -1878,6 +1910,27 @@ class Ship {
         }
 
         if (this.isPlayer) {
+            // ── スプライト描画 (読み込めていればベクターより優先) ──
+            const _pstype = gameState.shipType || 'assault';
+            const _psprite = SPRITES[_pstype];
+            if (spriteReady(_psprite)) {
+                const ecp = ENGINE_THRUST[gameState.engineType] || ENGINE_THRUST.thermonuclear;
+                const tpz = 0.6 + Math.sin(Date.now() * 0.008) * 0.4;
+                const grr = this.radius * 2.8;
+                // エンジン種別の噴射グロー (船尾=-x 側に重ねる)
+                const tg = ctx.createRadialGradient(-grr * 0.95, 0, 0, -grr * 0.95, 0, grr * 0.75);
+                tg.addColorStop(0,   `rgba(${ecp.core},${0.8 * tpz * ecp.a})`);
+                tg.addColorStop(0.4, `rgba(${ecp.mid},${0.4 * tpz * ecp.a})`);
+                tg.addColorStop(1,   'rgba(0,10,40,0)');
+                ctx.fillStyle = tg;
+                ctx.beginPath();
+                ctx.ellipse(-grr * 0.95, 0, grr * 0.75, grr * 0.52, 0, 0, Math.PI * 2);
+                ctx.fill();
+                // ハルスプライト
+                drawSpriteCentered(ctx, _psprite, this.radius * 6.4);
+                ctx.restore();
+                return;
+            }
             const vr = this.radius * 2.8; // ビジュアルスケール (当たり判定はthis.radius)
             const thrPulse = 0.65 + Math.sin(Date.now() * 0.008) * 0.35;
             const stype = gameState.shipType || 'assault';
@@ -2213,6 +2266,21 @@ class Ship {
             ctx.globalAlpha = 1;
             }
         } else {
+            // ── 敵スプライト描画 (読み込めていればベクターより優先) ──
+            const _eskey = ENEMY_SPRITE_KEY[this.type] || 'e_corvette';
+            const _esprite = SPRITES[_eskey];
+            if (spriteReady(_esprite)) {
+                if (isFlashing) {
+                    const fg = ctx.createRadialGradient(0, 0, 0, 0, 0, this.radius * 3.5);
+                    fg.addColorStop(0, 'rgba(255,90,90,0.5)');
+                    fg.addColorStop(1, 'rgba(255,0,0,0)');
+                    ctx.fillStyle = fg;
+                    ctx.beginPath(); ctx.arc(0, 0, this.radius * 3.5, 0, Math.PI * 2); ctx.fill();
+                }
+                drawSpriteCentered(ctx, _esprite, this.radius * (isFlashing ? 6.2 : 5.6));
+                ctx.restore();
+                return;
+            }
             // 敵は発砲フラッシュ中は大きく赤く光る
             const r = isFlashing ? this.radius * 1.5 : this.radius;
             ctx.fillStyle = isFlashing ? '#ff8888' : '#ff4d4d';
