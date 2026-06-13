@@ -230,6 +230,8 @@ let debris = [];
 let bgStars = [];
 let bgMist = [];
 let spaceBgCanvas = null; // 事前生成の宇宙背景テクスチャ
+let _nebulaTile = null;   // シームレスな星雲タイル (スクリーン空間パララックス層用)
+const _NEB_TILE = 1024;   // 星雲タイルのピクセルサイズ
 let bgMistCanvas = null;  // bgMist事前焼き付けキャンバス
 let scrapDrops = [];
 let stations = [];
@@ -417,49 +419,9 @@ function generateSpaceBackground() {
     bc.fillStyle = bg;
     bc.fillRect(0, 0, TEX, TEX);
 
-    // 2. 大型星雲バンド (画像の乳白色天の川風)
-    const bands = [
-        { x: rng()*TEX, y: rng()*TEX, rx: 600+rng()*500, ry: 200+rng()*200,
-          rot: rng()*Math.PI, col: `${12+rng()*20|0},${100+rng()*80|0},${150+rng()*60|0}`, a: 0.18 },
-        { x: rng()*TEX, y: rng()*TEX, rx: 500+rng()*400, ry: 160+rng()*160,
-          rot: rng()*Math.PI, col: `${40+rng()*30|0},${60+rng()*60|0},${160+rng()*60|0}`,  a: 0.14 },
-        { x: rng()*TEX, y: rng()*TEX, rx: 400+rng()*400, ry: 180+rng()*150,
-          rot: rng()*Math.PI, col: `${60+rng()*40|0},${20+rng()*30|0},${140+rng()*60|0}`,  a: 0.12 },
-    ];
-    bands.forEach(b => {
-        bc.save();
-        bc.translate(b.x, b.y);
-        bc.rotate(b.rot);
-        bc.scale(1, b.ry / b.rx);
-        const g = bc.createRadialGradient(0, 0, 0, 0, 0, b.rx);
-        g.addColorStop(0,    `rgba(${b.col},${(b.a).toFixed(3)})`);
-        g.addColorStop(0.35, `rgba(${b.col},${(b.a*0.7).toFixed(3)})`);
-        g.addColorStop(0.7,  `rgba(${b.col},${(b.a*0.25).toFixed(3)})`);
-        g.addColorStop(1,    'rgba(0,0,0,0)');
-        bc.fillStyle = g;
-        bc.beginPath(); bc.arc(0, 0, b.rx, 0, Math.PI*2); bc.fill();
-        bc.restore();
-    });
-
-    // 3. 小型星雲クラスター
-    for (let i = 0; i < 18; i++) {
-        const x = rng()*TEX, y = rng()*TEX;
-        const r = 60 + rng()*180;
-        const palettes = [
-            `${10+rng()*20|0},${160+rng()*80|0},${200+rng()*55|0}`,   // teal-cyan
-            `${60+rng()*40|0},${20+rng()*30|0},${180+rng()*60|0}`,    // purple-blue
-            `${20+rng()*20|0},${80+rng()*60|0},${160+rng()*50|0}`,    // blue
-            `${0+rng()*15|0},${140+rng()*80|0},${160+rng()*60|0}`,    // deep teal
-        ];
-        const col = palettes[Math.floor(rng()*palettes.length)];
-        const a = 0.08 + rng()*0.16;
-        const g = bc.createRadialGradient(x, y, 0, x, y, r);
-        g.addColorStop(0,   `rgba(${col},${a})`);
-        g.addColorStop(0.5, `rgba(${col},${(a*0.5).toFixed(3)})`);
-        g.addColorStop(1,   'rgba(0,0,0,0)');
-        bc.fillStyle = g;
-        bc.beginPath(); bc.arc(x, y, r, 0, Math.PI*2); bc.fill();
-    }
+    // 星雲(ネビュラ)は49倍引き伸ばしでボケるため焼き込まない。
+    // → スクリーン空間パララックス層 (_drawNebula / シームレスタイル) へ分離。
+    _nebulaTile = null; // 背景再生成に合わせて星雲タイルも作り直す
 
     // 4. 星 (数千個、3種類)
     //  dim background stars
@@ -3824,6 +3786,55 @@ function _drawStarfield(ctx) {
     ctx.restore();
 }
 
+// シームレスな星雲タイルを生成 (透過背景・端ラップで継ぎ目なし)
+function _initNebulaTile() {
+    const T = _NEB_TILE;
+    const c = document.createElement('canvas');
+    c.width = T; c.height = T;
+    const b = c.getContext('2d');
+    let _s = (Math.random() * 0xffffffff) >>> 0;
+    const rng = () => { _s = (_s * 1664525 + 1013904223) >>> 0; return _s / 4294967296; };
+    const palettes = ['14,110,170', '50,60,180', '60,25,150', '12,150,180', '40,90,170'];
+    // 大小の柔らかい雲を配置。各ブロブを3x3オフセットで描いて端をシームレスにラップ。
+    const blobs = 16;
+    for (let i = 0; i < blobs; i++) {
+        const bx = rng() * T, by = rng() * T;
+        const r = 150 + rng() * 280;
+        const col = palettes[(rng() * palettes.length) | 0];
+        const a = 0.05 + rng() * 0.11;
+        for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) {
+            const cx = bx + ox * T, cy = by + oy * T;
+            if (cx < -r || cx > T + r || cy < -r || cy > T + r) continue;
+            const g = b.createRadialGradient(cx, cy, 0, cx, cy, r);
+            g.addColorStop(0,   `rgba(${col},${a})`);
+            g.addColorStop(0.5, `rgba(${col},${a * 0.5})`);
+            g.addColorStop(1,   `rgba(${col},0)`);
+            b.fillStyle = g;
+            b.fillRect(cx - r, cy - r, r * 2, r * 2);
+        }
+    }
+    _nebulaTile = c;
+}
+
+// 星雲をスクリーン空間のパララックス層として描画 (常にほぼ等倍=シャープ)
+function _drawNebula(ctx) {
+    if (!_nebulaTile) _initNebulaTile();
+    const W = cssW, H = cssH;
+    const pf = 0.05;                 // ごく遅いパララックス (遠景)
+    const TS = _NEB_TILE * 1.5;       // 大きめに敷いて繰り返しを目立たせない
+    ctx.save();
+    ctx.setTransform(_dpr, 0, 0, _dpr, 0, 0); // スクリーン空間(CSS px)
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    let ox = (-camera.x * camera.zoom * pf) % TS; if (ox > 0) ox -= TS;
+    let oy = (-camera.y * camera.zoom * pf) % TS; if (oy > 0) oy -= TS;
+    for (let ty = oy; ty < H; ty += TS) {
+        for (let tx = ox; tx < W; tx += TS) {
+            ctx.drawImage(_nebulaTile, tx, ty, TS, TS);
+        }
+    }
+    ctx.restore();
+}
+
 function drawBackground(ctx) {
     if (PERF_DISABLE_BG) {
         const vw = cssW / camera.zoom;
@@ -3841,6 +3852,7 @@ function drawBackground(ctx) {
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(spaceBgCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
+        _drawNebula(ctx);    // シャープな星雲パララックス層 (引き伸ばしボケ解消)
         _drawStarfield(ctx); // 鮮明なパララックス星層を重ねる
     } else {
         ctx.fillStyle = 'rgb(1,3,14)';
