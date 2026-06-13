@@ -193,6 +193,20 @@ let genAlloc = { engine: 40, weapons: 30, sensors: 30, ai: 50 };
 let autoAttackEnabled = true;
 
 // ============================================================
+// 生成アセット (Higgsfield / Nano Banana Pro) スプライト読み込み
+// 透過PNGを assets/ から非同期ロード。ロード完了まではベクター描画にフォールバック。
+// ============================================================
+const SPRITES = {};
+function loadSprite(key, src) {
+    const img = new Image();
+    img.onload = () => { SPRITES[key] = img; };
+    img.onerror = () => { /* 失敗時はフォールバック描画のまま */ };
+    img.src = src;
+}
+loadSprite('ship_assault', 'assets/ship_assault.png'); // 自機(攻撃型) 俯瞰・艦首+X
+loadSprite('node_higgs',   'assets/node_higgs.png');   // ヒッグスリソースノード
+
+// ============================================================
 // 有視界システム — アメーバ形状視野 + ヒッグス連続濃度連動
 // ============================================================
 const BASE_VISION_RADIUS = 1200; // 0%ヒッグス時の基準視野半径 (ワールド単位)
@@ -1847,6 +1861,17 @@ class Ship {
                 ctx.ellipse(-vr * 0.88, yo, vr * 0.48, vr * 0.13, 0, 0, Math.PI * 2);
                 ctx.fill();
             });
+
+            // ── 生成スプライト (Nano Banana Pro) があればハル描画を差し替え ──
+            // スラスター炎グローは上で描画済み(船体の後ろ)。スプライトをその上に重ねる。
+            if (SPRITES.ship_assault && SPRITES.ship_assault.naturalWidth) {
+                const img = SPRITES.ship_assault;
+                const dw = vr * 2.35;                                  // 全長(X方向)
+                const dh = dw * (img.naturalHeight / img.naturalWidth); // アスペクト維持
+                ctx.drawImage(img, -dw * 0.5, -dh * 0.5, dw, dh);
+                ctx.restore();
+                return;
+            }
 
             // ── エンジンポッド (船尾) ────────────────────────────
             ctx.fillStyle = '#3e4455';
@@ -4461,29 +4486,39 @@ function gameLoop() {
                 ctx.globalAlpha = brightness * 0.35;
                 ctx.strokeStyle = '#80e0ff'; ctx.lineWidth = 1.5 / camera.zoom;
                 ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.stroke();
-                // メインクリスタル六角形
-                ctx.globalAlpha = brightness;
-                ctx.fillStyle = '#50c8ff';
-                if (_blurEnabled) { ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = isHiggsSnsr ? 12 : 5; }
-                ctx.beginPath();
-                for (let i = 0; i < 6; i++) {
-                    const a = (i / 6) * Math.PI * 2;
-                    const px = Math.cos(a) * 16, py = Math.sin(a) * 16;
-                    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                if (SPRITES.node_higgs && SPRITES.node_higgs.naturalWidth) {
+                    // ── 生成スプライト (Nano Banana Pro) ──
+                    // brightness で可視性を変調 (HIGGSセンサー時/近接時のみ明瞭)
+                    const img = SPRITES.node_higgs;
+                    const dw = 56, dh = dw * (img.naturalHeight / img.naturalWidth);
+                    ctx.globalAlpha = brightness;
+                    ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+                    ctx.shadowBlur = 0;
+                } else {
+                    // メインクリスタル六角形 (フォールバック)
+                    ctx.globalAlpha = brightness;
+                    ctx.fillStyle = '#50c8ff';
+                    if (_blurEnabled) { ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = isHiggsSnsr ? 12 : 5; }
+                    ctx.beginPath();
+                    for (let i = 0; i < 6; i++) {
+                        const a = (i / 6) * Math.PI * 2;
+                        const px = Math.cos(a) * 16, py = Math.sin(a) * 16;
+                        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                    }
+                    ctx.closePath(); ctx.fill();
+                    // インナーコア (白)
+                    ctx.globalAlpha = brightness * 0.9;
+                    ctx.fillStyle = '#ffffff';
+                    if (_blurEnabled) ctx.shadowBlur = 4;
+                    ctx.beginPath();
+                    for (let i = 0; i < 6; i++) {
+                        const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+                        const px = Math.cos(a) * 7, py = Math.sin(a) * 7;
+                        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                    }
+                    ctx.closePath(); ctx.fill();
+                    ctx.shadowBlur = 0;
                 }
-                ctx.closePath(); ctx.fill();
-                // インナーコア (白)
-                ctx.globalAlpha = brightness * 0.9;
-                ctx.fillStyle = '#ffffff';
-                if (_blurEnabled) ctx.shadowBlur = 4;
-                ctx.beginPath();
-                for (let i = 0; i < 6; i++) {
-                    const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
-                    const px = Math.cos(a) * 7, py = Math.sin(a) * 7;
-                    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-                }
-                ctx.closePath(); ctx.fill();
-                ctx.shadowBlur = 0;
                 ctx.restore();
                 // Crystal name label (adaptive scale)
                 if (inRange || isHiggsSnsr) {
