@@ -440,21 +440,22 @@ function generateSpaceBackground() {
     const starCount = 1 + (rng() < 0.5 ? 1 : 0);
     for (let si = 0; si < starCount; si++) {
         const sx = 200 + rng()*(TEX-400), sy = 100 + rng()*(TEX-400);
-        const sr = 60 + rng()*100;
+        // 画面表示時に約5.5倍拡大されるためハローを小さく抑える (旧60-160→25-70)
+        const sr = 25 + rng()*45;
         // 紫〜赤〜白の後光
         const haloCol = rng() < 0.5 ? '180,80,200' : '200,60,100';
         const hg = bc.createRadialGradient(sx, sy, 0, sx, sy, sr);
-        hg.addColorStop(0,    `rgba(${haloCol},0.25)`);
-        hg.addColorStop(0.4,  `rgba(${haloCol},0.10)`);
-        hg.addColorStop(0.7,  `rgba(${haloCol},0.04)`);
+        hg.addColorStop(0,    `rgba(${haloCol},0.20)`);
+        hg.addColorStop(0.4,  `rgba(${haloCol},0.08)`);
+        hg.addColorStop(0.7,  `rgba(${haloCol},0.03)`);
         hg.addColorStop(1,    'rgba(0,0,0,0)');
         bc.fillStyle = hg; bc.beginPath(); bc.arc(sx, sy, sr, 0, Math.PI*2); bc.fill();
         // 白いコア
-        const cg = bc.createRadialGradient(sx, sy, 0, sx, sy, 12);
+        const cg = bc.createRadialGradient(sx, sy, 0, sx, sy, 6);
         cg.addColorStop(0,   'rgba(255,255,255,1)');
         cg.addColorStop(0.3, 'rgba(220,240,255,0.8)');
         cg.addColorStop(1,   'rgba(0,0,0,0)');
-        bc.fillStyle = cg; bc.beginPath(); bc.arc(sx, sy, 12, 0, Math.PI*2); bc.fill();
+        bc.fillStyle = cg; bc.beginPath(); bc.arc(sx, sy, 6, 0, Math.PI*2); bc.fill();
         // 光芒 (4本)
         for (let ray = 0; ray < 4; ray++) {
             const a = ray * Math.PI/2;
@@ -518,6 +519,17 @@ function findHidingSpot(nearX, nearY, searchRadius) {
 }
 
 // Resize
+// SIGキャンバスの内部解像度を表示サイズ×DPRに合わせる (波形を鮮明に)
+function _fitSigCanvas(c) {
+    if (!c) return;
+    const r = c.getBoundingClientRect();
+    if (r.width > 4 && r.height > 4) {
+        const dpr = Math.min(2, window.devicePixelRatio || 1);
+        const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
+        if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    }
+}
+
 function resizeCanvas() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
@@ -527,6 +539,8 @@ function resizeCanvas() {
         minimapCanvas.width = Math.floor(mmr.width);
         minimapCanvas.height = Math.floor(mmr.height);
     }
+    _fitSigCanvas(document.getElementById('sig-canvas'));
+    _fitSigCanvas(document.getElementById('env-sig-canvas'));
 }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
@@ -2397,10 +2411,11 @@ function generateSector() {
             else if (d >= 0.50) col = '0,200,240';
             else if (d >= 0.30) col = '20,120,160';
             else                col = '15,40,100';
-            const baseAlpha = d >= 0.85 ? 0.18 : d >= 0.70 ? 0.15 : d >= 0.50 ? 0.13 : d >= 0.30 ? 0.08 : 0.04 + d * 0.04;
+            // 30個の雲が重なると画面全体が白飛びするためアルファを抑制 (×0.55)
+            const baseAlpha = (d >= 0.85 ? 0.18 : d >= 0.70 ? 0.15 : d >= 0.50 ? 0.13 : d >= 0.30 ? 0.08 : 0.04 + d * 0.04) * 0.55;
             const sx = m.x * scale, sy = m.y * scale, sr = m.r * scale;
             const g = mx.createRadialGradient(sx, sy, 0, sx, sy, sr);
-            g.addColorStop(0,    `rgba(${col},${Math.min(0.60, baseAlpha * 2.5).toFixed(3)})`);
+            g.addColorStop(0,    `rgba(${col},${Math.min(0.35, baseAlpha * 2.5).toFixed(3)})`);
             g.addColorStop(0.25, `rgba(${col},${(baseAlpha * 1.2).toFixed(3)})`);
             g.addColorStop(0.60, `rgba(${col},${(baseAlpha * 0.45).toFixed(3)})`);
             g.addColorStop(1,    'rgba(0,0,0,0)');
@@ -3048,7 +3063,7 @@ function drawPassiveAntenna(ctx) {
         const _ringScreenR = Math.min(110, Math.max(55, 90));
         const BASE_R    = _ringScreenR / camera.zoom;
         const MAX_BULGE = (50 / camera.zoom);
-        const N_POINTS  = 18;  // 36→18: 視覚差なし、計算半減
+        const N_POINTS  = 28;  // 18は角ばりが目立った。28で滑らか・コスト微増のみ
         const idleBreath = Math.sin(tSec * 0.7) * (3 / camera.zoom);
         const _rot = tSec * 0.08; // ループ外で事前計算
 
@@ -3430,6 +3445,54 @@ minimapCanvas.addEventListener('touchmove', (e) => { e.preventDefault(); e.stopP
 minimapCanvas.addEventListener('touchend', () => { isMinimapDragging = false; });
 
 // Background grid system
+// ── パララックス・スターフィールド (スクリーン空間・事前焼き付けタイル) ──
+// 背景テクスチャの引き伸ばしボケを補う「常に鮮明な」星层。
+// 512pxタイル3層を起動時に1回生成し、毎フレームは drawImage 数回のみ。
+let _starTileLayers = null;
+const _STAR_TILE = 512;
+function _initStarTiles() {
+    _starTileLayers = [];
+    const defs = [
+        { n: 48, pf: 0.045, smin: 0.6, smax: 1.1, amin: 0.20, amax: 0.45 }, // 遠景
+        { n: 28, pf: 0.110, smin: 0.9, smax: 1.7, amin: 0.35, amax: 0.70 }, // 中景
+        { n: 12, pf: 0.240, smin: 1.4, smax: 2.6, amin: 0.55, amax: 1.00 }, // 近景
+    ];
+    for (const L of defs) {
+        const tile = document.createElement('canvas');
+        tile.width = tile.height = _STAR_TILE;
+        const tc = tile.getContext('2d');
+        for (let i = 0; i < L.n; i++) {
+            const v = Math.random();
+            tc.globalAlpha = L.amin + Math.random() * (L.amax - L.amin);
+            tc.fillStyle = v < 0.55 ? '#cdd9ff' : (v < 0.80 ? '#ffffff' : (v < 0.92 ? '#ffd9a8' : '#a8c8ff'));
+            const s = L.smin + Math.random() * (L.smax - L.smin);
+            tc.fillRect(Math.random() * _STAR_TILE, Math.random() * _STAR_TILE, s, s);
+        }
+        tc.globalAlpha = 1;
+        _starTileLayers.push({ pf: L.pf, tile });
+    }
+}
+
+function _drawStarfield(ctx) {
+    if (!_starTileLayers) _initStarTiles();
+    const W = canvas.width, H = canvas.height;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // スクリーン空間で描画
+    for (const L of _starTileLayers) {
+        // カメラ移動にパララックス係数を掛けてオフセット (mod でタイルラップ)
+        let ox = (-camera.x * camera.zoom * L.pf) % _STAR_TILE;
+        let oy = (-camera.y * camera.zoom * L.pf) % _STAR_TILE;
+        if (ox > 0) ox -= _STAR_TILE;
+        if (oy > 0) oy -= _STAR_TILE;
+        for (let ty = oy; ty < H; ty += _STAR_TILE) {
+            for (let tx = ox; tx < W; tx += _STAR_TILE) {
+                ctx.drawImage(L.tile, tx, ty);
+            }
+        }
+    }
+    ctx.restore();
+}
+
 function drawBackground(ctx) {
     if (PERF_DISABLE_BG) {
         const vw = canvas.width / camera.zoom;
@@ -3447,6 +3510,7 @@ function drawBackground(ctx) {
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(spaceBgCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
+        _drawStarfield(ctx); // 鮮明なパララックス星層を重ねる
     } else {
         ctx.fillStyle = 'rgb(1,3,14)';
         ctx.fillRect(cx, cy, vw, vh);
@@ -4522,7 +4586,7 @@ function gameLoop() {
         if (PERF_SHOW_FPS) {
             ctx.save();
             const _fpsColor = _fpsDisplay >= 50 ? '#00ff88' : (_fpsDisplay >= 30 ? '#ffaa00' : '#ff4444');
-            const _fpsX = 8, _fpsY = canvas.height - 195;
+            const _fpsX = 8, _fpsY = 150; // ミニマップ(40-140px)直下・コンソールに隠れない位置
             ctx.fillStyle = 'rgba(0,0,0,0.55)';
             ctx.fillRect(_fpsX - 2, _fpsY - 2, 58, 18);
             ctx.font = 'bold 11px monospace';
