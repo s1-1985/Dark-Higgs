@@ -70,6 +70,15 @@ const ENGINE_TYPES = {
     photon:        { speedMult: 1.4,  heatMult: 0.0,  optMult: 3.0,  emMult: 0.2,  higgsSpeedBonus: 0.0 }
 };
 
+// エンジン種別 → 噴射(スラスター)炎の色。core=中心の高温色, mid=外周色, a=全体アルファ。
+// ヒッグスは低アルファ=ほぼ不可視(目立たない推進)。MEMORY.md「エンジン噴射エフェクト色」準拠。
+const ENGINE_THRUST = {
+    thermonuclear: { core: '255,210,140', mid: '255,90,0',    a: 1.0  }, // オレンジ〜白熱
+    pulse:         { core: '180,150,255', mid: '70,90,255',   a: 1.0  }, // 青紫〜電気
+    higgs:         { core: '150,90,210',  mid: '40,0,90',     a: 0.4  }, // 暗紫〜ほぼ不可視
+    photon:        { core: '255,255,255', mid: '120,210,255', a: 1.0  }  // 純白〜青白
+};
+
 // ============================================================
 // マルチセンサーシステム (じゃんけん方式)
 // heat: 移動中の熱源検出  optic: 発砲フラッシュ検出  em: 潜伏中受動放射検出
@@ -1869,24 +1878,30 @@ class Ship {
         }
 
         if (this.isPlayer) {
+            const vr = this.radius * 2.8; // ビジュアルスケール (当たり判定はthis.radius)
+            const thrPulse = 0.65 + Math.sin(Date.now() * 0.008) * 0.35;
+            const stype = gameState.shipType || 'assault';
+            // エンジン種別 → 噴射色 (全艦種共通)
+            const ec = ENGINE_THRUST[gameState.engineType] || ENGINE_THRUST.thermonuclear;
+            // 噴射グロー描画ヘルパー: 中心(tx,ty)・長さlen・縦半径halfH
+            const drawThruster = (tx, ty, len, halfH) => {
+                const tg = ctx.createRadialGradient(tx, ty, 0, tx, ty, len);
+                tg.addColorStop(0,   `rgba(${ec.core},${0.95 * thrPulse * ec.a})`);
+                tg.addColorStop(0.3, `rgba(${ec.mid},${0.55 * thrPulse * ec.a})`);
+                tg.addColorStop(1,   'rgba(0,10,40,0)');
+                ctx.fillStyle = tg;
+                ctx.beginPath();
+                ctx.ellipse(tx, ty, len, halfH, 0, 0, Math.PI * 2);
+                ctx.fill();
+            };
+
+            if (stype === 'assault') {
             // ============================================================
             // 攻撃型戦艦 (俯瞰トップダウン)
             // ============================================================
-            const vr = this.radius * 2.8; // ビジュアルスケール (当たり判定はthis.radius)
-            const thrPulse = 0.65 + Math.sin(Date.now() * 0.008) * 0.35;
-
             // ── スラスター炎グロー (船体の後ろに描く) ──────────
             const thrOffsets = [-vr * 0.38, vr * 0.38];
-            thrOffsets.forEach(yo => {
-                const tg = ctx.createRadialGradient(-vr * 0.88, yo, 0, -vr * 0.88, yo, vr * 0.48);
-                tg.addColorStop(0,   `rgba(180,240,255,${(0.95 * thrPulse).toFixed(3)})`);
-                tg.addColorStop(0.3, `rgba(0,140,255,${(0.55 * thrPulse).toFixed(3)})`);
-                tg.addColorStop(1,   'rgba(0,10,50,0)');
-                ctx.fillStyle = tg;
-                ctx.beginPath();
-                ctx.ellipse(-vr * 0.88, yo, vr * 0.48, vr * 0.13, 0, 0, Math.PI * 2);
-                ctx.fill();
-            });
+            thrOffsets.forEach(yo => drawThruster(-vr * 0.88, yo, vr * 0.48, vr * 0.13));
 
             // ── エンジンポッド (船尾) ────────────────────────────
             ctx.fillStyle = '#3e4455';
@@ -2064,8 +2079,8 @@ class Ship {
                 ctx.fill(); ctx.stroke();
                 // ノズル内グロー
                 const nGrad = ctx.createRadialGradient(-vr * 0.84, yo, 0, -vr * 0.84, yo, vr * 0.07);
-                nGrad.addColorStop(0,  `rgba(140,210,255,${(0.9 * thrPulse).toFixed(3)})`);
-                nGrad.addColorStop(0.5,`rgba(0,80,200,${(0.4 * thrPulse).toFixed(3)})`);
+                nGrad.addColorStop(0,  `rgba(${ec.core},${0.9 * thrPulse * ec.a})`);
+                nGrad.addColorStop(0.5,`rgba(${ec.mid},${0.4 * thrPulse * ec.a})`);
                 nGrad.addColorStop(1,  'rgba(0,0,20,0)');
                 ctx.fillStyle = nGrad;
                 ctx.beginPath();
@@ -2102,6 +2117,101 @@ class Ship {
                 ctx.beginPath(); ctx.arc(l.x, l.y, 1.6, 0, Math.PI * 2); ctx.fill();
             });
             ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+
+            } else if (stype === 'stealth') {
+            // ============================================================
+            // 潜航型 (細く鋭いステルス艦・暗色・低被視認)
+            // ============================================================
+            const sr = vr * 0.95;
+            // 単一の絞られた噴射 (ヒッグスエンジンならほぼ不可視)
+            drawThruster(-sr * 0.86, 0, sr * 0.40, sr * 0.085);
+            // ── ハル (細長い鋭利な菱形) ──
+            const sg = ctx.createLinearGradient(-sr * 0.85, 0, sr * 1.2, 0);
+            sg.addColorStop(0,   '#161b24');
+            sg.addColorStop(0.5, '#28303e');
+            sg.addColorStop(1,   '#1b2230');
+            ctx.fillStyle = sg;
+            ctx.beginPath();
+            ctx.moveTo( sr * 1.20,  0);
+            ctx.lineTo( sr * 0.10, -sr * 0.14);
+            ctx.lineTo(-sr * 0.55, -sr * 0.16);
+            ctx.lineTo(-sr * 0.85,  0);
+            ctx.lineTo(-sr * 0.55,  sr * 0.16);
+            ctx.lineTo( sr * 0.10,  sr * 0.14);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = '#3a4760'; ctx.lineWidth = 0.8; ctx.stroke();
+            // 中央リッジ
+            ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 0.6;
+            ctx.beginPath(); ctx.moveTo(sr * 1.10, 0); ctx.lineTo(-sr * 0.80, 0); ctx.stroke();
+            // スウェプト翼 (薄く後退)
+            ctx.fillStyle = '#1d2530';
+            ctx.beginPath();
+            ctx.moveTo(-sr * 0.10, -sr * 0.13); ctx.lineTo(-sr * 0.50, -sr * 0.52);
+            ctx.lineTo(-sr * 0.62, -sr * 0.48); ctx.lineTo(-sr * 0.40, -sr * 0.14);
+            ctx.closePath(); ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(-sr * 0.10,  sr * 0.13); ctx.lineTo(-sr * 0.50,  sr * 0.52);
+            ctx.lineTo(-sr * 0.62,  sr * 0.48); ctx.lineTo(-sr * 0.40,  sr * 0.14);
+            ctx.closePath(); ctx.fill();
+            // パネルライン
+            ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 0.5;
+            ctx.beginPath(); ctx.moveTo(sr * 0.10, -sr * 0.14); ctx.lineTo(sr * 0.10, sr * 0.14); ctx.stroke();
+            // センサーアイ (控えめなシアン点滅)
+            const sPulse = 0.5 + Math.sin(Date.now() * 0.004) * 0.5;
+            ctx.globalAlpha = 0.45 + sPulse * 0.4;
+            ctx.fillStyle = '#00ffcc';
+            ctx.beginPath(); ctx.arc(sr * 0.55, 0, 1.4, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = 1;
+
+            } else {
+            // ============================================================
+            // 空母型 (横長フラットデッキ・ドローンベイ・低速重装)
+            // ============================================================
+            const cr = vr * 1.12;
+            // 3基のスラスター
+            [-cr * 0.34, 0, cr * 0.34].forEach(yo => drawThruster(-cr * 0.94, yo, cr * 0.38, cr * 0.10));
+            // ── ワイドハル ──
+            const cg = ctx.createLinearGradient(-cr * 0.95, 0, cr * 0.9, 0);
+            cg.addColorStop(0,   '#33414a');
+            cg.addColorStop(0.5, '#566571');
+            cg.addColorStop(1,   '#3e4a54');
+            ctx.fillStyle = cg;
+            ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 3;
+            ctx.beginPath();
+            ctx.moveTo( cr * 0.86,  0);
+            ctx.lineTo( cr * 0.50, -cr * 0.50);
+            ctx.lineTo(-cr * 0.55, -cr * 0.60);
+            ctx.lineTo(-cr * 0.92, -cr * 0.40);
+            ctx.lineTo(-cr * 0.92,  cr * 0.40);
+            ctx.lineTo(-cr * 0.55,  cr * 0.60);
+            ctx.lineTo( cr * 0.50,  cr * 0.50);
+            ctx.closePath();
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = '#6a7888'; ctx.lineWidth = 0.9; ctx.stroke();
+            // フライトデッキ (中央の暗いスロット)
+            ctx.fillStyle = 'rgba(0,0,0,0.55)';
+            ctx.beginPath(); ctx.rect(-cr * 0.80, -cr * 0.16, cr * 1.30, cr * 0.32); ctx.fill();
+            // デッキセンターライン
+            ctx.strokeStyle = 'rgba(120,200,255,0.5)'; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(-cr * 0.75, 0); ctx.lineTo(cr * 0.45, 0); ctx.stroke();
+            // ドローンベイ仕切り
+            ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 0.6;
+            [-cr * 0.40, -cr * 0.10, cr * 0.20].forEach(xf => {
+                ctx.beginPath(); ctx.moveTo(xf, -cr * 0.16); ctx.lineTo(xf, cr * 0.16); ctx.stroke();
+            });
+            // 艦橋ブロック (右舷)
+            ctx.fillStyle = '#404858'; ctx.strokeStyle = '#5a6475'; ctx.lineWidth = 0.7;
+            ctx.beginPath(); ctx.rect(cr * 0.22, -cr * 0.50, cr * 0.18, cr * 0.20); ctx.fill(); ctx.stroke();
+            // グリーンアクセントライト
+            const cPulse = 0.55 + Math.sin(Date.now() * 0.003) * 0.45;
+            ctx.fillStyle = '#30ff70'; ctx.globalAlpha = cPulse * 0.85;
+            [{ x: cr * 0.70, y: 0 }, { x: -cr * 0.50, y: -cr * 0.55 }, { x: -cr * 0.50, y: cr * 0.55 }].forEach(l => {
+                ctx.beginPath(); ctx.arc(l.x, l.y, 1.6, 0, Math.PI * 2); ctx.fill();
+            });
+            ctx.globalAlpha = 1;
+            }
         } else {
             // 敵は発砲フラッシュ中は大きく赤く光る
             const r = isFlashing ? this.radius * 1.5 : this.radius;
