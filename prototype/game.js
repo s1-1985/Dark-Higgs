@@ -198,9 +198,14 @@ let autoAttackEnabled = true;
 const BASE_VISION_RADIUS = 1200; // 0%ヒッグス時の基準視野半径 (ワールド単位)
 let playerVisionRadius = BASE_VISION_RADIUS;
 
+const MIN_VISION_FACTOR = 0.05; // 100%ヒッグスでも最低限の視認性を残す
 function computeVisionRadius() {
-    // 霧・視野制限を無効化 — 常にマップ全体が有視界
-    return FIELD_SIZE;
+    // ヒッグス連続濃度連動: 0% = 基準視野(100%), 濃度上昇に比例して縮小, 100%でほぼゼロ
+    if (!player) return BASE_VISION_RADIUS;
+    const h = getHiggsIntensity(player.x, player.y); // 0..1
+    let factor = 1 - h * (1 - MIN_VISION_FACTOR);
+    if (factor < MIN_VISION_FACTOR) factor = MIN_VISION_FACTOR;
+    return BASE_VISION_RADIUS * factor;
 }
 
 // アメーバ形状の頂点列を生成 (毎フレームアニメーション)
@@ -278,14 +283,18 @@ function drawFogOfWar(ctx) {
     ctx.fill();
 
     // ── 視野境界のグロウリング (微光) ──
+    // shadowBlur はモバイルGPUで重いため使用しない (LESSONS_LEARNED.md)。
+    // globalAlpha を変えた二重ストロークで擬似グロウを表現。
     ctx.beginPath();
     ctx.arc(cx, cy, playerVisionRadius, 0, Math.PI * 2);
-    ctx.strokeStyle = `rgba(0,255,180,${(0.08 + hHere * 0.04).toFixed(3)})`;
-    ctx.lineWidth = 2 / camera.zoom;
-    ctx.shadowColor = 'rgba(0,255,180,0.3)';
-    ctx.shadowBlur = 3;
+    ctx.strokeStyle = 'rgba(0,255,180,1)';
+    ctx.globalAlpha = 0.04 + hHere * 0.03;
+    ctx.lineWidth = 5 / camera.zoom;
     ctx.stroke();
-    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 0.10 + hHere * 0.05;
+    ctx.lineWidth = 2 / camera.zoom;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
 
     ctx.restore();
 }
@@ -294,6 +303,8 @@ function drawFogOfWar(ctx) {
 function updateVisionLockOn() {
     if (!player || player.hp <= 0) return;
 
+    // 視野半径をヒッグス濃度に応じて毎フレーム更新 (描画OFFでもロックオン判定が正しく動く)
+    playerVisionRadius = computeVisionRadius();
     const vr = playerVisionRadius;
     enemies.forEach(e => {
         if (e.hp <= 0) return;
@@ -4543,7 +4554,7 @@ function gameLoop() {
             ctx.fillText('RADAR', player.x + visionRingR + 6 / camera.zoom, player.y);
             ctx.globalAlpha = 1;
             ctx.restore();
-            // drawFogOfWar(ctx); // 視野制限を無効化
+            drawFogOfWar(ctx); // 有視界システム: アメーバ視野 + ヒッグス濃度連動の霧
         }
 
         // ── 武器射程サークルインジケータ + ラベル (ワールド空間) ──
