@@ -4,6 +4,9 @@ const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const minimapCanvas = document.getElementById('minimapCanvas');
 const minimapCtx = minimapCanvas.getContext('2d');
+// 高精細(Retina)対応: 描画はCSSピクセル基準、バッキングストアを devicePixelRatio 倍に。
+// レーダー/リング/文字のボケ防止。cssW/cssH=CSS px, _dpr=ピクセル比。
+let cssW = window.innerWidth, cssH = window.innerHeight, _dpr = 1;
 
 // ── パフォーマンスデバッグフラグ ──────────────────────────────
 const PERF_DISABLE_THREAT_RING = false;   // スレットリング描画をオフ
@@ -289,8 +292,8 @@ function drawFogOfWar(ctx) {
     const fogB = Math.round(14 + hHere * 32);
 
     // 描画範囲: カメラビュー + マージン
-    const vw = canvas.width  / camera.zoom;
-    const vh = canvas.height / camera.zoom;
+    const vw = cssW  / camera.zoom;
+    const vh = cssH / camera.zoom;
     const mx = camera.x - 500;
     const my = camera.y - 500;
     const mw = vw + 1000;
@@ -589,8 +592,14 @@ function _fitSigCanvas(c) {
 }
 
 function resizeCanvas() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    _dpr = Math.min(2, window.devicePixelRatio || 1);
+    cssW = window.innerWidth;
+    cssH = window.innerHeight;
+    // バッキングストアは物理ピクセル、CSS表示はCSSピクセル → 描画は毎フレーム _dpr 倍に
+    canvas.width = Math.round(cssW * _dpr);
+    canvas.height = Math.round(cssH * _dpr);
+    canvas.style.width = cssW + 'px';
+    canvas.style.height = cssH + 'px';
     // Fix minimap canvas resolution to match CSS display size
     const mmr = minimapCanvas.getBoundingClientRect();
     if (mmr.width > 0 && mmr.height > 0) {
@@ -619,8 +628,8 @@ function addShake(amt) {
 
 function clampCamera() {
     // マップの一部が画面内に残る程度まで自由にスクロール可能
-    const vw = (canvas.width || window.innerWidth) / camera.zoom;
-    const vh = (canvas.height || window.innerHeight) / camera.zoom;
+    const vw = (cssW || window.innerWidth) / camera.zoom;
+    const vh = (cssH || window.innerHeight) / camera.zoom;
     const minVisible = 400; // この分だけマップが画面内に残る (ワールド単位)
     camera.x = Math.max(minVisible - vw, Math.min(camera.x, FIELD_SIZE - minVisible));
     camera.y = Math.max(minVisible - vh, Math.min(camera.y, FIELD_SIZE - minVisible));
@@ -628,8 +637,8 @@ function clampCamera() {
 
 function centerCameraOnPlayer() {
     if (!player) return;
-    const cw = canvas.width || window.innerWidth;
-    const ch = canvas.height || window.innerHeight;
+    const cw = cssW || window.innerWidth;
+    const ch = cssH || window.innerHeight;
     camera.x = player.x - (cw / 2) / camera.zoom;
     camera.y = player.y - (ch / 2) / camera.zoom;
     clampCamera();
@@ -638,8 +647,8 @@ function centerCameraOnPlayer() {
 // スクリーン座標 → ワールド座標変換 (getBoundingClientRect でCSS/canvas解像度差を補正)
 function screenToWorld(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
-    const cx = (clientX - rect.left) * (canvas.width / rect.width);
-    const cy = (clientY - rect.top) * (canvas.height / rect.height);
+    const cx = (clientX - rect.left) * (cssW / rect.width);
+    const cy = (clientY - rect.top) * (cssH / rect.height);
     return { x: cx / camera.zoom + camera.x, y: cy / camera.zoom + camera.y };
 }
 function worldToScreen(wx, wy) {
@@ -652,8 +661,8 @@ function worldToScreen(wx, wy) {
 function dragDeltaWorld(dClientX, dClientY) {
     const rect = canvas.getBoundingClientRect();
     return {
-        dx: dClientX * (canvas.width / rect.width) / camera.zoom,
-        dy: dClientY * (canvas.height / rect.height) / camera.zoom
+        dx: dClientX * (cssW / rect.width) / camera.zoom,
+        dy: dClientY * (cssH / rect.height) / camera.zoom
     };
 }
 
@@ -3613,7 +3622,7 @@ function drawMinimap() {
 
     // Viewport
     minimapCtx.strokeStyle = 'rgba(255,255,0,0.5)'; minimapCtx.lineWidth = 1;
-    minimapCtx.strokeRect(camera.x * mmScale + offX, camera.y * mmScale + offY, (canvas.width / camera.zoom) * mmScale, (canvas.height / camera.zoom) * mmScale);
+    minimapCtx.strokeRect(camera.x * mmScale + offX, camera.y * mmScale + offY, (cssW / camera.zoom) * mmScale, (cssH / camera.zoom) * mmScale);
 
     // Structures (discovered: with icon, undiscovered: very faint)
     structures.forEach(st => {
@@ -3739,7 +3748,7 @@ function handleMinimapInteraction(e) {
     const offY = (mH - FIELD_SIZE * mmScale) / 2;
     const wX = (mapX - offX) / mmScale;
     const wY = (mapY - offY) / mmScale;
-    camera.x = wX - (canvas.width / 2 / camera.zoom); camera.y = wY - (canvas.height / 2 / camera.zoom);
+    camera.x = wX - (cssW / 2 / camera.zoom); camera.y = wY - (cssH / 2 / camera.zoom);
     clampCamera();
 }
 let isMinimapDragging = false;
@@ -3758,8 +3767,8 @@ function handleMinimapTouchInteraction(t) {
     const offY = (mH - FIELD_SIZE * mmScale) / 2;
     const wX = (mapX - offX) / mmScale;
     const wY = (mapY - offY) / mmScale;
-    camera.x = wX - (canvas.width / 2 / camera.zoom);
-    camera.y = wY - (canvas.height / 2 / camera.zoom);
+    camera.x = wX - (cssW / 2 / camera.zoom);
+    camera.y = wY - (cssH / 2 / camera.zoom);
     clampCamera();
 }
 minimapCanvas.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); isMinimapDragging = true; handleMinimapTouchInteraction(e.touches[0]); }, { passive: false });
@@ -3797,9 +3806,9 @@ function _initStarTiles() {
 
 function _drawStarfield(ctx) {
     if (!_starTileLayers) _initStarTiles();
-    const W = canvas.width, H = canvas.height;
+    const W = cssW, H = cssH;
     ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0); // スクリーン空間で描画
+    ctx.setTransform(_dpr, 0, 0, _dpr, 0, 0); // スクリーン空間(CSS px)で描画
     for (const L of _starTileLayers) {
         // カメラ移動にパララックス係数を掛けてオフセット (mod でタイルラップ)
         let ox = (-camera.x * camera.zoom * L.pf) % _STAR_TILE;
@@ -3817,14 +3826,14 @@ function _drawStarfield(ctx) {
 
 function drawBackground(ctx) {
     if (PERF_DISABLE_BG) {
-        const vw = canvas.width / camera.zoom;
-        const vh = canvas.height / camera.zoom;
+        const vw = cssW / camera.zoom;
+        const vh = cssH / camera.zoom;
         ctx.fillStyle = 'rgb(1,3,14)';
         ctx.fillRect(camera.x, camera.y, vw, vh);
         return;
     }
-    const vw = canvas.width / camera.zoom;
-    const vh = canvas.height / camera.zoom;
+    const vw = cssW / camera.zoom;
+    const vh = cssH / camera.zoom;
     const cx = camera.x, cy = camera.y;
 
     // 宇宙背景テクスチャ (事前生成、ゲーム毎に異なる星雲配置)
@@ -4361,7 +4370,7 @@ function drawHUDOverlay(ctx) {
         const dispY = e.contactLife > 0 ? e.displayY : e.y;
         const { sx: esx, sy: esy } = worldToScreen(dispX, dispY);
         // 画面外はスキップ
-        if (esx < -30 || esx > canvas.width + 30 || esy < -30 || esy > canvas.height + 30) return;
+        if (esx < -30 || esx > cssW + 30 || esy < -30 || esy > cssH + 30) return;
         const er = 9;
         const acc = e.contactAccuracy;
         const col = acc > 0.7 ? '#ff4d4d' : (acc > 0.4 ? '#ff8800' : '#aaaaaa');
@@ -4715,8 +4724,9 @@ function gameLoop() {
         // カメラ追従
         if (cameraFollowPlayer && player) centerCameraOnPlayer();
 
-        // Rendering
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // Rendering — ベース変換を _dpr 倍に固定 (高精細でくっきり)。以降の描画は全てCSS px基準。
+        ctx.setTransform(_dpr, 0, 0, _dpr, 0, 0);
+        ctx.clearRect(0, 0, cssW, cssH);
 
         ctx.save();
         ctx.scale(camera.zoom, camera.zoom);
@@ -4741,7 +4751,7 @@ function gameLoop() {
         const _blurEnabled = !PERF_DISABLE_SHADOW_BLUR && camera.zoom >= 0.12;
         // ビューポート境界 (ワールド座標)
         const _vpX = camera.x, _vpY = camera.y;
-        const _vpW = canvas.width / camera.zoom, _vpH = canvas.height / camera.zoom;
+        const _vpW = cssW / camera.zoom, _vpH = cssH / camera.zoom;
 
         // リソースノード描画 (全センサーで常時表示; HIGGSで最大輝度)
         if (player && player.hp > 0) {
