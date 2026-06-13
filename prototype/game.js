@@ -882,7 +882,25 @@ class Structure {
 
         // Adaptive icon scale: full size at zoom>=1, shrinks proportionally below
         const _iconS = Math.max(4, Math.min(28, camera.zoom * 28)) / (camera.zoom * 28);
-        if (this.type === 'colony') {
+        // スプライト優先 (読み込めていればベクターより優先)
+        const _ssp = SPRITES[this.type === 'colony' ? 'colony' : 'derelict'];
+        if (spriteReady(_ssp)) {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            if (this.type === 'colony') ctx.rotate(t * 0.00008); // 母船はごくゆっくり自転
+            if (this.hacked) {
+                // ハック済み: シアンのグローを背後に
+                ctx.globalAlpha = 0.35 + Math.sin(t * 0.004) * 0.2;
+                const hg = ctx.createRadialGradient(0, 0, 0, 0, 0, this.radius * 1.6);
+                hg.addColorStop(0, 'rgba(0,200,255,0.5)');
+                hg.addColorStop(1, 'rgba(0,170,255,0)');
+                ctx.fillStyle = hg;
+                ctx.beginPath(); ctx.arc(0, 0, this.radius * 1.6, 0, Math.PI * 2); ctx.fill();
+                ctx.globalAlpha = 1;
+            }
+            drawSpriteCentered(ctx, _ssp, this.radius * 2.6);
+            ctx.restore();
+        } else if (this.type === 'colony') {
             ctx.save();
             ctx.translate(this.x, this.y);
             ctx.scale(_iconS, _iconS);
@@ -4785,6 +4803,13 @@ function gameLoop() {
                 ctx.save();
                 ctx.translate(n.x, n.y);
                 ctx.rotate(spin);
+                const _nsp = SPRITES.node_higgs;
+                if (spriteReady(_nsp)) {
+                    // スプライト (被探知ステルス: brightnessでアルファ変調)
+                    ctx.globalAlpha = brightness;
+                    drawSpriteCentered(ctx, _nsp, 72);
+                    ctx.globalAlpha = 1;
+                } else {
                 // 外側グロー
                 ctx.globalAlpha = brightness * 0.5;
                 ctx.fillStyle = '#50c8ff';
@@ -4817,6 +4842,7 @@ function gameLoop() {
                 }
                 ctx.closePath(); ctx.fill();
                 ctx.shadowBlur = 0;
+                }
                 ctx.restore();
                 // Crystal name label (adaptive scale)
                 if (inRange || isHiggsSnsr) {
