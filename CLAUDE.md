@@ -15,8 +15,39 @@ HTML5 Canvas 2D / Vanilla JS プロトタイプ。最終ターゲット: Android
 prototype/
 ├── index.html    # UI レイアウト（Homeworld2スタイル、日本語）
 ├── game.js       # ゲームロジック全体（3200+行）
-└── style.css     # SF緑パレット（Orbitronフォント）
+├── style.css     # SF緑パレット（Orbitronフォント）
+└── assets/       # Nano Banana Pro 生成スプライト（透過PNG, 512px）
 ```
+
+## 直近セッション記録（2026-06-13）
+
+**ブランチ**: `claude/t01-implementation-start-dauj7q` / **PR #34**（Draft, 未マージ）
+
+### 実装済み（このセッション）
+1. **T01: 有視界システム** — 優先度#1完了
+   - `computeVisionRadius()`@game.js:201 をヒッグス濃度連動の実計算に（0%=基準1200, 100%でも最低5%視野=`MIN_VISION_FACTOR`）
+   - 以前は `FIELD_SIZE` 返し＋`drawFogOfWar` コメントアウトで**無効化**されていた（全敵が常時フルロックオン状態）→ 復活
+   - `updateVisionLockOn()` 冒頭で視野半径を毎フレーム更新／`shadowBlur`→`globalAlpha`二重ストロークに置換
+2. **生成スプライト表示システム** — `SPRITES` 非同期ローダー（game.js:198付近）
+   - `assets/*.png` を読み込み、未ロード/欠如時は**既存ベクター描画にフォールバック**
+   - 自機: `SPRITES['ship_'+gameState.shipType]`（assault/stealth/carrier）@game.js:1899
+   - 敵: `SPRITES['enemy_'+this.type]`（corvette/fighter/destroyer/carrier, fighter=ドローン）@game.js:2128。発砲フラッシュは放射グラデ赤グロー
+   - 建造物: `SPRITES['structure_'+this.type]`（colony/derelict）@game.js:893。ハック時lighter合成で青ティント
+   - ノード: `node_higgs` を brightness 変調表示
+   - **規約**: スプライトは俯瞰・**艦首+X（右向き）**で生成（`ctx.rotate(this.angle)`と一致）
+
+### アセット生成パイプライン（再現手順）
+- Higgsfield MCP `generate_image`（model=`nano_banana_pro`, 1:1, 2k）でトップダウン生成
+- **武器ワード（warship/missile/weapon等）は検閲で失敗** → spaceship/cruiser/turret module 等に言い換え
+- 背景透過: 当初MCP `remove_background`、途中から**承認ゲートで不可**に → ローカルPIL+scipy代替
+  - **境界フラッドフィル方式**: 端から連結した背景画素のみ透過（黒背景×黒艦体の誤消去を防止、内部暗部を保護）
+  - 背景色は4辺リングのmedianで自動検出（黒/白両対応）→ トリミング → 512px最適化
+
+### 残課題・申し送り
+- ⚠️ **実機スクショ検証は未実施**（コンテナにヘッドレスブラウザ無し）。GitHub Pages反映後、スプライト**表示サイズ係数**（自機`vr*2.35`/敵`r*2.8`/建造物`_sw`）を実機で微調整要
+- 未生成: 空母型**建設物4種**（砲台/ビームバリア/センサーブイ/ヒッグス散布）、**武器エフェクト**（ミサイル/ビーム/着弾）
+- Higgsfield MCP が承認ゲート状態（生成・bg除去とも不可）。解除後に追加生成可能
+
 
 ## Git ルール（厳守）
 
@@ -98,7 +129,7 @@ AI配分↑ → EM放射↑（EMセンサーで検知されやすくなる）。
 
 ## 実装優先度（MEMORY.md より）
 
-1. 有視界システム（アメーバ形状視野、ヒッグス連続濃度連動）
+1. ✅ 有視界システム（アメーバ形状視野、ヒッグス連続濃度連動）— **実装済(PR#34)**
 2. 自動ロックオン + 攻撃ON/OFF + 武器射程サークル
 3. 武器リロード・マガジン制度、GEN→発射レート係数
 4. UI大幅改善（コンパクトなボタン、大型オシロスコープ）
