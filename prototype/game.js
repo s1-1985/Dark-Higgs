@@ -222,6 +222,11 @@ let player;
 let gameLoopRunning = false;
 let _frameCount = 0;
 let _higgsCache = new Map(), _higgsCacheFrame = -1;
+// Phase2 地形ハザード (§3-13 D): デブリ帯 / 磁気嵐帯
+let debrisField = [], stormField = [];
+let debrisCanvas = null, stormCanvas = null;
+let _debrisCache = new Map(), _debrisCacheFrame = -1;
+let _stormCache  = new Map(), _stormCacheFrame  = -1;
 let enemies = [];
 let projectiles = [];
 let structures = [];
@@ -279,6 +284,17 @@ const MIN_VISION_FACTOR = 0.05; // 100%ヒッグスでも最低限の視認性�
 // 「自機の濃度だけで視界が決まる」非対称を解消し、濃い雲ポケットを真の隠れ場所にする。
 const HIGGS_CLEAR_BELOW = 0.22; // この濃度未満なら完全クリア視認 (完全ロック)
 const HIGGS_CLEAR_SPAN  = 0.55; // +0.55 (≈0.77) で完全に雲隠れ (clarity→0)
+
+// ── Phase2 地形ハザード (§3-13 D) tunable定数 ──
+// デブリ帯=岩礁帯(OPTIC干渉・移動/命中デバフ・ビーム貫通) / 磁気嵐帯(EM干渉・AI退避所)
+const DEBRIS_SLOW        = 0.40; // デブリ密度100%での最大移動減速率
+const DEBRIS_AI_MITIGATE = 0.70; // AI配分100%で減速を最大70%軽減 (姿勢制御補助)
+const DEBRIS_ENEMY_MITIGATE = 0.35; // 敵の固定デブリ軽減 (動けなくなるのを防ぐ)
+const STORM_MISSILE_DEGRADE = 0.7; // 磁気嵐内でのミサイル誘導(旋回)劣化率
+const DEBRIS_MISS        = 0.55; // デブリ内ターゲットへの実弾/ミサイル最大ミス率 (ビームは貫通=対象外)
+const DEBRIS_OPTIC_MOD   = 0.85; // デブリ経路による光学(OPTIC)探知の減衰係数
+const STORM_EM_MOD       = 0.90; // 磁気嵐経路によるEM探知の減衰係数
+const STORM_EM_MASK      = 0.65; // 磁気嵐内に居る機体のEMシグネチャ低減率 (AIを安全に回せる)
 function computeVisionRadius() {
     // ヒッグス連続濃度連動: 0% = 基準視野(100%), 濃度上昇に比例して縮小, 100%でほぼゼロ
     if (!player) return BASE_VISION_RADIUS;
@@ -550,6 +566,62 @@ function getHiggsIntensity(x, y) {
     v = total > 1.0 ? 1.0 : total;
     _higgsCache.set(key, v);
     return v;
+}
+
+// ============================================================
+// 地形ハザード強度計算 (デブリ帯 / 磁気嵐帯) — getHiggsIntensity と同方式
+// フレームキャッシュ + 500グリッド量子化 (毎フレーム・全エンティティで複数回呼ばれる)
+// ============================================================
+function getDebrisIntensity(x, y) {
+    if (_debrisCacheFrame !== _frameCount) { _debrisCache.clear(); _debrisCacheFrame = _frameCount; }
+    const key = (Math.round(x / 500) * 100000 + Math.round(y / 500)) | 0;
+    let v = _debrisCache.get(key);
+    if (v !== undefined) return v;
+    let total = 0;
+    for (let i = 0; i < debrisField.length; i++) {
+        const m = debrisField[i];
+        const dist = Math.hypot(x - m.x, y - m.y);
+        if (dist < m.r) total += (1 - dist / m.r) * m.density;
+    }
+    v = total > 1.0 ? 1.0 : total;
+    _debrisCache.set(key, v);
+    return v;
+}
+function getStormIntensity(x, y) {
+    if (_stormCacheFrame !== _frameCount) { _stormCache.clear(); _stormCacheFrame = _frameCount; }
+    const key = (Math.round(x / 500) * 100000 + Math.round(y / 500)) | 0;
+    let v = _stormCache.get(key);
+    if (v !== undefined) return v;
+    let total = 0;
+    for (let i = 0; i < stormField.length; i++) {
+        const m = stormField[i];
+        const dist = Math.hypot(x - m.x, y - m.y);
+        if (dist < m.r) total += (1 - dist / m.r) * m.density;
+    }
+    v = total > 1.0 ? 1.0 : total;
+    _stormCache.set(key, v);
+    return v;
+}
+
+// ============================================================
+// AIロックオン候補生成 (§3-3): センサー検知→AI解析の推定位置を
+// 確率%付き候補群で表現。精度が低いほど候補数が多く分散も大きい。
+// 候補は推定中心(displayX/Y)からのオフセット {dx,dy,p}。本命(index0)が支配的。
+// ============================================================
+function makeContactCandidates(acc) {
+    const n = Math.max(2, Math.round(2 + (1 - acc) * 4)); // acc 0.7→3, 0.2→5, 0→6
+    const spread = (1 - acc) * 360;
+    const cands = [{ dx: (Math.random() - 0.5) * spread * 0.25, dy: (Math.random() - 0.5) * spread * 0.25 }];
+    for (let i = 1; i < n; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const r = (0.45 + Math.random() * 0.55) * spread;
+        cands.push({ dx: Math.cos(a) * r, dy: Math.sin(a) * r });
+    }
+    // 確率割当: 本命=高精度ほど支配的 / 低精度ほど均等に近づく
+    const w = cands.map((c, i) => i === 0 ? (0.4 + acc * 0.5) : (0.15 + Math.random() * 0.35));
+    const sum = w.reduce((a, b) => a + b, 0);
+    cands.forEach((c, i) => { c.p = w[i] / sum; });
+    return cands;
 }
 
 // ヒッグス濃度の高い隠れ場所を探す (ジエンド戦スタイルAI用)
@@ -1171,7 +1243,9 @@ class Projectile {
             let diff = targetAngle - this.angle;
             while (diff < -Math.PI) diff += Math.PI * 2;
             while (diff > Math.PI) diff -= Math.PI * 2;
-            this.angle += diff * 0.05;
+            // 磁気嵐帯: EM誘導が乱れ旋回精度が落ちる (§3-13 D) → 嵐内のミサイルは外れやすい
+            const _missileTurn = 0.05 * (1 - getStormIntensity(this.x, this.y) * STORM_MISSILE_DEGRADE);
+            this.angle += diff * _missileTurn;
             // デコイに到達したらミサイルは消費される(無害化)
             if (this._luredBy && Math.hypot(this._luredBy.x - this.x, this._luredBy.y - this.y) < 40) {
                 createHitEffect(this.x, this.y, '#cc99ff');
@@ -1189,6 +1263,13 @@ class Projectile {
         const hitTarget = this.isPlayer ? enemies.find(e => Math.hypot(e.x - this.x, e.y - this.y) < e.radius * 1.5) : (Math.hypot(player.x - this.x, player.y - this.y) < player.radius * 1.5 ? player : null);
 
         if (hitTarget && hitTarget.hp > 0) {
+            // デブリ帯(岩礁帯): 遮蔽で実弾/ミサイルが外れやすい (ビームは貫通=Projectile生成時に即着弾でここを通らない)
+            const _debHit = getDebrisIntensity(hitTarget.x, hitTarget.y);
+            if (_debHit > 0 && Math.random() < _debHit * DEBRIS_MISS) {
+                this.active = false; // 岩片に阻まれ命中せず
+                createHitEffect(this.x, this.y, '#8a8a7a');
+                return;
+            }
             let dmgMult = this.isPlayer ? (1 + (gameState.upgrades.weapons * 0.15)) : 1;
             let preemptive = false;
             // 先制攻撃ボーナス: 2x damage on unaware enemies
@@ -1336,6 +1417,15 @@ class Ship {
 
     setTarget(tx, ty) { this.targetX = tx; this.targetY = ty; this.state = 'moving'; }
 
+    // デブリ帯(岩礁帯)による移動減速 (§3-13 D)。AI配分で姿勢制御補助=軽減 (プレイヤーのみ)。
+    terrainSpeedMult() {
+        const deb = getDebrisIntensity(this.x, this.y);
+        if (deb <= 0) return 1;
+        // AI配分で姿勢制御補助=軽減。自機はGEN AI配分、敵は固定の軽減(全く動けなくなるのを防ぐ)。
+        const aiMit = this.isPlayer ? (genAlloc.ai / 100) * DEBRIS_AI_MITIGATE : DEBRIS_ENEMY_MITIGATE;
+        return 1 - deb * DEBRIS_SLOW * (1 - aiMit);
+    }
+
     update() {
         if (this.hp <= 0) return;
         if (this.fireCooldown > 0) this.fireCooldown--;
@@ -1355,6 +1445,8 @@ class Ship {
             this.heatSig    = _isMoving ? Math.min(1, (_spd * 0.5 + _ep * 0.35) * _engType.heatMult) : 0;
             this.opticalSig = Math.min(1, (_spd * 0.04 + _photonBonus + (this.weaponType === 'beam' ? 0.6 : 0)) * Math.max(1, _engType.optMult));
             this.emSig      = Math.min(1, (genAlloc.sensors / 100 * 0.4 + genAlloc.ai / 100 * 0.35 + _pulseBonus) * _engType.emMult);
+            // 磁気嵐帯: 嵐がEM放射を覆い隠す → AIを安全に高配分できる退避所 (§3-13 D)
+            this.emSig     *= (1 - getStormIntensity(this.x, this.y) * STORM_EM_MASK);
             this.higgsSig   = Math.min(1, _spd * _hHere * 1.5 * (_engType.higgsSpeedBonus > 0 ? 1 : 0.3) + _higgsEngBonus);
 
             // 潜航型ジャミング: 発動中はEM放射が増し逆探知されやすい(情報↔露出のトレードオフ)。タイマー減衰もここで。
@@ -1373,7 +1465,7 @@ class Ship {
             const engType = ENGINE_TYPES[gameState.engineType] || ENGINE_TYPES.thermonuclear;
             const higgsHereEng = getHiggsIntensity(this.x, this.y);
             const higgsBonusSpeed = higgsHereEng * engType.higgsSpeedBonus;
-            this.speed = (genAlloc.engine / 100) * genGain * 3.0 * (speedMult[gameState.shipType] || 1.0) * higgsSlowdown * (UPGRADE_MULT[gameState.upgrades.engine] || 1.0) * engType.speedMult + higgsBonusSpeed;
+            this.speed = ((genAlloc.engine / 100) * genGain * 3.0 * (speedMult[gameState.shipType] || 1.0) * higgsSlowdown * (UPGRADE_MULT[gameState.upgrades.engine] || 1.0) * engType.speedMult + higgsBonusSpeed) * this.terrainSpeedMult();
 
             // 円形マップ境界検知
             if (Math.hypot(this.x - MAP_CX, this.y - MAP_CY) > MAP_RADIUS - 100 && !dialogOpen) {
@@ -1643,11 +1735,18 @@ class Ship {
             let domSig = null, domVal = 0; // 最も強く検知したシグネチャ種別 (行動推定用)
             if (player && player.hp > 0) {
                 const pSigs = { heat: player.heatSig||0, optic: player.opticalSig||0, em: player.emSig||0, higgs: player.higgsSig||0 };
+                const _mx = (player.x + this.x) / 2, _my = (player.y + this.y) / 2;
+                const _debrisPath = getDebrisIntensity(_mx, _my);
+                const _stormPath  = getStormIntensity(_mx, _my);
                 ['heat','optic','em','higgs'].forEach(sName => {
                     const sc2 = sensorConfig[sName];
-                    const higgsPath = getHiggsIntensity((player.x + this.x)/2, (player.y + this.y)/2);
+                    const higgsPath = getHiggsIntensity(_mx, _my);
                     const distAtten = Math.max(0, 1 - distToPlayer / (myDetectRange * 2.5 * sc2.rangeScale));
-                    const attenuated = pSigs[sName] * distAtten * (1 - higgsPath * sc2.higgsMod);
+                    // 地形ハザード: デブリ経路は光学を、磁気嵐経路はEMを減衰 (§3-13 D)
+                    let terrAtten = 1;
+                    if (sName === 'optic') terrAtten = 1 - _debrisPath * DEBRIS_OPTIC_MOD;
+                    else if (sName === 'em') terrAtten = 1 - _stormPath * STORM_EM_MOD;
+                    const attenuated = pSigs[sName] * distAtten * (1 - higgsPath * sc2.higgsMod) * terrAtten;
                     if (attenuated > sc2.threshold * 0.6) { playerSigDetected = true; detectedSigStrength = Math.max(detectedSigStrength, attenuated); }
                     if (attenuated > domVal) { domVal = attenuated; domSig = sName; }
                 });
@@ -1745,7 +1844,7 @@ class Ship {
             if (this.aiState === 'combat') {
                 this.lurking = false;
                 const fireRange = 700 + gameState.sector * 25;
-                this.speed = Math.min(2.0, 0.9 + gameState.sector * 0.08);
+                this.speed = Math.min(2.0, 0.9 + gameState.sector * 0.08) * this.terrainSpeedMult();
 
                 // センサー制約型照準: 実プレイヤーではなく「最終既知位置」へ撃つ。
                 // 接触が新しいほど速度ぶんリード外挿、喪失するほど古い点で凍結 → 移動/沈黙で外れる。
@@ -1815,7 +1914,7 @@ class Ship {
 
             } else if (this.aiState === 'hunting') {
                 this.lurking = false;
-                this.speed = Math.min(1.5, 0.8 + gameState.sector * 0.06);
+                this.speed = Math.min(1.5, 0.8 + gameState.sector * 0.06) * this.terrainSpeedMult();
                 if (this.huntTimer > 0) this.huntTimer--;
                 if (this.huntTarget) {
                     const dist = Math.hypot(this.huntTarget.x - this.x, this.huntTarget.y - this.y);
@@ -1835,7 +1934,7 @@ class Ship {
 
             } else if (this.aiState === 'gathering') {
                 this.lurking = false;
-                this.speed = Math.min(1.2, 0.7 + gameState.sector * 0.05);
+                this.speed = Math.min(1.2, 0.7 + gameState.sector * 0.05) * this.terrainSpeedMult();
                 // 最寄りノード探索
                 if (!this.gatherTarget || !this.gatherTarget.active) {
                     let closest = null, closestDist = Infinity;
@@ -2561,6 +2660,37 @@ class Ship {
                 ctx.fillText(`${Math.round(this.contactAccuracy * 100)}%`, dispX, dispY - uncertaintyR - 5);
                 ctx.restore();
                 ctx.globalAlpha = 1;
+
+                // AIロックオン候補マーカー (§3-3): 低〜中精度のセンサー推定時のみ。
+                // 本命含む複数候補を確率%付きで表示。プレイヤーは「どれが本物か」を推理する。
+                if (this.contactAccuracy < 0.7) {
+                    if (this._candAcc !== this.contactAccuracy || !this.candidates) {
+                        this._candAcc = this.contactAccuracy;
+                        this.candidates = makeContactCandidates(this.contactAccuracy);
+                    }
+                    ctx.save();
+                    ctx.globalAlpha = lifeA * 2.0;
+                    ctx.font = '8px Orbitron';
+                    ctx.textAlign = 'center';
+                    let bestP = 0;
+                    for (const c of this.candidates) if (c.p > bestP) bestP = c.p;
+                    for (const c of this.candidates) {
+                        const cxp = dispX + c.dx, cyp = dispY + c.dy;
+                        const dom = c.p === bestP; // 本命
+                        const cc = dom ? col : '160,160,170';
+                        const ms = dom ? 7 : 5;
+                        ctx.strokeStyle = `rgba(${cc},0.9)`;
+                        ctx.lineWidth = dom ? 1.5 : 1;
+                        ctx.beginPath();
+                        ctx.moveTo(cxp, cyp - ms); ctx.lineTo(cxp + ms, cyp);
+                        ctx.lineTo(cxp, cyp + ms); ctx.lineTo(cxp - ms, cyp);
+                        ctx.closePath(); ctx.stroke();
+                        ctx.fillStyle = `rgba(${cc},0.95)`;
+                        ctx.fillText(`${Math.round(c.p * 100)}%`, cxp, cyp - ms - 3);
+                    }
+                    ctx.restore();
+                    ctx.globalAlpha = 1;
+                }
             }
 
             // HP バー (発砲フラッシュ中 or 高精度コンタクト時)
@@ -2787,6 +2917,8 @@ function generateSector() {
     bgMist = [];
     bgMistCanvas = null;
     higgsCloudCanvas = null;
+    debrisField = []; stormField = [];
+    debrisCanvas = null; stormCanvas = null;
     // 星雲色: 紫・青・赤紫・緑青・琥珀 — より鮮やかな値
     const mistColors = ['70,20,140','25,60,160','130,20,70','10,90,110','80,50,10','15,110,80'];
     for (let i = 0; i < 30; i++) {
@@ -2797,6 +2929,22 @@ function generateSector() {
             color: mistColors[Math.floor(Math.random() * mistColors.length)],
             density,
             phase: Math.random() * Math.PI * 2
+        });
+    }
+    // デブリ帯 (岩礁帯): ヒッグスより薄く散在 (スピード感を損なわない程度=「程々」)
+    for (let i = 0; i < 10; i++) {
+        debrisField.push({
+            x: Math.random() * FIELD_SIZE, y: Math.random() * FIELD_SIZE,
+            r: Math.random() * 3500 + 1800,
+            density: Math.random() * 0.5 + 0.25
+        });
+    }
+    // 磁気嵐帯: さらに少なめ
+    for (let i = 0; i < 6; i++) {
+        stormField.push({
+            x: Math.random() * FIELD_SIZE, y: Math.random() * FIELD_SIZE,
+            r: Math.random() * 4000 + 2200,
+            density: Math.random() * 0.55 + 0.25
         });
     }
     // bgMistをオフスクリーンキャンバスに事前焼き付け (毎フレームのcreateRadialGradientを排除)
@@ -2844,6 +2992,51 @@ function generateSector() {
             wcx.beginPath(); wcx.arc(sx, sy, sr, 0, Math.PI * 2); wcx.fill();
         });
         higgsCloudCanvas = wc;
+
+        // ── デブリ帯 (岩礁帯) ベイク: 散らばった岩片の点描 (灰色) ──
+        const dc = document.createElement('canvas');
+        dc.width = dc.height = 768;
+        const dcx = dc.getContext('2d');
+        let _ds = 0x9e3779b9 >>> 0;
+        const drng = () => { _ds = (_ds * 1664525 + 1013904223) >>> 0; return _ds / 4294967296; };
+        debrisField.forEach(m => {
+            const sx = m.x * scale, sy = m.y * scale, sr = m.r * scale;
+            // 薄いベース(岩礁の影) + 岩片の点描
+            const g = dcx.createRadialGradient(sx, sy, 0, sx, sy, sr);
+            g.addColorStop(0, `rgba(120,118,110,${(0.10 * m.density).toFixed(3)})`);
+            g.addColorStop(1, 'rgba(0,0,0,0)');
+            dcx.fillStyle = g;
+            dcx.beginPath(); dcx.arc(sx, sy, sr, 0, Math.PI * 2); dcx.fill();
+            const rocks = Math.floor(sr * sr * 0.0016 * m.density); // 面積×密度
+            for (let k = 0; k < rocks; k++) {
+                const a = drng() * Math.PI * 2;
+                const rr = Math.sqrt(drng()) * sr;
+                const px = sx + Math.cos(a) * rr, py = sy + Math.sin(a) * rr;
+                const sz = 0.6 + drng() * 1.6;
+                const sh = 80 + (drng() * 70) | 0;
+                dcx.globalAlpha = 0.25 + drng() * 0.4;
+                dcx.fillStyle = `rgb(${sh},${sh - 4},${sh - 12})`;
+                dcx.fillRect(px, py, sz, sz);
+            }
+            dcx.globalAlpha = 1;
+        });
+        debrisCanvas = dc;
+
+        // ── 磁気嵐帯 ベイク: 紫〜シアンのEMノイズ雲 (描画時に明滅) ──
+        const sc2c = document.createElement('canvas');
+        sc2c.width = sc2c.height = 768;
+        const scx = sc2c.getContext('2d');
+        stormField.forEach(m => {
+            const sx = m.x * scale, sy = m.y * scale, sr = m.r * scale;
+            const a = 0.10 + m.density * 0.16;
+            const g = scx.createRadialGradient(sx, sy, 0, sx, sy, sr);
+            g.addColorStop(0,    `rgba(150,70,220,${a.toFixed(3)})`);
+            g.addColorStop(0.5,  `rgba(70,120,230,${(a * 0.5).toFixed(3)})`);
+            g.addColorStop(1,    'rgba(0,0,0,0)');
+            scx.fillStyle = g;
+            scx.beginPath(); scx.arc(sx, sy, sr, 0, Math.PI * 2); scx.fill();
+        });
+        stormCanvas = sc2c;
     }, 50);
 
     // 敵を円形マップ内のヒッグス濃度の高い場所に配置
@@ -3840,6 +4033,17 @@ function drawMinimap() {
         minimapCtx.drawImage(bgMistCanvas, offX, offY, FIELD_SIZE * mmScale, FIELD_SIZE * mmScale);
         minimapCtx.globalAlpha = 1;
     }
+    // 地形オーバーレイ: デブリ帯(灰)/磁気嵐帯(紫) — 退避先の把握用
+    if (debrisCanvas) {
+        minimapCtx.globalAlpha = 0.45;
+        minimapCtx.drawImage(debrisCanvas, offX, offY, FIELD_SIZE * mmScale, FIELD_SIZE * mmScale);
+        minimapCtx.globalAlpha = 1;
+    }
+    if (stormCanvas) {
+        minimapCtx.globalAlpha = 0.4;
+        minimapCtx.drawImage(stormCanvas, offX, offY, FIELD_SIZE * mmScale, FIELD_SIZE * mmScale);
+        minimapCtx.globalAlpha = 1;
+    }
 
     // Viewport
     minimapCtx.strokeStyle = 'rgba(255,255,0,0.5)'; minimapCtx.lineWidth = 1;
@@ -4190,6 +4394,19 @@ function drawBackground(ctx) {
         ctx.drawImage(bgMistCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
     }
 
+    // 地形層 (§3-13 D): デブリ帯=岩片の点描 / 磁気嵐帯=EMノイズ(明滅)
+    if (debrisCanvas) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(debrisCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
+    }
+    if (stormCanvas) {
+        ctx.save();
+        ctx.globalAlpha = 0.6 + Math.sin(Date.now() * 0.006) * 0.18; // EMノイズの明滅
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(stormCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
+        ctx.restore();
+    }
+
     // Sparse coordinate grid (large cells)
     const gridSize = 2000;
     const startX = Math.floor(cx / gridSize) * gridSize;
@@ -4485,6 +4702,11 @@ function updateEnvInfo() {
         higgsSpan.textContent = Math.round(intensity * 100) + '%';
         higgsSpan.className = intensity > 0.75 ? 'warning-text' : (intensity > 0.4 ? 'highlight-text' : '');
     }
+    // 地形ハザード密度 (§3-13 D)
+    const debrisSpan = document.getElementById('env-debris');
+    if (debrisSpan) debrisSpan.textContent = Math.round(getDebrisIntensity(player.x, player.y) * 100) + '%';
+    const stormSpan = document.getElementById('env-storm');
+    if (stormSpan) stormSpan.textContent = Math.round(getStormIntensity(player.x, player.y) * 100) + '%';
     if (radarSpan) {
         const sLv = gameState.upgrades.sensor;
         const omniR = Math.round(OMNI_SONAR_RANGE[sLv] * (genAlloc.sensors / 100) * genGain);

@@ -19,6 +19,21 @@
 - **設計意図**: 「ヒッグスの影響を受ける主体が自機だけ」問題の解消。薄い所に居て視界が広くても、濃い雲ポケットに隠れた敵はクリーンに撃てない。
 - **⚠️ 申し送り**: 実機未検証（コンテナにブラウザ無し、`node --check`のみ通過）。GitHub Pagesで①視野内の雲の白飛び具合②`'lighter'`合成のモバイル負荷（クリップ+768px drawImage 1枚追加）③ゲートのバランス（敵が雲に隠れた時の手応え）を要確認。全てtunable定数。次は Phase2（デブリ帯+磁気嵐帯）。
 
+#### §3-3 AIロックオン候補表示（同ブランチ・PR#44）
+- `makeContactCandidates(acc)`: コンタクト精度から確率%付き候補群 `{dx,dy,p}` を生成（候補数=2+(1-acc)*4、分散=(1-acc)*360、本命=index0が支配的）。
+- 描画: `Ship.draw` のコンタクト描画ブロックで `contactAccuracy<0.7` の非視野コンタクトに候補ダイヤモンド+%を表示。`_candAcc`で精度変化時のみ再生成（揺れ防止）。完全ロックでは非表示。
+- 信頼度は既存 `contactAccuracy` を流用（§3-2 AI精度スライダー導入時に連動可）。バランスを変えない追加的UI（auto-targetは従来通り実体を狙う）。
+
+#### Phase2 実装 — 地形ハザード2種（デブリ帯+磁気嵐帯）（同ブランチ・PR#44）
+TODO §3-13 D を段階導入の方針通り2種だけ実装:
+- **フィールド/描画**: `debrisField[]`(10) / `stormField[]`(6)。`getDebrisIntensity`/`getStormIntensity`(getHiggs同方式=フレームキャッシュ+500量子化)。`generateSector`の setTimeout 内で `debrisCanvas`(岩片点描・灰)/`stormCanvas`(紫青EMノイズ)をベイク。`drawBackground`で bgMist の後に描画(嵐は明滅)。
+- **デブリ効果**: `Ship.terrainSpeedMult()` で移動減速(自機/敵共通、自機のみAI配分で最大70%軽減=逃げ込み戦術)／実弾・ミサイルのミス率↑(`DEBRIS_MISS`、ビームは即着弾でこの判定を通らない=貫通)／敵の光学探知を経路減衰(`DEBRIS_OPTIC_MOD`)。
+- **磁気嵐効果**: 嵐内機体のEMシグネチャ低減(`STORM_EM_MASK`=AIを安全に回せる退避所)／敵のEM探知を経路減衰(`STORM_EM_MOD`)。
+- **UI**: 左パネルに `岩礁:xx% / EM嵐:xx%`(`env-debris`/`env-storm`)。
+- **創発**: デブリ帯=ビーム有利／ヒッグス帯=実弾有利、のじゃんけん。磁気嵐=AI退避所(EM∝AI法則の例外)。
+- **Phase2仕上げ（同コミット群）**: 敵側デブリAI軽減(`DEBRIS_ENEMY_MITIGATE=0.35`で全停止防止)／磁気嵐内ミサイル誘導劣化(`STORM_MISSILE_DEGRADE`で旋回精度↓)／ミニマップにデブリ(灰)・嵐(紫)オーバーレイ。
+- **⚠️ 申し送り**: 実機未検証。要確認=①地形3種重畳時の30fps維持(getHiggs/getDebris/getStorm が毎フレーム複数回)②デブリ減速+ミス率の手応え③嵐EMマスクの強さ。全数値tunable。残=熱雲/4種目(Phase3・実機計測ゲート)・デブリOPTIC専任化判断・アクティブソナーの嵐劣化。
+
 #### 実機フィードバック反映（同ブランチ・追撃修正）
 オーナーが実機スクショで指摘した問題を修正:
 1. **ゲームリングがヒッグスに隠れる→最前面化**: 描画順を「エンティティ→`drawFogOfWar`→スレットリング(`drawPassiveAntenna`)→RADARリング→武器射程リング→方位ウェッジ」に並べ替え。従来 `drawPassiveAntenna`(5169)とRADARリングが fog より**前**に描画され雲に埋もれていた（"索敵・射撃ができずゲームにならない"）。
