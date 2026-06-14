@@ -105,7 +105,14 @@ const SPRITE_FILES = {
     e_carrier:  'assets/enemy_carrier.png',
     node_higgs: 'assets/node_higgs.png',
     colony:     'assets/structure_colony.png',
-    derelict:   'assets/structure_derelict.png'
+    derelict:   'assets/structure_derelict.png',
+    // Higgsfield生成エフェクトスプライト (黒背景 → 'lighter'加算合成で黒=透明)
+    fx_explosion_big:   'assets/fx_explosion_big.png',
+    fx_explosion_small: 'assets/fx_explosion_small.png',
+    fx_kinetic_flash:   'assets/fx_kinetic_flash.png',
+    fx_beam_impact:     'assets/fx_beam_impact.png',
+    fx_thruster_jet:    'assets/fx_thruster_jet.png',
+    fx_missile_exhaust: 'assets/fx_missile_exhaust.png',
 };
 const SPRITES = {};
 for (const k in SPRITE_FILES) {
@@ -1289,6 +1296,11 @@ class Projectile {
                 const beamArmorRes = (!isPlayer && target === player) ? ARMOR_RES_BEAM[gameState.upgrades.armor] : 0;
                 target.hp -= 150 * higgsBeamPenalty * dmgScale * (1 - beamArmorRes);
                 createHitEffect(target.x, target.y, isPlayer ? '#00ffaa' : '#ff4d4d');
+                // ビーム着弾スプライトエフェクト
+                const _bfxImg = SPRITES['fx_beam_impact'];
+                if (spriteReady(_bfxImg)) {
+                    effects.push({ type: 'fx-sprite', x: target.x, y: target.y, img: _bfxImg, r: target.radius * 4.5, life: 1.0, decay: 0.045 });
+                }
                 effects.push({ x: this.x, y: this.y, tx: target.x, ty: target.y, type: 'beam', a: 1, c: isPlayer ? '#00ffaa' : '#ff4d4d' });
                 // ヒッグスダークチャネル: ビームがヒッグス雲を押し分けて通路を作る
                 // ヒッグスセンサーで軌跡として可視化される
@@ -1405,10 +1417,21 @@ class Projectile {
             this.active = false;
             createHitEffect(this.x, this.y, this.isPlayer ? '#ffaa00' : '#ff4d4d');
             addShake((this.dmg * dmgMult) / 10);
+            // kinetic着弾フラッシュスプライト
+            if (this.type === 'kinetic') {
+                const _kfxImg = SPRITES['fx_kinetic_flash'];
+                if (spriteReady(_kfxImg)) {
+                    effects.push({ type: 'fx-sprite', x: this.x, y: this.y, img: _kfxImg, r: 18, life: 1.0, decay: 0.10 });
+                }
+            }
             // §3-10 AI追跡型ミサイル: 着弾時に大閃光 (光学強) — HIGGSセンサー+OPTICで位置特定される
             if (this.type === 'missile' && this.missileMode === 'smart') {
                 effects.push({ x: this.x, y: this.y, r: 0, maxR: 550, a: 0.75, c: '#ffffff', type: 'circle' });
                 effects.push({ x: this.x, y: this.y, r: 0, maxR: 380, a: 0.65, c: '#aaddff', type: 'circle' });
+                const _sfxImg = SPRITES['fx_explosion_big'];
+                if (spriteReady(_sfxImg)) {
+                    effects.push({ type: 'fx-sprite', x: this.x, y: this.y, img: _sfxImg, r: 38, life: 1.0, decay: 0.020 });
+                }
             }
             if (preemptive) {
                 effects.push({ x: hitTarget.x, y: hitTarget.y - 30, text: `先制! x2 (${Math.floor(this.dmg * dmgMult)})`, life: 1.0, type: 'floatText', c: '#ffff00' });
@@ -1454,6 +1477,15 @@ class Projectile {
             ctx.moveTo(-6, -1.2); ctx.lineTo(-12, 0); ctx.lineTo(-6, 1.2);
             ctx.closePath(); ctx.fill();
             ctx.shadowBlur = 0;
+            // ミサイル噴射スプライト (加算合成)
+            const _mexImg = SPRITES['fx_missile_exhaust'];
+            if (spriteReady(_mexImg)) {
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.globalAlpha = 0.80;
+                ctx.drawImage(_mexImg, -28, -10, 20, 20);
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.globalAlpha = 1;
+            }
         }
         ctx.restore();
     }
@@ -2345,6 +2377,15 @@ class Ship {
                 ctx.beginPath();
                 ctx.ellipse(-grr * 0.95, 0, grr * 0.75, grr * 0.52, 0, 0, Math.PI * 2);
                 ctx.fill();
+                // スプライットスラスタージェット (加算合成)
+                const _thrImg = SPRITES['fx_thruster_jet'];
+                if (spriteReady(_thrImg)) {
+                    ctx.globalCompositeOperation = 'lighter';
+                    ctx.globalAlpha = tpz * ecp.a * 0.70;
+                    ctx.drawImage(_thrImg, -grr * 2.2, -grr * 0.85, grr * 1.9, grr * 1.7);
+                    ctx.globalCompositeOperation = 'source-over';
+                    ctx.globalAlpha = 1;
+                }
                 // ハルスプライト
                 drawSpriteCentered(ctx, _psprite, this.radius * 6.4);
                 ctx.restore();
@@ -2936,6 +2977,15 @@ function updateDrawDebrisParticles(ctx) {
 function createExplosion(x, y, color, size) {
     addShake(size * 0.5);
     playSound('explosion');
+    // スプライトベース爆発エフェクト (加算合成: 黒=透明)
+    const _exKey = size >= 20 ? 'fx_explosion_big' : 'fx_explosion_small';
+    const _exImg = SPRITES[_exKey];
+    if (spriteReady(_exImg)) {
+        effects.push({ type: 'fx-sprite', x, y, img: _exImg, r: size * 1.3, life: 1.0, decay: 0.024 });
+        if (size >= 20) {
+            effects.push({ type: 'fx-sprite', x, y, img: _exImg, r: size * 0.75, life: 0.85, decay: 0.038 });
+        }
+    }
     for (let j = 0; j < 8; j++) createHitEffect(x + (Math.random() - 0.5) * 30, y + (Math.random() - 0.5) * 30, color);
 
     if (size < 5 && Math.random() < 0.3) {
@@ -3019,6 +3069,19 @@ function updateDrawEffects(ctx) {
             ctx.lineWidth = 1; ctx.setLineDash([4,4]); ctx.stroke(); ctx.setLineDash([]);
             ctx.globalAlpha = 1;
             if (ef.life <= 0) effects.splice(i, 1);
+        } else if (ef.type === 'fx-sprite') {
+            // Higgsfieldスプライトエフェクト: 黒背景画像を'lighter'加算合成で描画 (黒=透明)
+            if (!spriteReady(ef.img)) { effects.splice(i, 1); continue; }
+            ef.life -= ef.decay || 0.025;
+            if (ef.life <= 0) { effects.splice(i, 1); continue; }
+            const _fxR = ef.r * (1 + (1 - ef.life) * 0.45);
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.globalAlpha = Math.min(1, ef.life * 1.6);
+            ctx.drawImage(ef.img, ef.x - _fxR, ef.y - _fxR, _fxR * 2, _fxR * 2);
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = 1;
+            ctx.restore();
         } else {
             ef.r += ef.type === 'hit' ? 2 : 3; ef.a -= ef.type === 'hit' ? 0.1 : 0.05;
             ctx.beginPath(); ctx.arc(ef.x, ef.y, ef.r, 0, Math.PI * 2);
