@@ -281,6 +281,15 @@ let decoys = [];
 const DECOY_LIFE = 480;        // 8秒
 const DECOY_LURE_RADIUS = 1600; // この半径内の敵ミサイルを誘引
 
+// ── 空母型ドローン4種 (§3-6) ──
+// 攻撃=自動追尾射撃(熱) / デコイ=ミサイル誘引(強EM) / 哨戒=センサー拡張(低シグ) / 建設=設置タレット
+let playerDrones = [];
+const DRONE_LIFE = 2400;        // 40秒で帰投(消滅)
+const DRONE_ATK_RANGE = 1400;   // 攻撃ドローンの索敵/射程
+const DRONE_SCOUT_RANGE = 2200; // 哨戒ドローンのセンサー拡張半径
+const DRONE_TURRET_RANGE = 1100;// 建設タレットの射程
+const DRONE_LABELS = { attack: '攻撃ドローン', decoy: 'デコイドローン', scout: '哨戒ドローン', build: '建設タレット' };
+
 // ============================================================
 // 有視界システム — アメーバ形状視野 + ヒッグス連続濃度連動
 // ============================================================
@@ -1246,9 +1255,11 @@ class Projectile {
         if (this.type === 'missile' && this.target && this.target.hp > 0) {
             // 敵ミサイルはデコイ(強EM)に誘引される: 近傍デコイがあれば本標的より優先して追尾
             let homeX = this.target.x, homeY = this.target.y;
-            if (!this.isPlayer && decoys.length) {
+            if (!this.isPlayer) {
                 let best = null, bestD = DECOY_LURE_RADIUS;
                 for (const d of decoys) { const dd = Math.hypot(d.x - this.x, d.y - this.y); if (dd < bestD) { bestD = dd; best = d; } }
+                // 空母デコイドローンも強EM源としてミサイルを誘引 (§3-6)
+                for (const dr of playerDrones) { if (dr.type !== 'decoy') continue; const dd = Math.hypot(dr.x - this.x, dr.y - this.y); if (dd < bestD) { bestD = dd; best = dr; } }
                 if (best) { homeX = best.x; homeY = best.y; this._luredBy = best; }
             }
             const targetAngle = Math.atan2(homeY - this.y, homeX - this.x);
@@ -2902,7 +2913,7 @@ function generateSector() {
     player = new Ship(MAP_CX, MAP_CY, true);
     player.generatorOutput = genAlloc.engine;
     enemies = []; structures = []; projectiles = []; effects = []; particles = []; debris = []; scrapDrops = [];
-    stations = []; higgsWakes = []; resourceNodes = [];
+    stations = []; higgsWakes = []; resourceNodes = []; decoys = []; playerDrones = [];
 
     // センサーLvによるレーダー基本範囲の反映
     RADAR_RANGE = BASE_RADAR_RANGE * UPGRADE_MULT[gameState.upgrades.sensor];
@@ -3134,6 +3145,8 @@ function startGame(shipType) {
     document.getElementById('ship-select-lobby').classList.add('hidden');
     // 潜航型専用ジャミングボタンの表示制御
     document.querySelectorAll('.jam-btn').forEach(b => { b.style.display = shipType === 'stealth' ? '' : 'none'; });
+    // 空母型専用ドローン展開ボタンの表示制御 (§3-6)
+    document.querySelectorAll('.drone-btn').forEach(b => { b.style.display = shipType === 'carrier' ? '' : 'none'; });
     // S&D進捗バーの表示制御
     const sdBar = document.getElementById('sd-progress-bar');
     if (sdBar) sdBar.style.display = gameState.mode === 'sd' ? 'block' : 'none';
@@ -3389,6 +3402,12 @@ document.getElementById('btn-decoy')?.addEventListener('click', () => {
     logMessage(`DECOY: 強EMデコイ射出 (${decoys.length}/${CARGO_CAP.stealth}) — 敵ミサイルを誘引`, 'system-msg');
     playSound('ui');
 });
+
+// ── 空母型ドローン展開ボタン (§3-6) ──
+document.getElementById('btn-drone-attack')?.addEventListener('click', () => deployDrone('attack'));
+document.getElementById('btn-drone-decoy')?.addEventListener('click', () => deployDrone('decoy'));
+document.getElementById('btn-drone-scout')?.addEventListener('click', () => deployDrone('scout'));
+document.getElementById('btn-drone-build')?.addEventListener('click', () => deployDrone('build'));
 
 // ── モバイルメニュー ──
 (function initMobileMenu() {
@@ -5187,6 +5206,106 @@ function drawDecoys(ctx) {
     ctx.globalAlpha = 1;
 }
 
+// ── 空母型ドローン (§3-6) ──
+class Drone {
+    constructor(type, x, y) {
+        this.type = type;
+        this.x = x; this.y = y;
+        this.angle = Math.random() * Math.PI * 2;
+        this.life = DRONE_LIFE;
+        this.hp = type === 'build' ? 400 : 150;
+        this.fireCD = 0;
+        this.speed = type === 'attack' ? 4.4 : (type === 'scout' ? 3.4 : 0);
+        if (type === 'decoy') { this.vx = Math.cos(this.angle) * 5; this.vy = Math.sin(this.angle) * 5; }
+    }
+    _nearestEnemy(range) {
+        let best = null, bd = range;
+        for (const e of enemies) { if (e.hp <= 0 || !e.visible) continue; const d = Math.hypot(e.x - this.x, e.y - this.y); if (d < bd) { bd = d; best = e; } }
+        return best;
+    }
+    update() {
+        this.life--;
+        if (this.fireCD > 0) this.fireCD--;
+        if (this.type === 'attack') {
+            const tgt = this._nearestEnemy(DRONE_ATK_RANGE * 1.6);
+            if (tgt) {
+                const a = Math.atan2(tgt.y - this.y, tgt.x - this.x);
+                this.angle += (((a - this.angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * 0.1;
+                const d = Math.hypot(tgt.x - this.x, tgt.y - this.y);
+                if (d > 650) { this.x += Math.cos(this.angle) * this.speed; this.y += Math.sin(this.angle) * this.speed; }
+                if (d < DRONE_ATK_RANGE && this.fireCD <= 0 && tgt.hp > 0) { projectiles.push(new Projectile(this.x, this.y, tgt, true, 'kinetic', 0.5)); this.fireCD = 42; }
+            } else if (player) { // 敵が居なければ自機周辺を護衛
+                const a = Math.atan2(player.y - this.y, player.x - this.x), d = Math.hypot(player.x - this.x, player.y - this.y);
+                if (d > 520) { this.angle = a; this.x += Math.cos(a) * this.speed; this.y += Math.sin(a) * this.speed; }
+            }
+        } else if (this.type === 'scout') {
+            // 自機の前方を周回しつつ近傍の敵を探知(コンタクト付与)=センサーの目耳を前進配置
+            if (player) {
+                const d = Math.hypot(player.x - this.x, player.y - this.y);
+                if (d > 2000) { const a = Math.atan2(player.y - this.y, player.x - this.x); this.x += Math.cos(a) * this.speed; this.y += Math.sin(a) * this.speed; }
+                else { this.angle += 0.018; this.x += Math.cos(this.angle) * 1.8; this.y += Math.sin(this.angle) * 1.8; }
+            }
+            for (const e of enemies) { if (e.hp <= 0) continue; if (Math.hypot(e.x - this.x, e.y - this.y) < DRONE_SCOUT_RANGE) applyContact(e, 0.85, 30); }
+        } else if (this.type === 'decoy') {
+            this.x += this.vx; this.y += this.vy; this.vx *= 0.985; this.vy *= 0.985;
+            if (this.life % 24 === 0) effects.push({ x: this.x, y: this.y, r: 0, maxR: 240, a: 0.4, c: '#cc99ff', type: 'circle' });
+        } else if (this.type === 'build') {
+            const tgt = this._nearestEnemy(DRONE_TURRET_RANGE);
+            if (tgt) { this.angle = Math.atan2(tgt.y - this.y, tgt.x - this.x); if (this.fireCD <= 0 && tgt.hp > 0) { projectiles.push(new Projectile(this.x, this.y, tgt, true, 'kinetic', 0.6)); this.fireCD = 55; } }
+        }
+    }
+    draw(ctx) {
+        const a = Math.min(1, this.life / 90);
+        ctx.save();
+        ctx.globalAlpha = a;
+        ctx.translate(this.x, this.y);
+        if (this.type === 'decoy') {
+            ctx.rotate(0);
+            ctx.fillStyle = '#cc99ff';
+            ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(6, 0); ctx.lineTo(0, 7); ctx.lineTo(-6, 0); ctx.closePath(); ctx.fill();
+            const pr = 10 + (Math.sin(Date.now() * 0.01 + this.x) * 0.5 + 0.5) * 8;
+            ctx.globalAlpha = a * 0.5; ctx.strokeStyle = '#aa66ff'; ctx.lineWidth = 1.4;
+            ctx.beginPath(); ctx.arc(0, 0, pr, 0, Math.PI * 2); ctx.stroke();
+        } else if (this.type === 'build') {
+            ctx.fillStyle = '#ffaa33';
+            ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.fill();
+            ctx.rotate(this.angle); ctx.fillStyle = '#ffcc66'; ctx.fillRect(0, -2, 12, 4); // 砲身
+            ctx.rotate(-this.angle);
+            ctx.globalAlpha = a * 0.3; ctx.strokeStyle = '#ffaa33'; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.arc(0, 0, DRONE_TURRET_RANGE * 0.04 + 9, 0, Math.PI * 2); ctx.stroke();
+        } else { // attack / scout
+            const col = this.type === 'attack' ? '#00ffaa' : '#66ccff';
+            ctx.rotate(this.angle);
+            ctx.fillStyle = col;
+            ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(-5, -4); ctx.lineTo(-3, 0); ctx.lineTo(-5, 4); ctx.closePath(); ctx.fill();
+            ctx.rotate(-this.angle);
+        }
+        ctx.globalAlpha = a; ctx.fillStyle = '#dffff5'; ctx.font = '7px Orbitron'; ctx.textAlign = 'center';
+        const tag = this.type === 'attack' ? 'ATK' : (this.type === 'decoy' ? 'DCY' : (this.type === 'scout' ? 'SCT' : 'TUR'));
+        ctx.fillText(tag, 0, -12);
+        ctx.restore();
+        ctx.globalAlpha = 1;
+    }
+}
+
+function deployDrone(type) {
+    if (!player || player.hp <= 0) return;
+    if (gameState.shipType !== 'carrier') { logMessage('DRONE: ドローンは空母型のみ展開可能', 'warning-msg'); return; }
+    if (playerDrones.length >= CARGO_CAP.carrier) { logMessage(`DRONE: 同時展開上限 (${CARGO_CAP.carrier}機) に到達`, 'warning-msg'); return; }
+    const ang = player.angle + (Math.random() - 0.5);
+    playerDrones.push(new Drone(type, player.x + Math.cos(ang) * 45, player.y + Math.sin(ang) * 45));
+    logMessage(`DRONE: ${DRONE_LABELS[type]} 展開 (${playerDrones.length}/${CARGO_CAP.carrier})`, 'system-msg');
+    playSound('ui');
+}
+function updatePlayerDrones() {
+    for (let i = playerDrones.length - 1; i >= 0; i--) {
+        const d = playerDrones[i];
+        d.update();
+        if (d.life <= 0 || d.hp <= 0) playerDrones.splice(i, 1);
+    }
+}
+function drawPlayerDrones(ctx) { for (const d of playerDrones) d.draw(ctx); }
+
 // FPS計測用
 let _fpsLastTime = 0, _fpsFrameCount = 0, _fpsDisplay = 0;
 
@@ -5340,6 +5459,7 @@ function gameLoop() {
         }
         enemies.forEach(e => e.update());
         updateDecoys();
+        updatePlayerDrones();
 
         // Scrap Collection
         for (let i = scrapDrops.length - 1; i >= 0; i--) {
@@ -5563,6 +5683,7 @@ function gameLoop() {
 
         projectiles.forEach(p => p.draw(ctx));
         drawDecoys(ctx);
+        drawPlayerDrones(ctx);
         updateDrawEffects(ctx);
         updateDrawDebrisParticles(ctx);
 
