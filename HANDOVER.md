@@ -19,6 +19,12 @@
 - **設計意図**: 「ヒッグスの影響を受ける主体が自機だけ」問題の解消。薄い所に居て視界が広くても、濃い雲ポケットに隠れた敵はクリーンに撃てない。
 - **⚠️ 申し送り**: 実機未検証（コンテナにブラウザ無し、`node --check`のみ通過）。GitHub Pagesで①視野内の雲の白飛び具合②`'lighter'`合成のモバイル負荷（クリップ+768px drawImage 1枚追加）③ゲートのバランス（敵が雲に隠れた時の手応え）を要確認。全てtunable定数。次は Phase2（デブリ帯+磁気嵐帯）。
 
+#### 空母型ドローン4種（新ブランチ `claude/carrier-drones-…`・§3-6）
+- `Drone`クラス＋`playerDrones[]`＋`deployDrone()`/`updatePlayerDrones()`/`drawPlayerDrones()`。carrier専用の4ボタン`.drone-btn`（D-ATK/D-DCY/D-SCT/D-BLD、`startGame`で表示制御）。
+- 攻撃=可視敵を自動追尾しkinetic(dmg×0.5) / デコイ=ミサイル誘引(missile homingに`playerDrones`のdecoyを追加) / 哨戒=`DRONE_SCOUT_RANGE`内の敵に`applyContact`(センサー前進) / 建設=固定タレット(自動射撃 dmg×0.6・§3-7最小実装)。
+- 上限`CARGO_CAP.carrier=6`、`DRONE_LIFE=2400`(40秒)。`generateSector`で`playerDrones`/`decoys`リセット。`?v=20260614f`。
+- **残**: ドローンの被弾/撃墜・ドローンのシグネチャを敵探知へ反映・§3-7正式建設フロー。
+
 #### マップモード（新ブランチ `claude/map-mode-…`）
 - **ミニマップのタップ**で全画面マップに切替（`toggleMapMode`）。ドラッグはカメラパン（移動量で判別）。
 - 実装: `mapMode`フラグ。`enterMapMode`=現カメラ保存→追従OFF→ズームをマップ全体にフィット→マップ中心へ。`exitMapMode`=カメラ復元。
