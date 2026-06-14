@@ -288,7 +288,21 @@ const DRONE_LIFE = 2400;        // 40秒で帰投(消滅)
 const DRONE_ATK_RANGE = 1400;   // 攻撃ドローンの索敵/射程
 const DRONE_SCOUT_RANGE = 2200; // 哨戒ドローンのセンサー拡張半径
 const DRONE_TURRET_RANGE = 1100;// 建設タレットの射程
-const DRONE_LABELS = { attack: '攻撃ドローン', decoy: 'デコイドローン', scout: '哨戒ドローン', build: '建設タレット' };
+const DRONE_LABELS = { attack: '攻撃ドローン', decoy: 'デコイドローン', scout: '哨戒ドローン', build: '建設タレット', barrier: 'ビームバリア', buoy: 'センサーブイ', higgs: 'ヒッグス散布装置' };
+
+// §3-7 建設物3種 (carrier) 定数
+const DRONE_BARRIER_RADIUS = 880; // バリア: この半径内の敵に周期ダメージ
+const DRONE_BUOY_RANGE     = 3200;// センサーブイ: 探知半径
+const DRONE_HIGGS_RADIUS   = 700; // ヒッグス散布: 影響半径
+const DRONE_BUILDING_LIFE  = 7200;// 建設物寿命 (2分)
+
+// §3-10 ミサイル2タイプ (homing=熱源誘導/smart=AI追跡)
+let missileMode = 'homing'; // 'homing' | 'smart'
+
+// §3-9 修復ドローン (完全停止HP回復)
+let repairActive = false;
+const REPAIR_RATE     = 1.2; // HP/frame
+const REPAIR_SIG_MULT = 2.4; // 停止中シグネチャ増大倍率
 
 // ============================================================
 // 有視界システム — アメーバ形状視野 + ヒッグス連続濃度連動
@@ -1219,7 +1233,11 @@ class Projectile {
             this.speed = 12; this.maxDist = 800; this.dmg = 15 * dmgScale;
             this.angle = Math.atan2(target.y - y, target.x - x);
         } else if (type === 'missile') {
-            this.speed = 6; this.maxDist = 1500; this.dmg = 50 * dmgScale;
+            // §3-10 ミサイル2タイプ: homing=熱源誘導 / smart=AI追跡(EM強・デコイ耐性・大閃光)
+            this.missileMode = isPlayer ? missileMode : 'homing';
+            this.speed = this.missileMode === 'smart' ? 7.5 : 6;
+            this.maxDist = this.missileMode === 'smart' ? 2200 : 1500;
+            this.dmg = (this.missileMode === 'smart' ? 65 : 50) * dmgScale;
             this.angle = Math.atan2(target.y - y, target.x - x);
         } else if (type === 'beam') {
             this.active = false;
@@ -1256,11 +1274,15 @@ class Projectile {
             // 敵ミサイルはデコイ(強EM)に誘引される: 近傍デコイがあれば本標的より優先して追尾
             let homeX = this.target.x, homeY = this.target.y;
             if (!this.isPlayer) {
-                let best = null, bestD = DECOY_LURE_RADIUS;
-                for (const d of decoys) { const dd = Math.hypot(d.x - this.x, d.y - this.y); if (dd < bestD) { bestD = dd; best = d; } }
-                // 空母デコイドローンも強EM源としてミサイルを誘引 (§3-6)
-                for (const dr of playerDrones) { if (dr.type !== 'decoy') continue; const dd = Math.hypot(dr.x - this.x, dr.y - this.y); if (dd < bestD) { bestD = dd; best = dr; } }
-                if (best) { homeX = best.x; homeY = best.y; this._luredBy = best; }
+                // §3-10 AI追跡型ミサイル: aiPrec('sensor')確率でデコイ誘引を無効化
+                const _smartResist = (this.missileMode === 'smart') ? aiPrec('sensor') * 0.9 : 0;
+                if (Math.random() >= _smartResist) {
+                    let best = null, bestD = DECOY_LURE_RADIUS;
+                    for (const d of decoys) { const dd = Math.hypot(d.x - this.x, d.y - this.y); if (dd < bestD) { bestD = dd; best = d; } }
+                    // 空母デコイドローンも強EM源としてミサイルを誘引 (§3-6)
+                    for (const dr of playerDrones) { if (dr.type !== 'decoy') continue; const dd = Math.hypot(dr.x - this.x, dr.y - this.y); if (dd < bestD) { bestD = dd; best = dr; } }
+                    if (best) { homeX = best.x; homeY = best.y; this._luredBy = best; }
+                }
             }
             const targetAngle = Math.atan2(homeY - this.y, homeX - this.x);
             let diff = targetAngle - this.angle;
@@ -1317,6 +1339,11 @@ class Projectile {
             this.active = false;
             createHitEffect(this.x, this.y, this.isPlayer ? '#ffaa00' : '#ff4d4d');
             addShake((this.dmg * dmgMult) / 10);
+            // §3-10 AI追跡型ミサイル: 着弾時に大閃光 (光学強) — HIGGSセンサー+OPTICで位置特定される
+            if (this.type === 'missile' && this.missileMode === 'smart') {
+                effects.push({ x: this.x, y: this.y, r: 0, maxR: 550, a: 0.75, c: '#ffffff', type: 'circle' });
+                effects.push({ x: this.x, y: this.y, r: 0, maxR: 380, a: 0.65, c: '#aaddff', type: 'circle' });
+            }
             if (preemptive) {
                 effects.push({ x: hitTarget.x, y: hitTarget.y - 30, text: `先制! x2 (${Math.floor(this.dmg * dmgMult)})`, life: 1.0, type: 'floatText', c: '#ffff00' });
             }
@@ -1506,6 +1533,27 @@ class Ship {
                 showDialog();
             }
 
+            // §3-9 修復モード: 完全停止 + HP回復 + シグネチャ増大
+            if (repairActive) {
+                const _maxHp = { assault: 3500, stealth: 700, carrier: 2500 }[gameState.shipType] || 1500;
+                this.hp = Math.min(_maxHp, this.hp + REPAIR_RATE);
+                // 停止中は全センサーに脆弱 (シグネチャ増大)
+                this.heatSig    = Math.min(1, this.heatSig    + 0.28 * REPAIR_SIG_MULT);
+                this.emSig      = Math.min(1, this.emSig      + 0.35 * REPAIR_SIG_MULT);
+                this.opticalSig = Math.min(1, this.opticalSig + 0.15 * REPAIR_SIG_MULT);
+                this.higgsSig   = Math.min(1, this.higgsSig   + 0.10 * REPAIR_SIG_MULT);
+                // 修復完了で自動解除
+                if (this.hp >= _maxHp) {
+                    repairActive = false;
+                    logMessage('REGEN: 修復完了 — 全システム正常', 'system-msg');
+                    const _rbl = document.getElementById('repair-drone-label');
+                    const _rbtn = document.getElementById('btn-repair-drone');
+                    if (_rbl) _rbl.textContent = 'REGEN';
+                    if (_rbtn) { _rbtn.style.borderColor = '#44bbff'; _rbtn.style.color = '#88ddff'; }
+                }
+                return; // 移動・発射をスキップ
+            }
+
             // 手動ターゲットが死亡したらフラグをリセット
             if (this.manualTarget && (!this.targetEntity || this.targetEntity.hp <= 0)) {
                 this.manualTarget = false;
@@ -1596,6 +1644,7 @@ class Ship {
                             const proj = new Projectile(this.x, this.y, this.targetEntity, true, wType, _lockDmg);
                             if (proj.dmg) proj.dmg *= (UPGRADE_MULT[gameState.upgrades.weapons] || 1.0);
                             projectiles.push(proj);
+                            if (missileMode === 'smart') logMessage('WEP: MISSILE [AI追跡] 発射 — EM強・ジャミング耐性・大閃光', 'system-msg');
                             playSound('shoot');
                             const weaponGenFactor = Math.max(0.3, 1.5 - (genAlloc.weapons / 100));
                             this.fireCooldown = WEAPON_COOLDOWNS[wType] * weaponGenFactor;
@@ -2639,6 +2688,15 @@ class Ship {
             ctx.moveTo(0, -cx2); ctx.lineTo(0, -cx1);
             ctx.moveTo(0,  cx2); ctx.lineTo(0,  cx1);
             ctx.strokeStyle = 'rgba(0,200,255,0.55)'; ctx.lineWidth = 1.2; ctx.stroke();
+            // §3-9 修復モード: 緑パルスリングで視覚フィードバック
+            if (repairActive) {
+                const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.007);
+                ctx.globalAlpha = 0.35 + 0.3 * pulse;
+                ctx.strokeStyle = '#00ff88'; ctx.lineWidth = 2.5;
+                ctx.beginPath(); ctx.arc(0, 0, vr2 * (1.35 + 0.18 * pulse), 0, Math.PI * 2); ctx.stroke();
+                ctx.globalAlpha = 0.15 + 0.1 * pulse;
+                ctx.beginPath(); ctx.arc(0, 0, vr2 * (1.65 + 0.22 * pulse), 0, Math.PI * 2); ctx.stroke();
+            }
         }
         ctx.restore();
         ctx.globalAlpha = 1;
@@ -3145,8 +3203,15 @@ function startGame(shipType) {
     document.getElementById('ship-select-lobby').classList.add('hidden');
     // 潜航型専用ジャミングボタンの表示制御
     document.querySelectorAll('.jam-btn').forEach(b => { b.style.display = shipType === 'stealth' ? '' : 'none'; });
-    // 空母型専用ドローン展開ボタンの表示制御 (§3-6)
+    // 空母型専用ドローン展開ボタンの表示制御 (§3-6/§3-7)
     document.querySelectorAll('.drone-btn').forEach(b => { b.style.display = shipType === 'carrier' ? '' : 'none'; });
+    // 全艦種共通ボタン (ミサイルモード・修復) — ゲーム開始後に表示
+    document.querySelectorAll('.common-btn').forEach(b => { b.style.display = ''; });
+    // 修復状態をリセット
+    repairActive = false;
+    missileMode = 'homing';
+    const _mml = document.getElementById('missile-mode-label'); if (_mml) _mml.textContent = 'MSL:HON';
+    const _rgl = document.getElementById('repair-drone-label'); if (_rgl) _rgl.textContent = 'REGEN';
     // S&D進捗バーの表示制御
     const sdBar = document.getElementById('sd-progress-bar');
     if (sdBar) sdBar.style.display = gameState.mode === 'sd' ? 'block' : 'none';
@@ -3408,6 +3473,39 @@ document.getElementById('btn-drone-attack')?.addEventListener('click', () => dep
 document.getElementById('btn-drone-decoy')?.addEventListener('click', () => deployDrone('decoy'));
 document.getElementById('btn-drone-scout')?.addEventListener('click', () => deployDrone('scout'));
 document.getElementById('btn-drone-build')?.addEventListener('click', () => deployDrone('build'));
+// §3-7 建設物3種
+document.getElementById('btn-drone-barrier')?.addEventListener('click', () => deployDrone('barrier'));
+document.getElementById('btn-drone-buoy')?.addEventListener('click', () => deployDrone('buoy'));
+document.getElementById('btn-drone-higgs')?.addEventListener('click', () => deployDrone('higgs'));
+
+// ── §3-10 ミサイルモード切替 ──
+document.getElementById('btn-missile-mode')?.addEventListener('click', () => {
+    missileMode = missileMode === 'homing' ? 'smart' : 'homing';
+    const lbl = document.getElementById('missile-mode-label');
+    if (lbl) lbl.textContent = missileMode === 'smart' ? 'MSL:AI' : 'MSL:HON';
+    const btn = document.getElementById('btn-missile-mode');
+    if (btn) { btn.style.borderColor = missileMode === 'smart' ? '#aaddff' : '#ffaa33'; btn.style.color = missileMode === 'smart' ? '#aaddff' : '#ffcc66'; }
+    logMessage(`WEP: ミサイルモード → ${missileMode === 'smart' ? 'AI追跡型 (EM強・ジャミング耐性・大閃光)' : '熱源誘導型 (デコイ妨害可)'}`, 'system-msg');
+    playSound('ui');
+});
+
+// ── §3-9 修復ドローン ──
+document.getElementById('btn-repair-drone')?.addEventListener('click', () => {
+    if (!player || player.hp <= 0) return;
+    repairActive = !repairActive;
+    const lbl = document.getElementById('repair-drone-label');
+    const btn = document.getElementById('btn-repair-drone');
+    if (repairActive) {
+        if (lbl) lbl.textContent = 'REGEN ON';
+        if (btn) { btn.style.borderColor = '#00ff88'; btn.style.color = '#00ff88'; }
+        logMessage('REGEN: 修復モード起動 — 完全停止・HP回復 (全センサー脆弱)', 'warning-msg');
+    } else {
+        if (lbl) lbl.textContent = 'REGEN';
+        if (btn) { btn.style.borderColor = '#44bbff'; btn.style.color = '#88ddff'; }
+        logMessage('REGEN: 修復モード解除 — 行動再開', 'system-msg');
+    }
+    playSound('ui');
+});
 
 // ── モバイルメニュー ──
 (function initMobileMenu() {
@@ -5212,11 +5310,13 @@ class Drone {
         this.type = type;
         this.x = x; this.y = y;
         this.angle = Math.random() * Math.PI * 2;
-        this.life = DRONE_LIFE;
-        this.hp = type === 'build' ? 400 : 150;
+        const isBuilding = type === 'barrier' || type === 'buoy' || type === 'higgs';
+        this.life = isBuilding ? DRONE_BUILDING_LIFE : DRONE_LIFE;
+        this.hp = (type === 'build' || isBuilding) ? 400 : 150;
         this.fireCD = 0;
         this.speed = type === 'attack' ? 4.4 : (type === 'scout' ? 3.4 : 0);
         if (type === 'decoy') { this.vx = Math.cos(this.angle) * 5; this.vy = Math.sin(this.angle) * 5; }
+        this._scanCD = 0; // buoy/higgs用スキャンタイマー
     }
     _nearestEnemy(range) {
         let best = null, bd = range;
@@ -5252,6 +5352,47 @@ class Drone {
         } else if (this.type === 'build') {
             const tgt = this._nearestEnemy(DRONE_TURRET_RANGE);
             if (tgt) { this.angle = Math.atan2(tgt.y - this.y, tgt.x - this.x); if (this.fireCD <= 0 && tgt.hp > 0) { projectiles.push(new Projectile(this.x, this.y, tgt, true, 'kinetic', 0.6)); this.fireCD = 55; } }
+        } else if (this.type === 'barrier') {
+            // §3-7 ビームバリア: 周囲の敵に周期ダメージ + EMシグネチャ放射 (位置バレ)
+            if (this.fireCD <= 0) {
+                let hit = 0;
+                for (const e of enemies) {
+                    if (e.hp <= 0) continue;
+                    if (Math.hypot(e.x - this.x, e.y - this.y) < DRONE_BARRIER_RADIUS) {
+                        e.hp -= 10;
+                        createHitEffect(e.x, e.y, '#4499ff');
+                        hit++;
+                    }
+                }
+                if (hit > 0) effects.push({ x: this.x, y: this.y, r: 0, maxR: DRONE_BARRIER_RADIUS * 0.06, a: 0.5, c: '#4499ff', type: 'circle' });
+                this.fireCD = 45;
+            }
+        } else if (this.type === 'buoy') {
+            // §3-7 センサーブイ: 広域スキャンで敵コンタクト付与 (EM放射 = 位置特定されやすい)
+            if (this._scanCD <= 0) {
+                let found = 0;
+                for (const e of enemies) {
+                    if (e.hp <= 0) continue;
+                    if (Math.hypot(e.x - this.x, e.y - this.y) < DRONE_BUOY_RANGE) {
+                        applyContact(e, 0.70, 90);
+                        found++;
+                    }
+                }
+                if (found > 0) effects.push({ x: this.x, y: this.y, r: 0, maxR: DRONE_BUOY_RANGE * 0.06, a: 0.4, c: '#44ccff', type: 'circle' });
+                this._scanCD = 150; // 2.5秒ごとにスキャン
+            }
+            if (this._scanCD > 0) this._scanCD--;
+        } else if (this.type === 'higgs') {
+            // §3-7 ヒッグス散布装置: 周囲にヒッグスウェイクを生成し局所濃度を高める
+            if (this._scanCD <= 0) {
+                for (let h = 0; h < 6; h++) {
+                    const ha = Math.random() * Math.PI * 2;
+                    const hr = Math.random() * DRONE_HIGGS_RADIUS;
+                    higgsWakes.push({ x: this.x + Math.cos(ha) * hr, y: this.y + Math.sin(ha) * hr, intensity: 0.55 + Math.random() * 0.3, life: 1.0 });
+                }
+                this._scanCD = 20;
+            }
+            if (this._scanCD > 0) this._scanCD--;
         }
     }
     draw(ctx) {
@@ -5273,6 +5414,35 @@ class Drone {
             ctx.rotate(-this.angle);
             ctx.globalAlpha = a * 0.3; ctx.strokeStyle = '#ffaa33'; ctx.lineWidth = 1;
             ctx.beginPath(); ctx.arc(0, 0, DRONE_TURRET_RANGE * 0.04 + 9, 0, Math.PI * 2); ctx.stroke();
+        } else if (this.type === 'barrier') {
+            // §3-7 ビームバリア: 六角形コア + 周期で光るバリアリング
+            ctx.strokeStyle = '#4499ff'; ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            for (let i = 0; i < 6; i++) { const ba = (i / 6) * Math.PI * 2; (i === 0 ? ctx.moveTo : ctx.lineTo).call(ctx, Math.cos(ba) * 8, Math.sin(ba) * 8); }
+            ctx.closePath(); ctx.stroke();
+            ctx.globalAlpha = a * (0.15 + 0.1 * Math.sin(Date.now() * 0.006));
+            ctx.strokeStyle = '#6699ff'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(0, 0, DRONE_BARRIER_RADIUS * 0.04 + 8, 0, Math.PI * 2); ctx.stroke();
+        } else if (this.type === 'buoy') {
+            // §3-7 センサーブイ: 中心点 + 同心スキャンリング
+            ctx.fillStyle = '#44ccff';
+            ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI * 2); ctx.fill();
+            const phase = (Date.now() % 2500) / 2500;
+            [0, 0.4, 0.7].forEach(off => {
+                const p2 = (phase + off) % 1;
+                ctx.globalAlpha = a * (1 - p2) * 0.45;
+                ctx.strokeStyle = '#44ccff'; ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.arc(0, 0, p2 * DRONE_BUOY_RANGE * 0.05 + 6, 0, Math.PI * 2); ctx.stroke();
+            });
+        } else if (this.type === 'higgs') {
+            // §3-7 ヒッグス散布装置: 白青のパルスコア
+            const hp2 = 0.5 + 0.5 * Math.sin(Date.now() * 0.008);
+            ctx.fillStyle = '#cce8ff';
+            ctx.globalAlpha = a * (0.5 + 0.4 * hp2);
+            ctx.beginPath(); ctx.arc(0, 0, 6 + hp2 * 3, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = a * 0.25;
+            ctx.strokeStyle = '#aaddff'; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.arc(0, 0, DRONE_HIGGS_RADIUS * 0.04 + 9, 0, Math.PI * 2); ctx.stroke();
         } else { // attack / scout
             const col = this.type === 'attack' ? '#00ffaa' : '#66ccff';
             ctx.rotate(this.angle);
@@ -5281,7 +5451,8 @@ class Drone {
             ctx.rotate(-this.angle);
         }
         ctx.globalAlpha = a; ctx.fillStyle = '#dffff5'; ctx.font = '7px Orbitron'; ctx.textAlign = 'center';
-        const tag = this.type === 'attack' ? 'ATK' : (this.type === 'decoy' ? 'DCY' : (this.type === 'scout' ? 'SCT' : 'TUR'));
+        const _tagMap = { attack: 'ATK', decoy: 'DCY', scout: 'SCT', build: 'TUR', barrier: 'BAR', buoy: 'BUY', higgs: 'HGS' };
+        const tag = _tagMap[this.type] || this.type.slice(0, 3).toUpperCase();
         ctx.fillText(tag, 0, -12);
         ctx.restore();
         ctx.globalAlpha = 1;
