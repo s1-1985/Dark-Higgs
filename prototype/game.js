@@ -1316,7 +1316,13 @@ class Ship {
             } else if (this.targetEntity && this.targetEntity.hp > 0) {
                 const dist = Math.hypot(this.targetEntity.x - this.x, this.targetEntity.y - this.y);
                 const wType = document.getElementById('weapon-select').value;
-                const wRange = wType === 'missile' ? 1300 : (wType === 'beam' ? 800 : 500);
+                // ロック種別: 視野内=完全ロック / 視野外でセンサーコンタクトのみ=想定ロック
+                const _fullLock = !!this.targetEntity.inVision;
+                const _hasContact = (this.targetEntity.contactLife > 0) || ((this.targetEntity.contactAccuracy || 0) > 0);
+                const _assumedLock = !_fullLock && _hasContact;
+                let wRange = wType === 'missile' ? 1300 : (wType === 'beam' ? 800 : 500);
+                // 想定ロック時、beamはヒッグスダークチャネル狙撃で長射程化 (設計: マップ端から狙撃可)
+                if (wType === 'beam' && _assumedLock) wRange = 8000;
 
                 let targetAngle = Math.atan2(this.targetEntity.y - this.y, this.targetEntity.x - this.x);
                 let diff = targetAngle - this.angle;
@@ -1330,9 +1336,7 @@ class Ship {
                 }
 
                 if (dist < wRange && this.fireCooldown <= 0) {
-                    // 想定ロックオン: 視野内(inVision)=完全ロック=フルダメージ。
-                    // 視野外でセンサーコンタクトのみ=想定ロック=精度依存のダメージデバフ。
-                    const _fullLock = !!this.targetEntity.inVision;
+                    // 想定ロックオン: 完全ロック=フルダメージ / 想定ロック=精度依存のダメージデバフ。
                     const _acc = _fullLock ? 1 : Math.max(0, Math.min(1, this.targetEntity.contactAccuracy || 0));
                     const _lockDmg = _fullLock ? 1 : (0.3 + 0.5 * _acc); // 想定=30〜80%
                     if (_fullLock !== this._fullLockPrev) {
@@ -1408,9 +1412,20 @@ class Ship {
                             // リロード中は発射しない
                         } else {
                             this.weaponType = wType;
-                            const proj = new Projectile(this.x, this.y, this.targetEntity, true, wType, _lockDmg);
-                            if (proj.dmg) proj.dmg *= (UPGRADE_MULT[gameState.upgrades.weapons] || 1.0);
-                            projectiles.push(proj);
+                            // 想定ロック長射程狙撃: 精度が低いほど推定位置を外す (命中ジッター)
+                            const _beamMiss = _assumedLock && (Math.random() < (1 - _acc) * 0.6);
+                            if (_beamMiss) {
+                                // 外れ: ジッター点へビーム描画 (ダメージなし)。発射で自位置は露出する
+                                const _jit = (1 - _acc) * 700 + 80;
+                                const _ex = this.targetEntity.x + (Math.random() - 0.5) * 2 * _jit;
+                                const _ey = this.targetEntity.y + (Math.random() - 0.5) * 2 * _jit;
+                                effects.push({ x: this.x, y: this.y, tx: _ex, ty: _ey, type: 'beam', a: 1, c: '#00ffaa' });
+                                logMessage('WEP: BEAM 想定射撃 — 推定位置を外れた (命中せず)', 'warning-msg');
+                            } else {
+                                const proj = new Projectile(this.x, this.y, this.targetEntity, true, wType, _lockDmg);
+                                if (proj.dmg) proj.dmg *= (UPGRADE_MULT[gameState.upgrades.weapons] || 1.0);
+                                projectiles.push(proj);
+                            }
                             playSound('shoot');
                             const weaponGenFactor = Math.max(0.3, 1.5 - (genAlloc.weapons / 100));
                             this.fireCooldown = WEAPON_COOLDOWNS[wType] * weaponGenFactor;
@@ -2363,6 +2378,31 @@ class Ship {
         }
         ctx.restore();
         ctx.globalAlpha = 1;
+
+        // ロックオン・レティクル: 完全ロック(視野内)=緑実線 / 想定ロック(センサー)=琥珀破線
+        if (!this.isPlayer && player && player.targetEntity === this && this.hp > 0) {
+            const lx = this.contactLife > 0 ? this.displayX : this.x;
+            const ly = this.contactLife > 0 ? this.displayY : this.y;
+            const lr = this.radius * 3.2 + 6;
+            const full = !!this.inVision;
+            ctx.save();
+            ctx.translate(lx, ly);
+            ctx.strokeStyle = full ? 'rgba(0,255,170,0.9)' : 'rgba(255,170,0,0.85)';
+            ctx.lineWidth = 1.6;
+            if (!full) ctx.setLineDash([6, 6]);
+            const b = lr * 0.55; // コーナーブラケットの腕の長さ
+            for (let q = 0; q < 4; q++) {
+                const sx = (q & 1) ? 1 : -1;
+                const sy = (q & 2) ? 1 : -1;
+                ctx.beginPath();
+                ctx.moveTo(sx * lr, sy * (lr - b));
+                ctx.lineTo(sx * lr, sy * lr);
+                ctx.lineTo(sx * (lr - b), sy * lr);
+                ctx.stroke();
+            }
+            ctx.setLineDash([]);
+            ctx.restore();
+        }
 
         if (!this.isPlayer && this.visible) {
             const dispX = this.contactLife > 0 ? this.displayX : this.x;
