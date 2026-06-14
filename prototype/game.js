@@ -1555,6 +1555,7 @@ class Ship {
 
             let playerSigDetected = false;
             let detectedSigStrength = 0;
+            let domSig = null, domVal = 0; // 最も強く検知したシグネチャ種別 (行動推定用)
             if (player && player.hp > 0) {
                 const pSigs = { heat: player.heatSig||0, optic: player.opticalSig||0, em: player.emSig||0, higgs: player.higgsSig||0 };
                 ['heat','optic','em','higgs'].forEach(sName => {
@@ -1563,6 +1564,7 @@ class Ship {
                     const distAtten = Math.max(0, 1 - distToPlayer / (myDetectRange * 2.5 * sc2.rangeScale));
                     const attenuated = pSigs[sName] * distAtten * (1 - higgsPath * sc2.higgsMod);
                     if (attenuated > sc2.threshold * 0.6) { playerSigDetected = true; detectedSigStrength = Math.max(detectedSigStrength, attenuated); }
+                    if (attenuated > domVal) { domVal = attenuated; domSig = sName; }
                 });
                 // 接近探知
                 if (distToPlayer < myDetectRange) {
@@ -1585,9 +1587,39 @@ class Ship {
                 this.contactFreshness = Math.max(0, this.contactFreshness - 0.02);
             }
 
+            // ──────────────────────────────────────
+            // センサー制約型 行動推定 (predictedBehavior): 全知禁止 — 検知シグネチャだけから
+            // プレイヤーの行動を推測し、状態別AIで適応戦略を取る。
+            // ──────────────────────────────────────
+            let pb = this.predictedBehavior || 'unknown';
+            if (playerSigDetected && player) {
+                const pm = { heat: player.heatSig||0, optic: player.opticalSig||0, em: player.emSig||0 };
+                // 最寄りアクティブノードがプレイヤー近傍か (EMスパイク+ノード近接=収集)
+                let nearNode = false;
+                for (const n of resourceNodes) { if (n.active && Math.hypot(n.x-player.x, n.y-player.y) < 650) { nearNode = true; this._predNode = n; break; } }
+                if (domSig === 'em' && nearNode)               pb = 'gathering';   // リソース収集 → 先回り
+                else if (pm.heat > 0.4 && pm.em > 0.4 && pm.optic < 0.3) pb = 'charging'; // ビームチャージ → 回避
+                else if (domSig === 'optic')                   pb = 'kinetic';     // 実弾多用 → アウトレンジ
+                else                                            pb = 'moving';
+            } else {
+                pb = 'silent'; // 無反応 → 潜伏とみなす
+            }
+            if (pb !== this.predictedBehavior) {
+                this.predictedBehavior = pb;
+                if (this.aiState === 'combat' || this.aiState === 'hunting') {
+                    const lbl = { gathering:'リソース収集を推定 — 先回り', charging:'ビームチャージを推定 — 回避運動', kinetic:'実弾戦を推定 — 距離を取り長射程へ', moving:'移動を捕捉', silent:'接触喪失 — 推定航路を捜索' };
+                    if (lbl[pb]) logMessage(`敵AI: ${lbl[pb]}`, 'system-msg');
+                }
+            }
+
             // 探知時: 状態遷移
             if (playerSigDetected && this.aiState !== 'combat') {
-                this.huntTarget = { x: player.x + (Math.random()-0.5)*300, y: player.y + (Math.random()-0.5)*300 };
+                // 適応: リソース収集を推定したらノードへ先回り (プレイヤー周辺ではなくノードを抑える)
+                if (this.predictedBehavior === 'gathering' && this._predNode && this._predNode.active) {
+                    this.huntTarget = { x: this._predNode.x, y: this._predNode.y };
+                } else {
+                    this.huntTarget = { x: player.x + (Math.random()-0.5)*300, y: player.y + (Math.random()-0.5)*300 };
+                }
                 this.huntTimer = 480 + Math.floor(detectedSigStrength * 300);
                 if (distToPlayer < 1800 || detectedSigStrength > 0.6) {
                     if (this.aiState !== 'combat') {
@@ -1644,7 +1676,9 @@ class Ship {
                     while (diff < -Math.PI) diff += Math.PI * 2;
                     while (diff > Math.PI) diff -= Math.PI * 2;
                     this.angle += diff * 0.1;
-                    const wType = gameState.sector <= 2 ? 'kinetic' : (gameState.sector <= 4 ? 'missile' : 'beam');
+                    let wType = gameState.sector <= 2 ? 'kinetic' : (gameState.sector <= 4 ? 'missile' : 'beam');
+                    // 適応: プレイヤーが実弾近接戦と推定されたら長射程へ切替 (アウトレンジ)
+                    if (this.predictedBehavior === 'kinetic' && wType === 'kinetic') wType = 'missile';
                     this.weaponType = wType;
                     // 信じている照準点に向けて発射。kinetic/missileは飛翔体の命中判定が
                     // 実プレイヤーとのズレを自然に処理する。beamは即着弾のため、照準点が
@@ -1664,15 +1698,27 @@ class Ship {
                     effects.push({ x: this.x, y: this.y, r: 0, maxR: 200, a: 0.9, c: '#ff4d4d', type: 'circle' });
                     logMessage(`WARNING: 敵艦発砲 — ${sigLabel[wType]||''}シグネチャ捕捉。`, 'warning-msg');
                     this.postFireCooldown = 280;
-                } else if (distToBelief > fireRange * 0.8) {
-                    // 信じている位置へ接近 (実プレイヤーではなく予測点を追う)
-                    const ta = Math.atan2(aimY - this.y, aimX - this.x);
-                    let diff = ta - this.angle;
-                    while (diff < -Math.PI) diff += Math.PI * 2;
-                    while (diff > Math.PI) diff -= Math.PI * 2;
-                    this.angle += diff * 0.05;
-                    this.x += Math.cos(this.angle) * this.speed;
-                    this.y += Math.sin(this.angle) * this.speed;
+                } else {
+                    // 適応移動: kinetic推定=距離を保つ(カイト) / charging推定=側方回避 / 他=予測点へ接近
+                    const pbv = this.predictedBehavior;
+                    const standoff = pbv === 'kinetic' ? fireRange * 1.15 : fireRange * 0.8;
+                    let moveAngle = Math.atan2(aimY - this.y, aimX - this.x);
+                    let doMove = false;
+                    if (distToBelief > standoff) { doMove = true; }                                  // 接近
+                    else if (pbv === 'kinetic' && distToBelief < fireRange * 0.85) { moveAngle += Math.PI; doMove = true; } // 離脱(カイト)
+                    if (pbv === 'charging') {                                                          // ビーム回避: 側方ストレイフ
+                        const dodgeDir = this._dodgeDir || (this._dodgeDir = (Math.random() < 0.5 ? 1 : -1));
+                        moveAngle += dodgeDir * (Math.PI / 2.5);
+                        doMove = true;
+                    }
+                    if (doMove) {
+                        let diff = moveAngle - this.angle;
+                        while (diff < -Math.PI) diff += Math.PI * 2;
+                        while (diff > Math.PI) diff -= Math.PI * 2;
+                        this.angle += diff * 0.05;
+                        this.x += Math.cos(this.angle) * this.speed;
+                        this.y += Math.sin(this.angle) * this.speed;
+                    }
                 }
                 // シグネチャ喪失 → lurking
                 if (!playerSigDetected) {
