@@ -233,6 +233,7 @@ let spaceBgCanvas = null; // 事前生成の宇宙背景テクスチャ
 let _nebulaTile = null;   // シームレスな星雲タイル (スクリーン空間パララックス層用)
 const _NEB_TILE = 1024;   // 星雲タイルのピクセルサイズ
 let bgMistCanvas = null;  // bgMist事前焼き付けキャンバス
+let higgsCloudCanvas = null; // ヒッグス雲(白)事前焼き付け — 視野内で「下から見上げた雲」として合成
 let scrapDrops = [];
 let stations = [];
 let higgsWakes = [];    // ヒッグスウェイク軌跡 {x, y, intensity, life}
@@ -270,6 +271,11 @@ const BASE_VISION_RADIUS = 1200; // 0%ヒッグス時の基準視野半径 (ワ�
 let playerVisionRadius = BASE_VISION_RADIUS;
 
 const MIN_VISION_FACTOR = 0.05; // 100%ヒッグスでも最低限の視認性を残す
+// ── ターゲットローカル濃度ゲート (§3-13 C) ──
+// 視野リーチ内でも、敵が居る地点のヒッグス濃度が高ければ完全ロックにならず想定ロック止まりにする。
+// 「自機の濃度だけで視界が決まる」非対称を解消し、濃い雲ポケットを真の隠れ場所にする。
+const HIGGS_CLEAR_BELOW = 0.22; // この濃度未満なら完全クリア視認 (完全ロック)
+const HIGGS_CLEAR_SPAN  = 0.55; // +0.55 (≈0.77) で完全に雲隠れ (clarity→0)
 function computeVisionRadius() {
     // ヒッグス連続濃度連動: 0% = 基準視野(100%), 濃度上昇に比例して縮小, 100%でほぼゼロ
     if (!player) return BASE_VISION_RADIUS;
@@ -368,6 +374,26 @@ function drawFogOfWar(ctx) {
     ctx.globalAlpha = 1;
 
     ctx.restore();
+
+    // ── 視野内のヒッグス雲を「下から見上げた濃淡」で重ねる (§3-13 B) ──
+    // 視野バブル内にクリップし、白い雲を 'lighter' 合成。濃密ポケットは真っ白に近づき、
+    // 自機の濃度が低く視界が広くても、視界内の濃い箇所は曇って見えづらくなる。
+    if (higgsCloudCanvas) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo((pts[NUM_PTS - 1].x + pts[0].x) / 2, (pts[NUM_PTS - 1].y + pts[0].y) / 2);
+        for (let i = 0; i < NUM_PTS; i++) {
+            const next = pts[(i + 1) % NUM_PTS];
+            ctx.quadraticCurveTo(pts[i].x, pts[i].y, (pts[i].x + next.x) / 2, (pts[i].y + next.y) / 2);
+        }
+        ctx.closePath();
+        ctx.clip();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 0.85;
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(higgsCloudCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
+        ctx.restore();
+    }
 }
 
 // 視野内の敵を自動ロックオン (毎フレーム呼び出し)
@@ -381,11 +407,31 @@ function updateVisionLockOn() {
         if (e.hp <= 0) return;
         const dist = Math.hypot(e.x - player.x, e.y - player.y);
         if (dist <= vr) {
-            // 完全ロックオン: 視野内 — 高精度コンタクト、毎フレーム更新
-            e.inVision = true;
-            applyContact(e, 1.0, 90); // life=90 = 1.5秒 (更新されない間は維持)
-            e.displayX = e.x; // 位置ジッター無し
-            e.displayY = e.y;
+            // ターゲット地点のヒッグス濃度で「視認のクリアさ」を判定 (§3-13 C)。
+            // 濃い雲ポケットに居る敵は視野リーチ内でも完全ロックにならず想定ロック止まり。
+            const hTarget = getHiggsIntensity(e.x, e.y);
+            const clarity = 1 - Math.min(1, Math.max(0, (hTarget - HIGGS_CLEAR_BELOW) / HIGGS_CLEAR_SPAN));
+            if (clarity >= 0.85) {
+                // 完全ロックオン: クリアに視認 — 高精度コンタクト、毎フレーム更新
+                e.inVision = true;
+                applyContact(e, 1.0, 90); // life=90 = 1.5秒 (更新されない間は維持)
+                e.displayX = e.x; // 位置ジッター無し
+                e.displayY = e.y;
+            } else {
+                // 雲に紛れた敵: 視野内でも完全ロック不可 → 想定ロック (精度デバフ)。
+                // inVision=false により _fullLock=false となり、武器側で自動的に想定ロック扱い。
+                // applyContactは精度を下げない(max挙動)ため、ここで上限を直接キャップする。
+                e.inVision = false;
+                const accCap = clarity > 0.1 ? (0.4 + clarity * 0.5) : 0.25; // 0.45..0.87 / 濃密潜伏=0.25
+                if (e.contactAccuracy > accCap || e.contactLife < 60) {
+                    const jitter = (1 - accCap) * 400;
+                    e.displayX = e.x + (Math.random() - 0.5) * jitter;
+                    e.displayY = e.y + (Math.random() - 0.5) * jitter;
+                    e.contactAccuracy = accCap;
+                }
+                e.contactLife = Math.max(e.contactLife, clarity > 0.1 ? 75 : 45);
+                e.visible = true;
+            }
         } else {
             e.inVision = false;
         }
@@ -2754,6 +2800,7 @@ function generateSector() {
     }
     bgMist = [];
     bgMistCanvas = null;
+    higgsCloudCanvas = null;
     // 星雲色: 紫・青・赤紫・緑青・琥珀 — より鮮やかな値
     const mistColors = ['70,20,140','25,60,160','130,20,70','10,90,110','80,50,10','15,110,80'];
     for (let i = 0; i < 30; i++) {
@@ -2793,6 +2840,24 @@ function generateSector() {
             mx.beginPath(); mx.arc(sx, sy, sr, 0, Math.PI * 2); mx.fill();
         });
         bgMistCanvas = mc;
+
+        // ヒッグス雲(白) — 視野内で「下から見上げた雲」として 'lighter' 合成する用。
+        // 濃密部=ほぼ真っ白 / 疎部=青空が透ける薄さ。drawFogOfWar内で視野にクリップして重ねる。
+        const wc = document.createElement('canvas');
+        wc.width = wc.height = 768;
+        const wcx = wc.getContext('2d');
+        bgMist.forEach(m => {
+            const d = m.density;
+            const coreA = Math.min(0.72, 0.05 + d * 0.75); // 濃度連動の白さ
+            const sx = m.x * scale, sy = m.y * scale, sr = m.r * scale;
+            const g = wcx.createRadialGradient(sx, sy, 0, sx, sy, sr);
+            g.addColorStop(0,    `rgba(225,238,255,${coreA.toFixed(3)})`);
+            g.addColorStop(0.45, `rgba(175,205,245,${(coreA * 0.4).toFixed(3)})`);
+            g.addColorStop(1,    'rgba(0,0,0,0)');
+            wcx.fillStyle = g;
+            wcx.beginPath(); wcx.arc(sx, sy, sr, 0, Math.PI * 2); wcx.fill();
+        });
+        higgsCloudCanvas = wc;
     }, 50);
 
     // 敵を円形マップ内のヒッグス濃度の高い場所に配置
