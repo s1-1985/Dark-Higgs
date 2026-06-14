@@ -689,6 +689,44 @@ function centerCameraOnPlayer() {
     clampCamera();
 }
 
+// ── マップモード (§ミニマップタップで全画面マップ) ──
+// カメラをマップ全体にズームアウト＋追従OFF＋フォグ抑制(索敵済みの戦術マップ)。
+// 通常のタッチ操作(ウェイポイント長押し・パン・ピンチ・敵タップ)はワールド座標で動くのでそのまま使える。
+let mapMode = false;
+let _preMapCamera = null;
+function enterMapMode() {
+    if (mapMode || !player) return;
+    mapMode = true;
+    _preMapCamera = { x: camera.x, y: camera.y, zoom: camera.zoom, follow: cameraFollowPlayer };
+    cameraFollowPlayer = false;
+    const cw = cssW || window.innerWidth, ch = cssH || window.innerHeight;
+    camera.zoom = Math.max(camera.minZoom, Math.min(cw, ch) / FIELD_SIZE * 0.92);
+    camera.x = MAP_CX - (cw / camera.zoom) / 2;
+    camera.y = MAP_CY - (ch / camera.zoom) / 2;
+    const banner = document.getElementById('map-mode-banner');
+    if (banner) banner.style.display = 'block';
+    const fb = document.getElementById('btn-camera-follow');
+    if (fb) fb.textContent = '追従 OFF';
+    logMessage('NAV: マップモード ON — タップで航路設定、ミニマップ再タップで戻る', 'system-msg');
+}
+function exitMapMode() {
+    if (!mapMode) return;
+    mapMode = false;
+    if (_preMapCamera) {
+        camera.zoom = _preMapCamera.zoom;
+        camera.x = _preMapCamera.x;
+        camera.y = _preMapCamera.y;
+        cameraFollowPlayer = _preMapCamera.follow;
+        if (cameraFollowPlayer) centerCameraOnPlayer();
+    }
+    const banner = document.getElementById('map-mode-banner');
+    if (banner) banner.style.display = 'none';
+    const fb = document.getElementById('btn-camera-follow');
+    if (fb) fb.textContent = cameraFollowPlayer ? '追従 ON' : '追従 OFF';
+    logMessage('NAV: マップモード OFF', 'system-msg');
+}
+function toggleMapMode() { mapMode ? exitMapMode() : enterMapMode(); }
+
 // スクリーン座標 → ワールド座標変換 (getBoundingClientRect でCSS/canvas解像度差を補正)
 function screenToWorld(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
@@ -2852,6 +2890,8 @@ function logMessage(text, className) {
 // Generate Sector
 
 function generateSector() {
+    mapMode = false; _preMapCamera = null;
+    { const b = document.getElementById('map-mode-banner'); if (b) b.style.display = 'none'; }
     sectorCleared = false;
     enemiesKilled = 0;
     omniSonarCooldown = 0;
@@ -3286,6 +3326,7 @@ document.getElementById('btn-cancel').addEventListener('click', () => {
     logMessage('NAV: 待機命令を受諾。', 'system-msg');
 });
 document.getElementById('btn-camera-follow').addEventListener('click', () => {
+    if (mapMode) exitMapMode(); // 追従操作はマップモードを抜けてから
     cameraFollowPlayer = !cameraFollowPlayer;
     updateCameraFollowBtn();
     if (cameraFollowPlayer) centerCameraOnPlayer();
@@ -4216,9 +4257,13 @@ function handleMinimapInteraction(e) {
     clampCamera();
 }
 let isMinimapDragging = false;
-minimapCanvas.addEventListener('mousedown', e => { isMinimapDragging = true; handleMinimapInteraction(e); });
-window.addEventListener('mouseup', () => isMinimapDragging = false);
-minimapCanvas.addEventListener('mousemove', e => { if (isMinimapDragging) handleMinimapInteraction(e); });
+let _mmDownPos = null, _mmMoved = false;
+minimapCanvas.addEventListener('mousedown', e => { isMinimapDragging = true; _mmDownPos = { x: e.clientX, y: e.clientY }; _mmMoved = false; });
+minimapCanvas.addEventListener('mousemove', e => {
+    if (!isMinimapDragging) return;
+    if (_mmDownPos && Math.hypot(e.clientX - _mmDownPos.x, e.clientY - _mmDownPos.y) > 6) { _mmMoved = true; handleMinimapInteraction(e); }
+});
+window.addEventListener('mouseup', () => { if (isMinimapDragging && !_mmMoved) toggleMapMode(); isMinimapDragging = false; _mmDownPos = null; });
 
 // ミニマップ タッチ対応
 function handleMinimapTouchInteraction(t) {
@@ -4235,9 +4280,14 @@ function handleMinimapTouchInteraction(t) {
     camera.y = wY - (cssH / 2 / camera.zoom);
     clampCamera();
 }
-minimapCanvas.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); isMinimapDragging = true; handleMinimapTouchInteraction(e.touches[0]); }, { passive: false });
-minimapCanvas.addEventListener('touchmove', (e) => { e.preventDefault(); e.stopPropagation(); if (isMinimapDragging) handleMinimapTouchInteraction(e.touches[0]); }, { passive: false });
-minimapCanvas.addEventListener('touchend', () => { isMinimapDragging = false; });
+// タップ=マップモード切替 / ドラッグ=カメラパン (移動量で判別)
+minimapCanvas.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); const t = e.touches[0]; _mmDownPos = { x: t.clientX, y: t.clientY }; _mmMoved = false; }, { passive: false });
+minimapCanvas.addEventListener('touchmove', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const t = e.touches[0];
+    if (_mmDownPos && Math.hypot(t.clientX - _mmDownPos.x, t.clientY - _mmDownPos.y) > 10) { _mmMoved = true; handleMinimapTouchInteraction(t); }
+}, { passive: false });
+minimapCanvas.addEventListener('touchend', (e) => { e.preventDefault(); e.stopPropagation(); if (!_mmMoved) toggleMapMode(); _mmDownPos = null; }, { passive: false });
 
 // Background grid system
 // ── パララックス・スターフィールド (スクリーン空間・事前焼き付けタイル) ──
@@ -5522,7 +5572,8 @@ function gameLoop() {
         // ── 有視界フォグ (エンティティの上・ゲームリングの下) ──
         // ヒッグス雲/フォグはここで描画し、以降のスレットリング/レーダー/武器射程リングを
         // すべて最前面に重ねる。これらがヒッグスに隠れると索敵・射撃ができずゲームにならないため。
-        if (player && player.hp > 0) drawFogOfWar(ctx);
+        // マップモード中はフォグを抑制して全体を戦術マップとして表示(索敵済みの情報のみ可視)。
+        if (player && player.hp > 0 && !mapMode) drawFogOfWar(ctx);
 
         // ── センサー痕跡(ソナーの影/コンタクト) — ヒッグスより手前に表示 ──
         for (const e of enemies) e.drawSensorTrace(ctx);
