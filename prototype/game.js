@@ -244,6 +244,17 @@ let genAlloc = { engine: 40, weapons: 30, sensors: 30, ai: 50 };
 // 自動攻撃ON/OFFフラグ
 let autoAttackEnabled = true;
 
+// ── 潜航型ジャミング3種 (stealth専用) ──────────────────────
+// 敵の探知レンジを劣化させる。発動中はEM放射が増え逆探知されやすくなる(情報↔露出のトレードオフ)。
+// 数値は調整用デフォルト (バランスは実機調整前提)。
+let jamBurst = 0;     // 範囲ジャミング: 残りフレーム
+let jamCont = false;  // 継続EMジャム: ON/OFF (持続的にEM放射)
+let jamPulse = 0;     // EMパルス: 広域瞬間ブラインドの残りフレーム
+let jamPulseCD = 0;   // EMパルス: 再チャージ残り
+const JAM_BURST_RADIUS = 3500, JAM_BURST_DUR = 360, JAM_BURST_DEGRADE = 0.6;  // 半径3500を60%劣化, 6秒
+const JAM_CONT_RADIUS = 2400, JAM_CONT_DEGRADE = 0.35;                        // 半径2400を35%劣化(持続)
+const JAM_PULSE_RADIUS = 6000, JAM_PULSE_DUR = 75, JAM_PULSE_CD = 1200;       // 半径6000を1.25秒全ブラインド, CD20秒
+
 // ============================================================
 // 有視界システム — アメーバ形状視野 + ヒッグス連続濃度連動
 // ============================================================
@@ -1292,6 +1303,16 @@ class Ship {
             this.emSig      = Math.min(1, (genAlloc.sensors / 100 * 0.4 + genAlloc.ai / 100 * 0.35 + _pulseBonus) * _engType.emMult);
             this.higgsSig   = Math.min(1, _spd * _hHere * 1.5 * (_engType.higgsSpeedBonus > 0 ? 1 : 0.3) + _higgsEngBonus);
 
+            // 潜航型ジャミング: 発動中はEM放射が増し逆探知されやすい(情報↔露出のトレードオフ)。タイマー減衰もここで。
+            if (gameState.shipType === 'stealth') {
+                if (jamPulse > 0)  this.emSig = 1;
+                else if (jamBurst > 0) this.emSig = Math.min(1, this.emSig + 0.4);
+                else if (jamCont)  this.emSig = Math.min(1, this.emSig + 0.25);
+            }
+            if (jamBurst > 0)   jamBurst--;
+            if (jamPulse > 0)   jamPulse--;
+            if (jamPulseCD > 0) jamPulseCD--;
+
             // Speed defined by GEN engine allocation + 艦種補正 + ヒッグス減速
             const speedMult = { assault: 0.8, stealth: 1.4, carrier: 0.6 };
             const higgsSlowdown = 1 - getHiggsIntensity(this.x, this.y) * 0.45;
@@ -1551,7 +1572,17 @@ class Ship {
             const distToPlayer = Math.hypot(player.x - this.x, player.y - this.y);
             const higgsHereDetect = getHiggsIntensity(this.x, this.y);
             const playerEmBoost = 0.5 + (genAlloc.ai / 100) * 0.5;
-            const myDetectRange = 800 * (1 - higgsHereDetect * 0.55) * (1 + gameState.sector * 0.05) * playerEmBoost;
+            // 潜航型ジャミング: ジャミング半径内の敵は探知レンジが劣化する
+            let jamDegrade = 0;
+            if (gameState.shipType === 'stealth') {
+                if (jamPulse > 0 && distToPlayer < JAM_PULSE_RADIUS) {
+                    jamDegrade = 1; // 瞬間全ブラインド
+                } else {
+                    if (jamBurst > 0 && distToPlayer < JAM_BURST_RADIUS) jamDegrade = Math.max(jamDegrade, JAM_BURST_DEGRADE);
+                    if (jamCont && distToPlayer < JAM_CONT_RADIUS) jamDegrade = Math.max(jamDegrade, JAM_CONT_DEGRADE);
+                }
+            }
+            const myDetectRange = 800 * (1 - higgsHereDetect * 0.55) * (1 + gameState.sector * 0.05) * playerEmBoost * (1 - jamDegrade);
 
             let playerSigDetected = false;
             let detectedSigStrength = 0;
@@ -2806,6 +2837,8 @@ function generateSector() {
 function startGame(shipType) {
     gameState.shipType = shipType;
     document.getElementById('ship-select-lobby').classList.add('hidden');
+    // 潜航型専用ジャミングボタンの表示制御
+    document.querySelectorAll('.jam-btn').forEach(b => { b.style.display = shipType === 'stealth' ? '' : 'none'; });
     // S&D進捗バーの表示制御
     const sdBar = document.getElementById('sd-progress-bar');
     if (sdBar) sdBar.style.display = gameState.mode === 'sd' ? 'block' : 'none';
@@ -2987,6 +3020,32 @@ document.getElementById('btn-attack-toggle')?.addEventListener('click', () => {
 });
 
 document.getElementById('btn-scan').addEventListener('click', fireOmniSonar);
+
+// ── 潜航型ジャミング3種 ──
+document.getElementById('btn-jam-burst')?.addEventListener('click', () => {
+    if (gameState.shipType !== 'stealth') return;
+    if (jamBurst > 0) { logMessage('JAM: 範囲ジャミングは既に発動中', 'warning-msg'); return; }
+    jamBurst = JAM_BURST_DUR;
+    logMessage(`JAM: 範囲ジャミング展開 — 半径内の敵センサーを${Math.round(JAM_BURST_DEGRADE*100)}%劣化 (発動中はEM放射増)`, 'system-msg');
+    playSound('ui');
+});
+document.getElementById('btn-jam-cont')?.addEventListener('click', () => {
+    if (gameState.shipType !== 'stealth') return;
+    jamCont = !jamCont;
+    const b = document.getElementById('btn-jam-cont');
+    if (b) { b.style.borderColor = jamCont ? '#ff66cc' : '#aa66ff'; b.style.color = jamCont ? '#ff99dd' : '#cc99ff'; }
+    logMessage(`JAM: 継続EMジャム ${jamCont ? 'ON — 周辺センサーを持続妨害(常時EM放射)' : 'OFF'}`, 'system-msg');
+    playSound('ui');
+});
+document.getElementById('btn-jam-pulse')?.addEventListener('click', () => {
+    if (gameState.shipType !== 'stealth') return;
+    if (jamPulseCD > 0) { logMessage(`JAM: EMパルス再チャージ中 (${Math.ceil(jamPulseCD/60)}秒)`, 'warning-msg'); return; }
+    jamPulse = JAM_PULSE_DUR;
+    jamPulseCD = JAM_PULSE_CD;
+    effects.push({ x: player.x, y: player.y, r: 0, maxR: JAM_PULSE_RADIUS, a: 0.5, c: '#cc99ff', type: 'circle' });
+    logMessage('JAM: EMパルス発射 — 広域瞬間ブラインド！(自EM放射が最大に)', 'warning-msg');
+    playSound('ui');
+});
 
 // ── モバイルメニュー ──
 (function initMobileMenu() {
