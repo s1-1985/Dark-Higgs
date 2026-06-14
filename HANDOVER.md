@@ -19,6 +19,12 @@
 - **設計意図**: 「ヒッグスの影響を受ける主体が自機だけ」問題の解消。薄い所に居て視界が広くても、濃い雲ポケットに隠れた敵はクリーンに撃てない。
 - **⚠️ 申し送り**: 実機未検証（コンテナにブラウザ無し、`node --check`のみ通過）。GitHub Pagesで①視野内の雲の白飛び具合②`'lighter'`合成のモバイル負荷（クリップ+768px drawImage 1枚追加）③ゲートのバランス（敵が雲に隠れた時の手応え）を要確認。全てtunable定数。次は Phase2（デブリ帯+磁気嵐帯）。
 
+#### §3-2 AI精度スライダー（新ブランチ `claude/ai-precision-…`）
+- `aiPrecision={sensor,weapon,engine}` ゼロサム3スライダー（GEN同方式UI、AI出力スライダーの下に配置）。`aiPrec(key)=(genAlloc.ai/100)*(aiPrecision[key]/100)`。
+- 効果: 解析→`applyContact`精度ブースト(`AI_SENSOR_ACC`) / 命中→自機弾デブリミス率低減(`AI_WEAPON_AIM`) / 回避→敵弾を確率回避(`AI_ENGINE_DODGE`)。トレードオフはEM放射↑(既存`playerEmBoost`)。
+- 候補表示§3-3はコンタクト精度経由で自動連動（解析配分↑→候補が絞れる）。数値はtunable。
+- **運用変更**: 以後は機能ごとに**新ブランチ＋新PR**（マージ競合の再発防止）。
+
 #### 🔴 反映漏れの根本原因と恒久対策（重要）
 オーナーが「修正がずっと反映されない／背景がボケたまま」と繰り返し報告 → 原因は2つ:
 1. **ブラウザ/GitHub Pagesキャッシュ**: `index.html` が `game.js` をバージョン無しで読み込んでいたため、main更新後もブラウザが**旧game.jsをキャッシュ**し続けた。→ `?v=YYYYMMDD?` クエリ付与＋`<head>`にno-cacheメタ追加。**game.js/style.css変更時は必ず`?v=`更新**（CLAUDE.mdに明記）。

@@ -250,6 +250,15 @@ let resourceNodes = []; // リソースノード {x, y, active, emFlashTimer}
 // GEN配分 (ゼロサム: エンジン/武器/センサー/AI の合計=100)
 let genAlloc = { engine: 40, weapons: 30, sensors: 30, ai: 50 };
 
+// AI精度配分 (§3-2): GEN AI出力(genAlloc.ai)を 解析/命中/回避 の3つにゼロサム配分。
+// 実効精度 = (AI出力) × (各配分)。AIを上げるほど精度↑だが EM放射も増える(逆探知トレードオフ)。
+let aiPrecision = { sensor: 34, weapon: 33, engine: 33 };
+// 実効精度 0..1 (AI=100%かつ当該100%配分で1.0)。各効果の係数は AI_* 定数で調整。
+function aiPrec(key) { return (genAlloc.ai / 100) * (aiPrecision[key] / 100); }
+const AI_SENSOR_ACC   = 0.6;  // 解析精度→コンタクト精度ブースト上限
+const AI_WEAPON_AIM   = 0.7;  // 命中精度→デブリ等のミス率低減上限
+const AI_ENGINE_DODGE = 0.45; // 回避精度→被弾回避率上限
+
 // 自動攻撃ON/OFFフラグ
 let autoAttackEnabled = true;
 
@@ -1229,11 +1238,21 @@ class Projectile {
 
         if (hitTarget && hitTarget.hp > 0) {
             // デブリ帯(岩礁帯): 遮蔽で実弾/ミサイルが外れやすい (ビームは貫通=Projectile生成時に即着弾でここを通らない)
+            // AI命中精度(武器配分): 自機の弾はミス率を低減
             const _debHit = getDebrisIntensity(hitTarget.x, hitTarget.y);
-            if (_debHit > 0 && Math.random() < _debHit * DEBRIS_MISS) {
+            const _missChance = _debHit * DEBRIS_MISS * (this.isPlayer ? (1 - aiPrec('weapon') * AI_WEAPON_AIM) : 1);
+            if (_missChance > 0 && Math.random() < _missChance) {
                 this.active = false; // 岩片に阻まれ命中せず
                 createHitEffect(this.x, this.y, '#8a8a7a');
                 return;
+            }
+            // AI回避精度(エンジン配分): 自機への被弾を確率回避 (敵弾のみ対象)
+            if (!this.isPlayer && hitTarget === player) {
+                if (Math.random() < aiPrec('engine') * AI_ENGINE_DODGE) {
+                    this.active = false;
+                    effects.push({ x: player.x, y: player.y - 30, text: '回避', life: 1.0, type: 'floatText', c: '#00e0ff' });
+                    return;
+                }
             }
             let dmgMult = this.isPlayer ? (1 + (gameState.upgrades.weapons * 0.15)) : 1;
             let preemptive = false;
@@ -3208,6 +3227,44 @@ if (aiSlider) {
     });
 }
 
+// AI精度配分 (§3-2): 解析/命中/回避 のゼロサム3スライダー (GENと同方式)
+const AIPREC_KEYS = ['sensor', 'weapon', 'engine'];
+AIPREC_KEYS.forEach(key => {
+    const slider = document.getElementById(`aiprec-${key}`);
+    if (!slider) return;
+    slider.addEventListener('input', e => {
+        const newVal = parseInt(e.target.value);
+        const delta = newVal - aiPrecision[key];
+        aiPrecision[key] = newVal;
+        const others = AIPREC_KEYS.filter(k => k !== key);
+        const otherTotal = others.reduce((s, k) => s + aiPrecision[k], 0);
+        if (delta !== 0) {
+            let remaining = -delta;
+            if (otherTotal > 0) {
+                others.forEach((k, i) => {
+                    const prev = aiPrecision[k];
+                    if (i === others.length - 1) aiPrecision[k] = Math.min(100, Math.max(0, aiPrecision[k] + remaining));
+                    else { const adj = Math.round(remaining * (aiPrecision[k] / otherTotal)); aiPrecision[k] = Math.min(100, Math.max(0, aiPrecision[k] + adj)); remaining -= (aiPrecision[k] - prev); }
+                });
+            } else {
+                const last = others[others.length - 1];
+                aiPrecision[last] = Math.min(100, Math.max(0, aiPrecision[last] + remaining));
+            }
+            const total = AIPREC_KEYS.reduce((s, k) => s + aiPrecision[k], 0);
+            if (total !== 100) {
+                const adjustKey = others.reduce((b, k) => aiPrecision[k] > aiPrecision[b] ? k : b, others[0]);
+                aiPrecision[adjustKey] = Math.min(100, Math.max(0, aiPrecision[adjustKey] + (100 - total)));
+            }
+        }
+        AIPREC_KEYS.forEach(k => {
+            const el = document.getElementById(`aiprec-${k}`);
+            const valEl = document.getElementById(`aiprec-${k}-val`);
+            if (el) el.value = aiPrecision[k];
+            if (valEl) valEl.textContent = aiPrecision[k] + '%';
+        });
+    });
+});
+
 // 旧スライダー互換 (参照が残っている場合のフォールバック)
 const legacySlider = document.getElementById('speedSlider');
 if (legacySlider) {
@@ -3576,6 +3633,8 @@ function calcAccuracy(dist, maxRange, distDecay0, higgsBlock) {
 }
 
 function applyContact(e, accuracy, life = 600) {
+    // AI解析精度: センサー配分が高いほどコンタクト精度が上がる(ジャミング/デコイに強い・候補が絞れる)
+    accuracy = Math.min(1, accuracy * (1 + aiPrec('sensor') * AI_SENSOR_ACC));
     if (accuracy > e.contactAccuracy || e.contactLife < 60) {
         const jitter = (1 - accuracy) * 400;
         e.displayX = e.x + (Math.random() - 0.5) * jitter;
