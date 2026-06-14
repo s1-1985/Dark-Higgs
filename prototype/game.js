@@ -113,6 +113,21 @@ const SPRITE_FILES = {
     fx_beam_impact:     'assets/fx_beam_impact.png',
     fx_thruster_jet:    'assets/fx_thruster_jet.png',
     fx_missile_exhaust: 'assets/fx_missile_exhaust.png',
+    // 弾体スプライト
+    fx_bolt_player:     'assets/fx_bolt_player.png',
+    fx_bolt_enemy:      'assets/fx_bolt_enemy.png',
+    drone_missile:      'assets/drone_missile.png',
+    // ドローン・デコイスプライト
+    drone_attack:       'assets/drone_attack.png',
+    drone_scout:        'assets/drone_scout.png',
+    drone_decoy:        'assets/drone_decoy.png',
+    drone_turret:       'assets/drone_turret.png',
+    drone_buoy:         'assets/drone_buoy.png',
+    fx_decoy:           'assets/fx_decoy.png',
+    // センサーtrailパーティクル
+    particle_heat:      'assets/particle_heat.png',
+    particle_optic:     'assets/particle_optic.png',
+    particle_higgs:     'assets/particle_higgs.png',
 };
 const SPRITES = {};
 for (const k in SPRITE_FILES) {
@@ -1444,32 +1459,41 @@ class Projectile {
         ctx.translate(this.x, this.y);
         ctx.rotate(this.angle);
         if (this.type === 'kinetic') {
-            const c = this.isPlayer ? '#00ffaa' : '#ff4d4d';
-            ctx.shadowColor = c; ctx.shadowBlur = 5;
-            ctx.fillStyle = c;
-            ctx.beginPath();
-            ctx.moveTo(7, 0);
-            ctx.lineTo(0, -1.5); ctx.lineTo(-5, -1);
-            ctx.lineTo(-5, 1); ctx.lineTo(0, 1.5);
-            ctx.closePath(); ctx.fill();
-            ctx.shadowBlur = 0;
+            const _boltKey = this.isPlayer ? 'fx_bolt_player' : 'fx_bolt_enemy';
+            const _boltImg = SPRITES[_boltKey];
+            if (spriteReady(_boltImg)) {
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.globalAlpha = 0.92;
+                ctx.drawImage(_boltImg, -14, -9, 28, 18);
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.globalAlpha = 1;
+            } else {
+                const c = this.isPlayer ? '#00ffaa' : '#ff4d4d';
+                ctx.fillStyle = c;
+                ctx.beginPath();
+                ctx.moveTo(7, 0); ctx.lineTo(0, -1.5); ctx.lineTo(-5, -1);
+                ctx.lineTo(-5, 1); ctx.lineTo(0, 1.5);
+                ctx.closePath(); ctx.fill();
+            }
         } else if (this.type === 'missile') {
-            // Body
-            ctx.fillStyle = '#ddd';
-            ctx.beginPath();
-            ctx.moveTo(8, 0);
-            ctx.lineTo(2, -2.5); ctx.lineTo(-5, -2.5);
-            ctx.lineTo(-6, -1.5); ctx.lineTo(-6, 1.5);
-            ctx.lineTo(-5, 2.5); ctx.lineTo(2, 2.5);
-            ctx.closePath(); ctx.fill();
-            // Fins
-            ctx.fillStyle = '#999';
-            ctx.beginPath();
-            ctx.moveTo(-3, -2.5); ctx.lineTo(-7, -5); ctx.lineTo(-6, -2.5);
-            ctx.closePath(); ctx.fill();
-            ctx.beginPath();
-            ctx.moveTo(-3, 2.5); ctx.lineTo(-7, 5); ctx.lineTo(-6, 2.5);
-            ctx.closePath(); ctx.fill();
+            // ミサイル弾体スプライト
+            const _mslImg = SPRITES['drone_missile'];
+            if (spriteReady(_mslImg)) {
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.globalAlpha = 0.88;
+                ctx.drawImage(_mslImg, -16, -11, 32, 22);
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.globalAlpha = 1;
+            } else {
+                ctx.fillStyle = '#ddd';
+                ctx.beginPath();
+                ctx.moveTo(8, 0); ctx.lineTo(2, -2.5); ctx.lineTo(-5, -2.5);
+                ctx.lineTo(-6, -1.5); ctx.lineTo(-6, 1.5); ctx.lineTo(-5, 2.5); ctx.lineTo(2, 2.5);
+                ctx.closePath(); ctx.fill();
+                ctx.fillStyle = '#999';
+                ctx.beginPath(); ctx.moveTo(-3, -2.5); ctx.lineTo(-7, -5); ctx.lineTo(-6, -2.5); ctx.closePath(); ctx.fill();
+                ctx.beginPath(); ctx.moveTo(-3, 2.5); ctx.lineTo(-7, 5); ctx.lineTo(-6, 2.5); ctx.closePath(); ctx.fill();
+            }
             // Exhaust
             ctx.shadowColor = '#ff8800'; ctx.shadowBlur = 3;
             ctx.fillStyle = '#ff9900';
@@ -4073,23 +4097,39 @@ function drawPassiveAntenna(ctx) {
     const sensorRange = effectiveRadarRange * sc.rangeScale;
     // §3-12 HEAT trail: 橙色の熱排気跡 (エンジン移動・ミサイル推進)
     if (currentSensor === 'heat') {
+        const _hsp = SPRITES['particle_heat'];
+        ctx.globalCompositeOperation = 'lighter';
         heatTrails.forEach(w => {
             if (Math.hypot(w.x - player.x, w.y - player.y) > sensorRange) return;
-            ctx.save(); ctx.globalAlpha = w.life * 0.65;
-            ctx.fillStyle = 'rgba(255,120,20,0.85)';
-            ctx.beginPath(); ctx.arc(w.x, w.y, Math.max(1.5, 3 * w.intensity), 0, Math.PI * 2); ctx.fill();
-            ctx.restore(); ctx.globalAlpha = 1;
+            const r = Math.max(3, 6 * w.intensity);
+            ctx.globalAlpha = w.life * 0.65;
+            if (spriteReady(_hsp)) {
+                ctx.drawImage(_hsp, w.x - r, w.y - r, r * 2, r * 2);
+            } else {
+                ctx.fillStyle = 'rgba(255,120,20,0.85)';
+                ctx.beginPath(); ctx.arc(w.x, w.y, r * 0.5, 0, Math.PI * 2); ctx.fill();
+            }
         });
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = 1;
     }
     // §3-12 OPTIC trail: 黄白の発光跡 (弾跡・ビーム軌跡・ミサイル噴射)
     if (currentSensor === 'optic') {
+        const _osp = SPRITES['particle_optic'];
+        ctx.globalCompositeOperation = 'lighter';
         opticTrails.forEach(w => {
             if (Math.hypot(w.x - player.x, w.y - player.y) > sensorRange) return;
-            ctx.save(); ctx.globalAlpha = w.life * 0.6;
-            ctx.fillStyle = 'rgba(255,230,80,0.85)';
-            ctx.beginPath(); ctx.arc(w.x, w.y, Math.max(1.5, 2.5 * w.intensity), 0, Math.PI * 2); ctx.fill();
-            ctx.restore(); ctx.globalAlpha = 1;
+            const r = Math.max(3, 5 * w.intensity);
+            ctx.globalAlpha = w.life * 0.6;
+            if (spriteReady(_osp)) {
+                ctx.drawImage(_osp, w.x - r, w.y - r, r * 2, r * 2);
+            } else {
+                ctx.fillStyle = 'rgba(255,230,80,0.85)';
+                ctx.beginPath(); ctx.arc(w.x, w.y, r * 0.5, 0, Math.PI * 2); ctx.fill();
+            }
         });
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = 1;
     }
     if (currentSensor === 'em') {
         resourceNodes.forEach(n => {
@@ -4097,9 +4137,11 @@ function drawPassiveAntenna(ctx) {
             if (Math.hypot(n.x - player.x, n.y - player.y) > sensorRange) return;
             const intensity = n.emFlashTimer / 180;
             ctx.save(); ctx.globalAlpha = intensity * 0.9;
-            ctx.fillStyle = '#cc44ff'; ctx.shadowColor = '#cc44ff'; ctx.shadowBlur = 5 * intensity;
+            ctx.fillStyle = '#cc44ff';
             ctx.beginPath(); ctx.arc(n.x, n.y, 7 * intensity, 0, Math.PI * 2); ctx.fill();
-            ctx.shadowBlur = 0; ctx.restore(); ctx.globalAlpha = 1;
+            ctx.globalAlpha = intensity * 0.4;
+            ctx.beginPath(); ctx.arc(n.x, n.y, 11 * intensity, 0, Math.PI * 2); ctx.fill();
+            ctx.restore(); ctx.globalAlpha = 1;
         });
         // §3-12 EM trail: 紫のEM放射跡 (AI処理・ミサイル誘導・ビームチャージ)
         emTrails.forEach(w => {
@@ -4111,20 +4153,31 @@ function drawPassiveAntenna(ctx) {
         });
     }
     if (currentSensor === 'higgs') {
+        const _hgsp = SPRITES['particle_higgs'];
+        ctx.globalCompositeOperation = 'lighter';
         higgsWakes.forEach(w => {
             if (Math.hypot(w.x - player.x, w.y - player.y) > sensorRange) return;
-            ctx.save(); ctx.globalAlpha = w.life * 0.7;
-            ctx.fillStyle = `rgba(${CR},0.8)`; ctx.beginPath();
-            ctx.arc(w.x, w.y, 3 * w.intensity, 0, Math.PI * 2); ctx.fill();
-            ctx.restore(); ctx.globalAlpha = 1;
+            const r = Math.max(3, 6 * w.intensity);
+            ctx.globalAlpha = w.life * 0.7;
+            if (spriteReady(_hgsp)) {
+                ctx.drawImage(_hgsp, w.x - r, w.y - r, r * 2, r * 2);
+            } else {
+                ctx.fillStyle = `rgba(${CR},0.8)`;
+                ctx.beginPath(); ctx.arc(w.x, w.y, r * 0.5, 0, Math.PI * 2); ctx.fill();
+            }
         });
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = 1;
         resourceNodes.forEach(n => {
             if (!n.active || Math.hypot(n.x - player.x, n.y - player.y) > sensorRange) return;
             const pulse = 0.6 + Math.sin(t * 0.004) * 0.4;
             ctx.save(); ctx.globalAlpha = pulse;
-            ctx.fillStyle = '#fff'; ctx.shadowColor = `rgba(${CR},1)`; ctx.shadowBlur = 4;
+            ctx.fillStyle = '#fff';
             ctx.beginPath(); ctx.arc(n.x, n.y, 5, 0, Math.PI * 2); ctx.fill();
-            ctx.shadowBlur = 0; ctx.globalAlpha = 0.3;
+            ctx.globalAlpha = pulse * 0.35;
+            ctx.fillStyle = `rgba(${CR},0.9)`;
+            ctx.beginPath(); ctx.arc(n.x, n.y, 9, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = 0.3;
             ctx.strokeStyle = `rgba(${CR},0.8)`; ctx.lineWidth = 1;
             ctx.beginPath(); ctx.arc(n.x, n.y, 20, 0, Math.PI * 2); ctx.stroke();
             ctx.restore(); ctx.globalAlpha = 1;
@@ -5502,14 +5555,22 @@ function updateDecoys() {
     }
 }
 function drawDecoys(ctx) {
+    const _dsp = SPRITES['fx_decoy'];
     for (const d of decoys) {
         const a = Math.min(1, d.life / 60);
         ctx.save();
         ctx.globalAlpha = a * 0.9;
         ctx.translate(d.x, d.y);
-        // 菱形コア + EMパルスリング
-        ctx.fillStyle = '#cc99ff';
-        ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(6, 0); ctx.lineTo(0, 7); ctx.lineTo(-6, 0); ctx.closePath(); ctx.fill();
+        if (spriteReady(_dsp)) {
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.drawImage(_dsp, -20, -20, 40, 40);
+            ctx.globalCompositeOperation = 'source-over';
+        } else {
+            // フォールバック: 菱形コア
+            ctx.fillStyle = '#cc99ff';
+            ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(6, 0); ctx.lineTo(0, 7); ctx.lineTo(-6, 0); ctx.closePath(); ctx.fill();
+        }
+        // EMパルスリング (スプライト有無に関わらず表示)
         const pr = 10 + (Math.sin(Date.now() * 0.01 + d.x) * 0.5 + 0.5) * 8;
         ctx.globalAlpha = a * 0.5;
         ctx.strokeStyle = '#aa66ff'; ctx.lineWidth = 1.4;
@@ -5618,22 +5679,59 @@ class Drone {
         ctx.save();
         ctx.globalAlpha = a;
         ctx.translate(this.x, this.y);
-        if (this.type === 'decoy') {
-            ctx.rotate(0);
-            ctx.fillStyle = '#cc99ff';
-            ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(6, 0); ctx.lineTo(0, 7); ctx.lineTo(-6, 0); ctx.closePath(); ctx.fill();
+        // スプライトキー (各タイプに対応)
+        const _droneSprite = {
+            attack: SPRITES['drone_attack'], scout: SPRITES['drone_scout'],
+            decoy:  SPRITES['drone_decoy'],  build: SPRITES['drone_turret'],
+            buoy:   SPRITES['drone_buoy']
+        }[this.type];
+
+        if (this.type === 'attack' || this.type === 'scout') {
+            const _sp = _droneSprite;
+            if (spriteReady(_sp)) {
+                ctx.rotate(this.angle);
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.drawImage(_sp, -16, -16, 32, 32);
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.rotate(-this.angle);
+            } else {
+                const col = this.type === 'attack' ? '#00ffaa' : '#66ccff';
+                ctx.rotate(this.angle);
+                ctx.fillStyle = col;
+                ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(-5, -4); ctx.lineTo(-3, 0); ctx.lineTo(-5, 4); ctx.closePath(); ctx.fill();
+                ctx.rotate(-this.angle);
+            }
+        } else if (this.type === 'decoy') {
+            const _sp = _droneSprite;
+            if (spriteReady(_sp)) {
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.drawImage(_sp, -16, -16, 32, 32);
+                ctx.globalCompositeOperation = 'source-over';
+            } else {
+                ctx.fillStyle = '#cc99ff';
+                ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(6, 0); ctx.lineTo(0, 7); ctx.lineTo(-6, 0); ctx.closePath(); ctx.fill();
+            }
             const pr = 10 + (Math.sin(Date.now() * 0.01 + this.x) * 0.5 + 0.5) * 8;
             ctx.globalAlpha = a * 0.5; ctx.strokeStyle = '#aa66ff'; ctx.lineWidth = 1.4;
             ctx.beginPath(); ctx.arc(0, 0, pr, 0, Math.PI * 2); ctx.stroke();
         } else if (this.type === 'build') {
-            ctx.fillStyle = '#ffaa33';
-            ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.fill();
-            ctx.rotate(this.angle); ctx.fillStyle = '#ffcc66'; ctx.fillRect(0, -2, 12, 4); // 砲身
-            ctx.rotate(-this.angle);
+            const _sp = _droneSprite;
+            if (spriteReady(_sp)) {
+                ctx.rotate(this.angle);
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.drawImage(_sp, -16, -16, 32, 32);
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.rotate(-this.angle);
+            } else {
+                ctx.fillStyle = '#ffaa33';
+                ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.fill();
+                ctx.rotate(this.angle); ctx.fillStyle = '#ffcc66'; ctx.fillRect(0, -2, 12, 4);
+                ctx.rotate(-this.angle);
+            }
             ctx.globalAlpha = a * 0.3; ctx.strokeStyle = '#ffaa33'; ctx.lineWidth = 1;
             ctx.beginPath(); ctx.arc(0, 0, DRONE_TURRET_RANGE * 0.04 + 9, 0, Math.PI * 2); ctx.stroke();
         } else if (this.type === 'barrier') {
-            // §3-7 ビームバリア: 六角形コア + 周期で光るバリアリング
+            // §3-7 ビームバリア: 六角形コア + 周期で光るバリアリング (スプライト未生成→キャンバス)
             ctx.strokeStyle = '#4499ff'; ctx.lineWidth = 1.5;
             ctx.beginPath();
             for (let i = 0; i < 6; i++) { const ba = (i / 6) * Math.PI * 2; (i === 0 ? ctx.moveTo : ctx.lineTo).call(ctx, Math.cos(ba) * 8, Math.sin(ba) * 8); }
@@ -5642,9 +5740,15 @@ class Drone {
             ctx.strokeStyle = '#6699ff'; ctx.lineWidth = 2;
             ctx.beginPath(); ctx.arc(0, 0, DRONE_BARRIER_RADIUS * 0.04 + 8, 0, Math.PI * 2); ctx.stroke();
         } else if (this.type === 'buoy') {
-            // §3-7 センサーブイ: 中心点 + 同心スキャンリング
-            ctx.fillStyle = '#44ccff';
-            ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI * 2); ctx.fill();
+            const _sp = _droneSprite;
+            if (spriteReady(_sp)) {
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.drawImage(_sp, -16, -16, 32, 32);
+                ctx.globalCompositeOperation = 'source-over';
+            } else {
+                ctx.fillStyle = '#44ccff';
+                ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI * 2); ctx.fill();
+            }
             const phase = (Date.now() % 2500) / 2500;
             [0, 0.4, 0.7].forEach(off => {
                 const p2 = (phase + off) % 1;
@@ -5653,7 +5757,7 @@ class Drone {
                 ctx.beginPath(); ctx.arc(0, 0, p2 * DRONE_BUOY_RANGE * 0.05 + 6, 0, Math.PI * 2); ctx.stroke();
             });
         } else if (this.type === 'higgs') {
-            // §3-7 ヒッグス散布装置: 白青のパルスコア
+            // §3-7 ヒッグス散布装置: 白青のパルスコア (スプライト未生成→キャンバス)
             const hp2 = 0.5 + 0.5 * Math.sin(Date.now() * 0.008);
             ctx.fillStyle = '#cce8ff';
             ctx.globalAlpha = a * (0.5 + 0.4 * hp2);
@@ -5661,12 +5765,6 @@ class Drone {
             ctx.globalAlpha = a * 0.25;
             ctx.strokeStyle = '#aaddff'; ctx.lineWidth = 1;
             ctx.beginPath(); ctx.arc(0, 0, DRONE_HIGGS_RADIUS * 0.04 + 9, 0, Math.PI * 2); ctx.stroke();
-        } else { // attack / scout
-            const col = this.type === 'attack' ? '#00ffaa' : '#66ccff';
-            ctx.rotate(this.angle);
-            ctx.fillStyle = col;
-            ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(-5, -4); ctx.lineTo(-3, 0); ctx.lineTo(-5, 4); ctx.closePath(); ctx.fill();
-            ctx.rotate(-this.angle);
         }
         ctx.globalAlpha = a; ctx.fillStyle = '#dffff5'; ctx.font = '7px Orbitron'; ctx.textAlign = 'center';
         const _tagMap = { attack: 'ATK', decoy: 'DCY', scout: 'SCT', build: 'TUR', barrier: 'BAR', buoy: 'BUY', higgs: 'HGS' };
