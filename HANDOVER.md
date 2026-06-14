@@ -26,7 +26,8 @@
 3. **タッチ: スワイプがウェイポイント誤設定**: `TOUCH_WAYPOINT_DELAY` 250→400ms、`TOUCH_MOVE_THRESHOLD` 12→10px。さらに**長押し進捗リング**を`drawHUDOverlay`に追加（指を止めている間だけ充填、スワイプで即消える＝視覚フィードバック）。
 4. **ミニマップ(レーダー)のボケ**: ミニマップだけ DPR 未適用だった。`minimapDpr`を導入しバッキングストアを DPR 倍化、`drawMinimap`を`setTransform`でCSS px基準描画に、クリック/タッチ座標変換も CSS px へ補正。
 5. **確認した非バグ**: 自機SIGオシロ(`sig-canvas`)は `player.heatSig/opticalSig/emSig/higgsSig`(Ship.update 1369-1372で計算)を表示し**機能している**。停止中は heat/optic/higgs=0・em=GEN配分の定数のため平坦に見えるだけ（移動・発砲・AI配分変更で振れる）。ヒッグス濃度表示は mobile status barの「H:」＝`msb-higgs`／左パネル「Higgs:」＝`env-higgs`（既存）。
-- **未対応(要相談)**: 背景のボケ＝`spaceBgCanvas`(1024px)を FIELD_SIZE(70000)へ約68倍拡大しているため（特に巨星ハロー）。星雲/星はパララックス層(`_drawNebula`/`_drawStarfield`)で分離済みだが巨星ハローは未分離。スクリーン空間パララックス化が要追加作業。
+6. **背景の巨星ボケ → 鮮明パララックス層へ分離**: 巨星ハローは`spaceBgCanvas`(1024px)を約68倍拡大していたためボケていた。焼き込みを廃し、`_giantStarTile`(1400px・透過)に鮮明生成 → `_drawGiantStars()`でスクリーン空間パララックス(pf=0.035・最遠景)描画。星雲(`_drawNebula`)/星(`_drawStarfield`)と同方式。`generateSpaceBackground`でタイルをreset、`drawBackground`で nebula→巨星→starfield の順に重ねる。
+- **残(任意)**: `spaceBgCanvas`内の小星(dim/medium/bright)も68倍拡大でボケるが、`_drawStarfield`の鮮明パララックス星が上に乗るため実害小。気になれば焼き込み廃止も可。
 
 ### 2026-06-14（後半）— ブランチ統一・4機能実装（PR#40, #41 マージ済み）
 

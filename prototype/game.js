@@ -233,6 +233,8 @@ let bgMist = [];
 let spaceBgCanvas = null; // 事前生成の宇宙背景テクスチャ
 let _nebulaTile = null;   // シームレスな星雲タイル (スクリーン空間パララックス層用)
 const _NEB_TILE = 1024;   // 星雲タイルのピクセルサイズ
+let _giantStarTile = null; // 明るい巨星タイル (スクリーン空間パララックス層用・鮮明)
+const _GSTAR_TILE = 1400;  // 巨星タイルのピクセルサイズ (繰り返しを目立たせない大きさ)
 let bgMistCanvas = null;  // bgMist事前焼き付けキャンバス
 let higgsCloudCanvas = null; // ヒッグス雲(白)事前焼き付け — 視野内で「下から見上げた雲」として合成
 let scrapDrops = [];
@@ -525,41 +527,9 @@ function generateSpaceBackground() {
     }
     bc.globalAlpha = 1;
 
-    // 5. 明るい巨星 1〜2個 (画像の右上の星風)
-    const starCount = 1 + (rng() < 0.5 ? 1 : 0);
-    for (let si = 0; si < starCount; si++) {
-        const sx = 200 + rng()*(TEX-400), sy = 100 + rng()*(TEX-400);
-        // 画面表示時に約5.5倍拡大されるためハローを小さく抑える (旧60-160→25-70)
-        const sr = 25 + rng()*45;
-        // 紫〜赤〜白の後光
-        const haloCol = rng() < 0.5 ? '180,80,200' : '200,60,100';
-        const hg = bc.createRadialGradient(sx, sy, 0, sx, sy, sr);
-        hg.addColorStop(0,    `rgba(${haloCol},0.20)`);
-        hg.addColorStop(0.4,  `rgba(${haloCol},0.08)`);
-        hg.addColorStop(0.7,  `rgba(${haloCol},0.03)`);
-        hg.addColorStop(1,    'rgba(0,0,0,0)');
-        bc.fillStyle = hg; bc.beginPath(); bc.arc(sx, sy, sr, 0, Math.PI*2); bc.fill();
-        // 白いコア
-        const cg = bc.createRadialGradient(sx, sy, 0, sx, sy, 6);
-        cg.addColorStop(0,   'rgba(255,255,255,1)');
-        cg.addColorStop(0.3, 'rgba(220,240,255,0.8)');
-        cg.addColorStop(1,   'rgba(0,0,0,0)');
-        bc.fillStyle = cg; bc.beginPath(); bc.arc(sx, sy, 6, 0, Math.PI*2); bc.fill();
-        // 光芒 (4本)
-        for (let ray = 0; ray < 4; ray++) {
-            const a = ray * Math.PI/2;
-            bc.save();
-            bc.translate(sx, sy); bc.rotate(a);
-            const rg = bc.createLinearGradient(0,0,sr*1.8,0);
-            rg.addColorStop(0,   'rgba(255,255,255,0.6)');
-            rg.addColorStop(0.3, 'rgba(200,230,255,0.15)');
-            rg.addColorStop(1,   'rgba(0,0,0,0)');
-            bc.fillStyle = rg;
-            bc.beginPath(); bc.moveTo(0,-3); bc.lineTo(sr*1.8,0); bc.lineTo(0,3); bc.closePath(); bc.fill();
-            bc.restore();
-        }
-    }
-    bc.globalAlpha = 1;
+    // 明るい巨星は 68倍拡大でハローがボケるため焼き込まない。
+    // → スクリーン空間パララックス層 (_drawGiantStars / 鮮明タイル) へ分離。
+    _giantStarTile = null; // 背景再生成に合わせて巨星タイルも作り直す
 }
 
 // ============================================================
@@ -4124,6 +4094,69 @@ function _drawNebula(ctx) {
     ctx.restore();
 }
 
+// 明るい巨星タイルを生成 (透過背景・鮮明)。1〜2個をタイル内に配置し、ほぼ等倍で描いてボケを排除。
+function _initGiantStarTile() {
+    const T = _GSTAR_TILE;
+    const c = document.createElement('canvas');
+    c.width = T; c.height = T;
+    const b = c.getContext('2d');
+    let _s = (Math.random() * 0xffffffff) >>> 0;
+    const rng = () => { _s = (_s * 1664525 + 1013904223) >>> 0; return _s / 4294967296; };
+    const count = 1 + (rng() < 0.5 ? 1 : 0);
+    for (let si = 0; si < count; si++) {
+        const sx = T * (0.18 + rng() * 0.64), sy = T * (0.12 + rng() * 0.5);
+        const sr = 120 + rng() * 150; // ハロー半径 (CSS px相当・鮮明)
+        const haloCol = rng() < 0.5 ? '180,80,200' : '200,60,100';
+        // 後光
+        const hg = b.createRadialGradient(sx, sy, 0, sx, sy, sr);
+        hg.addColorStop(0,   `rgba(${haloCol},0.20)`);
+        hg.addColorStop(0.4, `rgba(${haloCol},0.08)`);
+        hg.addColorStop(0.7, `rgba(${haloCol},0.03)`);
+        hg.addColorStop(1,   'rgba(0,0,0,0)');
+        b.fillStyle = hg; b.beginPath(); b.arc(sx, sy, sr, 0, Math.PI * 2); b.fill();
+        // 白いコア
+        const cr = 8 + rng() * 4;
+        const cg = b.createRadialGradient(sx, sy, 0, sx, sy, cr * 2.4);
+        cg.addColorStop(0,   'rgba(255,255,255,1)');
+        cg.addColorStop(0.3, 'rgba(220,240,255,0.85)');
+        cg.addColorStop(1,   'rgba(0,0,0,0)');
+        b.fillStyle = cg; b.beginPath(); b.arc(sx, sy, cr * 2.4, 0, Math.PI * 2); b.fill();
+        // 光芒 (4本)
+        for (let ray = 0; ray < 4; ray++) {
+            const a = ray * Math.PI / 2;
+            b.save();
+            b.translate(sx, sy); b.rotate(a);
+            const rg = b.createLinearGradient(0, 0, sr * 1.6, 0);
+            rg.addColorStop(0,   'rgba(255,255,255,0.5)');
+            rg.addColorStop(0.3, 'rgba(200,230,255,0.12)');
+            rg.addColorStop(1,   'rgba(0,0,0,0)');
+            b.fillStyle = rg;
+            b.beginPath(); b.moveTo(0, -3); b.lineTo(sr * 1.6, 0); b.lineTo(0, 3); b.closePath(); b.fill();
+            b.restore();
+        }
+    }
+    _giantStarTile = c;
+}
+
+// 巨星を最遠景のスクリーン空間パララックス層として描画 (ほぼ等倍=鮮明)
+function _drawGiantStars(ctx) {
+    if (!_giantStarTile) _initGiantStarTile();
+    const W = cssW, H = cssH;
+    const pf = 0.035;          // 最も遅いパララックス (最遠景)
+    const TS = _GSTAR_TILE;
+    ctx.save();
+    ctx.setTransform(_dpr, 0, 0, _dpr, 0, 0); // スクリーン空間(CSS px)
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    let ox = (-camera.x * camera.zoom * pf) % TS; if (ox > 0) ox -= TS;
+    let oy = (-camera.y * camera.zoom * pf) % TS; if (oy > 0) oy -= TS;
+    for (let ty = oy; ty < H; ty += TS) {
+        for (let tx = ox; tx < W; tx += TS) {
+            ctx.drawImage(_giantStarTile, tx, ty);
+        }
+    }
+    ctx.restore();
+}
+
 function drawBackground(ctx) {
     if (PERF_DISABLE_BG) {
         const vw = cssW / camera.zoom;
@@ -4141,8 +4174,9 @@ function drawBackground(ctx) {
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(spaceBgCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
-        _drawNebula(ctx);    // シャープな星雲パララックス層 (引き伸ばしボケ解消)
-        _drawStarfield(ctx); // 鮮明なパララックス星層を重ねる
+        _drawNebula(ctx);      // シャープな星雲パララックス層 (引き伸ばしボケ解消)
+        _drawGiantStars(ctx);  // 鮮明な巨星パララックス層 (68倍拡大のボケ解消)
+        _drawStarfield(ctx);   // 鮮明なパララックス星層を重ねる
     } else {
         ctx.fillStyle = 'rgb(1,3,14)';
         ctx.fillRect(cx, cy, vw, vh);
