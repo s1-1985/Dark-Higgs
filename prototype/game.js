@@ -1415,23 +1415,24 @@ class Ship {
         if (this.fireCooldown > 0) this.fireCooldown--;
 
         if (this.isPlayer) {
-            // Player signature calculation (speed = distance moved since last frame)
+            // ── 自機シグネチャ再設計 (速度+エンジン配分+ゲイン を統一指標化) ──
             const _spd = Math.hypot(this.x - (this.prevX ?? this.x), this.y - (this.prevY ?? this.y));
             const _engType = ENGINE_TYPES[gameState.engineType] || ENGINE_TYPES.thermonuclear;
             const _hHere = getHiggsIntensity(this.x, this.y);
-            const _isMoving = _spd > 0.1;
             const _ep = genAlloc.engine / 100;
-            // エンジン別シグネチャ: 停止中はエンジン由来のシグネチャなし
-            // 熱核: 熱放射が主  パルス: EM放射が主  Higgs: ヒッグス乱流が主  Photon: 光学が主
-            const _photonBonus  = (gameState.engineType === 'photon'  && _isMoving) ? _ep * 0.6 : 0;
-            const _pulseBonus   = (gameState.engineType === 'pulse'   && _isMoving) ? _ep * 0.5 : 0;
-            const _higgsEngBonus = (gameState.engineType === 'higgs'  && _isMoving) ? _ep * _hHere : 0;
-            this.heatSig    = _isMoving ? Math.min(1, (_spd * 0.5 + _ep * 0.35) * _engType.heatMult) : 0;
-            this.opticalSig = Math.min(1, (_spd * 0.04 + _photonBonus + (this.weaponType === 'beam' ? 0.6 : 0)) * Math.max(1, _engType.optMult));
-            this.emSig      = Math.min(1, (genAlloc.sensors / 100 * 0.4 + genAlloc.ai / 100 * 0.35 + _pulseBonus) * _engType.emMult);
+            const _gain = (typeof genGain === 'number' && genGain > 0) ? genGain : 1; // 0.5..2.0
+            // 推進排気強度 0..1: 速度を主体に、エンジン配分とゲインで増減。停止中も僅かなアイドル放射。
+            const _spdN = Math.min(1, _spd / 6);
+            const _thrust = Math.min(1, (0.05 + _spdN * 0.85 + _ep * 0.10) * (0.55 + _gain * 0.45));
+            // 各シグネチャ = 推進強度 × エンジン種別倍率。エンジンごとに支配的シグネチャが変わる。
+            this.heatSig    = Math.min(1, _thrust * _engType.heatMult * 0.55);
+            this.opticalSig = Math.min(1, _thrust * _engType.optMult * 0.45 + (this.weaponType === 'beam' ? 0.5 : 0));
+            // EM: 推進＋(センサー/AI処理放射)。ゲインで増幅。AI↑でEM↑(逆探知の法則)。
+            this.emSig      = Math.min(1, (_thrust * 0.35 + genAlloc.sensors / 100 * 0.18 + genAlloc.ai / 100 * 0.40) * (0.6 + _gain * 0.4) * _engType.emMult);
             // 磁気嵐帯: 嵐がEM放射を覆い隠す → AIを安全に高配分できる退避所 (§3-13 D)
             this.emSig     *= (1 - getStormIntensity(this.x, this.y) * STORM_EM_MASK);
-            this.higgsSig   = Math.min(1, _spd * _hHere * 1.5 * (_engType.higgsSpeedBonus > 0 ? 1 : 0.3) + _higgsEngBonus);
+            // ヒッグス: ヒッグス雲内を動くほどウェイク乱流。ヒッグスエンジンは特に顕著。
+            this.higgsSig   = Math.min(1, _thrust * _hHere * 1.6 + (_engType.higgsSpeedBonus > 0 ? _thrust * _engType.higgsSpeedBonus * 0.7 : _thrust * 0.08));
 
             // 潜航型ジャミング: 発動中はEM放射が増し逆探知されやすい(情報↔露出のトレードオフ)。タイマー減衰もここで。
             if (gameState.shipType === 'stealth') {
@@ -2623,59 +2624,7 @@ class Ship {
             const dispY = this.contactLife > 0 ? this.displayY : this.y;
 
             // 精度サークル (不確実性ゾーン)
-            if (this.contactLife > 0 && this.contactAccuracy < 0.95) {
-                const uncertaintyR = Math.max(20, (1 - this.contactAccuracy) * 400);
-                const acc = this.contactAccuracy;
-                const col = acc > 0.7 ? '0,255,170' : (acc > 0.4 ? '255,170,0' : '255,77,77');
-                const lifeA = Math.min(1, this.contactLife / 60) * 0.4;
-                ctx.save();
-                ctx.globalAlpha = lifeA;
-                ctx.beginPath();
-                ctx.arc(dispX, dispY, uncertaintyR, 0, Math.PI * 2);
-                ctx.strokeStyle = `rgba(${col},0.7)`;
-                ctx.lineWidth = 1;
-                ctx.setLineDash([8, 8]);
-                ctx.stroke();
-                ctx.setLineDash([]);
-                // 色グラデーション: 精度ラベル
-                ctx.fillStyle = `rgba(${col},0.9)`;
-                ctx.font = '9px Orbitron';
-                ctx.textAlign = 'center';
-                ctx.fillText(`${Math.round(this.contactAccuracy * 100)}%`, dispX, dispY - uncertaintyR - 5);
-                ctx.restore();
-                ctx.globalAlpha = 1;
-
-                // AIロックオン候補マーカー (§3-3): 低〜中精度のセンサー推定時のみ。
-                // 本命含む複数候補を確率%付きで表示。プレイヤーは「どれが本物か」を推理する。
-                if (this.contactAccuracy < 0.7) {
-                    if (this._candAcc !== this.contactAccuracy || !this.candidates) {
-                        this._candAcc = this.contactAccuracy;
-                        this.candidates = makeContactCandidates(this.contactAccuracy);
-                    }
-                    ctx.save();
-                    ctx.globalAlpha = lifeA * 2.0;
-                    ctx.font = '8px Orbitron';
-                    ctx.textAlign = 'center';
-                    let bestP = 0;
-                    for (const c of this.candidates) if (c.p > bestP) bestP = c.p;
-                    for (const c of this.candidates) {
-                        const cxp = dispX + c.dx, cyp = dispY + c.dy;
-                        const dom = c.p === bestP; // 本命
-                        const cc = dom ? col : '160,160,170';
-                        const ms = dom ? 7 : 5;
-                        ctx.strokeStyle = `rgba(${cc},0.9)`;
-                        ctx.lineWidth = dom ? 1.5 : 1;
-                        ctx.beginPath();
-                        ctx.moveTo(cxp, cyp - ms); ctx.lineTo(cxp + ms, cyp);
-                        ctx.lineTo(cxp, cyp + ms); ctx.lineTo(cxp - ms, cyp);
-                        ctx.closePath(); ctx.stroke();
-                        ctx.fillStyle = `rgba(${cc},0.95)`;
-                        ctx.fillText(`${Math.round(c.p * 100)}%`, cxp, cyp - ms - 3);
-                    }
-                    ctx.restore();
-                    ctx.globalAlpha = 1;
-                }
-            }
+            // センサー痕跡(不確実性サークル+候補)は drawSensorTrace() でフォグの後に描画(ヒッグスより手前)
 
             // HP バー (発砲フラッシュ中 or 高精度コンタクト時)
             if (isFlashing || this.contactAccuracy > 0.6) {
@@ -2695,6 +2644,62 @@ class Ship {
                 ctx.fillText(`HOSTILE [${gameState.sector}]`, dispX, dispY - 35);
                 ctx.shadowBlur = 0;
             }
+        }
+    }
+
+    // センサー痕跡(不確実性サークル + AIロックオン候補) — フォグ/ヒッグスの「手前」に描く専用パス
+    drawSensorTrace(ctx) {
+        if (this.isPlayer || this.hp <= 0) return;
+        if (!(this.contactLife > 0 && this.contactAccuracy < 0.95)) return;
+        const dispX = this.displayX, dispY = this.displayY;
+        const uncertaintyR = Math.max(20, (1 - this.contactAccuracy) * 400);
+        const acc = this.contactAccuracy;
+        const col = acc > 0.7 ? '0,255,170' : (acc > 0.4 ? '255,170,0' : '255,77,77');
+        const lifeA = Math.min(1, this.contactLife / 60) * 0.4;
+        ctx.save();
+        ctx.globalAlpha = lifeA;
+        ctx.beginPath();
+        ctx.arc(dispX, dispY, uncertaintyR, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(${col},0.7)`;
+        ctx.lineWidth = 1.5 / camera.zoom;
+        ctx.setLineDash([8 / camera.zoom, 8 / camera.zoom]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = `rgba(${col},0.9)`;
+        ctx.font = `${Math.round(9 / camera.zoom)}px Orbitron`;
+        ctx.textAlign = 'center';
+        ctx.fillText(`${Math.round(acc * 100)}%`, dispX, dispY - uncertaintyR - 5 / camera.zoom);
+        ctx.restore();
+        ctx.globalAlpha = 1;
+
+        // AIロックオン候補マーカー (§3-3): 低〜中精度のセンサー推定時のみ
+        if (acc < 0.7) {
+            if (this._candAcc !== acc || !this.candidates) {
+                this._candAcc = acc;
+                this.candidates = makeContactCandidates(acc);
+            }
+            ctx.save();
+            ctx.globalAlpha = Math.min(1, lifeA * 2.2);
+            ctx.font = `${Math.round(8 / camera.zoom)}px Orbitron`;
+            ctx.textAlign = 'center';
+            let bestP = 0;
+            for (const c of this.candidates) if (c.p > bestP) bestP = c.p;
+            for (const c of this.candidates) {
+                const cxp = dispX + c.dx, cyp = dispY + c.dy;
+                const dom = c.p === bestP;
+                const cc = dom ? col : '160,160,170';
+                const ms = (dom ? 7 : 5) / camera.zoom;
+                ctx.strokeStyle = `rgba(${cc},0.9)`;
+                ctx.lineWidth = (dom ? 1.5 : 1) / camera.zoom;
+                ctx.beginPath();
+                ctx.moveTo(cxp, cyp - ms); ctx.lineTo(cxp + ms, cyp);
+                ctx.lineTo(cxp, cyp + ms); ctx.lineTo(cxp - ms, cyp);
+                ctx.closePath(); ctx.stroke();
+                ctx.fillStyle = `rgba(${cc},0.95)`;
+                ctx.fillText(`${Math.round(c.p * 100)}%`, cxp, cyp - ms - 3 / camera.zoom);
+            }
+            ctx.restore();
+            ctx.globalAlpha = 1;
         }
     }
 }
@@ -3724,8 +3729,9 @@ function drawPassiveAntenna(ctx) {
     if (!player || player.hp <= 0) return;
 
     const higgsAtPlayer = getHiggsIntensity(player.x, player.y);
-    // センサー100%で2倍のレーダー範囲
-    effectiveRadarRange = RADAR_RANGE * (1 - higgsAtPlayer * 0.65) * (1 + genAlloc.sensors / 100 * 1.0);
+    // レーダー範囲は AI解析配分(aiPrec('sensor')) に連動。AI解析最大(=ai・解析とも高)で
+    // ≈2450 (ミサイル射程2200より少し大)。ヒッグス濃度で縮小。
+    effectiveRadarRange = (500 + aiPrec('sensor') * 1950) * (1 - higgsAtPlayer * 0.55);
 
     const sc = sensorConfig[currentSensor];
     const CR = sc.r;
@@ -4133,10 +4139,19 @@ function drawMinimap() {
         minimapCtx.stroke();
     }
 
-    // Enemies (only visible ones; dead enemies are removed in game loop before minimap draws)
-    minimapCtx.fillStyle = '#ff4d4d';
+    // Enemies / センサー痕跡 (完全ロック=実位置 / センサー検知=推定位置を精度色で)
     enemies.forEach(e => {
-        if (e.visible && e.hp > 0) { minimapCtx.beginPath(); minimapCtx.arc(e.x * mmScale + offX, e.y * mmScale + offY, 2, 0, Math.PI * 2); minimapCtx.fill(); }
+        if (e.hp <= 0) return;
+        if (e.inVision) {
+            minimapCtx.fillStyle = '#ff4d4d';
+            minimapCtx.beginPath(); minimapCtx.arc(e.x * mmScale + offX, e.y * mmScale + offY, 2.4, 0, Math.PI * 2); minimapCtx.fill();
+        } else if (e.contactLife > 0 && e.visible) {
+            const acc = e.contactAccuracy || 0;
+            minimapCtx.globalAlpha = 0.35 + acc * 0.6;
+            minimapCtx.fillStyle = acc > 0.7 ? '#ff4d4d' : (acc > 0.4 ? '#ffaa00' : '#ff8866');
+            minimapCtx.beginPath(); minimapCtx.arc((e.displayX) * mmScale + offX, (e.displayY) * mmScale + offY, acc > 0.6 ? 2.2 : 1.5, 0, Math.PI * 2); minimapCtx.fill();
+            minimapCtx.globalAlpha = 1;
+        }
     });
 
     // リソースノード (常時ミニマップ表示; HIGGSセンサーで明るく)
@@ -4807,11 +4822,15 @@ function updateEnvInfo() {
     const msbEnemies = document.getElementById('msb-enemies');
     const msbAmmo   = document.getElementById('msb-ammo');
     const msbNodes  = document.getElementById('msb-nodes');
+    const msbDebris = document.getElementById('msb-debris');
+    const msbStorm  = document.getElementById('msb-storm');
     if (player && player.hp > 0) {
         const hpPct = Math.max(0, Math.round((player.hp / player.maxHp) * 100));
         if (msbHpFill) msbHpFill.style.width = hpPct + '%';
         if (msbHpText) msbHpText.textContent = hpPct + '%';
         if (msbHiggs) msbHiggs.textContent = Math.round(getHiggsIntensity(player.x, player.y) * 100) + '%';
+        if (msbDebris) msbDebris.textContent = Math.round(getDebrisIntensity(player.x, player.y) * 100) + '%';
+        if (msbStorm) msbStorm.textContent = Math.round(getStormIntensity(player.x, player.y) * 100) + '%';
         if (msbEnemies) msbEnemies.textContent = enemies.filter(e => e.visible).length || '?';
         if (msbAmmo) {
             const wTypeMsb = document.getElementById('weapon-select')?.value || 'kinetic';
@@ -4903,31 +4922,37 @@ function drawHUDOverlay(ctx) {
         }
     }
 
-    // ── 自機マーカー (常に固定サイズ) ──
-    const mS = 14; // marker size in screen pixels
-    ctx.save();
-    ctx.translate(psx, psy);
-    ctx.rotate(player.angle);
-    ctx.shadowColor = '#00ffaa'; ctx.shadowBlur = 3;
-    ctx.fillStyle = '#00ffaa';
-    ctx.beginPath();
-    ctx.moveTo(mS, 0);
-    ctx.lineTo(-mS * 0.6, -mS * 0.55);
-    ctx.lineTo(-mS * 0.25, 0);
-    ctx.lineTo(-mS * 0.6, mS * 0.55);
-    ctx.closePath();
-    ctx.fill();
-    // パルスリング
-    const pulse = 0.4 + Math.sin(t * 0.005) * 0.3;
-    ctx.globalAlpha = pulse;
-    ctx.strokeStyle = '#00ffaa';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(0, 0, mS * 1.6 + pulse * 4, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-    ctx.shadowBlur = 0;
-    ctx.restore();
+    // ── 自機マーカー: 縮小時のみ表示。拡大して艦本体が十分見える時は自然に消す ──
+    const _shipScreenDiam = camera.zoom * player.radius * 5.6; // 艦の画面上の直径(px)
+    if (_shipScreenDiam < 36) {
+        const mS = 14; // marker size in screen pixels
+        // 艦が見え始める手前でフェードアウト (28px〜36pxで薄くなる)
+        const markerAlpha = _shipScreenDiam > 28 ? Math.max(0, (36 - _shipScreenDiam) / 8) : 1;
+        ctx.save();
+        ctx.globalAlpha = markerAlpha;
+        ctx.translate(psx, psy);
+        ctx.rotate(player.angle);
+        ctx.shadowColor = '#00ffaa'; ctx.shadowBlur = 3;
+        ctx.fillStyle = '#00ffaa';
+        ctx.beginPath();
+        ctx.moveTo(mS, 0);
+        ctx.lineTo(-mS * 0.6, -mS * 0.55);
+        ctx.lineTo(-mS * 0.25, 0);
+        ctx.lineTo(-mS * 0.6, mS * 0.55);
+        ctx.closePath();
+        ctx.fill();
+        // パルスリング
+        const pulse = 0.4 + Math.sin(t * 0.005) * 0.3;
+        ctx.globalAlpha = markerAlpha * pulse;
+        ctx.strokeStyle = '#00ffaa';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(0, 0, mS * 1.6 + pulse * 4, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.shadowBlur = 0;
+        ctx.restore();
+    }
 
     // ── ウェイポイントライン + 目的地マーカー ──
     if (player.state === 'moving') {
@@ -5498,6 +5523,9 @@ function gameLoop() {
         // ヒッグス雲/フォグはここで描画し、以降のスレットリング/レーダー/武器射程リングを
         // すべて最前面に重ねる。これらがヒッグスに隠れると索敵・射撃ができずゲームにならないため。
         if (player && player.hp > 0) drawFogOfWar(ctx);
+
+        // ── センサー痕跡(ソナーの影/コンタクト) — ヒッグスより手前に表示 ──
+        for (const e of enemies) e.drawSensorTrace(ctx);
 
         // ── シグネチャ・スレットリング (最前面・フォグの上) ──
         if (player && player.hp > 0) drawPassiveAntenna(ctx);
