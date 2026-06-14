@@ -65,7 +65,15 @@ let genGain = 1.0;
 const OMNI_SONAR_RANGE  = [0, MAP_RADIUS/6, MAP_RADIUS/3, MAP_RADIUS/2]; // Lv1,2,3 @100%SEN
 const DIR_SONAR_HALF_ANGLE = [0, Math.PI/36, Math.PI/12, Math.PI/9];     // 5°/15°/20° 半角
 const DIR_SONAR_MAX_RANGE  = MAP_RADIUS * 2;                               // マップ直径
-const UPGRADE_MULT = [0, 1.0, 1.5, 2.0]; // Lv別性能倍率 (index=Lv)
+const UPGRADE_MULT = [0, 1.0, 1.5, 2.0]; // Lv別性能倍率 (sensor用)
+// §3-1 アップグレードツリー再整合
+const ENGINE_UPG_HIGGS_RESIST = [0, 0.20, 0.35, 0.50]; // エンジン: ヒッグス/デブリ減速軽減 Lv0-3
+const ENGINE_UPG_HEAT_REDUCE  = [0, 0.10, 0.20, 0.30]; // エンジン: heatSig低下率 Lv0-3
+const WEAPONS_UPG_RANGE_MULT  = [1.0, 1.15, 1.30, 1.50]; // 武装: 射程倍率 Lv0-3
+const WEAPONS_UPG_RELOAD_MULT = [1.0, 0.85, 0.70, 0.55]; // 武装: リロード時間倍率 Lv0-3
+const ARMOR_RES_KINETIC = [0, 0.25, 0.25, 0.25]; // 装甲: kinetic耐性 Lv1+
+const ARMOR_RES_MISSILE = [0, 0,    0.25, 0.25]; // 装甲: missile耐性 Lv2+
+const ARMOR_RES_BEAM    = [0, 0,    0,    0.25]; // 装甲: beam耐性 Lv3+
 
 const ENGINE_TYPES = {
     thermonuclear: { speedMult: 1.0,  heatMult: 2.0,  optMult: 0.2,  emMult: 0.4,  higgsSpeedBonus: 0.0 },
@@ -1232,24 +1240,27 @@ class Projectile {
         this.active = true;
         this.distTraveled = 0;
 
+        // §3-1 武装アップグレード: 射程倍率 (自機弾のみ)
+        const _wRange = isPlayer ? (WEAPONS_UPG_RANGE_MULT[gameState.upgrades.weapons] || 1.0) : 1.0;
         if (type === 'kinetic') {
-            this.speed = 12; this.maxDist = 800; this.dmg = 15 * dmgScale;
+            this.speed = 12; this.maxDist = 800 * _wRange; this.dmg = 15 * dmgScale;
             this.angle = Math.atan2(target.y - y, target.x - x);
         } else if (type === 'missile') {
             // §3-10 ミサイル2タイプ: homing=熱源誘導 / smart=AI追跡(EM強・デコイ耐性・大閃光)
             this.missileMode = isPlayer ? missileMode : 'homing';
             this.speed = this.missileMode === 'smart' ? 7.5 : 6;
-            this.maxDist = this.missileMode === 'smart' ? 2200 : 1500;
+            this.maxDist = (this.missileMode === 'smart' ? 2200 : 1500) * _wRange;
             this.dmg = (this.missileMode === 'smart' ? 65 : 50) * dmgScale;
             this.angle = Math.atan2(target.y - y, target.x - x);
         } else if (type === 'beam') {
             this.active = false;
             if (target && target.hp > 0) {
-                const dmgMult = this.isPlayer ? (1 + (gameState.upgrades.weapons * 0.15)) : 1;
                 // ヒッグス高濃度エリアではビームダメージ大幅低下 (設計確定仕様)
                 const higgsBetween = getHiggsIntensity((x + target.x) / 2, (y + target.y) / 2);
                 const higgsBeamPenalty = 1 - higgsBetween * 0.8; // 最大80%ダメージ減衰
-                target.hp -= 150 * dmgMult * higgsBeamPenalty * dmgScale;
+                // §3-1 装甲: beam耐性 (敵ビームが自機に当たる時)
+                const beamArmorRes = (!isPlayer && target === player) ? ARMOR_RES_BEAM[gameState.upgrades.armor] : 0;
+                target.hp -= 150 * higgsBeamPenalty * dmgScale * (1 - beamArmorRes);
                 createHitEffect(target.x, target.y, isPlayer ? '#00ffaa' : '#ff4d4d');
                 effects.push({ x: this.x, y: this.y, tx: target.x, ty: target.y, type: 'beam', a: 1, c: isPlayer ? '#00ffaa' : '#ff4d4d' });
                 // ヒッグスダークチャネル: ビームがヒッグス雲を押し分けて通路を作る
@@ -1346,7 +1357,7 @@ class Projectile {
                     return;
                 }
             }
-            let dmgMult = this.isPlayer ? (1 + (gameState.upgrades.weapons * 0.15)) : 1;
+            let dmgMult = 1;
             let preemptive = false;
             // 先制攻撃ボーナス: 2x damage on unaware enemies
             if (this.isPlayer && hitTarget.detectionState === 'unaware') {
@@ -1356,6 +1367,13 @@ class Projectile {
                 hitTarget.isAggro = true; hitTarget.aggroTimer = 600;
             }
             if (!this.isPlayer) hitTarget.detectionState = 'alerted'; // Being hit alerts player too (no-op but consistent)
+            // §3-1 装甲: 武器種別耐性 (敵弾が自機に当たる時のみ)
+            if (!this.isPlayer && hitTarget === player) {
+                const armorLv = gameState.upgrades.armor;
+                const res = (this.type === 'kinetic' ? ARMOR_RES_KINETIC[armorLv]
+                           : this.type === 'missile' ? ARMOR_RES_MISSILE[armorLv] : 0);
+                dmgMult *= (1 - res);
+            }
             hitTarget.hp -= this.dmg * dmgMult;
             this.active = false;
             createHitEffect(this.x, this.y, this.isPlayer ? '#ffaa00' : '#ff4d4d');
@@ -1436,7 +1454,7 @@ class Ship {
             this.type = gameState.shipType || 'assault';
             const hpBase = { assault: 3500, stealth: 700, carrier: 2500 };
             this.radius = 20;
-            this.maxHp = (hpBase[gameState.shipType] || 2000) * (UPGRADE_MULT[gameState.upgrades.armor] || 1.0);
+            this.maxHp = hpBase[gameState.shipType] || 2000; // §3-1 装甲=耐性(HP増加なし)
         } else {
             this.type = type; // corvette, destroyer, carrier, fighter
             this.radius = type === 'carrier' ? 30 : (type === 'destroyer' ? 18 : (type === 'fighter' ? 6 : 12));
@@ -1504,7 +1522,9 @@ class Ship {
         if (deb <= 0) return 1;
         // AI配分で姿勢制御補助=軽減。自機はGEN AI配分、敵は固定の軽減(全く動けなくなるのを防ぐ)。
         const aiMit = this.isPlayer ? (genAlloc.ai / 100) * DEBRIS_AI_MITIGATE : DEBRIS_ENEMY_MITIGATE;
-        return 1 - deb * DEBRIS_SLOW * (1 - aiMit);
+        // §3-1 エンジンアップグレード: デブリ減速もヒッグスの50%相当で軽減
+        const engMit = this.isPlayer ? ENGINE_UPG_HIGGS_RESIST[gameState.upgrades.engine] * 0.5 : 0;
+        return 1 - deb * DEBRIS_SLOW * (1 - aiMit) * (1 - engMit);
     }
 
     update() {
@@ -1522,7 +1542,8 @@ class Ship {
             const _spdN = Math.min(1, _spd / 6);
             const _thrust = Math.min(1, (0.05 + _spdN * 0.85 + _ep * 0.10) * (0.55 + _gain * 0.45));
             // 各シグネチャ = 推進強度 × エンジン種別倍率。エンジンごとに支配的シグネチャが変わる。
-            this.heatSig    = Math.min(1, _thrust * _engType.heatMult * 0.55);
+            // §3-1 エンジンアップグレード: 熱効率改善でheatSig低下
+            this.heatSig    = Math.min(1, _thrust * _engType.heatMult * 0.55 * (1 - ENGINE_UPG_HEAT_REDUCE[gameState.upgrades.engine]));
             this.opticalSig = Math.min(1, _thrust * _engType.optMult * 0.45 + (this.weaponType === 'beam' ? 0.5 : 0));
             // EM: 推進＋(センサー/AI処理放射)。ゲインで増幅。AI↑でEM↑(逆探知の法則)。
             this.emSig      = Math.min(1, (_thrust * 0.35 + genAlloc.sensors / 100 * 0.18 + genAlloc.ai / 100 * 0.40) * (0.6 + _gain * 0.4) * _engType.emMult);
@@ -1542,12 +1563,13 @@ class Ship {
             if (jamPulseCD > 0) jamPulseCD--;
 
             // Speed defined by GEN engine allocation + 艦種補正 + ヒッグス減速
+            // §3-1 エンジンアップグレード: ヒッグス減速軽減 (旧UPGRADE_MULT速度増加→廃止)
             const speedMult = { assault: 0.8, stealth: 1.4, carrier: 0.6 };
-            const higgsSlowdown = 1 - getHiggsIntensity(this.x, this.y) * 0.45;
             const engType = ENGINE_TYPES[gameState.engineType] || ENGINE_TYPES.thermonuclear;
             const higgsHereEng = getHiggsIntensity(this.x, this.y);
+            const higgsSlowdown = 1 - higgsHereEng * 0.45 * (1 - ENGINE_UPG_HIGGS_RESIST[gameState.upgrades.engine]);
             const higgsBonusSpeed = higgsHereEng * engType.higgsSpeedBonus;
-            this.speed = ((genAlloc.engine / 100) * genGain * 3.0 * (speedMult[gameState.shipType] || 1.0) * higgsSlowdown * (UPGRADE_MULT[gameState.upgrades.engine] || 1.0) * engType.speedMult + higgsBonusSpeed) * this.terrainSpeedMult();
+            this.speed = ((genAlloc.engine / 100) * genGain * 3.0 * (speedMult[gameState.shipType] || 1.0) * higgsSlowdown * engType.speedMult + higgsBonusSpeed) * this.terrainSpeedMult();
 
             // 円形マップ境界検知
             if (Math.hypot(this.x - MAP_CX, this.y - MAP_CY) > MAP_RADIUS - 100 && !dialogOpen) {
@@ -1629,7 +1651,6 @@ class Ship {
                         } else {
                             this.weaponType = wType;
                             const proj = new Projectile(this.x, this.y, this.targetEntity, true, wType, _lockDmg);
-                            if (proj.dmg) proj.dmg *= (UPGRADE_MULT[gameState.upgrades.weapons] || 1.0);
                             projectiles.push(proj);
                             // 攻撃型特殊: 3連装同時発射 (kinetic時のみ)
                             if (gameState.shipType === 'assault') {
@@ -1647,7 +1668,8 @@ class Ship {
                             this.kineticAmmo--;
                             if (this.kineticAmmo <= 0) {
                                 this.kineticReloading = true;
-                                this.kineticReloadTimer = KINETIC_RELOAD_TIME;
+                                // §3-1 武装アップグレード: リロード時間短縮
+                                this.kineticReloadTimer = Math.round(KINETIC_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0));
                                 logMessage('WEP: KINETICリロード中...', 'system-msg');
                             }
                         }
@@ -1663,14 +1685,14 @@ class Ship {
                         } else {
                             this.weaponType = wType;
                             const proj = new Projectile(this.x, this.y, this.targetEntity, true, wType, _lockDmg);
-                            if (proj.dmg) proj.dmg *= (UPGRADE_MULT[gameState.upgrades.weapons] || 1.0);
                             projectiles.push(proj);
                             if (missileMode === 'smart') logMessage('WEP: MISSILE [AI追跡] 発射 — EM強・ジャミング耐性・大閃光', 'system-msg');
                             playSound('shoot');
                             const weaponGenFactor = Math.max(0.3, 1.5 - (genAlloc.weapons / 100));
                             this.fireCooldown = WEAPON_COOLDOWNS[wType] * weaponGenFactor;
                             this.missileReloading = true;
-                            this.missileReloadTimer = MISSILE_RELOAD_TIME;
+                            // §3-1 武装アップグレード: リロード時間短縮
+                            this.missileReloadTimer = Math.round(MISSILE_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0));
                         }
                     // ── beam マガジン・リロード処理 ──
                     } else if (wType === 'beam') {
@@ -1694,7 +1716,6 @@ class Ship {
                                 logMessage('WEP: BEAM 想定射撃 — 推定位置を外れた (命中せず)', 'warning-msg');
                             } else {
                                 const proj = new Projectile(this.x, this.y, this.targetEntity, true, wType, _lockDmg);
-                                if (proj.dmg) proj.dmg *= (UPGRADE_MULT[gameState.upgrades.weapons] || 1.0);
                                 projectiles.push(proj);
                             }
                             playSound('shoot');
@@ -3644,10 +3665,6 @@ document.getElementById('btn-hack').addEventListener('click', () => {
             if (gameState.upgrades[key] < MAX_UPGRADE_LV) {
                 gameState.upgrades[key]++;
                 if (key === 'sensor') RADAR_RANGE = BASE_RADAR_RANGE * UPGRADE_MULT[gameState.upgrades.sensor];
-                if (key === 'armor') {
-                    const hpBase = { assault: 3500, stealth: 700, carrier: 2500 };
-                    player.maxHp = (hpBase[gameState.shipType] || 2000) * UPGRADE_MULT[gameState.upgrades.armor];
-                }
                 const keyLabel = { weapons: '武装', sensor: 'センサー', armor: '装甲' };
                 logMessage(`EW[難破船]: ハッキング完了 — +${reward} SCR。${keyLabel[key]} Lv${gameState.upgrades[key]} に強化。`, 'system-msg');
             } else {
@@ -6099,17 +6116,20 @@ function buyUpgrade(type) {
         gameState.credits -= cost;
         gameState.upgrades[type]++;
         playSound('ui');
-        // ステータス再計算
-        if (type === 'armor') {
-            const hpBase = { assault: 3500, stealth: 700, carrier: 2500 };
-            player.maxHp = (hpBase[gameState.shipType] || 2000) * UPGRADE_MULT[gameState.upgrades.armor];
-        }
         if (type === 'sensor') RADAR_RANGE = BASE_RADAR_RANGE * UPGRADE_MULT[gameState.upgrades.sensor];
         updateTopUI();
         updateDockingUI();
         saveGame();
+        // §3-1 各アップグレードの効果説明
+        const newLv = gameState.upgrades[type];
+        const upgradeDescs = {
+            engine:  ['', 'ヒッグス/デブリ減速-20% / 熱署名-10%', 'ヒッグス/デブリ減速-35% / 熱署名-20%', 'ヒッグス/デブリ減速-50% / 熱署名-30%'],
+            weapons: ['', '射程×1.15 / リロード×0.85', '射程×1.30 / リロード×0.70', '射程×1.50 / リロード×0.55'],
+            armor:   ['', 'kinetic耐性25%付与', 'missile耐性25%追加', 'beam耐性25%追加 (全3種耐性)'],
+            sensor:  ['', 'ソナー範囲×1.0', 'ソナー範囲×1.5', 'ソナー範囲×2.0'],
+        };
         const names = { engine:'エンジン', weapons:'武装', armor:'装甲', sensor:'センサー' };
-        logMessage(`UPGRADE: ${names[type]} Lv${gameState.upgrades[type]} に強化完了 (Lv${lv}→${gameState.upgrades[type]}) ─ 性能 ×${UPGRADE_MULT[gameState.upgrades[type]].toFixed(1)}`, 'system-msg');
+        logMessage(`UPGRADE: ${names[type]} Lv${newLv} 強化完了 ─ ${upgradeDescs[type][newLv]}`, 'system-msg');
     }
 }
 
