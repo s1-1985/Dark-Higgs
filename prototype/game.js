@@ -603,6 +603,27 @@ function getStormIntensity(x, y) {
     return v;
 }
 
+// ============================================================
+// AIロックオン候補生成 (§3-3): センサー検知→AI解析の推定位置を
+// 確率%付き候補群で表現。精度が低いほど候補数が多く分散も大きい。
+// 候補は推定中心(displayX/Y)からのオフセット {dx,dy,p}。本命(index0)が支配的。
+// ============================================================
+function makeContactCandidates(acc) {
+    const n = Math.max(2, Math.round(2 + (1 - acc) * 4)); // acc 0.7→3, 0.2→5, 0→6
+    const spread = (1 - acc) * 360;
+    const cands = [{ dx: (Math.random() - 0.5) * spread * 0.25, dy: (Math.random() - 0.5) * spread * 0.25 }];
+    for (let i = 1; i < n; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const r = (0.45 + Math.random() * 0.55) * spread;
+        cands.push({ dx: Math.cos(a) * r, dy: Math.sin(a) * r });
+    }
+    // 確率割当: 本命=高精度ほど支配的 / 低精度ほど均等に近づく
+    const w = cands.map((c, i) => i === 0 ? (0.4 + acc * 0.5) : (0.15 + Math.random() * 0.35));
+    const sum = w.reduce((a, b) => a + b, 0);
+    cands.forEach((c, i) => { c.p = w[i] / sum; });
+    return cands;
+}
+
 // ヒッグス濃度の高い隠れ場所を探す (ジエンド戦スタイルAI用)
 function clampToMapCircle(x, y, margin = 200) {
     const dx = x - MAP_CX, dy = y - MAP_CY;
@@ -2639,6 +2660,37 @@ class Ship {
                 ctx.fillText(`${Math.round(this.contactAccuracy * 100)}%`, dispX, dispY - uncertaintyR - 5);
                 ctx.restore();
                 ctx.globalAlpha = 1;
+
+                // AIロックオン候補マーカー (§3-3): 低〜中精度のセンサー推定時のみ。
+                // 本命含む複数候補を確率%付きで表示。プレイヤーは「どれが本物か」を推理する。
+                if (this.contactAccuracy < 0.7) {
+                    if (this._candAcc !== this.contactAccuracy || !this.candidates) {
+                        this._candAcc = this.contactAccuracy;
+                        this.candidates = makeContactCandidates(this.contactAccuracy);
+                    }
+                    ctx.save();
+                    ctx.globalAlpha = lifeA * 2.0;
+                    ctx.font = '8px Orbitron';
+                    ctx.textAlign = 'center';
+                    let bestP = 0;
+                    for (const c of this.candidates) if (c.p > bestP) bestP = c.p;
+                    for (const c of this.candidates) {
+                        const cxp = dispX + c.dx, cyp = dispY + c.dy;
+                        const dom = c.p === bestP; // 本命
+                        const cc = dom ? col : '160,160,170';
+                        const ms = dom ? 7 : 5;
+                        ctx.strokeStyle = `rgba(${cc},0.9)`;
+                        ctx.lineWidth = dom ? 1.5 : 1;
+                        ctx.beginPath();
+                        ctx.moveTo(cxp, cyp - ms); ctx.lineTo(cxp + ms, cyp);
+                        ctx.lineTo(cxp, cyp + ms); ctx.lineTo(cxp - ms, cyp);
+                        ctx.closePath(); ctx.stroke();
+                        ctx.fillStyle = `rgba(${cc},0.95)`;
+                        ctx.fillText(`${Math.round(c.p * 100)}%`, cxp, cyp - ms - 3);
+                    }
+                    ctx.restore();
+                    ctx.globalAlpha = 1;
+                }
             }
 
             // HP バー (発砲フラッシュ中 or 高精度コンタクト時)

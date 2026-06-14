@@ -19,6 +19,11 @@
 - **設計意図**: 「ヒッグスの影響を受ける主体が自機だけ」問題の解消。薄い所に居て視界が広くても、濃い雲ポケットに隠れた敵はクリーンに撃てない。
 - **⚠️ 申し送り**: 実機未検証（コンテナにブラウザ無し、`node --check`のみ通過）。GitHub Pagesで①視野内の雲の白飛び具合②`'lighter'`合成のモバイル負荷（クリップ+768px drawImage 1枚追加）③ゲートのバランス（敵が雲に隠れた時の手応え）を要確認。全てtunable定数。次は Phase2（デブリ帯+磁気嵐帯）。
 
+#### §3-3 AIロックオン候補表示（同ブランチ・PR#44）
+- `makeContactCandidates(acc)`: コンタクト精度から確率%付き候補群 `{dx,dy,p}` を生成（候補数=2+(1-acc)*4、分散=(1-acc)*360、本命=index0が支配的）。
+- 描画: `Ship.draw` のコンタクト描画ブロックで `contactAccuracy<0.7` の非視野コンタクトに候補ダイヤモンド+%を表示。`_candAcc`で精度変化時のみ再生成（揺れ防止）。完全ロックでは非表示。
+- 信頼度は既存 `contactAccuracy` を流用（§3-2 AI精度スライダー導入時に連動可）。バランスを変えない追加的UI（auto-targetは従来通り実体を狙う）。
+
 #### Phase2 実装 — 地形ハザード2種（デブリ帯+磁気嵐帯）（同ブランチ・PR#44）
 TODO §3-13 D を段階導入の方針通り2種だけ実装:
 - **フィールド/描画**: `debrisField[]`(10) / `stormField[]`(6)。`getDebrisIntensity`/`getStormIntensity`(getHiggs同方式=フレームキャッシュ+500量子化)。`generateSector`の setTimeout 内で `debrisCanvas`(岩片点描・灰)/`stormCanvas`(紫青EMノイズ)をベイク。`drawBackground`で bgMist の後に描画(嵐は明滅)。
