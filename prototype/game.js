@@ -245,6 +245,9 @@ let higgsCloudCanvas = null; // ヒッグス雲(白)事前焼き付け — 視�
 let scrapDrops = [];
 let stations = [];
 let higgsWakes = [];    // ヒッグスウェイク軌跡 {x, y, intensity, life}
+let heatTrails  = [];   // §3-12 HEATセンサー向け熱排気跡
+let opticTrails = [];   // §3-12 OPTICセンサー向け発光跡(弾跡・ビーム)
+let emTrails    = [];   // §3-12 EMセンサー向けEM放射跡
 let resourceNodes = []; // リソースノード {x, y, active, emFlashTimer}
 
 // GEN配分 (ゼロサム: エンジン/武器/センサー/AI の合計=100)
@@ -1263,6 +1266,14 @@ class Projectile {
                     if (localHiggs > 0.08) {
                         higgsWakes.push({ x: wx, y: wy, intensity: localHiggs * 1.4, life: 1.0 });
                     }
+                    // §3-12 ビーム軌跡: optic trail (光学センサーで光跡が残る)
+                    if (s % 3 === 0 && opticTrails.length < 600) {
+                        opticTrails.push({ x: wx, y: wy, intensity: 0.9, life: 1.0 });
+                    }
+                    // §3-12 ビームチャージ: EM trail (チャージ＋発射でEM放射)
+                    if (s % 4 === 0 && emTrails.length < 600) {
+                        emTrails.push({ x: wx, y: wy, intensity: 0.7, life: 0.9 });
+                    }
                 }
             }
         }
@@ -1304,6 +1315,16 @@ class Projectile {
         this.y += Math.sin(this.angle) * this.speed;
         this.distTraveled += this.speed;
         if (this.distTraveled > this.maxDist) this.active = false;
+        // §3-12 弾跡trail生成 (センサー別の足跡)
+        if (this.type === 'kinetic' && _frameCount % 2 === 0) {
+            if (opticTrails.length < 600) opticTrails.push({ x: this.x, y: this.y, intensity: 0.75, life: 1.0 });
+        } else if (this.type === 'missile') {
+            if (_frameCount % 3 === 0) {
+                if (heatTrails.length  < 600) heatTrails.push({  x: this.x, y: this.y, intensity: 0.85, life: 1.0 });
+                if (emTrails.length    < 600) emTrails.push({    x: this.x, y: this.y, intensity: 0.55, life: 0.8 }); // 誘導EM
+                if (opticTrails.length < 600) opticTrails.push({ x: this.x, y: this.y, intensity: 0.5,  life: 0.7 }); // 噴射光
+            }
+        }
 
         const hitTarget = this.isPlayer ? enemies.find(e => Math.hypot(e.x - this.x, e.y - this.y) < e.radius * 1.5) : (Math.hypot(player.x - this.x, player.y - this.y) < player.radius * 1.5 ? player : null);
 
@@ -2168,6 +2189,14 @@ class Ship {
                 if (higgsAtThisShip > 0.15 && spd > 0.2) {
                     higgsWakes.push({ x: this.x, y: this.y, intensity: higgsAtThisShip * 0.8, life: 1.0 });
                 }
+                // §3-12 敵 HEAT trail (高速移動時の熱排気跡)
+                if (this.heatSig > 0.08 && spd > 0.3 && Math.random() < 0.18) {
+                    if (heatTrails.length < 600) heatTrails.push({ x: this.x, y: this.y, intensity: this.heatSig * 0.85, life: 1.0 });
+                }
+                // §3-12 敵 EM trail (AI処理/ミサイル誘導放射)
+                if (this.emSig > 0.12 && Math.random() < 0.12) {
+                    if (emTrails.length < 600) emTrails.push({ x: this.x, y: this.y, intensity: this.emSig * 0.9, life: 1.0 });
+                }
             } else {
                 this.higgsSig = Math.max(0, this.higgsSig - 0.02);
             }
@@ -2971,7 +3000,8 @@ function generateSector() {
     player = new Ship(MAP_CX, MAP_CY, true);
     player.generatorOutput = genAlloc.engine;
     enemies = []; structures = []; projectiles = []; effects = []; particles = []; debris = []; scrapDrops = [];
-    stations = []; higgsWakes = []; resourceNodes = []; decoys = []; playerDrones = [];
+    stations = []; higgsWakes = []; heatTrails = []; opticTrails = []; emTrails = [];
+    resourceNodes = []; decoys = []; playerDrones = [];
 
     // センサーLvによるレーダー基本範囲の反映
     RADAR_RANGE = BASE_RADAR_RANGE * UPGRADE_MULT[gameState.upgrades.sensor];
@@ -3895,8 +3925,28 @@ function drawPassiveAntenna(ctx) {
     const CR = sc.r;
     const t  = Date.now();
 
-    // EM / HIGGS センサー専用のウェイク・ノード描画
+    // センサー別 trail/wake 描画 (§3-12 全センサー一般化)
     const sensorRange = effectiveRadarRange * sc.rangeScale;
+    // §3-12 HEAT trail: 橙色の熱排気跡 (エンジン移動・ミサイル推進)
+    if (currentSensor === 'heat') {
+        heatTrails.forEach(w => {
+            if (Math.hypot(w.x - player.x, w.y - player.y) > sensorRange) return;
+            ctx.save(); ctx.globalAlpha = w.life * 0.65;
+            ctx.fillStyle = 'rgba(255,120,20,0.85)';
+            ctx.beginPath(); ctx.arc(w.x, w.y, Math.max(1.5, 3 * w.intensity), 0, Math.PI * 2); ctx.fill();
+            ctx.restore(); ctx.globalAlpha = 1;
+        });
+    }
+    // §3-12 OPTIC trail: 黄白の発光跡 (弾跡・ビーム軌跡・ミサイル噴射)
+    if (currentSensor === 'optic') {
+        opticTrails.forEach(w => {
+            if (Math.hypot(w.x - player.x, w.y - player.y) > sensorRange) return;
+            ctx.save(); ctx.globalAlpha = w.life * 0.6;
+            ctx.fillStyle = 'rgba(255,230,80,0.85)';
+            ctx.beginPath(); ctx.arc(w.x, w.y, Math.max(1.5, 2.5 * w.intensity), 0, Math.PI * 2); ctx.fill();
+            ctx.restore(); ctx.globalAlpha = 1;
+        });
+    }
     if (currentSensor === 'em') {
         resourceNodes.forEach(n => {
             if (n.emFlashTimer <= 0) return;
@@ -3906,6 +3956,14 @@ function drawPassiveAntenna(ctx) {
             ctx.fillStyle = '#cc44ff'; ctx.shadowColor = '#cc44ff'; ctx.shadowBlur = 5 * intensity;
             ctx.beginPath(); ctx.arc(n.x, n.y, 7 * intensity, 0, Math.PI * 2); ctx.fill();
             ctx.shadowBlur = 0; ctx.restore(); ctx.globalAlpha = 1;
+        });
+        // §3-12 EM trail: 紫のEM放射跡 (AI処理・ミサイル誘導・ビームチャージ)
+        emTrails.forEach(w => {
+            if (Math.hypot(w.x - player.x, w.y - player.y) > sensorRange) return;
+            ctx.save(); ctx.globalAlpha = w.life * 0.55;
+            ctx.fillStyle = 'rgba(180,80,255,0.85)';
+            ctx.beginPath(); ctx.arc(w.x, w.y, Math.max(1.5, 3 * w.intensity), 0, Math.PI * 2); ctx.fill();
+            ctx.restore(); ctx.globalAlpha = 1;
         });
     }
     if (currentSensor === 'higgs') {
@@ -5660,12 +5718,25 @@ function gameLoop() {
             higgsWakes[i].life -= 0.005;
             if (higgsWakes[i].life <= 0) higgsWakes.splice(i, 1);
         }
-        // プレイヤーの移動でもウェイクを生成
+        // §3-12 センサーtrail decay (各センサー軸の足跡フェード)
+        for (let i = heatTrails.length  - 1; i >= 0; i--) { heatTrails[i].life  -= 0.004; if (heatTrails[i].life  <= 0) heatTrails.splice(i,  1); }
+        for (let i = opticTrails.length - 1; i >= 0; i--) { opticTrails[i].life -= 0.006; if (opticTrails[i].life <= 0) opticTrails.splice(i, 1); }
+        for (let i = emTrails.length    - 1; i >= 0; i--) { emTrails[i].life    -= 0.005; if (emTrails[i].life    <= 0) emTrails.splice(i,    1); }
+
+        // プレイヤーの移動でウェイク・trail を生成
         if (player && player.hp > 0 && player.state === 'moving') {
             const playerHiggs = getHiggsIntensity(player.x, player.y);
             if (playerHiggs > 0.2 && Math.random() < 0.3) {
                 higgsWakes.push({ x: player.x, y: player.y, intensity: playerHiggs * 0.6, life: 0.8 });
             }
+            // §3-12 HEAT trail: エンジン熱排気 (移動時)
+            if (!repairActive && player.heatSig > 0.07 && Math.random() < 0.22) {
+                if (heatTrails.length < 600) heatTrails.push({ x: player.x, y: player.y, intensity: player.heatSig, life: 1.0 });
+            }
+        }
+        // §3-12 EM trail: AI処理放射 (移動に関係なく高EM時)
+        if (player && player.hp > 0 && !repairActive && player.emSig > 0.2 && Math.random() < 0.14) {
+            if (emTrails.length < 600) emTrails.push({ x: player.x, y: player.y, intensity: player.emSig * 0.9, life: 1.0 });
         }
 
         // リソースノード収集チェック (プレイヤー接近で自動収集)
