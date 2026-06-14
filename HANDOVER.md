@@ -10,6 +10,14 @@
 
 ## セッションログ（新しい順）
 
+### 2026-06-14（深夜⑤）— 戦闘メカニクス4改善（PR#56・`claude/reading-markdown-files-nm1nmj`）
+- **回頭レート制限**: `PLAYER_TURN_RATE = 0.022 rad/frame`。旧: `diff * 0.03`（無制限比例回頭） → 後方攻撃が容易だった問題を解消。
+- **射撃弧 ±120°**: `PLAYER_FIRE_ARC = Math.PI * 0.67`。後方60°は射撃死角。「後ろを取る」戦術が有効に。
+- **ロックオン保持**: `LOCK_PERSIST_BASE = 2.0`。有視界外逃走後も `visionRadius × 2 × (1 + aiPrec('sensor') * 2.5)` 距離まで `_fullLock` 継続。`_wasLocked` フラグで管理。追跡時のウェイポイント操作でロックが即解除されない。
+- **ゲームスピードトグル**: ACTIONSパネルにSPDボタン。`gameSpeedFactor` (0.5/1.0/2.0) を自機・敵速度・全リロードタイマー・fireCooldownに適用。戦闘時スロー/移動時ファスト操作が可能に。
+- **ベーススピード 3.0→2.4**: 全体的な動きの重量感を改善。
+- `?v=20260614k`。全壁打ちタスク実装完了。
+
 ### 2026-06-14（深夜④）— §3-13 Phase3 熱雲(HEAT地形)実装（PR#55・`claude/reading-markdown-files-nm1nmj`）
 - **熱雲**: `thermalField[]`(7ブロブ) + `getThermalIntensity()`(フレームキャッシュ+量子化) + `thermalCanvas`(768px、赤橙ベイク)。
 - **効果**: `THERMAL_HEAT_MASK=0.60` → 熱雲内heatSig低減（HEATセンサーから隠れやすい）。`THERMAL_HEAT_MOD=0.80` → 敵HEAT探知経路減衰。
