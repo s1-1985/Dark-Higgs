@@ -22,6 +22,9 @@
         <!-- Main Game Field -->
         <canvas id="gameCanvas"></canvas>
 
+        <!-- マップモード バナー (ミニマップタップで表示) -->
+        <div id="map-mode-banner" style="display:none; position:absolute; top:54px; left:50%; transform:translateX(-50%); z-index:60; padding:4px 14px; background:rgba(0,20,16,0.8); border:1px solid #00ffaa; border-radius:4px; color:#00ffaa; font-family:'Orbitron',monospace; font-size:11px; letter-spacing:1px; pointer-events:none; box-shadow:0 0 12px rgba(0,255,170,0.3);">◰ MAP MODE — タップで航路設定 / ミニマップ再タップで戻る</div>
+
         <!-- UI Overlay -->
         <div id="ui-layer">
             <!-- Top Bar (New feature for Save & Currency) -->
@@ -593,7 +596,7 @@
 
     </div>
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20260614d"></script>
+    <script src="game.js?v=20260614e"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
