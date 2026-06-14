@@ -10,6 +10,15 @@
 
 ## セッションログ（新しい順）
 
+### 2026-06-14（深夜③）— §3-1 アップグレードツリー再整合（PR#53・`claude/reading-markdown-files-nm1nmj`）
+- **エンジン Lv1-3**: 旧「速度倍率」→ ヒッグス/デブリ減速軽減(20/35/50%) + heatSig低下(10/20/30%)
+- **武装 Lv1-3**: 旧「ダメージ倍率」→ 射程×(1.15/1.30/1.50) + リロード×(0.85/0.70/0.55)
+- **装甲 Lv1-3**: 旧「HP倍率」→ kinetic25%(Lv1) / +missile25%(Lv2) / +beam25%(Lv3) 武器種別耐性
+- **センサー**: 変更なし（ソナー範囲×UPGRADE_MULT）
+- 新定数: `ENGINE_UPG_HIGGS_RESIST/HEAT_REDUCE`, `WEAPONS_UPG_RANGE/RELOAD_MULT`, `ARMOR_RES_KINETIC/MISSILE/BEAM`
+- HTML更新: アップグレードパネル説明文。`?v=20260614i`。
+- **⚠️ 申し送り**: 残タスクは §3-13 Phase3（熱雲）のみ。実機30fps計測後に判断。その他は全タスク完了。
+
 ### 2026-06-14（深夜②）— §3-12 全センサーtrail一般化（PR#52・`claude/reading-markdown-files-nm1nmj`）
 - **§3-12 HEAT/OPTIC/EM trail**: `heatTrails[]`/`opticTrails[]`/`emTrails[]`を追加（`higgsWakes`と同パターン）。
   - 源泉: 実弾→optic、ミサイル→heat+em+optic、ビーム→optic+em、プレイヤー移動→heat+em、敵Ship移動→heat+em。
