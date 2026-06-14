@@ -350,4 +350,12 @@
 
 ---
 
-*最終更新: 2026-06-14 — PR#55で§3-13 Phase3熱雲(HEAT地形)を実装。`origin/main`(PR#34-53)反映済・PR#55マージ待ち。全壁打ちタスク実装完了。4種目地形・アクティブソナー嵐劣化は任意拡張。*
+### Higgsfield ビジュアルエフェクト（PR#57・PR#58 完了）
+- ✅ **Phase1（PR#57）**: `fx_explosion_big/small`, `fx_kinetic_flash`, `fx_beam_impact`, `fx_thruster_jet`, `fx_missile_exhaust` — 爆発・弾着・スラスター・ミサイル排気スプライト
+- ✅ **Phase2（PR#58）**: `drone_attack/scout/decoy/missile/turret/buoy`, `fx_bolt_player/enemy`, `fx_decoy`, `particle_heat/optic/higgs` — ドローン全種・弾体・デコイ・センサーtrail粒子スプライト
+- **手法**: 黒背景 + `globalCompositeOperation='lighter'` 加算合成。`spriteReady()` ガード＋キャンバスフォールバック。`shadowBlur` 2箇所も合わせて除去。
+- **残**: 岩礁（debris）スポーン岩の置き換え（現状はキャンバス四角形）/ 熱雲Blobのテクスチャ化 — 任意拡張。
+
+---
+
+*最終更新: 2026-06-14 — PR#57・#58でHiggsfield全スプライト Phase1+2を適用。`origin/main`(PR#34-58)全反映済。全壁打ちタスク実装完了。残は任意拡張のみ。*
