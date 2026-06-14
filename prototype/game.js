@@ -255,6 +255,14 @@ const JAM_BURST_RADIUS = 3500, JAM_BURST_DUR = 360, JAM_BURST_DEGRADE = 0.6;  //
 const JAM_CONT_RADIUS = 2400, JAM_CONT_DEGRADE = 0.35;                        // 半径2400を35%劣化(持続)
 const JAM_PULSE_RADIUS = 6000, JAM_PULSE_DUR = 75, JAM_PULSE_CD = 1200;       // 半径6000を1.25秒全ブラインド, CD20秒
 
+// ── 積載量 (同時展開上限) — オーナー確定値 2026-06-14 ──
+const CARGO_CAP = { assault: 2, stealth: 3, carrier: 6 };
+
+// ── 潜航型デコイ (強EM放射のダミー → 敵ミサイルを誘引・索敵妨害) ──
+let decoys = [];
+const DECOY_LIFE = 480;        // 8秒
+const DECOY_LURE_RADIUS = 1600; // この半径内の敵ミサイルを誘引
+
 // ============================================================
 // 有視界システム — アメーバ形状視野 + ヒッグス連続濃度連動
 // ============================================================
@@ -1120,11 +1128,25 @@ class Projectile {
         if (!this.active) return;
 
         if (this.type === 'missile' && this.target && this.target.hp > 0) {
-            const targetAngle = Math.atan2(this.target.y - this.y, this.target.x - this.x);
+            // 敵ミサイルはデコイ(強EM)に誘引される: 近傍デコイがあれば本標的より優先して追尾
+            let homeX = this.target.x, homeY = this.target.y;
+            if (!this.isPlayer && decoys.length) {
+                let best = null, bestD = DECOY_LURE_RADIUS;
+                for (const d of decoys) { const dd = Math.hypot(d.x - this.x, d.y - this.y); if (dd < bestD) { bestD = dd; best = d; } }
+                if (best) { homeX = best.x; homeY = best.y; this._luredBy = best; }
+            }
+            const targetAngle = Math.atan2(homeY - this.y, homeX - this.x);
             let diff = targetAngle - this.angle;
             while (diff < -Math.PI) diff += Math.PI * 2;
             while (diff > Math.PI) diff -= Math.PI * 2;
             this.angle += diff * 0.05;
+            // デコイに到達したらミサイルは消費される(無害化)
+            if (this._luredBy && Math.hypot(this._luredBy.x - this.x, this._luredBy.y - this.y) < 40) {
+                createHitEffect(this.x, this.y, '#cc99ff');
+                this._luredBy.life = Math.min(this._luredBy.life, 30); // デコイも消耗
+                this.active = false;
+                return;
+            }
         }
 
         this.x += Math.cos(this.angle) * this.speed;
@@ -3046,6 +3068,15 @@ document.getElementById('btn-jam-pulse')?.addEventListener('click', () => {
     logMessage('JAM: EMパルス発射 — 広域瞬間ブラインド！(自EM放射が最大に)', 'warning-msg');
     playSound('ui');
 });
+document.getElementById('btn-decoy')?.addEventListener('click', () => {
+    if (gameState.shipType !== 'stealth') return;
+    if (!player || player.hp <= 0) return;
+    if (decoys.length >= CARGO_CAP.stealth) { logMessage(`DECOY: 同時展開上限 (${CARGO_CAP.stealth}機) に到達`, 'warning-msg'); return; }
+    const ang = player.angle, sp = 4;
+    decoys.push({ x: player.x + Math.cos(ang) * 30, y: player.y + Math.sin(ang) * 30, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, life: DECOY_LIFE });
+    logMessage(`DECOY: 強EMデコイ射出 (${decoys.length}/${CARGO_CAP.stealth}) — 敵ミサイルを誘引`, 'system-msg');
+    playSound('ui');
+});
 
 // ── モバイルメニュー ──
 (function initMobileMenu() {
@@ -4663,6 +4694,39 @@ function drawHUDOverlay(ctx) {
     });
 }
 
+// ── 潜航型デコイ: 更新・描画 ──
+function updateDecoys() {
+    for (let i = decoys.length - 1; i >= 0; i--) {
+        const d = decoys[i];
+        d.x += d.vx; d.y += d.vy;
+        d.vx *= 0.985; d.vy *= 0.985; // 慣性で減速
+        d.life--;
+        // デコイは強EM源 → ヒッグスウェイクは出さないがEM波紋演出
+        if (d.life % 24 === 0) effects.push({ x: d.x, y: d.y, r: 0, maxR: 220, a: 0.4, c: '#cc99ff', type: 'circle' });
+        if (d.life <= 0) decoys.splice(i, 1);
+    }
+}
+function drawDecoys(ctx) {
+    for (const d of decoys) {
+        const a = Math.min(1, d.life / 60);
+        ctx.save();
+        ctx.globalAlpha = a * 0.9;
+        ctx.translate(d.x, d.y);
+        // 菱形コア + EMパルスリング
+        ctx.fillStyle = '#cc99ff';
+        ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(6, 0); ctx.lineTo(0, 7); ctx.lineTo(-6, 0); ctx.closePath(); ctx.fill();
+        const pr = 10 + (Math.sin(Date.now() * 0.01 + d.x) * 0.5 + 0.5) * 8;
+        ctx.globalAlpha = a * 0.5;
+        ctx.strokeStyle = '#aa66ff'; ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.arc(0, 0, pr, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = a;
+        ctx.fillStyle = '#ffffff'; ctx.font = '8px Orbitron'; ctx.textAlign = 'center';
+        ctx.fillText('DECOY', 0, -14);
+        ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+}
+
 // FPS計測用
 let _fpsLastTime = 0, _fpsFrameCount = 0, _fpsDisplay = 0;
 
@@ -4815,6 +4879,7 @@ function gameLoop() {
             setTimeout(() => showGameOver(), 2500);
         }
         enemies.forEach(e => e.update());
+        updateDecoys();
 
         // Scrap Collection
         for (let i = scrapDrops.length - 1; i >= 0; i--) {
@@ -5039,6 +5104,7 @@ function gameLoop() {
         if (player && player.hp > 0) drawPassiveAntenna(ctx);
 
         projectiles.forEach(p => p.draw(ctx));
+        drawDecoys(ctx);
         updateDrawEffects(ctx);
         updateDrawDebrisParticles(ctx);
 
