@@ -10,6 +10,13 @@
 
 ## セッションログ（新しい順）
 
+### 2026-06-14（深夜④）— §3-13 Phase3 熱雲(HEAT地形)実装（PR#55・`claude/reading-markdown-files-nm1nmj`）
+- **熱雲**: `thermalField[]`(7ブロブ) + `getThermalIntensity()`(フレームキャッシュ+量子化) + `thermalCanvas`(768px、赤橙ベイク)。
+- **効果**: `THERMAL_HEAT_MASK=0.60` → 熱雲内heatSig低減（HEATセンサーから隠れやすい）。`THERMAL_HEAT_MOD=0.80` → 敵HEAT探知経路減衰。
+- **UI**: env-thermal/msb-thermal (橙色%表示) + ミニマップ赤橙オーバーレイ。`?v=20260614j`。
+- **地形3種の対称性完成**: デブリ=OPTIC / 磁気嵐=EM / 熱雲=HEAT。
+- **⚠️ 申し送り**: 全壁打ちタスク実装完了。残: 4種目地形(任意) / アクティブソナー嵐劣化(任意) / 実機30fps計測(未実施)。
+
 ### 2026-06-14（深夜③）— §3-1 アップグレードツリー再整合（PR#53・`claude/reading-markdown-files-nm1nmj`）
 - **エンジン Lv1-3**: 旧「速度倍率」→ ヒッグス/デブリ減速軽減(20/35/50%) + heatSig低下(10/20/30%)
 - **武装 Lv1-3**: 旧「ダメージ倍率」→ 射程×(1.15/1.30/1.50) + リロード×(0.85/0.70/0.55)

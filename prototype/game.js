@@ -235,6 +235,9 @@ let debrisField = [], stormField = [];
 let debrisCanvas = null, stormCanvas = null;
 let _debrisCache = new Map(), _debrisCacheFrame = -1;
 let _stormCache  = new Map(), _stormCacheFrame  = -1;
+// Phase3 地形ハザード (§3-13 Phase3): 熱雲 (HEAT)
+let thermalField = [], thermalCanvas = null;
+let _thermalCache = new Map(), _thermalCacheFrame = -1;
 let enemies = [];
 let projectiles = [];
 let structures = [];
@@ -338,6 +341,8 @@ const DEBRIS_MISS        = 0.55; // デブリ内ターゲットへの実弾/ミ�
 const DEBRIS_OPTIC_MOD   = 0.85; // デブリ経路による光学(OPTIC)探知の減衰係数
 const STORM_EM_MOD       = 0.90; // 磁気嵐経路によるEM探知の減衰係数
 const STORM_EM_MASK      = 0.65; // 磁気嵐内に居る機体のEMシグネチャ低減率 (AIを安全に回せる)
+const THERMAL_HEAT_MASK  = 0.60; // 熱雲内の機体のheatSig低減率 (HEATセンサーから隠れやすい)
+const THERMAL_HEAT_MOD   = 0.80; // 熱雲経路によるHEAT探知の減衰係数
 function computeVisionRadius() {
     // ヒッグス連続濃度連動: 0% = 基準視野(100%), 濃度上昇に比例して縮小, 100%でほぼゼロ
     if (!player) return BASE_VISION_RADIUS;
@@ -608,6 +613,21 @@ function getStormIntensity(x, y) {
     }
     v = total > 1.0 ? 1.0 : total;
     _stormCache.set(key, v);
+    return v;
+}
+function getThermalIntensity(x, y) {
+    if (_thermalCacheFrame !== _frameCount) { _thermalCache.clear(); _thermalCacheFrame = _frameCount; }
+    const key = (Math.round(x / 500) * 100000 + Math.round(y / 500)) | 0;
+    let v = _thermalCache.get(key);
+    if (v !== undefined) return v;
+    let total = 0;
+    for (let i = 0; i < thermalField.length; i++) {
+        const m = thermalField[i];
+        const dist = Math.hypot(x - m.x, y - m.y);
+        if (dist < m.r) total += (1 - dist / m.r) * m.density;
+    }
+    v = total > 1.0 ? 1.0 : total;
+    _thermalCache.set(key, v);
     return v;
 }
 
@@ -1549,6 +1569,8 @@ class Ship {
             this.emSig      = Math.min(1, (_thrust * 0.35 + genAlloc.sensors / 100 * 0.18 + genAlloc.ai / 100 * 0.40) * (0.6 + _gain * 0.4) * _engType.emMult);
             // 磁気嵐帯: 嵐がEM放射を覆い隠す → AIを安全に高配分できる退避所 (§3-13 D)
             this.emSig     *= (1 - getStormIntensity(this.x, this.y) * STORM_EM_MASK);
+            // 熱雲: 環境熱ノイズが熱署名を埋もれさせる → HEATセンサーから隠れやすい (§3-13 Phase3)
+            this.heatSig   *= (1 - getThermalIntensity(this.x, this.y) * THERMAL_HEAT_MASK);
             // ヒッグス: ヒッグス雲内を動くほどウェイク乱流。ヒッグスエンジンは特に顕著。
             this.higgsSig   = Math.min(1, _thrust * _hHere * 1.6 + (_engType.higgsSpeedBonus > 0 ? _thrust * _engType.higgsSpeedBonus * 0.7 : _thrust * 0.08));
 
@@ -1861,16 +1883,18 @@ class Ship {
             if (player && player.hp > 0) {
                 const pSigs = { heat: player.heatSig||0, optic: player.opticalSig||0, em: player.emSig||0, higgs: player.higgsSig||0 };
                 const _mx = (player.x + this.x) / 2, _my = (player.y + this.y) / 2;
-                const _debrisPath = getDebrisIntensity(_mx, _my);
-                const _stormPath  = getStormIntensity(_mx, _my);
+                const _debrisPath  = getDebrisIntensity(_mx, _my);
+                const _stormPath   = getStormIntensity(_mx, _my);
+                const _thermalPath = getThermalIntensity(_mx, _my);
                 ['heat','optic','em','higgs'].forEach(sName => {
                     const sc2 = sensorConfig[sName];
                     const higgsPath = getHiggsIntensity(_mx, _my);
                     const distAtten = Math.max(0, 1 - distToPlayer / (myDetectRange * 2.5 * sc2.rangeScale));
-                    // 地形ハザード: デブリ経路は光学を、磁気嵐経路はEMを減衰 (§3-13 D)
+                    // 地形ハザード: デブリ=OPTIC減衰 / 磁気嵐=EM減衰 / 熱雲=HEAT減衰 (§3-13)
                     let terrAtten = 1;
                     if (sName === 'optic') terrAtten = 1 - _debrisPath * DEBRIS_OPTIC_MOD;
-                    else if (sName === 'em') terrAtten = 1 - _stormPath * STORM_EM_MOD;
+                    else if (sName === 'em')   terrAtten = 1 - _stormPath   * STORM_EM_MOD;
+                    else if (sName === 'heat') terrAtten = 1 - _thermalPath * THERMAL_HEAT_MOD;
                     const attenuated = pSigs[sName] * distAtten * (1 - higgsPath * sc2.higgsMod) * terrAtten;
                     if (attenuated > sc2.threshold * 0.6) { playerSigDetected = true; detectedSigStrength = Math.max(detectedSigStrength, attenuated); }
                     if (attenuated > domVal) { domVal = attenuated; domSig = sName; }
@@ -3066,8 +3090,8 @@ function generateSector() {
     bgMist = [];
     bgMistCanvas = null;
     higgsCloudCanvas = null;
-    debrisField = []; stormField = [];
-    debrisCanvas = null; stormCanvas = null;
+    debrisField = []; stormField = []; thermalField = [];
+    debrisCanvas = null; stormCanvas = null; thermalCanvas = null;
     // 星雲色: 紫・青・赤紫・緑青・琥珀 — より鮮やかな値
     const mistColors = ['70,20,140','25,60,160','130,20,70','10,90,110','80,50,10','15,110,80'];
     for (let i = 0; i < 30; i++) {
@@ -3094,6 +3118,14 @@ function generateSector() {
             x: Math.random() * FIELD_SIZE, y: Math.random() * FIELD_SIZE,
             r: Math.random() * 4000 + 2200,
             density: Math.random() * 0.55 + 0.25
+        });
+    }
+    // 熱雲(プラズマ雲): 少なめ (§3-13 Phase3)
+    for (let i = 0; i < 7; i++) {
+        thermalField.push({
+            x: Math.random() * FIELD_SIZE, y: Math.random() * FIELD_SIZE,
+            r: Math.random() * 3800 + 1600,
+            density: Math.random() * 0.50 + 0.20
         });
     }
     // bgMistをオフスクリーンキャンバスに事前焼き付け (毎フレームのcreateRadialGradientを排除)
@@ -3186,6 +3218,22 @@ function generateSector() {
             scx.beginPath(); scx.arc(sx, sy, sr, 0, Math.PI * 2); scx.fill();
         });
         stormCanvas = sc2c;
+
+        // ── 熱雲(プラズマ雲) ベイク: 赤橙のゆらぎ (§3-13 Phase3) ──
+        const tc = document.createElement('canvas');
+        tc.width = tc.height = 768;
+        const tcx = tc.getContext('2d');
+        thermalField.forEach(m => {
+            const sx = m.x * scale, sy = m.y * scale, sr = m.r * scale;
+            const a = 0.08 + m.density * 0.13;
+            const g = tcx.createRadialGradient(sx, sy, 0, sx, sy, sr);
+            g.addColorStop(0,    `rgba(255,80,20,${a.toFixed(3)})`);
+            g.addColorStop(0.5,  `rgba(220,120,0,${(a * 0.5).toFixed(3)})`);
+            g.addColorStop(1,    'rgba(0,0,0,0)');
+            tcx.fillStyle = g;
+            tcx.beginPath(); tcx.arc(sx, sy, sr, 0, Math.PI * 2); tcx.fill();
+        });
+        thermalCanvas = tc;
     }, 50);
 
     // 敵を円形マップ内のヒッグス濃度の高い場所に配置
@@ -4307,6 +4355,11 @@ function drawMinimap() {
         minimapCtx.drawImage(stormCanvas, offX, offY, FIELD_SIZE * mmScale, FIELD_SIZE * mmScale);
         minimapCtx.globalAlpha = 1;
     }
+    if (thermalCanvas) {
+        minimapCtx.globalAlpha = 0.35;
+        minimapCtx.drawImage(thermalCanvas, offX, offY, FIELD_SIZE * mmScale, FIELD_SIZE * mmScale);
+        minimapCtx.globalAlpha = 1;
+    }
 
     // Viewport
     minimapCtx.strokeStyle = 'rgba(255,255,0,0.5)'; minimapCtx.lineWidth = 1;
@@ -4688,6 +4741,13 @@ function drawBackground(ctx) {
         ctx.drawImage(stormCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
         ctx.restore();
     }
+    if (thermalCanvas) {
+        ctx.save();
+        ctx.globalAlpha = 0.50 + Math.sin(Date.now() * 0.003 + 2.1) * 0.14; // 熱ゆらぎ (嵐より遅い)
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(thermalCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
+        ctx.restore();
+    }
 
     // Sparse coordinate grid (large cells)
     const gridSize = 2000;
@@ -4989,6 +5049,8 @@ function updateEnvInfo() {
     if (debrisSpan) debrisSpan.textContent = Math.round(getDebrisIntensity(player.x, player.y) * 100) + '%';
     const stormSpan = document.getElementById('env-storm');
     if (stormSpan) stormSpan.textContent = Math.round(getStormIntensity(player.x, player.y) * 100) + '%';
+    const thermalSpan = document.getElementById('env-thermal');
+    if (thermalSpan) thermalSpan.textContent = Math.round(getThermalIntensity(player.x, player.y) * 100) + '%';
     if (radarSpan) {
         const sLv = gameState.upgrades.sensor;
         const omniR = Math.round(OMNI_SONAR_RANGE[sLv] * (genAlloc.sensors / 100) * genGain);
@@ -5073,6 +5135,8 @@ function updateEnvInfo() {
         if (msbHiggs) msbHiggs.textContent = Math.round(getHiggsIntensity(player.x, player.y) * 100) + '%';
         if (msbDebris) msbDebris.textContent = Math.round(getDebrisIntensity(player.x, player.y) * 100) + '%';
         if (msbStorm) msbStorm.textContent = Math.round(getStormIntensity(player.x, player.y) * 100) + '%';
+        const msbThermal = document.getElementById('msb-thermal');
+        if (msbThermal) msbThermal.textContent = Math.round(getThermalIntensity(player.x, player.y) * 100) + '%';
         if (msbEnemies) msbEnemies.textContent = enemies.filter(e => e.visible).length || '?';
         if (msbAmmo) {
             const wTypeMsb = document.getElementById('weapon-select')?.value || 'kinetic';
