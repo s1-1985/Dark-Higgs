@@ -335,7 +335,7 @@ function drawFogOfWar(ctx) {
     ctx.fill();
 
     // ── 視野境界のグロウリング (微光) ──
-    // shadowBlur はモバイルGPUで重いため使用しない (LESSONS_LEARNED.md)。
+    // shadowBlur はモバイルGPUで重いため使用しない (HANDOVER.md パフォーマンス教訓)。
     // globalAlpha を変えた二重ストロークで擬似グロウを表現。
     ctx.beginPath();
     ctx.arc(cx, cy, playerVisionRadius, 0, Math.PI * 2);
@@ -882,7 +882,25 @@ class Structure {
 
         // Adaptive icon scale: full size at zoom>=1, shrinks proportionally below
         const _iconS = Math.max(4, Math.min(28, camera.zoom * 28)) / (camera.zoom * 28);
-        if (this.type === 'colony') {
+        // スプライト優先 (読み込めていればベクターより優先)
+        const _ssp = SPRITES[this.type === 'colony' ? 'colony' : 'derelict'];
+        if (spriteReady(_ssp)) {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            if (this.type === 'colony') ctx.rotate(t * 0.00008); // 母船はごくゆっくり自転
+            if (this.hacked) {
+                // ハック済み: シアンのグローを背後に
+                ctx.globalAlpha = 0.35 + Math.sin(t * 0.004) * 0.2;
+                const hg = ctx.createRadialGradient(0, 0, 0, 0, 0, this.radius * 1.6);
+                hg.addColorStop(0, 'rgba(0,200,255,0.5)');
+                hg.addColorStop(1, 'rgba(0,170,255,0)');
+                ctx.fillStyle = hg;
+                ctx.beginPath(); ctx.arc(0, 0, this.radius * 1.6, 0, Math.PI * 2); ctx.fill();
+                ctx.globalAlpha = 1;
+            }
+            drawSpriteCentered(ctx, _ssp, this.radius * 2.6);
+            ctx.restore();
+        } else if (this.type === 'colony') {
             ctx.save();
             ctx.translate(this.x, this.y);
             ctx.scale(_iconS, _iconS);
@@ -1047,17 +1065,17 @@ class Station {
 }
 
 class Projectile {
-    constructor(x, y, target, isPlayer, type) {
+    constructor(x, y, target, isPlayer, type, dmgScale = 1) {
         this.x = x; this.y = y; this.isPlayer = isPlayer; this.type = type;
         this.target = target;
         this.active = true;
         this.distTraveled = 0;
 
         if (type === 'kinetic') {
-            this.speed = 12; this.maxDist = 800; this.dmg = 15;
+            this.speed = 12; this.maxDist = 800; this.dmg = 15 * dmgScale;
             this.angle = Math.atan2(target.y - y, target.x - x);
         } else if (type === 'missile') {
-            this.speed = 6; this.maxDist = 1500; this.dmg = 50;
+            this.speed = 6; this.maxDist = 1500; this.dmg = 50 * dmgScale;
             this.angle = Math.atan2(target.y - y, target.x - x);
         } else if (type === 'beam') {
             this.active = false;
@@ -1066,7 +1084,7 @@ class Projectile {
                 // ヒッグス高濃度エリアではビームダメージ大幅低下 (設計確定仕様)
                 const higgsBetween = getHiggsIntensity((x + target.x) / 2, (y + target.y) / 2);
                 const higgsBeamPenalty = 1 - higgsBetween * 0.8; // 最大80%ダメージ減衰
-                target.hp -= 150 * dmgMult * higgsBeamPenalty;
+                target.hp -= 150 * dmgMult * higgsBeamPenalty * dmgScale;
                 createHitEffect(target.x, target.y, isPlayer ? '#00ffaa' : '#ff4d4d');
                 effects.push({ x: this.x, y: this.y, tx: target.x, ty: target.y, type: 'beam', a: 1, c: isPlayer ? '#00ffaa' : '#ff4d4d' });
                 // ヒッグスダークチャネル: ビームがヒッグス雲を押し分けて通路を作る
@@ -1312,6 +1330,18 @@ class Ship {
                 }
 
                 if (dist < wRange && this.fireCooldown <= 0) {
+                    // 想定ロックオン: 視野内(inVision)=完全ロック=フルダメージ。
+                    // 視野外でセンサーコンタクトのみ=想定ロック=精度依存のダメージデバフ。
+                    const _fullLock = !!this.targetEntity.inVision;
+                    const _acc = _fullLock ? 1 : Math.max(0, Math.min(1, this.targetEntity.contactAccuracy || 0));
+                    const _lockDmg = _fullLock ? 1 : (0.3 + 0.5 * _acc); // 想定=30〜80%
+                    if (_fullLock !== this._fullLockPrev) {
+                        this._fullLockPrev = _fullLock;
+                        logMessage(_fullLock
+                            ? 'LOCK: 完全ロックオン — フルダメージ'
+                            : `LOCK: 想定ロックオン — センサー推定射撃 (威力${Math.round(_lockDmg * 100)}%)`,
+                            _fullLock ? 'system-msg' : 'warning-msg');
+                    }
                     // ── kinetic マガジン・リロード処理 ──
                     if (wType === 'kinetic') {
                         if (this.kineticReloading) {
@@ -1324,7 +1354,7 @@ class Ship {
                             // リロード中は発射しない
                         } else {
                             this.weaponType = wType;
-                            const proj = new Projectile(this.x, this.y, this.targetEntity, true, wType);
+                            const proj = new Projectile(this.x, this.y, this.targetEntity, true, wType, _lockDmg);
                             if (proj.dmg) proj.dmg *= (UPGRADE_MULT[gameState.upgrades.weapons] || 1.0);
                             projectiles.push(proj);
                             // 攻撃型特殊: 3連装同時発射 (kinetic時のみ)
@@ -1332,7 +1362,7 @@ class Ship {
                                 const spread = 0.12;
                                 const baseAngle = Math.atan2(this.targetEntity.y - this.y, this.targetEntity.x - this.x);
                                 [-spread, spread].forEach(offset => {
-                                    const p = new Projectile(this.x, this.y, this.targetEntity, true, 'kinetic');
+                                    const p = new Projectile(this.x, this.y, this.targetEntity, true, 'kinetic', _lockDmg);
                                     p.angle = baseAngle + offset;
                                     projectiles.push(p);
                                 });
@@ -1358,7 +1388,7 @@ class Ship {
                             // リロード中は発射しない
                         } else {
                             this.weaponType = wType;
-                            const proj = new Projectile(this.x, this.y, this.targetEntity, true, wType);
+                            const proj = new Projectile(this.x, this.y, this.targetEntity, true, wType, _lockDmg);
                             if (proj.dmg) proj.dmg *= (UPGRADE_MULT[gameState.upgrades.weapons] || 1.0);
                             projectiles.push(proj);
                             playSound('shoot');
@@ -1378,7 +1408,7 @@ class Ship {
                             // リロード中は発射しない
                         } else {
                             this.weaponType = wType;
-                            const proj = new Projectile(this.x, this.y, this.targetEntity, true, wType);
+                            const proj = new Projectile(this.x, this.y, this.targetEntity, true, wType, _lockDmg);
                             if (proj.dmg) proj.dmg *= (UPGRADE_MULT[gameState.upgrades.weapons] || 1.0);
                             projectiles.push(proj);
                             playSound('shoot');
@@ -4785,6 +4815,13 @@ function gameLoop() {
                 ctx.save();
                 ctx.translate(n.x, n.y);
                 ctx.rotate(spin);
+                const _nsp = SPRITES.node_higgs;
+                if (spriteReady(_nsp)) {
+                    // スプライト (被探知ステルス: brightnessでアルファ変調)
+                    ctx.globalAlpha = brightness;
+                    drawSpriteCentered(ctx, _nsp, 72);
+                    ctx.globalAlpha = 1;
+                } else {
                 // 外側グロー
                 ctx.globalAlpha = brightness * 0.5;
                 ctx.fillStyle = '#50c8ff';
@@ -4817,6 +4854,7 @@ function gameLoop() {
                 }
                 ctx.closePath(); ctx.fill();
                 ctx.shadowBlur = 0;
+                }
                 ctx.restore();
                 // Crystal name label (adaptive scale)
                 if (inRange || isHiggsSnsr) {
