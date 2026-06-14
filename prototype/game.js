@@ -4,6 +4,7 @@ const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const minimapCanvas = document.getElementById('minimapCanvas');
 const minimapCtx = minimapCanvas.getContext('2d');
+let minimapDpr = 1; // ミニマップのバッキングストア倍率 (高DPI対応・resizeCanvasで更新)
 // 高精細(Retina)対応: 描画はCSSピクセル基準、バッキングストアを devicePixelRatio 倍に。
 // レーダー/リング/文字のボケ防止。cssW/cssH=CSS px, _dpr=ピクセル比。
 let cssW = window.innerWidth, cssH = window.innerHeight, _dpr = 1;
@@ -232,6 +233,8 @@ let bgMist = [];
 let spaceBgCanvas = null; // 事前生成の宇宙背景テクスチャ
 let _nebulaTile = null;   // シームレスな星雲タイル (スクリーン空間パララックス層用)
 const _NEB_TILE = 1024;   // 星雲タイルのピクセルサイズ
+let _giantStarTile = null; // 明るい巨星タイル (スクリーン空間パララックス層用・鮮明)
+const _GSTAR_TILE = 1400;  // 巨星タイルのピクセルサイズ (繰り返しを目立たせない大きさ)
 let bgMistCanvas = null;  // bgMist事前焼き付けキャンバス
 let higgsCloudCanvas = null; // ヒッグス雲(白)事前焼き付け — 視野内で「下から見上げた雲」として合成
 let scrapDrops = [];
@@ -389,7 +392,7 @@ function drawFogOfWar(ctx) {
         ctx.closePath();
         ctx.clip();
         ctx.globalCompositeOperation = 'lighter';
-        ctx.globalAlpha = 0.85;
+        ctx.globalAlpha = 0.5; // washout防止 (0.85→0.5)。ゲームリングは fog の後に描画して最前面に
         ctx.imageSmoothingEnabled = true;
         ctx.drawImage(higgsCloudCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
         ctx.restore();
@@ -524,41 +527,9 @@ function generateSpaceBackground() {
     }
     bc.globalAlpha = 1;
 
-    // 5. 明るい巨星 1〜2個 (画像の右上の星風)
-    const starCount = 1 + (rng() < 0.5 ? 1 : 0);
-    for (let si = 0; si < starCount; si++) {
-        const sx = 200 + rng()*(TEX-400), sy = 100 + rng()*(TEX-400);
-        // 画面表示時に約5.5倍拡大されるためハローを小さく抑える (旧60-160→25-70)
-        const sr = 25 + rng()*45;
-        // 紫〜赤〜白の後光
-        const haloCol = rng() < 0.5 ? '180,80,200' : '200,60,100';
-        const hg = bc.createRadialGradient(sx, sy, 0, sx, sy, sr);
-        hg.addColorStop(0,    `rgba(${haloCol},0.20)`);
-        hg.addColorStop(0.4,  `rgba(${haloCol},0.08)`);
-        hg.addColorStop(0.7,  `rgba(${haloCol},0.03)`);
-        hg.addColorStop(1,    'rgba(0,0,0,0)');
-        bc.fillStyle = hg; bc.beginPath(); bc.arc(sx, sy, sr, 0, Math.PI*2); bc.fill();
-        // 白いコア
-        const cg = bc.createRadialGradient(sx, sy, 0, sx, sy, 6);
-        cg.addColorStop(0,   'rgba(255,255,255,1)');
-        cg.addColorStop(0.3, 'rgba(220,240,255,0.8)');
-        cg.addColorStop(1,   'rgba(0,0,0,0)');
-        bc.fillStyle = cg; bc.beginPath(); bc.arc(sx, sy, 6, 0, Math.PI*2); bc.fill();
-        // 光芒 (4本)
-        for (let ray = 0; ray < 4; ray++) {
-            const a = ray * Math.PI/2;
-            bc.save();
-            bc.translate(sx, sy); bc.rotate(a);
-            const rg = bc.createLinearGradient(0,0,sr*1.8,0);
-            rg.addColorStop(0,   'rgba(255,255,255,0.6)');
-            rg.addColorStop(0.3, 'rgba(200,230,255,0.15)');
-            rg.addColorStop(1,   'rgba(0,0,0,0)');
-            bc.fillStyle = rg;
-            bc.beginPath(); bc.moveTo(0,-3); bc.lineTo(sr*1.8,0); bc.lineTo(0,3); bc.closePath(); bc.fill();
-            bc.restore();
-        }
-    }
-    bc.globalAlpha = 1;
+    // 明るい巨星は 68倍拡大でハローがボケるため焼き込まない。
+    // → スクリーン空間パララックス層 (_drawGiantStars / 鮮明タイル) へ分離。
+    _giantStarTile = null; // 背景再生成に合わせて巨星タイルも作り直す
 }
 
 // ============================================================
@@ -627,11 +598,12 @@ function resizeCanvas() {
     canvas.height = Math.round(cssH * _dpr);
     canvas.style.width = cssW + 'px';
     canvas.style.height = cssH + 'px';
-    // Fix minimap canvas resolution to match CSS display size
+    // ミニマップ解像度を表示サイズ×DPRに合わせる (高DPI端末でのボケ解消)
     const mmr = minimapCanvas.getBoundingClientRect();
     if (mmr.width > 0 && mmr.height > 0) {
-        minimapCanvas.width = Math.floor(mmr.width);
-        minimapCanvas.height = Math.floor(mmr.height);
+        minimapDpr = Math.min(2, window.devicePixelRatio || 1);
+        minimapCanvas.width = Math.floor(mmr.width * minimapDpr);
+        minimapCanvas.height = Math.floor(mmr.height * minimapDpr);
     }
     _fitSigCanvas(document.getElementById('sig-canvas'));
     _fitSigCanvas(document.getElementById('env-sig-canvas'));
@@ -805,11 +777,16 @@ const touch = {
     waypointFired: false, // 長押しウェイポイント発動済み
     waypointTimer: null,  // 長押し判定タイマー
     pinchDist: 0,
-    isPinching: false
+    isPinching: false,
+    holding: false,       // 単指ホールド進行中 (進捗リング表示用)
+    holdSX: 0, holdSY: 0  // ホールド位置 (キャンバス相対スクリーン座標)
 };
 
-const TOUCH_WAYPOINT_DELAY = 250;  // 長押し判定: 250ms
-const TOUCH_MOVE_THRESHOLD = 12;   // 長押し中の最大許容移動距離 (px)
+// 長押し=ウェイポイント / スワイプ=パン の取り違え対策:
+// ・判定を 400ms に延長 (スワイプ開始の猶予を確保)
+// ・許容移動を 10px に縮小 (少しでも動かしたらウェイポイントをキャンセル=パン優先)
+const TOUCH_WAYPOINT_DELAY = 400;  // 長押し判定: 400ms
+const TOUCH_MOVE_THRESHOLD = 10;   // 長押し中の最大許容移動距離 (px)
 
 canvas.addEventListener('touchstart', (e) => {
     e.preventDefault();
@@ -823,14 +800,20 @@ canvas.addEventListener('touchstart', (e) => {
         touch.moved = false;
         touch.waypointFired = false;
         touch.isPinching = false;
+        // ホールド進捗リング用 (キャンバス相対座標)
+        const _cr = canvas.getBoundingClientRect();
+        touch.holdSX = t.clientX - _cr.left;
+        touch.holdSY = t.clientY - _cr.top;
+        touch.holding = true;
         // 1本指ドラッグ = 即時カメラパン
         camera.isDragging = true;
         camera.lastX = t.clientX;
         camera.lastY = t.clientY;
 
-        // 長押し検出: 250ms後にウェイポイント指定
+        // 長押し検出: TOUCH_WAYPOINT_DELAY後にウェイポイント指定
         clearTimeout(touch.waypointTimer);
         touch.waypointTimer = setTimeout(() => {
+            touch.holding = false;
             if (!touch.isPinching && !touch.moved && player) {
                 const { x: worldX, y: worldY } = screenToWorld(touch.startX, touch.startY);
                 // 指向性ソナー待機中: 長押しで発射方向を決定
@@ -857,6 +840,7 @@ canvas.addEventListener('touchstart', (e) => {
     } else if (e.touches.length === 2) {
         clearTimeout(touch.waypointTimer);
         touch.isPinching = true;
+        touch.holding = false;
         camera.isDragging = false;
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
@@ -872,6 +856,7 @@ canvas.addEventListener('touchmove', (e) => {
         const dy = t.clientY - touch.startY;
         if (Math.hypot(dx, dy) > TOUCH_MOVE_THRESHOLD) {
             touch.moved = true;
+            touch.holding = false; // スワイプ確定 → ウェイポイント進捗を中止 (パン優先)
             clearTimeout(touch.waypointTimer);
         }
         // タッチ位置をワールド座標で追跡 (指向性ソナー方向用)
@@ -903,6 +888,7 @@ canvas.addEventListener('touchmove', (e) => {
 canvas.addEventListener('touchend', (e) => {
     e.preventDefault();
     clearTimeout(touch.waypointTimer);
+    touch.holding = false;
     camera.isDragging = false;
     const elapsed = Date.now() - touch.startTime;
 
@@ -2848,7 +2834,7 @@ function generateSector() {
         const wcx = wc.getContext('2d');
         bgMist.forEach(m => {
             const d = m.density;
-            const coreA = Math.min(0.72, 0.05 + d * 0.75); // 濃度連動の白さ
+            const coreA = Math.min(0.55, 0.04 + d * 0.6); // 濃度連動の白さ (washout防止に抑制)
             const sx = m.x * scale, sy = m.y * scale, sr = m.r * scale;
             const g = wcx.createRadialGradient(sx, sy, 0, sx, sy, sr);
             g.addColorStop(0,    `rgba(225,238,255,${coreA.toFixed(3)})`);
@@ -3830,7 +3816,9 @@ function drawPassiveAntenna(ctx) {
 }
 
 function drawMinimap() {
-    const mW = minimapCanvas.width, mH = minimapCanvas.height;
+    // バッキングストアはDPR倍。描画はCSS px基準にして DPR でスケール (ボケ防止)。
+    minimapCtx.setTransform(minimapDpr, 0, 0, minimapDpr, 0, 0);
+    const mW = minimapCanvas.width / minimapDpr, mH = minimapCanvas.height / minimapDpr;
     minimapCtx.clearRect(0, 0, mW, mH);
     // Uniform scale to keep circular map as a circle
     const mmScale = Math.min(mW, mH) / FIELD_SIZE;
@@ -3975,7 +3963,7 @@ function drawMinimap() {
 function handleMinimapInteraction(e) {
     const r = minimapCanvas.getBoundingClientRect();
     const mapX = e.clientX - r.left; const mapY = e.clientY - r.top;
-    const mW = minimapCanvas.width, mH = minimapCanvas.height;
+    const mW = minimapCanvas.width / minimapDpr, mH = minimapCanvas.height / minimapDpr;
     const mmScale = Math.min(mW, mH) / FIELD_SIZE;
     const offX = (mW - FIELD_SIZE * mmScale) / 2;
     const offY = (mH - FIELD_SIZE * mmScale) / 2;
@@ -3994,7 +3982,7 @@ function handleMinimapTouchInteraction(t) {
     const r = minimapCanvas.getBoundingClientRect();
     const mapX = t.clientX - r.left;
     const mapY = t.clientY - r.top;
-    const mW = minimapCanvas.width, mH = minimapCanvas.height;
+    const mW = minimapCanvas.width / minimapDpr, mH = minimapCanvas.height / minimapDpr;
     const mmScale = Math.min(mW, mH) / FIELD_SIZE;
     const offX = (mW - FIELD_SIZE * mmScale) / 2;
     const offY = (mH - FIELD_SIZE * mmScale) / 2;
@@ -4106,6 +4094,69 @@ function _drawNebula(ctx) {
     ctx.restore();
 }
 
+// 明るい巨星タイルを生成 (透過背景・鮮明)。1〜2個をタイル内に配置し、ほぼ等倍で描いてボケを排除。
+function _initGiantStarTile() {
+    const T = _GSTAR_TILE;
+    const c = document.createElement('canvas');
+    c.width = T; c.height = T;
+    const b = c.getContext('2d');
+    let _s = (Math.random() * 0xffffffff) >>> 0;
+    const rng = () => { _s = (_s * 1664525 + 1013904223) >>> 0; return _s / 4294967296; };
+    const count = 1 + (rng() < 0.5 ? 1 : 0);
+    for (let si = 0; si < count; si++) {
+        const sx = T * (0.18 + rng() * 0.64), sy = T * (0.12 + rng() * 0.5);
+        const sr = 120 + rng() * 150; // ハロー半径 (CSS px相当・鮮明)
+        const haloCol = rng() < 0.5 ? '180,80,200' : '200,60,100';
+        // 後光
+        const hg = b.createRadialGradient(sx, sy, 0, sx, sy, sr);
+        hg.addColorStop(0,   `rgba(${haloCol},0.20)`);
+        hg.addColorStop(0.4, `rgba(${haloCol},0.08)`);
+        hg.addColorStop(0.7, `rgba(${haloCol},0.03)`);
+        hg.addColorStop(1,   'rgba(0,0,0,0)');
+        b.fillStyle = hg; b.beginPath(); b.arc(sx, sy, sr, 0, Math.PI * 2); b.fill();
+        // 白いコア
+        const cr = 8 + rng() * 4;
+        const cg = b.createRadialGradient(sx, sy, 0, sx, sy, cr * 2.4);
+        cg.addColorStop(0,   'rgba(255,255,255,1)');
+        cg.addColorStop(0.3, 'rgba(220,240,255,0.85)');
+        cg.addColorStop(1,   'rgba(0,0,0,0)');
+        b.fillStyle = cg; b.beginPath(); b.arc(sx, sy, cr * 2.4, 0, Math.PI * 2); b.fill();
+        // 光芒 (4本)
+        for (let ray = 0; ray < 4; ray++) {
+            const a = ray * Math.PI / 2;
+            b.save();
+            b.translate(sx, sy); b.rotate(a);
+            const rg = b.createLinearGradient(0, 0, sr * 1.6, 0);
+            rg.addColorStop(0,   'rgba(255,255,255,0.5)');
+            rg.addColorStop(0.3, 'rgba(200,230,255,0.12)');
+            rg.addColorStop(1,   'rgba(0,0,0,0)');
+            b.fillStyle = rg;
+            b.beginPath(); b.moveTo(0, -3); b.lineTo(sr * 1.6, 0); b.lineTo(0, 3); b.closePath(); b.fill();
+            b.restore();
+        }
+    }
+    _giantStarTile = c;
+}
+
+// 巨星を最遠景のスクリーン空間パララックス層として描画 (ほぼ等倍=鮮明)
+function _drawGiantStars(ctx) {
+    if (!_giantStarTile) _initGiantStarTile();
+    const W = cssW, H = cssH;
+    const pf = 0.035;          // 最も遅いパララックス (最遠景)
+    const TS = _GSTAR_TILE;
+    ctx.save();
+    ctx.setTransform(_dpr, 0, 0, _dpr, 0, 0); // スクリーン空間(CSS px)
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    let ox = (-camera.x * camera.zoom * pf) % TS; if (ox > 0) ox -= TS;
+    let oy = (-camera.y * camera.zoom * pf) % TS; if (oy > 0) oy -= TS;
+    for (let ty = oy; ty < H; ty += TS) {
+        for (let tx = ox; tx < W; tx += TS) {
+            ctx.drawImage(_giantStarTile, tx, ty);
+        }
+    }
+    ctx.restore();
+}
+
 function drawBackground(ctx) {
     if (PERF_DISABLE_BG) {
         const vw = cssW / camera.zoom;
@@ -4123,8 +4174,9 @@ function drawBackground(ctx) {
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(spaceBgCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
-        _drawNebula(ctx);    // シャープな星雲パララックス層 (引き伸ばしボケ解消)
-        _drawStarfield(ctx); // 鮮明なパララックス星層を重ねる
+        _drawNebula(ctx);      // シャープな星雲パララックス層 (引き伸ばしボケ解消)
+        _drawGiantStars(ctx);  // 鮮明な巨星パララックス層 (68倍拡大のボケ解消)
+        _drawStarfield(ctx);   // 鮮明なパララックス星層を重ねる
     } else {
         ctx.fillStyle = 'rgb(1,3,14)';
         ctx.fillRect(cx, cy, vw, vh);
@@ -4582,6 +4634,27 @@ function drawHUDOverlay(ctx) {
     if (!player || player.hp <= 0) return;
     const { sx: psx, sy: psy } = worldToScreen(player.x, player.y);
     const t = Date.now();
+
+    // ── 長押し進捗リング (ウェイポイント設定のフィードバック) ──
+    // 指を止めて押している間だけ充填。スワイプ(パン)では即消える=取り違え防止の視覚手がかり。
+    if (touch.holding) {
+        const prog = Math.max(0, Math.min(1, (t - touch.startTime) / TOUCH_WAYPOINT_DELAY));
+        if (prog > 0.04) {
+            ctx.save();
+            ctx.translate(touch.holdSX, touch.holdSY);
+            ctx.strokeStyle = 'rgba(0,255,170,0.22)';
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(0, 0, 26, 0, Math.PI * 2); ctx.stroke();
+            ctx.strokeStyle = '#00ffaa';
+            ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.arc(0, 0, 26, -Math.PI / 2, -Math.PI / 2 + prog * Math.PI * 2); ctx.stroke();
+            ctx.globalAlpha = 0.3 + prog * 0.6;
+            ctx.fillStyle = '#00ffaa';
+            ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = 1;
+            ctx.restore();
+        }
+    }
 
     // ── 自機マーカー (常に固定サイズ) ──
     const mS = 14; // marker size in screen pixels
@@ -5166,8 +5239,6 @@ function gameLoop() {
             ctx.globalAlpha = 1;
         });
 
-        if (player && player.hp > 0) drawPassiveAntenna(ctx);
-
         projectiles.forEach(p => p.draw(ctx));
         drawDecoys(ctx);
         updateDrawEffects(ctx);
@@ -5175,6 +5246,14 @@ function gameLoop() {
 
         enemies.forEach(e => e.draw(ctx));
         if (player && player.hp > 0) player.draw(ctx);
+
+        // ── 有視界フォグ (エンティティの上・ゲームリングの下) ──
+        // ヒッグス雲/フォグはここで描画し、以降のスレットリング/レーダー/武器射程リングを
+        // すべて最前面に重ねる。これらがヒッグスに隠れると索敵・射撃ができずゲームにならないため。
+        if (player && player.hp > 0) drawFogOfWar(ctx);
+
+        // ── シグネチャ・スレットリング (最前面・フォグの上) ──
+        if (player && player.hp > 0) drawPassiveAntenna(ctx);
 
         // ── レーダー範囲リング + ラベル ──
         if (player && player.hp > 0) {
@@ -5201,7 +5280,6 @@ function gameLoop() {
             ctx.fillText('RADAR', player.x + visionRingR + 6 / camera.zoom, player.y);
             ctx.globalAlpha = 1;
             ctx.restore();
-            drawFogOfWar(ctx); // 有視界システム: アメーバ視野 + ヒッグス濃度連動の霧
         }
 
         // ── 武器射程サークルインジケータ + ラベル (ワールド空間) ──

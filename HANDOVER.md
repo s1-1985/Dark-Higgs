@@ -19,6 +19,16 @@
 - **設計意図**: 「ヒッグスの影響を受ける主体が自機だけ」問題の解消。薄い所に居て視界が広くても、濃い雲ポケットに隠れた敵はクリーンに撃てない。
 - **⚠️ 申し送り**: 実機未検証（コンテナにブラウザ無し、`node --check`のみ通過）。GitHub Pagesで①視野内の雲の白飛び具合②`'lighter'`合成のモバイル負荷（クリップ+768px drawImage 1枚追加）③ゲートのバランス（敵が雲に隠れた時の手応え）を要確認。全てtunable定数。次は Phase2（デブリ帯+磁気嵐帯）。
 
+#### 実機フィードバック反映（同ブランチ・追撃修正）
+オーナーが実機スクショで指摘した問題を修正:
+1. **ゲームリングがヒッグスに隠れる→最前面化**: 描画順を「エンティティ→`drawFogOfWar`→スレットリング(`drawPassiveAntenna`)→RADARリング→武器射程リング→方位ウェッジ」に並べ替え。従来 `drawPassiveAntenna`(5169)とRADARリングが fog より**前**に描画され雲に埋もれていた（"索敵・射撃ができずゲームにならない"）。
+2. **Phase1の白い雲が強すぎ(H:1%でも画面が真っ白)**: `'lighter'`合成のalpha 0.85→0.5、白さ`coreA`上限 0.72→0.55に抑制。
+3. **タッチ: スワイプがウェイポイント誤設定**: `TOUCH_WAYPOINT_DELAY` 250→400ms、`TOUCH_MOVE_THRESHOLD` 12→10px。さらに**長押し進捗リング**を`drawHUDOverlay`に追加（指を止めている間だけ充填、スワイプで即消える＝視覚フィードバック）。
+4. **ミニマップ(レーダー)のボケ**: ミニマップだけ DPR 未適用だった。`minimapDpr`を導入しバッキングストアを DPR 倍化、`drawMinimap`を`setTransform`でCSS px基準描画に、クリック/タッチ座標変換も CSS px へ補正。
+5. **確認した非バグ**: 自機SIGオシロ(`sig-canvas`)は `player.heatSig/opticalSig/emSig/higgsSig`(Ship.update 1369-1372で計算)を表示し**機能している**。停止中は heat/optic/higgs=0・em=GEN配分の定数のため平坦に見えるだけ（移動・発砲・AI配分変更で振れる）。ヒッグス濃度表示は mobile status barの「H:」＝`msb-higgs`／左パネル「Higgs:」＝`env-higgs`（既存）。
+6. **背景の巨星ボケ → 鮮明パララックス層へ分離**: 巨星ハローは`spaceBgCanvas`(1024px)を約68倍拡大していたためボケていた。焼き込みを廃し、`_giantStarTile`(1400px・透過)に鮮明生成 → `_drawGiantStars()`でスクリーン空間パララックス(pf=0.035・最遠景)描画。星雲(`_drawNebula`)/星(`_drawStarfield`)と同方式。`generateSpaceBackground`でタイルをreset、`drawBackground`で nebula→巨星→starfield の順に重ねる。
+- **残(任意)**: `spaceBgCanvas`内の小星(dim/medium/bright)も68倍拡大でボケるが、`_drawStarfield`の鮮明パララックス星が上に乗るため実害小。気になれば焼き込み廃止も可。
+
 ### 2026-06-14（後半）— ブランチ統一・4機能実装（PR#40, #41 マージ済み）
 
 **ブランチ分岐の解消（PR#40 / #39クローズ）**
