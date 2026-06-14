@@ -423,6 +423,11 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12,5 v14 M5,12 h14"/><circle cx="12" cy="12" r="7" stroke-opacity=".4"/></svg>
                             <span id="repair-drone-label">REGEN</span>
                         </button>
+                        <!-- ゲームスピードトグル (戦闘時スロー・移動時ファスト) -->
+                        <button class="act-icon-btn common-btn" id="btn-game-speed" title="ゲームスピード切替: 0.5x低速 / 1x通常 / 2x高速" style="border-color:#aaffcc;color:#ccffee;">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="9" stroke-opacity=".5"/><polyline points="12,7 12,12 16,12"/></svg>
+                            <span>SPD:1x</span>
+                        </button>
                     </div>
                 </div>
 
@@ -638,7 +643,7 @@
 
     </div>
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20260614j"></script>
+    <script src="game.js?v=20260614k"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
