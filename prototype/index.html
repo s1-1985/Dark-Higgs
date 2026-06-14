@@ -115,9 +115,28 @@
                         </div>
                         <div style="border-top:1px solid rgba(77,166,255,0.2); margin-top:4px; padding-top:4px;">
                             <div class="gen-row">
-                                <label class="gen-label ai-label" title="AI処理 → 命中率・回避・EM放射強度 (独立)">AI</label>
+                                <label class="gen-label ai-label" title="AI処理出力 → 精度の総量・EM放射強度 (独立)">AI</label>
                                 <input type="range" class="gen-slider" id="gen-ai" min="0" max="100" value="50">
                                 <span class="gen-val" id="gen-ai-val">50%</span>
+                            </div>
+                        </div>
+                        <!-- AI精度配分 (§3-2): AI出力を 解析/命中/回避 にゼロサム配分 -->
+                        <div style="border-top:1px solid rgba(204,136,255,0.25); margin-top:4px; padding-top:4px;">
+                            <div class="gen-header"><span style="color:#cc88ff;font-size:9px;">AI精度配分</span><span id="aiprec-total" class="gen-total" style="font-size:9px;">計100%</span></div>
+                            <div class="gen-row">
+                                <label class="gen-label" style="color:#cc88ff" title="解析精度 → コンタクト精度↑・候補絞り込み">解析</label>
+                                <input type="range" class="gen-slider" id="aiprec-sensor" min="0" max="100" value="34">
+                                <span class="gen-val" id="aiprec-sensor-val">34%</span>
+                            </div>
+                            <div class="gen-row">
+                                <label class="gen-label" style="color:#cc88ff" title="命中精度 → 実弾/ミサイルのミス率↓">命中</label>
+                                <input type="range" class="gen-slider" id="aiprec-weapon" min="0" max="100" value="33">
+                                <span class="gen-val" id="aiprec-weapon-val">33%</span>
+                            </div>
+                            <div class="gen-row">
+                                <label class="gen-label" style="color:#cc88ff" title="回避精度 → 被弾を確率回避">回避</label>
+                                <input type="range" class="gen-slider" id="aiprec-engine" min="0" max="100" value="33">
+                                <span class="gen-val" id="aiprec-engine-val">33%</span>
                             </div>
                         </div>
                         <div style="border-top:1px solid rgba(0,255,170,0.2); margin-top:4px; padding-top:4px;">
@@ -572,7 +591,7 @@
 
     </div>
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20260614b"></script>
+    <script src="game.js?v=20260614c"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
