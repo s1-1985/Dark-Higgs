@@ -289,6 +289,8 @@ const HIGGS_CLEAR_SPAN  = 0.55; // +0.55 (≈0.77) で完全に雲隠れ (clarit
 // デブリ帯=岩礁帯(OPTIC干渉・移動/命中デバフ・ビーム貫通) / 磁気嵐帯(EM干渉・AI退避所)
 const DEBRIS_SLOW        = 0.40; // デブリ密度100%での最大移動減速率
 const DEBRIS_AI_MITIGATE = 0.70; // AI配分100%で減速を最大70%軽減 (姿勢制御補助)
+const DEBRIS_ENEMY_MITIGATE = 0.35; // 敵の固定デブリ軽減 (動けなくなるのを防ぐ)
+const STORM_MISSILE_DEGRADE = 0.7; // 磁気嵐内でのミサイル誘導(旋回)劣化率
 const DEBRIS_MISS        = 0.55; // デブリ内ターゲットへの実弾/ミサイル最大ミス率 (ビームは貫通=対象外)
 const DEBRIS_OPTIC_MOD   = 0.85; // デブリ経路による光学(OPTIC)探知の減衰係数
 const STORM_EM_MOD       = 0.90; // 磁気嵐経路によるEM探知の減衰係数
@@ -1220,7 +1222,9 @@ class Projectile {
             let diff = targetAngle - this.angle;
             while (diff < -Math.PI) diff += Math.PI * 2;
             while (diff > Math.PI) diff -= Math.PI * 2;
-            this.angle += diff * 0.05;
+            // 磁気嵐帯: EM誘導が乱れ旋回精度が落ちる (§3-13 D) → 嵐内のミサイルは外れやすい
+            const _missileTurn = 0.05 * (1 - getStormIntensity(this.x, this.y) * STORM_MISSILE_DEGRADE);
+            this.angle += diff * _missileTurn;
             // デコイに到達したらミサイルは消費される(無害化)
             if (this._luredBy && Math.hypot(this._luredBy.x - this.x, this._luredBy.y - this.y) < 40) {
                 createHitEffect(this.x, this.y, '#cc99ff');
@@ -1396,7 +1400,8 @@ class Ship {
     terrainSpeedMult() {
         const deb = getDebrisIntensity(this.x, this.y);
         if (deb <= 0) return 1;
-        const aiMit = this.isPlayer ? (genAlloc.ai / 100) * DEBRIS_AI_MITIGATE : 0;
+        // AI配分で姿勢制御補助=軽減。自機はGEN AI配分、敵は固定の軽減(全く動けなくなるのを防ぐ)。
+        const aiMit = this.isPlayer ? (genAlloc.ai / 100) * DEBRIS_AI_MITIGATE : DEBRIS_ENEMY_MITIGATE;
         return 1 - deb * DEBRIS_SLOW * (1 - aiMit);
     }
 
@@ -3974,6 +3979,17 @@ function drawMinimap() {
     if (bgMistCanvas) {
         minimapCtx.globalAlpha = 0.35;
         minimapCtx.drawImage(bgMistCanvas, offX, offY, FIELD_SIZE * mmScale, FIELD_SIZE * mmScale);
+        minimapCtx.globalAlpha = 1;
+    }
+    // 地形オーバーレイ: デブリ帯(灰)/磁気嵐帯(紫) — 退避先の把握用
+    if (debrisCanvas) {
+        minimapCtx.globalAlpha = 0.45;
+        minimapCtx.drawImage(debrisCanvas, offX, offY, FIELD_SIZE * mmScale, FIELD_SIZE * mmScale);
+        minimapCtx.globalAlpha = 1;
+    }
+    if (stormCanvas) {
+        minimapCtx.globalAlpha = 0.4;
+        minimapCtx.drawImage(stormCanvas, offX, offY, FIELD_SIZE * mmScale, FIELD_SIZE * mmScale);
         minimapCtx.globalAlpha = 1;
     }
 
