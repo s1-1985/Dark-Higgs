@@ -4,6 +4,7 @@ const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const minimapCanvas = document.getElementById('minimapCanvas');
 const minimapCtx = minimapCanvas.getContext('2d');
+let minimapDpr = 1; // ミニマップのバッキングストア倍率 (高DPI対応・resizeCanvasで更新)
 // 高精細(Retina)対応: 描画はCSSピクセル基準、バッキングストアを devicePixelRatio 倍に。
 // レーダー/リング/文字のボケ防止。cssW/cssH=CSS px, _dpr=ピクセル比。
 let cssW = window.innerWidth, cssH = window.innerHeight, _dpr = 1;
@@ -389,7 +390,7 @@ function drawFogOfWar(ctx) {
         ctx.closePath();
         ctx.clip();
         ctx.globalCompositeOperation = 'lighter';
-        ctx.globalAlpha = 0.85;
+        ctx.globalAlpha = 0.5; // washout防止 (0.85→0.5)。ゲームリングは fog の後に描画して最前面に
         ctx.imageSmoothingEnabled = true;
         ctx.drawImage(higgsCloudCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
         ctx.restore();
@@ -627,11 +628,12 @@ function resizeCanvas() {
     canvas.height = Math.round(cssH * _dpr);
     canvas.style.width = cssW + 'px';
     canvas.style.height = cssH + 'px';
-    // Fix minimap canvas resolution to match CSS display size
+    // ミニマップ解像度を表示サイズ×DPRに合わせる (高DPI端末でのボケ解消)
     const mmr = minimapCanvas.getBoundingClientRect();
     if (mmr.width > 0 && mmr.height > 0) {
-        minimapCanvas.width = Math.floor(mmr.width);
-        minimapCanvas.height = Math.floor(mmr.height);
+        minimapDpr = Math.min(2, window.devicePixelRatio || 1);
+        minimapCanvas.width = Math.floor(mmr.width * minimapDpr);
+        minimapCanvas.height = Math.floor(mmr.height * minimapDpr);
     }
     _fitSigCanvas(document.getElementById('sig-canvas'));
     _fitSigCanvas(document.getElementById('env-sig-canvas'));
@@ -805,11 +807,16 @@ const touch = {
     waypointFired: false, // 長押しウェイポイント発動済み
     waypointTimer: null,  // 長押し判定タイマー
     pinchDist: 0,
-    isPinching: false
+    isPinching: false,
+    holding: false,       // 単指ホールド進行中 (進捗リング表示用)
+    holdSX: 0, holdSY: 0  // ホールド位置 (キャンバス相対スクリーン座標)
 };
 
-const TOUCH_WAYPOINT_DELAY = 250;  // 長押し判定: 250ms
-const TOUCH_MOVE_THRESHOLD = 12;   // 長押し中の最大許容移動距離 (px)
+// 長押し=ウェイポイント / スワイプ=パン の取り違え対策:
+// ・判定を 400ms に延長 (スワイプ開始の猶予を確保)
+// ・許容移動を 10px に縮小 (少しでも動かしたらウェイポイントをキャンセル=パン優先)
+const TOUCH_WAYPOINT_DELAY = 400;  // 長押し判定: 400ms
+const TOUCH_MOVE_THRESHOLD = 10;   // 長押し中の最大許容移動距離 (px)
 
 canvas.addEventListener('touchstart', (e) => {
     e.preventDefault();
@@ -823,14 +830,20 @@ canvas.addEventListener('touchstart', (e) => {
         touch.moved = false;
         touch.waypointFired = false;
         touch.isPinching = false;
+        // ホールド進捗リング用 (キャンバス相対座標)
+        const _cr = canvas.getBoundingClientRect();
+        touch.holdSX = t.clientX - _cr.left;
+        touch.holdSY = t.clientY - _cr.top;
+        touch.holding = true;
         // 1本指ドラッグ = 即時カメラパン
         camera.isDragging = true;
         camera.lastX = t.clientX;
         camera.lastY = t.clientY;
 
-        // 長押し検出: 250ms後にウェイポイント指定
+        // 長押し検出: TOUCH_WAYPOINT_DELAY後にウェイポイント指定
         clearTimeout(touch.waypointTimer);
         touch.waypointTimer = setTimeout(() => {
+            touch.holding = false;
             if (!touch.isPinching && !touch.moved && player) {
                 const { x: worldX, y: worldY } = screenToWorld(touch.startX, touch.startY);
                 // 指向性ソナー待機中: 長押しで発射方向を決定
@@ -857,6 +870,7 @@ canvas.addEventListener('touchstart', (e) => {
     } else if (e.touches.length === 2) {
         clearTimeout(touch.waypointTimer);
         touch.isPinching = true;
+        touch.holding = false;
         camera.isDragging = false;
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
@@ -872,6 +886,7 @@ canvas.addEventListener('touchmove', (e) => {
         const dy = t.clientY - touch.startY;
         if (Math.hypot(dx, dy) > TOUCH_MOVE_THRESHOLD) {
             touch.moved = true;
+            touch.holding = false; // スワイプ確定 → ウェイポイント進捗を中止 (パン優先)
             clearTimeout(touch.waypointTimer);
         }
         // タッチ位置をワールド座標で追跡 (指向性ソナー方向用)
@@ -903,6 +918,7 @@ canvas.addEventListener('touchmove', (e) => {
 canvas.addEventListener('touchend', (e) => {
     e.preventDefault();
     clearTimeout(touch.waypointTimer);
+    touch.holding = false;
     camera.isDragging = false;
     const elapsed = Date.now() - touch.startTime;
 
@@ -2848,7 +2864,7 @@ function generateSector() {
         const wcx = wc.getContext('2d');
         bgMist.forEach(m => {
             const d = m.density;
-            const coreA = Math.min(0.72, 0.05 + d * 0.75); // 濃度連動の白さ
+            const coreA = Math.min(0.55, 0.04 + d * 0.6); // 濃度連動の白さ (washout防止に抑制)
             const sx = m.x * scale, sy = m.y * scale, sr = m.r * scale;
             const g = wcx.createRadialGradient(sx, sy, 0, sx, sy, sr);
             g.addColorStop(0,    `rgba(225,238,255,${coreA.toFixed(3)})`);
@@ -3830,7 +3846,9 @@ function drawPassiveAntenna(ctx) {
 }
 
 function drawMinimap() {
-    const mW = minimapCanvas.width, mH = minimapCanvas.height;
+    // バッキングストアはDPR倍。描画はCSS px基準にして DPR でスケール (ボケ防止)。
+    minimapCtx.setTransform(minimapDpr, 0, 0, minimapDpr, 0, 0);
+    const mW = minimapCanvas.width / minimapDpr, mH = minimapCanvas.height / minimapDpr;
     minimapCtx.clearRect(0, 0, mW, mH);
     // Uniform scale to keep circular map as a circle
     const mmScale = Math.min(mW, mH) / FIELD_SIZE;
@@ -3975,7 +3993,7 @@ function drawMinimap() {
 function handleMinimapInteraction(e) {
     const r = minimapCanvas.getBoundingClientRect();
     const mapX = e.clientX - r.left; const mapY = e.clientY - r.top;
-    const mW = minimapCanvas.width, mH = minimapCanvas.height;
+    const mW = minimapCanvas.width / minimapDpr, mH = minimapCanvas.height / minimapDpr;
     const mmScale = Math.min(mW, mH) / FIELD_SIZE;
     const offX = (mW - FIELD_SIZE * mmScale) / 2;
     const offY = (mH - FIELD_SIZE * mmScale) / 2;
@@ -3994,7 +4012,7 @@ function handleMinimapTouchInteraction(t) {
     const r = minimapCanvas.getBoundingClientRect();
     const mapX = t.clientX - r.left;
     const mapY = t.clientY - r.top;
-    const mW = minimapCanvas.width, mH = minimapCanvas.height;
+    const mW = minimapCanvas.width / minimapDpr, mH = minimapCanvas.height / minimapDpr;
     const mmScale = Math.min(mW, mH) / FIELD_SIZE;
     const offX = (mW - FIELD_SIZE * mmScale) / 2;
     const offY = (mH - FIELD_SIZE * mmScale) / 2;
@@ -4583,6 +4601,27 @@ function drawHUDOverlay(ctx) {
     const { sx: psx, sy: psy } = worldToScreen(player.x, player.y);
     const t = Date.now();
 
+    // ── 長押し進捗リング (ウェイポイント設定のフィードバック) ──
+    // 指を止めて押している間だけ充填。スワイプ(パン)では即消える=取り違え防止の視覚手がかり。
+    if (touch.holding) {
+        const prog = Math.max(0, Math.min(1, (t - touch.startTime) / TOUCH_WAYPOINT_DELAY));
+        if (prog > 0.04) {
+            ctx.save();
+            ctx.translate(touch.holdSX, touch.holdSY);
+            ctx.strokeStyle = 'rgba(0,255,170,0.22)';
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(0, 0, 26, 0, Math.PI * 2); ctx.stroke();
+            ctx.strokeStyle = '#00ffaa';
+            ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.arc(0, 0, 26, -Math.PI / 2, -Math.PI / 2 + prog * Math.PI * 2); ctx.stroke();
+            ctx.globalAlpha = 0.3 + prog * 0.6;
+            ctx.fillStyle = '#00ffaa';
+            ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = 1;
+            ctx.restore();
+        }
+    }
+
     // ── 自機マーカー (常に固定サイズ) ──
     const mS = 14; // marker size in screen pixels
     ctx.save();
@@ -5166,8 +5205,6 @@ function gameLoop() {
             ctx.globalAlpha = 1;
         });
 
-        if (player && player.hp > 0) drawPassiveAntenna(ctx);
-
         projectiles.forEach(p => p.draw(ctx));
         drawDecoys(ctx);
         updateDrawEffects(ctx);
@@ -5175,6 +5212,14 @@ function gameLoop() {
 
         enemies.forEach(e => e.draw(ctx));
         if (player && player.hp > 0) player.draw(ctx);
+
+        // ── 有視界フォグ (エンティティの上・ゲームリングの下) ──
+        // ヒッグス雲/フォグはここで描画し、以降のスレットリング/レーダー/武器射程リングを
+        // すべて最前面に重ねる。これらがヒッグスに隠れると索敵・射撃ができずゲームにならないため。
+        if (player && player.hp > 0) drawFogOfWar(ctx);
+
+        // ── シグネチャ・スレットリング (最前面・フォグの上) ──
+        if (player && player.hp > 0) drawPassiveAntenna(ctx);
 
         // ── レーダー範囲リング + ラベル ──
         if (player && player.hp > 0) {
@@ -5201,7 +5246,6 @@ function gameLoop() {
             ctx.fillText('RADAR', player.x + visionRingR + 6 / camera.zoom, player.y);
             ctx.globalAlpha = 1;
             ctx.restore();
-            drawFogOfWar(ctx); // 有視界システム: アメーバ視野 + ヒッグス濃度連動の霧
         }
 
         // ── 武器射程サークルインジケータ + ラベル (ワールド空間) ──
