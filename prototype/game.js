@@ -335,7 +335,7 @@ function drawFogOfWar(ctx) {
     ctx.fill();
 
     // ── 視野境界のグロウリング (微光) ──
-    // shadowBlur はモバイルGPUで重いため使用しない (LESSONS_LEARNED.md)。
+    // shadowBlur はモバイルGPUで重いため使用しない (HANDOVER.md パフォーマンス教訓)。
     // globalAlpha を変えた二重ストロークで擬似グロウを表現。
     ctx.beginPath();
     ctx.arc(cx, cy, playerVisionRadius, 0, Math.PI * 2);
