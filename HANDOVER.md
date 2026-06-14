@@ -10,6 +10,35 @@
 
 ## セッションログ（新しい順）
 
+### 2026-06-14（深夜⑥）— Higgsfield ビジュアルエフェクト Phase2（PR#58・`claude/higgsfield-visual-effects-nhbaey`）
+- **Phase1（PR#57、前セッションでマージ済み）**: `fx_explosion_big/small`, `fx_kinetic_flash`, `fx_beam_impact`, `fx_thruster_jet`, `fx_missile_exhaust` の6スプライトを生成・適用。
+- **Phase2（本セッション・PR#58）**: さらに12スプライトを Higgsfield nano_banana_pro で生成し適用。
+  - **ドローン6種**: `drone_attack`, `drone_scout`, `drone_decoy`, `drone_missile`, `drone_turret`, `drone_buoy`
+  - **弾体**: `fx_bolt_player`（cyan-green）/ `fx_bolt_enemy`（red-orange）
+  - **ステルスデコイ**: `fx_decoy`（EMジャマー外観）
+  - **センサー粒子**: `particle_heat`（橙）/ `particle_optic`（黄白）/ `particle_higgs`（シアン青）
+- **コード変更**:
+  - `Drone.draw()`: 全5展開可能タイプ（attack/scout/decoy/build/buoy）を `'lighter'` 加算合成スプライト描画に変更。barrier/higgs はキャンバスフォールバック継続。
+  - `drawDecoys()`: ステルスデコイを `fx_decoy.png` スプライト（加算合成）＋EMパルスリングに変更。
+  - `drawPassiveAntenna()`: HEAT/OPTIC/HIGGS センサーtrailの `ctx.arc()` → 粒子スプライト描画へ置換。`globalCompositeOperation='lighter'` をループ外に1回設定（per-particle save/restore を廃止し描画コスト低減）。
+  - `shadowBlur` 違反2箇所（EMフラッシュ / HIGGSノード）をアルファ重ね描きで代替（モバイルGPU規則遵守）。
+- **加算合成ブラックバック方式**: 黒背景スプライトを `'lighter'` で描くと黒が透明になるため、背景除去不要。全スプライトに一貫適用。
+- `?v=20260614m`。PR#58マージ済み。
+
+### 2026-06-14（深夜⑤）— Higgsfield ビジュアルエフェクト Phase1 洗い出し→生成→実装（PR#57・`claude/higgsfield-visual-effects-nhbaey`）
+- **依頼**: 「higgsfieldでnanobananapro使って攻撃/爆発/ジェット/ビジュアル面をブラッシュアップ」
+- **洗い出し**: game.js全体で置き換え可能な視覚要素を棚卸し。FXエフェクト・ドローン・デコイ・センサー粒子・弾体・岩礁スポーン・熱雲Blob・ミサイル/ビーム本体 など18カテゴリを列挙。
+- **Phase1スプライト生成**: `fx_explosion_big`, `fx_explosion_small`, `fx_kinetic_flash`, `fx_beam_impact`, `fx_thruster_jet`, `fx_missile_exhaust`（6種）
+- **接続方針確立**: black bg + `globalCompositeOperation='lighter'` でPNG背景除去不要。`spriteReady(img)` ガード＋キャンバスフォールバック必須。
+- **禁止語対策**: warship/missile/weapon → spaceship/cruiser/module/energy bolt で代替プロンプト。
+- **実装ポイント**:
+  - `effects[]` に `'fx-sprite'` タイプ追加（`updateDrawEffects`で加算合成展開フェード）
+  - 爆発にスプライトオーバーレイ追加（`createExplosion`/`Projectile.update`）
+  - スラスターを自機スプライト描画直前にオーバーレイ（`player.draw()`）
+  - ミサイル弾体を `drone_missile.png` スプライトに（既存排気スプライトと共存）
+  - キネティック弾を矩形→`fx_bolt_player/enemy.png` スプライトに
+- PR#57マージ済み。`?v=20260614l`。
+
 ### 2026-06-14（深夜④）— §3-13 Phase3 熱雲(HEAT地形)実装（PR#55・`claude/reading-markdown-files-nm1nmj`）
 - **熱雲**: `thermalField[]`(7ブロブ) + `getThermalIntensity()`(フレームキャッシュ+量子化) + `thermalCanvas`(768px、赤橙ベイク)。
 - **効果**: `THERMAL_HEAT_MASK=0.60` → 熱雲内heatSig低減（HEATセンサーから隠れやすい）。`THERMAL_HEAT_MOD=0.80` → 敵HEAT探知経路減衰。
