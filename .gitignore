@@ -20,3 +20,6 @@ desktop.ini
 # Temp / build artifacts
 *.tmp
 *.bak
+
+# Claude Code internal
+.claude/worktrees/

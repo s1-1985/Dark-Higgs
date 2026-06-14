@@ -261,6 +261,13 @@ let opticTrails = [];   // §3-12 OPTICセンサー向け発光跡(弾跡・ビ�
 let emTrails    = [];   // §3-12 EMセンサー向けEM放射跡
 let resourceNodes = []; // リソースノード {x, y, active, emFlashTimer}
 
+// ── ゲームスピード制御 ──────────────────────────────────────
+let gameSpeedFactor = 1.0; // 0.5=低速 / 1.0=通常 / 2.0=高速
+const PLAYER_TURN_RATE = 0.022; // 自機最大回頭レート (rad/frame)
+const PLAYER_FIRE_ARC  = Math.PI * 0.67; // 前方射撃弧 ±120° (π*2/3)
+const LOCK_PERSIST_BASE = 2.0; // ロック保持倍率 (visionRadius × N)
+// ─────────────────────────────────────────────────────────────
+
 // GEN配分 (ゼロサム: エンジン/武器/センサー/AI の合計=100)
 let genAlloc = { engine: 40, weapons: 30, sensors: 30, ai: 50 };
 
@@ -1549,7 +1556,7 @@ class Ship {
 
     update() {
         if (this.hp <= 0) return;
-        if (this.fireCooldown > 0) this.fireCooldown--;
+        if (this.fireCooldown > 0) this.fireCooldown -= gameSpeedFactor;
 
         if (this.isPlayer) {
             // ── 自機シグネチャ再設計 (速度+エンジン配分+ゲイン を統一指標化) ──
@@ -1591,7 +1598,7 @@ class Ship {
             const higgsHereEng = getHiggsIntensity(this.x, this.y);
             const higgsSlowdown = 1 - higgsHereEng * 0.45 * (1 - ENGINE_UPG_HIGGS_RESIST[gameState.upgrades.engine]);
             const higgsBonusSpeed = higgsHereEng * engType.higgsSpeedBonus;
-            this.speed = ((genAlloc.engine / 100) * genGain * 3.0 * (speedMult[gameState.shipType] || 1.0) * higgsSlowdown * engType.speedMult + higgsBonusSpeed) * this.terrainSpeedMult();
+            this.speed = ((genAlloc.engine / 100) * genGain * 2.4 * (speedMult[gameState.shipType] || 1.0) * higgsSlowdown * engType.speedMult + higgsBonusSpeed) * this.terrainSpeedMult() * gameSpeedFactor;
 
             // 円形マップ境界検知
             if (Math.hypot(this.x - MAP_CX, this.y - MAP_CY) > MAP_RADIUS - 100 && !dialogOpen) {
@@ -1631,7 +1638,14 @@ class Ship {
                 const dist = Math.hypot(this.targetEntity.x - this.x, this.targetEntity.y - this.y);
                 const wType = document.getElementById('weapon-select').value;
                 // ロック種別: 視野内=完全ロック / 視野外でセンサーコンタクトのみ=想定ロック
-                const _fullLock = !!this.targetEntity.inVision;
+                // lock-on persistence: 有視界内ならフラグ記録
+                if (this.targetEntity.inVision) this.targetEntity._wasLocked = true;
+                // ロック保持距離: visionRadius × LOCK_PERSIST_BASE × AI精度補正
+                const _visionR = computeVisionRadius();
+                const _lockPersistRange = _visionR * LOCK_PERSIST_BASE * (1 + aiPrec('sensor') * 2.5);
+                const _distToTgt = Math.hypot(this.targetEntity.x - this.x, this.targetEntity.y - this.y);
+                if (_distToTgt >= _lockPersistRange) this.targetEntity._wasLocked = false;
+                const _fullLock = !!this.targetEntity.inVision || (!!this.targetEntity._wasLocked && _distToTgt < _lockPersistRange);
                 const _hasContact = (this.targetEntity.contactLife > 0) || ((this.targetEntity.contactAccuracy || 0) > 0);
                 const _assumedLock = !_fullLock && _hasContact;
                 let wRange = wType === 'missile' ? 1300 : (wType === 'beam' ? 800 : 500);
@@ -1642,14 +1656,16 @@ class Ship {
                 let diff = targetAngle - this.angle;
                 while (diff < -Math.PI) diff += Math.PI * 2;
                 while (diff > Math.PI) diff -= Math.PI * 2;
-                this.angle += diff * 0.03; // Heavy slow turn
+                // 最大回頭レート制限 (旧: diff*0.03 = 無制限比例ターン)
+                this.angle += Math.sign(diff) * Math.min(Math.abs(diff), PLAYER_TURN_RATE * gameSpeedFactor);
 
                 if (dist > wRange * 0.8) {
                     this.x += Math.cos(this.angle) * this.speed;
                     this.y += Math.sin(this.angle) * this.speed;
                 }
 
-                if (dist < wRange && this.fireCooldown <= 0) {
+                // 射撃弧チェック: 前方±120° 以内のみ発射可。後方60°は死角。
+                if (dist < wRange && this.fireCooldown <= 0 && Math.abs(diff) < PLAYER_FIRE_ARC) {
                     // 想定ロックオン: 完全ロック=フルダメージ / 想定ロック=精度依存のダメージデバフ。
                     const _acc = _fullLock ? 1 : Math.max(0, Math.min(1, this.targetEntity.contactAccuracy || 0));
                     const _lockDmg = _fullLock ? 1 : (0.3 + 0.5 * _acc); // 想定=30〜80%
@@ -1663,7 +1679,7 @@ class Ship {
                     // ── kinetic マガジン・リロード処理 ──
                     if (wType === 'kinetic') {
                         if (this.kineticReloading) {
-                            this.kineticReloadTimer--;
+                            this.kineticReloadTimer -= gameSpeedFactor;
                             if (this.kineticReloadTimer <= 0) {
                                 this.kineticAmmo = this.kineticMaxAmmo;
                                 this.kineticReloading = false;
@@ -1698,7 +1714,7 @@ class Ship {
                     // ── missile マガジン・リロード処理 ──
                     } else if (wType === 'missile') {
                         if (this.missileReloading) {
-                            this.missileReloadTimer--;
+                            this.missileReloadTimer -= gameSpeedFactor;
                             if (this.missileReloadTimer <= 0) {
                                 this.missileReloading = false;
                                 logMessage('WEP: MISSILEリロード完了', 'system-msg');
@@ -1719,7 +1735,7 @@ class Ship {
                     // ── beam マガジン・リロード処理 ──
                     } else if (wType === 'beam') {
                         if (this.beamReloading) {
-                            this.beamReloadTimer--;
+                            this.beamReloadTimer -= gameSpeedFactor;
                             if (this.beamReloadTimer <= 0) {
                                 this.beamReloading = false;
                                 logMessage('WEP: BEAMリロード完了', 'system-msg');
@@ -1993,7 +2009,7 @@ class Ship {
             if (this.aiState === 'combat') {
                 this.lurking = false;
                 const fireRange = 700 + gameState.sector * 25;
-                this.speed = Math.min(2.0, 0.9 + gameState.sector * 0.08) * this.terrainSpeedMult();
+                this.speed = Math.min(2.0, 0.9 + gameState.sector * 0.08) * this.terrainSpeedMult() * gameSpeedFactor;
 
                 // センサー制約型照準: 実プレイヤーではなく「最終既知位置」へ撃つ。
                 // 接触が新しいほど速度ぶんリード外挿、喪失するほど古い点で凍結 → 移動/沈黙で外れる。
@@ -2063,7 +2079,7 @@ class Ship {
 
             } else if (this.aiState === 'hunting') {
                 this.lurking = false;
-                this.speed = Math.min(1.5, 0.8 + gameState.sector * 0.06) * this.terrainSpeedMult();
+                this.speed = Math.min(1.5, 0.8 + gameState.sector * 0.06) * this.terrainSpeedMult() * gameSpeedFactor;
                 if (this.huntTimer > 0) this.huntTimer--;
                 if (this.huntTarget) {
                     const dist = Math.hypot(this.huntTarget.x - this.x, this.huntTarget.y - this.y);
@@ -2083,7 +2099,7 @@ class Ship {
 
             } else if (this.aiState === 'gathering') {
                 this.lurking = false;
-                this.speed = Math.min(1.2, 0.7 + gameState.sector * 0.05) * this.terrainSpeedMult();
+                this.speed = Math.min(1.2, 0.7 + gameState.sector * 0.05) * this.terrainSpeedMult() * gameSpeedFactor;
                 // 最寄りノード探索
                 if (!this.gatherTarget || !this.gatherTarget.active) {
                     let closest = null, closestDist = Infinity;
@@ -6201,6 +6217,17 @@ function buyUpgrade(type) {
     const btn = document.getElementById(`btn-upgrade-${type}`);
     if (btn) btn.addEventListener('click', () => buyUpgrade(type));
 });
+
+// ── ゲームスピードトグル ──────────────────────────────────────
+document.getElementById('btn-game-speed')?.addEventListener('click', () => {
+    if (gameSpeedFactor === 1.0) gameSpeedFactor = 0.5;
+    else if (gameSpeedFactor === 0.5) gameSpeedFactor = 2.0;
+    else gameSpeedFactor = 1.0;
+    const labels = { 0.5: '0.5x 低速', 1.0: '1x 通常', 2.0: '2x 高速' };
+    document.getElementById('btn-game-speed').textContent = `SPD:${labels[gameSpeedFactor]}`;
+    logMessage(`SYSTEM: ゲームスピード ${labels[gameSpeedFactor]} に変更`, 'system-msg');
+});
+// ─────────────────────────────────────────────────────────────
 
 // gameLoop is started by startGame() after ship selection
 
