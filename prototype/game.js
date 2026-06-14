@@ -244,6 +244,25 @@ let genAlloc = { engine: 40, weapons: 30, sensors: 30, ai: 50 };
 // 自動攻撃ON/OFFフラグ
 let autoAttackEnabled = true;
 
+// ── 潜航型ジャミング3種 (stealth専用) ──────────────────────
+// 敵の探知レンジを劣化させる。発動中はEM放射が増え逆探知されやすくなる(情報↔露出のトレードオフ)。
+// 数値は調整用デフォルト (バランスは実機調整前提)。
+let jamBurst = 0;     // 範囲ジャミング: 残りフレーム
+let jamCont = false;  // 継続EMジャム: ON/OFF (持続的にEM放射)
+let jamPulse = 0;     // EMパルス: 広域瞬間ブラインドの残りフレーム
+let jamPulseCD = 0;   // EMパルス: 再チャージ残り
+const JAM_BURST_RADIUS = 3500, JAM_BURST_DUR = 360, JAM_BURST_DEGRADE = 0.6;  // 半径3500を60%劣化, 6秒
+const JAM_CONT_RADIUS = 2400, JAM_CONT_DEGRADE = 0.35;                        // 半径2400を35%劣化(持続)
+const JAM_PULSE_RADIUS = 6000, JAM_PULSE_DUR = 75, JAM_PULSE_CD = 1200;       // 半径6000を1.25秒全ブラインド, CD20秒
+
+// ── 積載量 (同時展開上限) — オーナー確定値 2026-06-14 ──
+const CARGO_CAP = { assault: 2, stealth: 3, carrier: 6 };
+
+// ── 潜航型デコイ (強EM放射のダミー → 敵ミサイルを誘引・索敵妨害) ──
+let decoys = [];
+const DECOY_LIFE = 480;        // 8秒
+const DECOY_LURE_RADIUS = 1600; // この半径内の敵ミサイルを誘引
+
 // ============================================================
 // 有視界システム — アメーバ形状視野 + ヒッグス連続濃度連動
 // ============================================================
@@ -1109,11 +1128,25 @@ class Projectile {
         if (!this.active) return;
 
         if (this.type === 'missile' && this.target && this.target.hp > 0) {
-            const targetAngle = Math.atan2(this.target.y - this.y, this.target.x - this.x);
+            // 敵ミサイルはデコイ(強EM)に誘引される: 近傍デコイがあれば本標的より優先して追尾
+            let homeX = this.target.x, homeY = this.target.y;
+            if (!this.isPlayer && decoys.length) {
+                let best = null, bestD = DECOY_LURE_RADIUS;
+                for (const d of decoys) { const dd = Math.hypot(d.x - this.x, d.y - this.y); if (dd < bestD) { bestD = dd; best = d; } }
+                if (best) { homeX = best.x; homeY = best.y; this._luredBy = best; }
+            }
+            const targetAngle = Math.atan2(homeY - this.y, homeX - this.x);
             let diff = targetAngle - this.angle;
             while (diff < -Math.PI) diff += Math.PI * 2;
             while (diff > Math.PI) diff -= Math.PI * 2;
             this.angle += diff * 0.05;
+            // デコイに到達したらミサイルは消費される(無害化)
+            if (this._luredBy && Math.hypot(this._luredBy.x - this.x, this._luredBy.y - this.y) < 40) {
+                createHitEffect(this.x, this.y, '#cc99ff');
+                this._luredBy.life = Math.min(this._luredBy.life, 30); // デコイも消耗
+                this.active = false;
+                return;
+            }
         }
 
         this.x += Math.cos(this.angle) * this.speed;
@@ -1292,6 +1325,16 @@ class Ship {
             this.emSig      = Math.min(1, (genAlloc.sensors / 100 * 0.4 + genAlloc.ai / 100 * 0.35 + _pulseBonus) * _engType.emMult);
             this.higgsSig   = Math.min(1, _spd * _hHere * 1.5 * (_engType.higgsSpeedBonus > 0 ? 1 : 0.3) + _higgsEngBonus);
 
+            // 潜航型ジャミング: 発動中はEM放射が増し逆探知されやすい(情報↔露出のトレードオフ)。タイマー減衰もここで。
+            if (gameState.shipType === 'stealth') {
+                if (jamPulse > 0)  this.emSig = 1;
+                else if (jamBurst > 0) this.emSig = Math.min(1, this.emSig + 0.4);
+                else if (jamCont)  this.emSig = Math.min(1, this.emSig + 0.25);
+            }
+            if (jamBurst > 0)   jamBurst--;
+            if (jamPulse > 0)   jamPulse--;
+            if (jamPulseCD > 0) jamPulseCD--;
+
             // Speed defined by GEN engine allocation + 艦種補正 + ヒッグス減速
             const speedMult = { assault: 0.8, stealth: 1.4, carrier: 0.6 };
             const higgsSlowdown = 1 - getHiggsIntensity(this.x, this.y) * 0.45;
@@ -1316,7 +1359,13 @@ class Ship {
             } else if (this.targetEntity && this.targetEntity.hp > 0) {
                 const dist = Math.hypot(this.targetEntity.x - this.x, this.targetEntity.y - this.y);
                 const wType = document.getElementById('weapon-select').value;
-                const wRange = wType === 'missile' ? 1300 : (wType === 'beam' ? 800 : 500);
+                // ロック種別: 視野内=完全ロック / 視野外でセンサーコンタクトのみ=想定ロック
+                const _fullLock = !!this.targetEntity.inVision;
+                const _hasContact = (this.targetEntity.contactLife > 0) || ((this.targetEntity.contactAccuracy || 0) > 0);
+                const _assumedLock = !_fullLock && _hasContact;
+                let wRange = wType === 'missile' ? 1300 : (wType === 'beam' ? 800 : 500);
+                // 想定ロック時、beamはヒッグスダークチャネル狙撃で長射程化 (設計: マップ端から狙撃可)
+                if (wType === 'beam' && _assumedLock) wRange = 8000;
 
                 let targetAngle = Math.atan2(this.targetEntity.y - this.y, this.targetEntity.x - this.x);
                 let diff = targetAngle - this.angle;
@@ -1330,9 +1379,7 @@ class Ship {
                 }
 
                 if (dist < wRange && this.fireCooldown <= 0) {
-                    // 想定ロックオン: 視野内(inVision)=完全ロック=フルダメージ。
-                    // 視野外でセンサーコンタクトのみ=想定ロック=精度依存のダメージデバフ。
-                    const _fullLock = !!this.targetEntity.inVision;
+                    // 想定ロックオン: 完全ロック=フルダメージ / 想定ロック=精度依存のダメージデバフ。
                     const _acc = _fullLock ? 1 : Math.max(0, Math.min(1, this.targetEntity.contactAccuracy || 0));
                     const _lockDmg = _fullLock ? 1 : (0.3 + 0.5 * _acc); // 想定=30〜80%
                     if (_fullLock !== this._fullLockPrev) {
@@ -1408,9 +1455,20 @@ class Ship {
                             // リロード中は発射しない
                         } else {
                             this.weaponType = wType;
-                            const proj = new Projectile(this.x, this.y, this.targetEntity, true, wType, _lockDmg);
-                            if (proj.dmg) proj.dmg *= (UPGRADE_MULT[gameState.upgrades.weapons] || 1.0);
-                            projectiles.push(proj);
+                            // 想定ロック長射程狙撃: 精度が低いほど推定位置を外す (命中ジッター)
+                            const _beamMiss = _assumedLock && (Math.random() < (1 - _acc) * 0.6);
+                            if (_beamMiss) {
+                                // 外れ: ジッター点へビーム描画 (ダメージなし)。発射で自位置は露出する
+                                const _jit = (1 - _acc) * 700 + 80;
+                                const _ex = this.targetEntity.x + (Math.random() - 0.5) * 2 * _jit;
+                                const _ey = this.targetEntity.y + (Math.random() - 0.5) * 2 * _jit;
+                                effects.push({ x: this.x, y: this.y, tx: _ex, ty: _ey, type: 'beam', a: 1, c: '#00ffaa' });
+                                logMessage('WEP: BEAM 想定射撃 — 推定位置を外れた (命中せず)', 'warning-msg');
+                            } else {
+                                const proj = new Projectile(this.x, this.y, this.targetEntity, true, wType, _lockDmg);
+                                if (proj.dmg) proj.dmg *= (UPGRADE_MULT[gameState.upgrades.weapons] || 1.0);
+                                projectiles.push(proj);
+                            }
                             playSound('shoot');
                             const weaponGenFactor = Math.max(0.3, 1.5 - (genAlloc.weapons / 100));
                             this.fireCooldown = WEAPON_COOLDOWNS[wType] * weaponGenFactor;
@@ -1536,10 +1594,21 @@ class Ship {
             const distToPlayer = Math.hypot(player.x - this.x, player.y - this.y);
             const higgsHereDetect = getHiggsIntensity(this.x, this.y);
             const playerEmBoost = 0.5 + (genAlloc.ai / 100) * 0.5;
-            const myDetectRange = 800 * (1 - higgsHereDetect * 0.55) * (1 + gameState.sector * 0.05) * playerEmBoost;
+            // 潜航型ジャミング: ジャミング半径内の敵は探知レンジが劣化する
+            let jamDegrade = 0;
+            if (gameState.shipType === 'stealth') {
+                if (jamPulse > 0 && distToPlayer < JAM_PULSE_RADIUS) {
+                    jamDegrade = 1; // 瞬間全ブラインド
+                } else {
+                    if (jamBurst > 0 && distToPlayer < JAM_BURST_RADIUS) jamDegrade = Math.max(jamDegrade, JAM_BURST_DEGRADE);
+                    if (jamCont && distToPlayer < JAM_CONT_RADIUS) jamDegrade = Math.max(jamDegrade, JAM_CONT_DEGRADE);
+                }
+            }
+            const myDetectRange = 800 * (1 - higgsHereDetect * 0.55) * (1 + gameState.sector * 0.05) * playerEmBoost * (1 - jamDegrade);
 
             let playerSigDetected = false;
             let detectedSigStrength = 0;
+            let domSig = null, domVal = 0; // 最も強く検知したシグネチャ種別 (行動推定用)
             if (player && player.hp > 0) {
                 const pSigs = { heat: player.heatSig||0, optic: player.opticalSig||0, em: player.emSig||0, higgs: player.higgsSig||0 };
                 ['heat','optic','em','higgs'].forEach(sName => {
@@ -1548,6 +1617,7 @@ class Ship {
                     const distAtten = Math.max(0, 1 - distToPlayer / (myDetectRange * 2.5 * sc2.rangeScale));
                     const attenuated = pSigs[sName] * distAtten * (1 - higgsPath * sc2.higgsMod);
                     if (attenuated > sc2.threshold * 0.6) { playerSigDetected = true; detectedSigStrength = Math.max(detectedSigStrength, attenuated); }
+                    if (attenuated > domVal) { domVal = attenuated; domSig = sName; }
                 });
                 // 接近探知
                 if (distToPlayer < myDetectRange) {
@@ -1570,9 +1640,39 @@ class Ship {
                 this.contactFreshness = Math.max(0, this.contactFreshness - 0.02);
             }
 
+            // ──────────────────────────────────────
+            // センサー制約型 行動推定 (predictedBehavior): 全知禁止 — 検知シグネチャだけから
+            // プレイヤーの行動を推測し、状態別AIで適応戦略を取る。
+            // ──────────────────────────────────────
+            let pb = this.predictedBehavior || 'unknown';
+            if (playerSigDetected && player) {
+                const pm = { heat: player.heatSig||0, optic: player.opticalSig||0, em: player.emSig||0 };
+                // 最寄りアクティブノードがプレイヤー近傍か (EMスパイク+ノード近接=収集)
+                let nearNode = false;
+                for (const n of resourceNodes) { if (n.active && Math.hypot(n.x-player.x, n.y-player.y) < 650) { nearNode = true; this._predNode = n; break; } }
+                if (domSig === 'em' && nearNode)               pb = 'gathering';   // リソース収集 → 先回り
+                else if (pm.heat > 0.4 && pm.em > 0.4 && pm.optic < 0.3) pb = 'charging'; // ビームチャージ → 回避
+                else if (domSig === 'optic')                   pb = 'kinetic';     // 実弾多用 → アウトレンジ
+                else                                            pb = 'moving';
+            } else {
+                pb = 'silent'; // 無反応 → 潜伏とみなす
+            }
+            if (pb !== this.predictedBehavior) {
+                this.predictedBehavior = pb;
+                if (this.aiState === 'combat' || this.aiState === 'hunting') {
+                    const lbl = { gathering:'リソース収集を推定 — 先回り', charging:'ビームチャージを推定 — 回避運動', kinetic:'実弾戦を推定 — 距離を取り長射程へ', moving:'移動を捕捉', silent:'接触喪失 — 推定航路を捜索' };
+                    if (lbl[pb]) logMessage(`敵AI: ${lbl[pb]}`, 'system-msg');
+                }
+            }
+
             // 探知時: 状態遷移
             if (playerSigDetected && this.aiState !== 'combat') {
-                this.huntTarget = { x: player.x + (Math.random()-0.5)*300, y: player.y + (Math.random()-0.5)*300 };
+                // 適応: リソース収集を推定したらノードへ先回り (プレイヤー周辺ではなくノードを抑える)
+                if (this.predictedBehavior === 'gathering' && this._predNode && this._predNode.active) {
+                    this.huntTarget = { x: this._predNode.x, y: this._predNode.y };
+                } else {
+                    this.huntTarget = { x: player.x + (Math.random()-0.5)*300, y: player.y + (Math.random()-0.5)*300 };
+                }
                 this.huntTimer = 480 + Math.floor(detectedSigStrength * 300);
                 if (distToPlayer < 1800 || detectedSigStrength > 0.6) {
                     if (this.aiState !== 'combat') {
@@ -1629,7 +1729,9 @@ class Ship {
                     while (diff < -Math.PI) diff += Math.PI * 2;
                     while (diff > Math.PI) diff -= Math.PI * 2;
                     this.angle += diff * 0.1;
-                    const wType = gameState.sector <= 2 ? 'kinetic' : (gameState.sector <= 4 ? 'missile' : 'beam');
+                    let wType = gameState.sector <= 2 ? 'kinetic' : (gameState.sector <= 4 ? 'missile' : 'beam');
+                    // 適応: プレイヤーが実弾近接戦と推定されたら長射程へ切替 (アウトレンジ)
+                    if (this.predictedBehavior === 'kinetic' && wType === 'kinetic') wType = 'missile';
                     this.weaponType = wType;
                     // 信じている照準点に向けて発射。kinetic/missileは飛翔体の命中判定が
                     // 実プレイヤーとのズレを自然に処理する。beamは即着弾のため、照準点が
@@ -1649,15 +1751,27 @@ class Ship {
                     effects.push({ x: this.x, y: this.y, r: 0, maxR: 200, a: 0.9, c: '#ff4d4d', type: 'circle' });
                     logMessage(`WARNING: 敵艦発砲 — ${sigLabel[wType]||''}シグネチャ捕捉。`, 'warning-msg');
                     this.postFireCooldown = 280;
-                } else if (distToBelief > fireRange * 0.8) {
-                    // 信じている位置へ接近 (実プレイヤーではなく予測点を追う)
-                    const ta = Math.atan2(aimY - this.y, aimX - this.x);
-                    let diff = ta - this.angle;
-                    while (diff < -Math.PI) diff += Math.PI * 2;
-                    while (diff > Math.PI) diff -= Math.PI * 2;
-                    this.angle += diff * 0.05;
-                    this.x += Math.cos(this.angle) * this.speed;
-                    this.y += Math.sin(this.angle) * this.speed;
+                } else {
+                    // 適応移動: kinetic推定=距離を保つ(カイト) / charging推定=側方回避 / 他=予測点へ接近
+                    const pbv = this.predictedBehavior;
+                    const standoff = pbv === 'kinetic' ? fireRange * 1.15 : fireRange * 0.8;
+                    let moveAngle = Math.atan2(aimY - this.y, aimX - this.x);
+                    let doMove = false;
+                    if (distToBelief > standoff) { doMove = true; }                                  // 接近
+                    else if (pbv === 'kinetic' && distToBelief < fireRange * 0.85) { moveAngle += Math.PI; doMove = true; } // 離脱(カイト)
+                    if (pbv === 'charging') {                                                          // ビーム回避: 側方ストレイフ
+                        const dodgeDir = this._dodgeDir || (this._dodgeDir = (Math.random() < 0.5 ? 1 : -1));
+                        moveAngle += dodgeDir * (Math.PI / 2.5);
+                        doMove = true;
+                    }
+                    if (doMove) {
+                        let diff = moveAngle - this.angle;
+                        while (diff < -Math.PI) diff += Math.PI * 2;
+                        while (diff > Math.PI) diff -= Math.PI * 2;
+                        this.angle += diff * 0.05;
+                        this.x += Math.cos(this.angle) * this.speed;
+                        this.y += Math.sin(this.angle) * this.speed;
+                    }
                 }
                 // シグネチャ喪失 → lurking
                 if (!playerSigDetected) {
@@ -2364,6 +2478,31 @@ class Ship {
         ctx.restore();
         ctx.globalAlpha = 1;
 
+        // ロックオン・レティクル: 完全ロック(視野内)=緑実線 / 想定ロック(センサー)=琥珀破線
+        if (!this.isPlayer && player && player.targetEntity === this && this.hp > 0) {
+            const lx = this.contactLife > 0 ? this.displayX : this.x;
+            const ly = this.contactLife > 0 ? this.displayY : this.y;
+            const lr = this.radius * 3.2 + 6;
+            const full = !!this.inVision;
+            ctx.save();
+            ctx.translate(lx, ly);
+            ctx.strokeStyle = full ? 'rgba(0,255,170,0.9)' : 'rgba(255,170,0,0.85)';
+            ctx.lineWidth = 1.6;
+            if (!full) ctx.setLineDash([6, 6]);
+            const b = lr * 0.55; // コーナーブラケットの腕の長さ
+            for (let q = 0; q < 4; q++) {
+                const sx = (q & 1) ? 1 : -1;
+                const sy = (q & 2) ? 1 : -1;
+                ctx.beginPath();
+                ctx.moveTo(sx * lr, sy * (lr - b));
+                ctx.lineTo(sx * lr, sy * lr);
+                ctx.lineTo(sx * (lr - b), sy * lr);
+                ctx.stroke();
+            }
+            ctx.setLineDash([]);
+            ctx.restore();
+        }
+
         if (!this.isPlayer && this.visible) {
             const dispX = this.contactLife > 0 ? this.displayX : this.x;
             const dispY = this.contactLife > 0 ? this.displayY : this.y;
@@ -2720,6 +2859,8 @@ function generateSector() {
 function startGame(shipType) {
     gameState.shipType = shipType;
     document.getElementById('ship-select-lobby').classList.add('hidden');
+    // 潜航型専用ジャミングボタンの表示制御
+    document.querySelectorAll('.jam-btn').forEach(b => { b.style.display = shipType === 'stealth' ? '' : 'none'; });
     // S&D進捗バーの表示制御
     const sdBar = document.getElementById('sd-progress-bar');
     if (sdBar) sdBar.style.display = gameState.mode === 'sd' ? 'block' : 'none';
@@ -2901,6 +3042,41 @@ document.getElementById('btn-attack-toggle')?.addEventListener('click', () => {
 });
 
 document.getElementById('btn-scan').addEventListener('click', fireOmniSonar);
+
+// ── 潜航型ジャミング3種 ──
+document.getElementById('btn-jam-burst')?.addEventListener('click', () => {
+    if (gameState.shipType !== 'stealth') return;
+    if (jamBurst > 0) { logMessage('JAM: 範囲ジャミングは既に発動中', 'warning-msg'); return; }
+    jamBurst = JAM_BURST_DUR;
+    logMessage(`JAM: 範囲ジャミング展開 — 半径内の敵センサーを${Math.round(JAM_BURST_DEGRADE*100)}%劣化 (発動中はEM放射増)`, 'system-msg');
+    playSound('ui');
+});
+document.getElementById('btn-jam-cont')?.addEventListener('click', () => {
+    if (gameState.shipType !== 'stealth') return;
+    jamCont = !jamCont;
+    const b = document.getElementById('btn-jam-cont');
+    if (b) { b.style.borderColor = jamCont ? '#ff66cc' : '#aa66ff'; b.style.color = jamCont ? '#ff99dd' : '#cc99ff'; }
+    logMessage(`JAM: 継続EMジャム ${jamCont ? 'ON — 周辺センサーを持続妨害(常時EM放射)' : 'OFF'}`, 'system-msg');
+    playSound('ui');
+});
+document.getElementById('btn-jam-pulse')?.addEventListener('click', () => {
+    if (gameState.shipType !== 'stealth') return;
+    if (jamPulseCD > 0) { logMessage(`JAM: EMパルス再チャージ中 (${Math.ceil(jamPulseCD/60)}秒)`, 'warning-msg'); return; }
+    jamPulse = JAM_PULSE_DUR;
+    jamPulseCD = JAM_PULSE_CD;
+    effects.push({ x: player.x, y: player.y, r: 0, maxR: JAM_PULSE_RADIUS, a: 0.5, c: '#cc99ff', type: 'circle' });
+    logMessage('JAM: EMパルス発射 — 広域瞬間ブラインド！(自EM放射が最大に)', 'warning-msg');
+    playSound('ui');
+});
+document.getElementById('btn-decoy')?.addEventListener('click', () => {
+    if (gameState.shipType !== 'stealth') return;
+    if (!player || player.hp <= 0) return;
+    if (decoys.length >= CARGO_CAP.stealth) { logMessage(`DECOY: 同時展開上限 (${CARGO_CAP.stealth}機) に到達`, 'warning-msg'); return; }
+    const ang = player.angle, sp = 4;
+    decoys.push({ x: player.x + Math.cos(ang) * 30, y: player.y + Math.sin(ang) * 30, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, life: DECOY_LIFE });
+    logMessage(`DECOY: 強EMデコイ射出 (${decoys.length}/${CARGO_CAP.stealth}) — 敵ミサイルを誘引`, 'system-msg');
+    playSound('ui');
+});
 
 // ── モバイルメニュー ──
 (function initMobileMenu() {
@@ -4518,6 +4694,39 @@ function drawHUDOverlay(ctx) {
     });
 }
 
+// ── 潜航型デコイ: 更新・描画 ──
+function updateDecoys() {
+    for (let i = decoys.length - 1; i >= 0; i--) {
+        const d = decoys[i];
+        d.x += d.vx; d.y += d.vy;
+        d.vx *= 0.985; d.vy *= 0.985; // 慣性で減速
+        d.life--;
+        // デコイは強EM源 → ヒッグスウェイクは出さないがEM波紋演出
+        if (d.life % 24 === 0) effects.push({ x: d.x, y: d.y, r: 0, maxR: 220, a: 0.4, c: '#cc99ff', type: 'circle' });
+        if (d.life <= 0) decoys.splice(i, 1);
+    }
+}
+function drawDecoys(ctx) {
+    for (const d of decoys) {
+        const a = Math.min(1, d.life / 60);
+        ctx.save();
+        ctx.globalAlpha = a * 0.9;
+        ctx.translate(d.x, d.y);
+        // 菱形コア + EMパルスリング
+        ctx.fillStyle = '#cc99ff';
+        ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(6, 0); ctx.lineTo(0, 7); ctx.lineTo(-6, 0); ctx.closePath(); ctx.fill();
+        const pr = 10 + (Math.sin(Date.now() * 0.01 + d.x) * 0.5 + 0.5) * 8;
+        ctx.globalAlpha = a * 0.5;
+        ctx.strokeStyle = '#aa66ff'; ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.arc(0, 0, pr, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = a;
+        ctx.fillStyle = '#ffffff'; ctx.font = '8px Orbitron'; ctx.textAlign = 'center';
+        ctx.fillText('DECOY', 0, -14);
+        ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+}
+
 // FPS計測用
 let _fpsLastTime = 0, _fpsFrameCount = 0, _fpsDisplay = 0;
 
@@ -4670,6 +4879,7 @@ function gameLoop() {
             setTimeout(() => showGameOver(), 2500);
         }
         enemies.forEach(e => e.update());
+        updateDecoys();
 
         // Scrap Collection
         for (let i = scrapDrops.length - 1; i >= 0; i--) {
@@ -4894,6 +5104,7 @@ function gameLoop() {
         if (player && player.hp > 0) drawPassiveAntenna(ctx);
 
         projectiles.forEach(p => p.draw(ctx));
+        drawDecoys(ctx);
         updateDrawEffects(ctx);
         updateDrawDebrisParticles(ctx);
 
