@@ -152,16 +152,22 @@ prototype/
 `fireFlashTimer`, `manualTarget`, `contactAccuracy`, `contactLife`,
 `kineticAmmo`/`*Reloading`/`*ReloadTimer`
 
-## Git ルール（厳守）
+## Git / PR / デプロイ反映ルール（厳守 — 過去に反映漏れ多発）
 
 ```bash
 git checkout -b claude/feature-name-xxxxx   # 必ず claude/ プレフィックス
 git push -u origin claude/feature-name-xxxxx
-# → Draft PR作成 → オーナーがマージ
+# → 【非Draft】PR作成 (マージボタンを必ず出す) → オーナーがマージ
 # ❌ main への直接 push は 403 で拒否される
 ```
 
-- push 前に `git branch` でブランチ確認 / push 後は必ず Draft PR を作成
+### ⚠️ 反映漏れ防止（最重要・過去に何度も発生）
+1. **PRは必ず非Draft（ready）で作る**。Draft PRには**マージボタンが出ず**、オーナーが反映できない。
+2. **マージ後の追加は必ず「新しいPR（別番号）」で出す**。マージ済み/クローズPRのブランチに push し続けても、その差分はどのPRにも入らず**反映されない**。`mcp__github__pull_request_read`でPRが`merged/closed`でないか確認してから push 先を判断する。
+3. **「適用済み」と言う前に必ず検証**: `git log origin/main..HEAD --oneline` で**未マージコミットが無いこと**を確認する。1つでも残っていれば「まだ本番(main)に入っていない」＝GitHub Pagesに反映されない。
+4. **GitHub Pages は `main` を配信**。PRをマージするまでゲーム本体には反映されない。マージ後も配信反映に1〜2分。
+5. **キャッシュバスティング必須**: `game.js`/`style.css` を変更したら **`prototype/index.html` の `?v=YYYYMMDD?` を必ず更新する**。これを怠るとブラウザが旧ファイルをキャッシュし「修正が反映されない」と誤認する（実際に長期間発生）。`<head>`に no-cache メタも設定済み。
+6. push 前に `git branch` でブランチ確認。
 
 ## モバイルパフォーマンス規則（詳細は HANDOVER.md）
 
@@ -178,3 +184,5 @@ git push -u origin claude/feature-name-xxxxx
 - 実装前確認不要（承認済みとして進める）。ただし**数値未定義の仕様**（積載量等）は実装前に合意
 - git push は `claude/` ブランチのみ（main直接push = 403）。PRマージはオーナー実施
 - コミットは機能実装後に実施
+- **PRは非Draftで作成**（マージボタンを出す）。**マージ後の追加は新PR番号**で出す（上記「反映漏れ防止」厳守）
+- `game.js`/`style.css`変更時は **index.html の `?v=` を更新**（キャッシュ対策）

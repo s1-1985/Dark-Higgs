@@ -503,49 +503,14 @@ function generateSpaceBackground() {
     bc.fillStyle = bg;
     bc.fillRect(0, 0, TEX, TEX);
 
-    // 星雲(ネビュラ)は49倍引き伸ばしでボケるため焼き込まない。
+    // 星雲(ネビュラ)は68倍引き伸ばしでボケるため焼き込まない。
     // → スクリーン空間パララックス層 (_drawNebula / シームレスタイル) へ分離。
     _nebulaTile = null; // 背景再生成に合わせて星雲タイルも作り直す
 
-    // 4. 星 (数千個、3種類)
-    //  dim background stars
-    for (let i = 0; i < 6000; i++) {
-        const x = rng()*TEX, y = rng()*TEX;
-        const v = rng();
-        bc.globalAlpha = 0.08 + rng()*0.22;
-        bc.fillStyle = v < 0.6 ? '#c8d8ff' : (v < 0.85 ? '#ffffff' : '#ffd8aa');
-        bc.fillRect(x, y, 0.8, 0.8);
-    }
-    //  medium stars
-    for (let i = 0; i < 1800; i++) {
-        const x = rng()*TEX, y = rng()*TEX;
-        const v = rng();
-        bc.globalAlpha = 0.25 + rng()*0.55;
-        bc.fillStyle = v < 0.5 ? '#ddeeff' : (v < 0.75 ? '#ffffff' : (v < 0.9 ? '#aaccff' : '#ffcc88'));
-        const sz = 0.9 + rng()*0.6;
-        bc.fillRect(x, y, sz, sz);
-    }
-    //  bright foreground stars (with glow)
-    for (let i = 0; i < 200; i++) {
-        const x = rng()*TEX, y = rng()*TEX;
-        const sz = 1.5 + rng()*2.0;
-        const v = rng();
-        const col = v < 0.55 ? '#ffffff' : (v < 0.75 ? '#aaccff' : (v < 0.9 ? '#ffddaa' : '#cc99ff'));
-        bc.globalAlpha = 0.7 + rng()*0.3;
-        bc.shadowColor = col; bc.shadowBlur = 2;
-        bc.fillStyle = col;
-        bc.fillRect(x, y, sz, sz);
-        // 十字フレア
-        bc.globalAlpha = 0.2;
-        bc.fillRect(x - sz*3, y + sz*0.3, sz*8, sz*0.4);
-        bc.fillRect(x + sz*0.3, y - sz*3, sz*0.4, sz*8);
-        bc.shadowBlur = 0;
-    }
-    bc.globalAlpha = 1;
-
-    // 明るい巨星は 68倍拡大でハローがボケるため焼き込まない。
-    // → スクリーン空間パララックス層 (_drawGiantStars / 鮮明タイル) へ分離。
-    _giantStarTile = null; // 背景再生成に合わせて巨星タイルも作り直す
+    // 星も68倍拡大でボケるため焼き込まない (旧: 6000+1800+200個をTEXに焼いていた)。
+    // → 鮮明なスクリーン空間パララックス層 (_drawStarfield) が担当。
+    // spaceBgCanvas は「暗い深宇宙グラデーション」のみ (滑らかなので拡大してもボケが目立たない)。
+    _giantStarTile = null; // 明るい巨星も鮮明パララックス層 (_drawGiantStars) へ。再生成に合わせreset
 }
 
 // ============================================================
@@ -4208,10 +4173,11 @@ let _starTileLayers = null;
 const _STAR_TILE = 512;
 function _initStarTiles() {
     _starTileLayers = [];
+    // 焼き込み星を廃止したぶん鮮明パララックス星の密度を増やす (ボケ解消)
     const defs = [
-        { n: 48, pf: 0.045, smin: 0.6, smax: 1.1, amin: 0.20, amax: 0.45 }, // 遠景
-        { n: 28, pf: 0.110, smin: 0.9, smax: 1.7, amin: 0.35, amax: 0.70 }, // 中景
-        { n: 12, pf: 0.240, smin: 1.4, smax: 2.6, amin: 0.55, amax: 1.00 }, // 近景
+        { n: 90, pf: 0.045, smin: 0.6, smax: 1.1, amin: 0.20, amax: 0.45 }, // 遠景
+        { n: 52, pf: 0.110, smin: 0.9, smax: 1.7, amin: 0.35, amax: 0.70 }, // 中景
+        { n: 22, pf: 0.240, smin: 1.4, smax: 2.6, amin: 0.55, amax: 1.00 }, // 近景
     ];
     for (const L of defs) {
         const tile = document.createElement('canvas');
