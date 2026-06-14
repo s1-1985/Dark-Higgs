@@ -10,6 +10,15 @@
 
 ## セッションログ（新しい順）
 
+### 2026-06-14（深夜②）— §3-12 全センサーtrail一般化（PR#52・`claude/reading-markdown-files-nm1nmj`）
+- **§3-12 HEAT/OPTIC/EM trail**: `heatTrails[]`/`opticTrails[]`/`emTrails[]`を追加（`higgsWakes`と同パターン）。
+  - 源泉: 実弾→optic、ミサイル→heat+em+optic、ビーム→optic+em、プレイヤー移動→heat+em、敵Ship移動→heat+em。
+  - センサー切替で色分け表示: HEAT=橙(255,120,20) / OPTIC=黄白(255,230,80) / EM=紫(180,80,255)。
+  - 上限600エントリ、decay率: heat=0.004 / em=0.005 / optic=0.006。`shadowBlur`不使用。
+  - `drawPassiveAntenna`内のEM/HIGGSブロックに他センサー分を追加。
+- PR#52マージ済。`?v=20260614h`。
+- **⚠️ 申し送り**: §3-1アップグレードツリー再整合は要オーナー決定（現`armor`を残すか設計ツリーへ寄せるか）。§3-13 Phase3（熱雲）は実機30fps計測後に判断。
+
 ### 2026-06-14（深夜）— 残機能3件実装（PR#51・`claude/reading-markdown-files-nm1nmj`）
 - **§3-7 建設物3種（空母carrier専用）**: D-BAR(ビームバリア)/D-BUY(センサーブイ)/D-HGS(ヒッグス散布装置)。`DRONE_BUILDING_LIFE=7200`(2分)。Drone classを拡張し7タイプ対応に。
 - **§3-10 ミサイル2タイプ**: `missileMode='homing'|'smart'`。MSL:HON/AIボタン(全艦種)。AI型はデコイ耐性(`aiPrec*0.9`確率)+着弾大閃光+射程2200。
