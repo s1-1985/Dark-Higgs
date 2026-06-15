@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__Higgsfield__generate_image",
+      "mcp__Higgsfield__show_generations",
+      "mcp__Higgsfield__job_display",
+      "mcp__Higgsfield__balance",
+      "mcp__Higgsfield__remove_background"
+    ]
+  }
+}
