@@ -11,7 +11,7 @@
     <title>Dark Echo: Tactical Space RTS</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23000' stroke='%2300ff88' stroke-width='2'/><circle cx='16' cy='16' r='6' fill='none' stroke='%2300ff88' stroke-width='1.5'/><line x1='16' y1='2' x2='16' y2='30' stroke='%2300ff88' stroke-width='1' opacity='0.4'/><line x1='2' y1='16' x2='30' y2='16' stroke='%2300ff88' stroke-width='1' opacity='0.4'/></svg>" type="image/svg+xml">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20260615i">
+    <link rel="stylesheet" href="style.css?v=20260615j">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -611,21 +611,9 @@
                     <div class="enemy-select" style="margin-bottom:18px;">
                         <div class="mode-label" style="margin-bottom:8px;">敵艦種</div>
                         <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
-                            <button class="btn btn-small enemy-select-btn" data-type="corvette" style="font-size:10px; padding:4px 10px;">コルベット<br><span style="font-size:9px; color:#aaa;">小型・高速</span></button>
-                            <button class="btn btn-small enemy-select-btn active" data-type="destroyer" style="font-size:10px; padding:4px 10px; border-color:#ff4444;">デストロイヤー<br><span style="font-size:9px; color:#aaa;">標準・万能</span></button>
-                            <button class="btn btn-small enemy-select-btn" data-type="carrier" style="font-size:10px; padding:4px 10px;">キャリアー<br><span style="font-size:9px; color:#aaa;">大型・ドローン</span></button>
-                            <button class="btn btn-small enemy-select-btn" data-type="fighter" style="font-size:10px; padding:4px 10px;">ファイター<br><span style="font-size:9px; color:#aaa;">極小・最速</span></button>
-                        </div>
-                    </div>
-
-                    <!-- 敵艦種選択 -->
-                    <div class="enemy-select" style="margin-bottom:18px;">
-                        <div class="mode-label" style="margin-bottom:8px;">敵艦種</div>
-                        <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
-                            <button class="btn btn-small enemy-select-btn" data-type="corvette" style="font-size:10px; padding:4px 10px;">コルベット<br><span style="font-size:9px; color:#aaa;">小型・高速</span></button>
-                            <button class="btn btn-small enemy-select-btn active" data-type="destroyer" style="font-size:10px; padding:4px 10px; border-color:#00ffaa;">デストロイヤー<br><span style="font-size:9px; color:#aaa;">標準・万能</span></button>
-                            <button class="btn btn-small enemy-select-btn" data-type="carrier" style="font-size:10px; padding:4px 10px;">キャリアー<br><span style="font-size:9px; color:#aaa;">大型・ドローン</span></button>
-                            <button class="btn btn-small enemy-select-btn" data-type="fighter" style="font-size:10px; padding:4px 10px;">ファイター<br><span style="font-size:9px; color:#aaa;">極小・最速</span></button>
+                            <button class="btn btn-small enemy-select-btn active" data-type="assault" style="font-size:10px; padding:4px 10px; border-color:#00ffaa;">攻撃型<br><span style="font-size:9px; color:#aaa;">高耐久・重装甲</span></button>
+                            <button class="btn btn-small enemy-select-btn" data-type="stealth" style="font-size:10px; padding:4px 10px;">潜航型<br><span style="font-size:9px; color:#aaa;">高速・ステルス</span></button>
+                            <button class="btn btn-small enemy-select-btn" data-type="carrier" style="font-size:10px; padding:4px 10px;">空母型<br><span style="font-size:9px; color:#aaa;">大型・ドローン</span></button>
                         </div>
                     </div>
                     <div class="ship-cards">
@@ -707,7 +695,7 @@
 
     </div>
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20260615i"></script>
+    <script src="game.js?v=20260615j"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {

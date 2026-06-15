@@ -214,7 +214,7 @@ function playSound(type) {
 let gameState = {
     shipType: 'assault',
     mode: 'br',
-    enemyType: 'destroyer', // 敵艦種 (ロビーで選択)
+    enemyType: 'assault', // 敵艦種 (ロビーで選択: assault/stealth/carrier → 内部型にマップ)
     sector: 1,
     credits: 0,       // スクラップ (アップグレード素材 + 修理費)
     engineType: 'thermonuclear',
@@ -3494,7 +3494,9 @@ function generateSector() {
     const spawnCenterX = MAP_CX + Math.cos(spawnAngle) * spawnDist;
     const spawnCenterY = MAP_CY + Math.sin(spawnAngle) * spawnDist;
     const bossSpawn = findHidingSpot(spawnCenterX, spawnCenterY, 2000);
-    const boss = new Ship(bossSpawn.x, bossSpawn.y, false, gameState.enemyType || 'destroyer');
+    // 敵艦種: ロビー選択(assault/stealth/carrier)→内部型にマップ
+    const _enemyTypeMap = { assault: 'destroyer', stealth: 'corvette', carrier: 'carrier' };
+    const boss = new Ship(bossSpawn.x, bossSpawn.y, false, _enemyTypeMap[gameState.enemyType] || 'destroyer');
     // セクターが深いほど高HP・高速化
     boss.maxHp = 500 + gameState.sector * 200;
     boss.hp = boss.maxHp;
@@ -3563,7 +3565,7 @@ function toggleDemoMode() {
 function startGame(shipType) {
     gameState.shipType = shipType;
     // 敵艦種: ロビーで選択された値をセット
-    const _selEt = document.querySelector('.enemy-select-btn.active')?.dataset?.type || 'destroyer';
+    const _selEt = document.querySelector('.enemy-select-btn.active')?.dataset?.type || 'assault';
     gameState.enemyType = _selEt;
     document.getElementById('ship-select-lobby').classList.add('hidden');
     // 潜航型専用ジャミングボタンの表示制御
