@@ -10,6 +10,71 @@
 
 ## セッションログ（新しい順）
 
+### 2026-06-15（PR#76+77・`claude/sleepy-davinci-alrc2s`）— 重慣性物理・武器射角・デモモード・敵艦種選択 + Round3スプライト + ビームVFX
+
+**背景**: 7機能の大型壁打ち（慣性物理・後方被弾ボーナス・武器射角・フリー射撃・デモモード・敵艦種選択・ビームVFX）+ スプライトRound3更新。PR#76で全実装、PR#77でバグ修正。
+
+#### スプライト Round 3 + ビームVFX
+- 7種（自機3 + 敵4）を nano_banana_pro で全面再生成。PIL コーナー輝度チェック後、`ship_assault`/`ship_carrier`/`enemy_destroyer`/`enemy_carrier` の4種を flood-fill 修正。`enemy_carrier` は JPEG→PNG変換が必要だった（Higgsfield がJPEGで返した）。
+- **新規**: `fx_beam_main.png`（荷電粒子砲VFX、黒背景・シアン白プラズマ・1376×768）をHiggsfieldで生成。ガンダムSEEDヴァリアント / ZOIDSデスザウラー荷電粒子砲モチーフ。`SPRITE_FILES` に `fx_beam_main` として登録済み。
+
+#### 重慣性物理システム（PR#76）
+- Ship コンストラクタに `currentSpeed = 0` プロパティ追加（慣性実速度）。
+- **2層速度設計**: `_baseTargetSpeed`（フレーム毎に GEN/エンジン/ヒッグスから算出した目標速度）と `currentSpeed`（実速度、フレーム毎に target に向かって加速）を分離。
+- **艦種別定数**:
+  - `SHIP_MAX_SPEED_MULT = { assault: 0.58, stealth: 1.05, carrier: 0.38 }` — 最高速倍率
+  - `SHIP_ACCEL_RATE = { carrier: 0.003, assault: 0.008, stealth: 0.016 }` — 加速レート
+  - `SHIP_TURN_SLOW = { carrier: 0.78, assault: 0.52, stealth: 0.22 }` — 旋回中の速度低下率
+  - `PLAYER_TURN_RATES = { assault: 0.010, stealth: 0.015, carrier: 0.004 }` — 旋回レート（ラジアン/フレーム）
+  - `ENEMY_TURN_RATES = { corvette: 0.030, fighter: 0.040, destroyer: 0.014, carrier: 0.006 }`
+- **旋回スロー**: 旋回量 `|diff| / (π × 0.12)` を 0〜1 に正規化したスロー係数を `SHIP_TURN_SLOW` に掛けてその分だけ target speed を低下させる。停止から最高速までは `SHIP_ACCEL_RATE` で徐々に加速。停止時は `SHIP_ACCEL_RATE × 3` で減速（停止が速い）。
+- **全体速度低下**: GEN エンジン配分の速度係数 `genGain * 1.4` に抑制を加え、マップの広大感を維持。
+- **デザイン意図**: 空母は重くて旋回も遅く加速も鈍い。潜航型は身軽で即座に反応。攻撃型は中間。空母で旋回しながら発砲しようとすると明確に速度が落ちる。
+
+#### 武器射角（PR#76）
+- `WEAPON_FIRE_ARC = { kinetic: Math.PI * 5/6, missile: Math.PI/4, beam: Math.PI/18 }`
+  - kinetic: ±150°（前方300°） / missile: ±45°（前方90°） / beam: ±10°（前方20°）
+- 自動射撃の発砲前に `Math.abs(diff) < _fireArc` を判定。射角外では発砲しない（回り込みが必要）。
+
+#### 右クリック自由射撃（PR#76）
+- `canvas.addEventListener('contextmenu', ...)` でミサイル/ビームのみ受付（canvas クリック座標 → カメラ行列でワールド座標変換）。
+- 射角チェック（`WEAPON_FIRE_ARC`）あり。射角外は `logMessage` で通知して不発。
+- **ミサイル**: 偽ターゲット `{ x, y, hp: 999 }` を作ってホーミング発射。外れても熱シグネチャを残す。
+- **ビーム**: 直線コリジョン検査（line segment–circle intersection、`enemy.radius * 1.5`）で敵に判定。当たれば `beam` エフェクト生成+ダメージ。外れでもヒッグスダークチャネルが残り自位置が露出（EMシグネチャスパイクも追加）。
+- **設計意図**: 「シグネチャから予想して勘打ちをし、外すと逆に位置がバレる」駆け引き。長押しウェイポイントと操作が被らないよう右クリックを選択。
+
+#### 後方被弾ボーナス（PR#76）
+- Projectile.update の被弾処理内で被弾角度 `_hitAng = atan2(this.y - hitTarget.y, this.x - hitTarget.x)` と `hitTarget.angle` の差分を計算。
+- `|diff| > π × 0.55`（概ね後方 ±165° の弧）の場合 `dmgMult *= 1.5`。
+- 自機が後方被弾した場合はフロートテキスト「後方被弾 ×1.5」（`#ff6666`）を表示。
+
+#### デモモード（PR#76）
+- `let demoMode = false;`（game.js 先頭付近）
+- `drawFogOfWar()` 冒頭で `if (demoMode) return;` — ヒッグス暗幕を全解除。
+- `updateVisionLockOn()` 冒頭で `if (demoMode) { enemies.forEach(e => { e.visible = true; e.inVision = true; }); return; }` — 全敵を常時視野内扱い。
+- 敵AIの挙動は通常と同一（センサー制約型の検知ロジックをそのまま維持）。
+- `toggleDemoMode()` 関数追加。`btn-demo-mode`（トップバー右上）でトグル。ON 時は黄色テキスト + `DEMO: ON` 表示。
+
+#### 敵艦種選択（PR#76）
+- ロビーに「敵艦種」セクション追加（`.enemy-select-btn`、3択）。
+- 表示名: 攻撃型（高耐久・重装甲）/ 潜航型（高速・ステルス）/ 空母型（大型・ドローン）
+- `gameState.enemyType` に `'assault' | 'stealth' | 'carrier'` を格納。
+- `generateSector()` 内の敵スポーンで内部型にマップ: `{ assault: 'destroyer', stealth: 'corvette', carrier: 'carrier' }` → ボス敵の `new Ship(...)` 第4引数に渡す。
+
+#### バグ修正（PR#77）
+- **重複敵艦種選択ブロック**: PR#76 でバックグラウンドエージェントとメインスレッドが両方 index.html に enemy-select ブロックを追加したため2つ表示されていた。PR#77 で単一ブロックに統合。
+- **敵艦種の内部名表示**: 初回実装では「コルベット / デストロイヤー / ファイター」（内部ゲーム型名）が表示されていたが、ユーザー期待は自機と対応する「攻撃型 / 潜航型 / 空母型」だった。PR#77 で修正。
+
+#### キャッシュバスティング
+- 最終バージョン: `?v=20260615j`（PR#77マージ時点）
+
+#### ⚠️ 申し送り
+- **実機未検証**: 慣性物理のバランス（重さ感・加速時間・旋回スロー）は実機 GitHub Pages で体感要確認。`SHIP_ACCEL_RATE` / `SHIP_TURN_SLOW` / `SHIP_MAX_SPEED_MULT` は全てチューニング可能な定数。
+- `fx_beam_main.png` は `SPRITE_FILES` 登録済みだが、現在のビーム描画は 3層グロー（Canvas）で実装済み。スプライト合成追加は任意。
+- デモモードは開発者確認用。本番でも ON/OFF 可。敵AIは通常挙動のまま。
+
+---
+
 ### 2026-06-15（PR#71+72・`claude/sleepy-davinci-alrc2s`）— 船体スプライト全面再生成 + 白背景修正
 - **PR#71（全面再生成）**: nano_banana_pro で7種全再生成（真上90度正射影・艦首右・黒背景・Homeworld2アニメSFスタイル）。
   - 自機3種: ship_assault（重装甲・シアン）/ ship_stealth（低プロファイル・紫）/ ship_carrier（広甲板・6スラスター）

@@ -96,6 +96,20 @@
 ### 基盤
 - ✅ HUDオーバーレイ（ズーム不変）/ ミニマップ / セーブロード / ゲームオーバー・クリア画面 / カメラ追従 / スマホ操作（ドラッグ・長押し・ピンチ）
 
+### 移動・戦闘メカニクス（2026-06-15実装 PR#76）
+- ✅ **重慣性物理システム** — `currentSpeed` プロパティ（初期値0）による2層速度設計。`_baseTargetSpeed`（目標）に向けて `SHIP_ACCEL_RATE` で加速。停止時は `×3` で素早く減速。
+  - `SHIP_MAX_SPEED_MULT = { assault: 0.58, stealth: 1.05, carrier: 0.38 }` — 最高速倍率
+  - `SHIP_ACCEL_RATE = { carrier: 0.003, assault: 0.008, stealth: 0.016 }` — 加速レート
+  - `SHIP_TURN_SLOW = { carrier: 0.78, assault: 0.52, stealth: 0.22 }` — 旋回中の速度低下率（旋回量 `|diff|/(π×0.12)` で正規化した係数を掛ける）
+  - `PLAYER_TURN_RATES = { assault: 0.010, stealth: 0.015, carrier: 0.004 }` — 旋回レート(rad/frame)
+- ✅ **武器射角（fire arc）** — `WEAPON_FIRE_ARC = { kinetic: Math.PI*5/6, missile: Math.PI/4, beam: Math.PI/18 }`（kinetic=±150° / missile=±45° / beam=±10°）。自動発砲前に `|diff| < _fireArc` を判定。
+- ✅ **右クリック自由射撃（フリーファイア）** — ミサイル/ビームのみ。`contextmenu` イベントでワールド座標変換後、射角チェック→発砲。外れると自位置シグネチャが露出（ミサイル=熱 / ビーム=ヒッグスダークチャネル+EMスパイク）。
+- ✅ **後方被弾ボーナス（×1.5）** — Projectile.update で被弾角度が `|diff| > π×0.55`（後方弧）の時 `dmgMult *= 1.5`。自機被弾時はフロートテキスト「後方被弾 ×1.5」表示。
+
+### デモモード・ロビー追加（2026-06-15実装 PR#76+77）
+- ✅ **デモモード** — `demoMode` フラグ（初期 `false`）。`drawFogOfWar()` と `updateVisionLockOn()` を早期 return でバイパス→全フィールド・全敵が常時見える。敵AIの挙動は通常と同一。`toggleDemoMode()` 関数 + `btn-demo-mode`（トップバー）でトグル。
+- ✅ **敵艦種選択（ロビー）** — `gameState.enemyType: 'assault'|'stealth'|'carrier'`。ロビーに `.enemy-select-btn` 3択を追加。`generateSector()` で内部型にマップ（`assault→destroyer / stealth→corvette / carrier→carrier`）してボス敵をスポーン。
+
 ---
 
 ## 2. 🚧 部分実装（設計に届いていない）
@@ -358,4 +372,4 @@
 
 ---
 
-*最終更新: 2026-06-14 — PR#57・#58でHiggsfield全スプライト Phase1+2を適用。`origin/main`(PR#34-58)全反映済。全壁打ちタスク実装完了。残は任意拡張のみ。*
+*最終更新: 2026-06-15 — PR#76+77で重慣性物理・武器射角・フリーファイア・後方被弾ボーナス・デモモード・敵艦種選択を実装。スプライトRound3全面再生成・fx_beam_main.png新規生成。全壁打ちタスク実装完了。残は任意拡張のみ。*
