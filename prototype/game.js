@@ -3611,7 +3611,7 @@ document.querySelectorAll('.enemy-select-btn').forEach(btn => {
             b.style.borderColor = '';
         });
         btn.classList.add('active');
-        btn.style.borderColor = '#ff4444';
+        btn.style.borderColor = '#00ffaa';
         playSound('ui');
     });
 });
