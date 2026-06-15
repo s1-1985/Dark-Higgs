@@ -10,6 +10,17 @@
 
 ## セッションログ（新しい順）
 
+### 2026-06-15（PR#71+72・`claude/sleepy-davinci-alrc2s`）— 船体スプライト全面再生成 + 白背景修正
+- **PR#71（全面再生成）**: nano_banana_pro で7種全再生成（真上90度正射影・艦首右・黒背景・Homeworld2アニメSFスタイル）。
+  - 自機3種: ship_assault（重装甲・シアン）/ ship_stealth（低プロファイル・紫）/ ship_carrier（広甲板・6スラスター）
+  - 敵4種: enemy_corvette / enemy_destroyer / enemy_carrier / enemy_fighter（三角デルタ）
+- **PR#72（白背景修正）**: 生成後に`ship_carrier`, `enemy_corvette`, `enemy_fighter` の3種が白背景(lum≈254)だったことが判明（他4種はlum≈1で黒背景）。PIL flood-fillでコーナーから連結白領域を純黒(0,0,0,255)に置換。
+- **⚠️ スプライト黒背景の注意点（次セッション向け）**:
+  - nano_banana_pro は約3/7の確率で白背景を生成する（モデルの確率的挙動）。生成後に必ずコーナー輝度を確認すること。
+  - 修正スクリプト（Pillow flood-fill）: `from PIL import Image; import collections; ...` 上記PR#72コミットのログ参照。
+  - recraft-v4-1 は `background_color="#000000"` パラメータで確実に黒背景指定可能（代替モデル）。ただし近黒(lum≈25)で完全黒ではない。
+  - **最確実**: nano_banana_pro 生成後に PIL flood-fill 処理（既存デザイン保持）。
+
 ### 2026-06-15（PR#68・`claude/sprite-thruster-fix-20260615`）— スプライト screen合成復活 + 停止中スラスター修正
 - **背景**: PR#65で「プレイヤー船体スプライトブロックを全削除してCanvasのみ」という修正を行ったが、ユーザーからのフィードバックは「前のクソダサデザインに戻っちゃったんだけど。機体のデザインはhiggsfieldでやり直し、スラスターはもとに戻せ」。
   - PR#65の解釈が間違いだった。正しい意図は「**Higgsfieldスプライトは残す（hull描画用）**、スラスターだけ元のCanvasグラデーションに戻せ」。
@@ -22,11 +33,7 @@
   - `lighter` = 加算合成 `src*alpha + dst`。暗いhull(0.2)×alpha(0.55)+bg(0.05)≈0.16 **→ ほぼ不可視（NG）**
   - `screen` = `1-(1-src)(1-dst)`。黒背景(0.05)×hull(0.2) → `1-0.95×0.8=0.24` **→ hull見える（OK）**。完全黒(0)は完全透明。加算合成の発光も適度に表現。
   - **結論**: 黒背景スプライトに `screen+globalAlpha=0.9` が最適。`lighter` は明るい発光エフェクト限定。
-- **⚠️ 申し送り（次セッションの最優先タスク）**:
-  - **船体スプライト全面再生成（未完）**: ユーザーから「機体のデザインはhiggsfieldでやり直し」の指示。現在のスプライトは「リアル軍艦/ステルス爆撃機寄りすぎ・アイソメ視点」が問題。
-  - 対象: `ship_assault`, `ship_stealth`, `ship_carrier`, `enemy_corvette`（旧スプライトのまま）, `enemy_destroyer`, `enemy_carrier`, `enemy_fighter`（計7種）
-  - **推奨プロンプト方針**: "Science fiction space warship, [TYPE], strictly overhead top-down view 90 degrees directly above, flat orthographic bird-eye projection, no perspective no foreshortening, symmetrical design, [TYPE-SPECIFIC DETAILS], anime sci-fi space opera style like Homeworld or Macross, stylized illustration not photorealistic, isolated on pure solid black background, 1024x1024"
-  - **Higgsfield承認問題**: `mcp__Higgsfield__generate_image` は `settings.local.json` の allow リストに追加済み（PR#64）。新セッションで自動承認されるはず。旧セッション継続だと承認がキャッシュされない。
+- **申し送り**: 船体スプライト全面再生成は PR#71+72 で完了（上記エントリ参照）。
 
 ### 2026-06-15（PR#63→65）— 船体スプライト視点修正・透明バグ修正・Canvas粒子スラスター復元
 - **PR#63（真上視点再生成）**: 「空母がアイソメ・デザインが現実の軍艦寄り」の指摘受け、7種を真上90度正射影・SF宇宙潜水艦デザインで再生成。`globalAlpha=0.55`追加（→これが透明バグを悪化させた）。
