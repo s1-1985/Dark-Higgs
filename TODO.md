@@ -107,7 +107,8 @@
 - ✅ **後方被弾ボーナス（×1.5）** — Projectile.update で被弾角度が `|diff| > π×0.55`（後方弧）の時 `dmgMult *= 1.5`。自機被弾時はフロートテキスト「後方被弾 ×1.5」表示。
 
 ### デモモード・ロビー追加（2026-06-15実装 PR#76+77）
-- ✅ **デモモード** — `demoMode` フラグ（初期 `false`）。`drawFogOfWar()` と `updateVisionLockOn()` を早期 return でバイパス→全フィールド・全敵が常時見える。敵AIの挙動は通常と同一。`toggleDemoMode()` 関数 + `btn-demo-mode`（トップバー）でトグル。
+- 🚧 **デモモード** — `demoMode` フラグ（初期 `false`）。`drawFogOfWar()` と `updateVisionLockOn()` を早期 return でバイパス→全フィールド・全敵が常時見える。敵AIの挙動は通常と同一。`toggleDemoMode()` 関数 + `btn-demo-mode`（トップバー）でトグル。
+  - **❌ 未実装・要確認（次セッション）**: デモモード時に抜けている要素がある（実機確認要）。地形ハザード（デブリ/磁気嵐/熱雲）の効果・ミニマップ全表示・センサーtrail表示等、`drawFogOfWar`/`updateVisionLockOn` 以外で demoMode フラグが必要な箇所を洗い出して対応すること。
 - ✅ **敵艦種選択（ロビー）** — `gameState.enemyType: 'assault'|'stealth'|'carrier'`。ロビーに `.enemy-select-btn` 3択を追加。`generateSector()` で内部型にマップ（`assault→destroyer / stealth→corvette / carrier→carrier`）してボス敵をスポーン。
 
 ---
