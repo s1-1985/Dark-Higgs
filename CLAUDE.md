@@ -25,9 +25,9 @@ TODO.md         # 実装タスク台帳（壁打ち企画・実装状況・未�
 HANDOVER.md     # セッションログ・決定経緯・パフォーマンス教訓
 prototype/
 ├── index.html  # UI レイアウト（Homeworld2スタイル、日本語）
-├── game.js     # ゲームロジック全体（約5050行）
+├── game.js     # ゲームロジック全体（約5200行）
 ├── style.css   # SF緑パレット（Orbitronフォント）
-└── assets/     # 生成スプライト（透過PNG, 512px）: ship_*/enemy_*/structure_*/node_higgs
+└── assets/     # 生成スプライト（透過PNG）: ship_*/enemy_*/structure_*/node_higgs/fx_beam_main
 ```
 
 > 旧 `MEMORY.md` / `game_design_v2.md` / `game_requirements.md` / `LESSONS_LEARNED.md` は
@@ -70,26 +70,31 @@ prototype/
 - **GEN**: エンジン/武器/センサー/AI の4スライダー（合計100%固定）`genAlloc`
   - エンジン→速度 / 武器→火力・連射 / センサー→探知レンジ / AI→AI基礎量
 - **物理法則**: AI配分↑ → EM放射↑（EMセンサーで検知されやすい）
-- **AI精度制御**（独立配分・**未実装** → `TODO.md` §3-2）: 命中率/回避/センサー解析精度
+- **AI精度制御**（独立配分✅ → `TODO.md` §3-2）: 命中率/回避/センサー解析精度
 
 ### 艦種3種
 
 | 艦種 | HP | 速度 | 固有 | 弱点 |
 |---|---|---|---|---|
-| 攻撃型 Assault | 3500 | ×0.8 | 複数武器同時発射（kinetic3連装） | シグネチャ大 |
-| 潜航型 Stealth | 700 | ×1.4 | ジャミング3種✅ + デコイ射出✅(ミサイル誘引) | HP極低・失敗即死 |
-| 空母型 Carrier | 2500 | ×0.6 | ドローン4種+建設物4種（**未実装**） | 建設中は停止＝最大脆弱 |
+| 攻撃型 Assault | 3500 | ×0.58 | 複数武器同時発射（kinetic3連装） | シグネチャ大・旋回時速度低下大 |
+| 潜航型 Stealth | 700 | ×1.05 | ジャミング3種✅ + デコイ射出✅(ミサイル誘引) | HP極低・失敗即死 |
+| 空母型 Carrier | 2500 | ×0.38 | ドローン4種✅+建設物4種✅ | 加速/旋回最鈍・建設中は停止＝最大脆弱 |
+
+> 速度倍率は `SHIP_MAX_SPEED_MULT` による最高速倍率（慣性あり・旋回中はさらに低下）。加速レートは `SHIP_ACCEL_RATE`（carrier=0.003 / assault=0.008 / stealth=0.016）。
 
 ### 武器3種
 
 | 武器 | レンジ | シグネチャ |
 |---|---|---|
-| 実弾 Kinetic | 短(800) | 光学強（発光・衝撃フラッシュ）。マガジン制 |
-| ミサイル | 中長(2200) | 熱源（+AI型はEM）。リロード。※2タイプは**未実装** |
-| ビーム | 長(8000) | チャージ=熱+EM強 / 発射=光学軌跡+ヒッグスダークチャネル。GEN大量消費 |
+| 実弾 Kinetic | 短(800) ±150° | 光学強（発光・衝撃フラッシュ）。マガジン制 |
+| ミサイル | 中長(2200) ±45° | 熱源（+AI型はEM）。リロード。HON/AI 2タイプ✅ |
+| ビーム | 長(8000) ±10° | チャージ=熱+EM強 / 発射=光学軌跡+ヒッグスダークチャネル。GEN大量消費 |
 
 - GEN武器配分↑ → 発射レート↑（`weaponGenFactor`）
 - ヒッグス高濃度でビームダメージ大幅低下
+- **射角**: `WEAPON_FIRE_ARC = { kinetic: Math.PI*5/6, missile: Math.PI/4, beam: Math.PI/18 }`
+- **右クリック自由射撃**: ミサイル/ビームのみ。射角チェックあり。外れると自位置シグネチャが露出
+- **後方被弾ボーナス**: 後方弧（`|diff| > π×0.55`）から被弾時 ×1.5 ダメージ
 
 ### ヒッグス物理法則（3つ）
 1. **ヒッグスウェイク**: 移動で軌跡が残る（HIGGSセンサーに見える）`higgsWakes[]`
@@ -99,7 +104,7 @@ prototype/
 
 ### ロックオン2種
 - **完全ロックオン**: 視野内で捉えた状態（フルダメージ）✅
-- **想定ロックオン**: センサー検知→AI解析の推定位置（ダメージデバフ）🚧部分（`TODO.md` §2-1）
+- **想定ロックオン**: センサー検知→AI解析の推定位置（ダメージデバフ）✅（`TODO.md` §2-1）
 
 ### 敵AI設計原則
 - **センサー制約型（全知禁止）**: プレイヤーと同じセンサールールで情報収集。直接位置は知らず、検知から行動を予測
@@ -114,11 +119,12 @@ prototype/
 
 | 変数 | 型 | 説明 |
 |---|---|---|
-| `gameState` | object | sector, credits, mode('br'\|'sd'), shipType, engineType, upgrades |
+| `gameState` | object | sector, credits, mode('br'\|'sd'), shipType, engineType, upgrades, **enemyType**('assault'\|'stealth'\|'carrier') |
 | `currentSensor` | string | 'heat' \| 'optic' \| 'em' \| 'higgs' |
 | `genAlloc` | object | {engine, weapons, sensors, ai} ゼロサム100% |
 | `autoAttackEnabled` | bool | 自動攻撃ON/OFF |
 | `cameraFollowPlayer` | bool | 自艦追従フラグ |
+| `demoMode` | bool | デモモード（霧解除・全敵可視・敵AI通常動作） |
 | `higgsWakes[]` | array | {x, y, intensity, life} 移動軌跡 |
 | `passiveBearings[]` | array | パッシブ方位ウェッジ（計測位置アンカー、三角測量用） |
 | `resourceNodes[]` | array | ヒッグスノード |
@@ -126,6 +132,11 @@ prototype/
 | `camera` | object | {x, y, zoom, vx, vy} |
 | `MAP_RADIUS` / `FIELD_SIZE` | const | 35000 / 70000 |
 | `ENGINE_TYPES` | const | thermonuclear/pulse/higgs/photon |
+| `SHIP_MAX_SPEED_MULT` | const | {assault:0.58, stealth:1.05, carrier:0.38} 最高速倍率 |
+| `SHIP_ACCEL_RATE` | const | {carrier:0.003, assault:0.008, stealth:0.016} 加速レート |
+| `SHIP_TURN_SLOW` | const | {carrier:0.78, assault:0.52, stealth:0.22} 旋回中速度低下率 |
+| `PLAYER_TURN_RATES` | const | {assault:0.010, stealth:0.015, carrier:0.004} 旋回レート(rad/frame) |
+| `WEAPON_FIRE_ARC` | const | {kinetic:π×5/6, missile:π/4, beam:π/18} 射角（半角ラジアン） |
 
 ## 主要関数（game.js）
 
@@ -144,13 +155,15 @@ prototype/
 | `buyUpgrade(type)` @5013 | アップグレード購入（engine/weapons/armor/sensor Lv0-3） |
 | `generateSector()` @2534 | セクター生成 |
 | `saveGame()` / `loadGame()` | localStorage 永続化 |
+| `toggleDemoMode()` | デモモードON/OFF切替（`btn-demo-mode`から呼出） |
 
 ## Ship クラスの主要フィールド
 
 `type`('corvette'\|'destroyer'\|'carrier'\|'fighter' ※敵), `heatSig`, `opticalSig`,
 `emSig`, `higgsSig`, `weaponType`, `lurking`, `aiState`, `postFireCooldown`,
 `fireFlashTimer`, `manualTarget`, `contactAccuracy`, `contactLife`,
-`kineticAmmo`/`*Reloading`/`*ReloadTimer`
+`kineticAmmo`/`*Reloading`/`*ReloadTimer`,
+**`currentSpeed`** (慣性実速度、0=停止)
 
 ## Git / PR / デプロイ反映ルール（厳守 — 過去に反映漏れ多発）
 
