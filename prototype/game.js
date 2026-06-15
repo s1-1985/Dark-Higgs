@@ -2392,6 +2392,31 @@ class Ship {
         }
 
         if (this.isPlayer) {
+            // ── スプライト描画 (screen合成: 黒=背景と同化・hull正常表示・過飽和なし) ──
+            const _pstype = gameState.shipType || 'assault';
+            const _psprite = SPRITES[_pstype];
+            if (spriteReady(_psprite)) {
+                if (this.state === 'moving') {
+                    const ecp = ENGINE_THRUST[gameState.engineType] || ENGINE_THRUST.thermonuclear;
+                    const tpz = 0.6 + Math.sin(Date.now() * 0.008) * 0.4;
+                    const grr = this.radius * 2.8;
+                    const tg = ctx.createRadialGradient(-grr * 0.95, 0, 0, -grr * 0.95, 0, grr * 0.75);
+                    tg.addColorStop(0,   `rgba(${ecp.core},${0.85 * tpz * ecp.a})`);
+                    tg.addColorStop(0.4, `rgba(${ecp.mid},${0.45 * tpz * ecp.a})`);
+                    tg.addColorStop(1,   'rgba(0,10,40,0)');
+                    ctx.fillStyle = tg;
+                    ctx.beginPath();
+                    ctx.ellipse(-grr * 0.95, 0, grr * 0.75, grr * 0.52, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.globalCompositeOperation = 'screen';
+                ctx.globalAlpha = 0.9;
+                drawSpriteCentered(ctx, _psprite, this.radius * 6.4);
+                ctx.globalAlpha = 1;
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.restore();
+                return;
+            }
             const vr = this.radius * 2.8; // ビジュアルスケール (当たり判定はthis.radius)
             const thrPulse = 0.65 + Math.sin(Date.now() * 0.008) * 0.35;
             const stype = gameState.shipType || 'assault';
@@ -2408,40 +2433,6 @@ class Ship {
                 ctx.ellipse(tx, ty, len, halfH, 0, 0, Math.PI * 2);
                 ctx.fill();
             };
-            // エンジン種別パーティクル: 細かい丸をエンジンタイプ別に描画
-            // scale=各艦種のビジュアル半径(vr/sr/cr)
-            const drawThrusterParticles = (nozzleX, nozzleY, scale) => {
-                const etype = gameState.engineType || 'thermonuclear';
-                const t = Date.now() * 0.001;
-                // エンジン別パラメータ (N粒子数, spd速度, sprd拡散, psz粒子径)
-                let N, spd, sprd, psz;
-                if (etype === 'pulse') {
-                    N = 9; spd = 4.5; sprd = 0.20; psz = scale * 0.048;
-                } else if (etype === 'higgs') {
-                    N = 5; spd = 0.7; sprd = 0.08; psz = scale * 0.038;
-                } else if (etype === 'photon') {
-                    N = 15; spd = 3.8; sprd = 0.06; psz = scale * 0.030;
-                } else { // thermonuclear
-                    N = 12; spd = 2.2; sprd = 0.24; psz = scale * 0.058;
-                }
-                // pulse: バースト点滅
-                const burstFactor = etype === 'pulse'
-                    ? (Math.sin(t * 12) > 0.2 ? 1 : 0.15)
-                    : 1;
-                for (let i = 0; i < N; i++) {
-                    const trail = i / N;
-                    const phase = (t * spd + i * 2.094) % (Math.PI * 2);
-                    const px = nozzleX - trail * scale * 1.05;
-                    const py = nozzleY + Math.sin(phase) * scale * sprd * (0.3 + trail * 0.7);
-                    const pr = psz * (1 - trail * 0.65) * (0.45 + 0.55 * Math.abs(Math.sin(phase * 1.8)));
-                    ctx.globalAlpha = (1 - trail) * 0.78 * thrPulse * ec.a * burstFactor;
-                    ctx.fillStyle = i < (N >> 1) ? ec.p1 : ec.p2;
-                    ctx.beginPath();
-                    ctx.arc(px, py, Math.max(pr, 0.5), 0, Math.PI * 2);
-                    ctx.fill();
-                }
-                ctx.globalAlpha = 1;
-            };
 
             if (stype === 'assault') {
             // ============================================================
@@ -2449,8 +2440,9 @@ class Ship {
             // ============================================================
             // ── スラスター炎グロー (船体の後ろに描く) ──────────
             const thrOffsets = [-vr * 0.38, vr * 0.38];
-            thrOffsets.forEach(yo => drawThruster(-vr * 0.88, yo, vr * 0.48, vr * 0.13));
-            thrOffsets.forEach(yo => drawThrusterParticles(-vr * 0.88, yo, vr));
+            if (this.state === 'moving') {
+                thrOffsets.forEach(yo => drawThruster(-vr * 0.88, yo, vr * 0.48, vr * 0.13));
+            }
 
             // ── エンジンポッド (船尾) ────────────────────────────
             ctx.fillStyle = '#3e4455';
@@ -2673,8 +2665,9 @@ class Ship {
             // ============================================================
             const sr = vr * 0.95;
             // 単一の絞られた噴射 (ヒッグスエンジンならほぼ不可視)
-            drawThruster(-sr * 0.86, 0, sr * 0.40, sr * 0.085);
-            drawThrusterParticles(-sr * 0.86, 0, sr);
+            if (this.state === 'moving') {
+                drawThruster(-sr * 0.86, 0, sr * 0.40, sr * 0.085);
+            }
             // ── ハル (細長い鋭利な菱形) ──
             const sg = ctx.createLinearGradient(-sr * 0.85, 0, sr * 1.2, 0);
             sg.addColorStop(0,   '#161b24');
@@ -2720,8 +2713,9 @@ class Ship {
             // ============================================================
             const cr = vr * 1.12;
             // 3基のスラスター
-            [-cr * 0.34, 0, cr * 0.34].forEach(yo => drawThruster(-cr * 0.94, yo, cr * 0.38, cr * 0.10));
-            [-cr * 0.34, 0, cr * 0.34].forEach(yo => drawThrusterParticles(-cr * 0.94, yo, cr));
+            if (this.state === 'moving') {
+                [-cr * 0.34, 0, cr * 0.34].forEach(yo => drawThruster(-cr * 0.94, yo, cr * 0.38, cr * 0.10));
+            }
             // ── ワイドハル ──
             const cg = ctx.createLinearGradient(-cr * 0.95, 0, cr * 0.9, 0);
             cg.addColorStop(0,   '#33414a');
