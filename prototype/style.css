@@ -206,6 +206,7 @@ body {
 .action-panel {
     width: 220px;
     min-width: 180px;
+    position: relative;
 }
 
 /* アクションボタングリッド */
@@ -1009,6 +1010,10 @@ input[type=range]::-webkit-slider-thumb {
     letter-spacing: 0.5px;
 }
 
+/* アクションバー: デスクトップでは非表示 */
+#abar { display: none; }
+#action-popover { display: none; }
+
 /* ============================================================
    モバイル対応 (スマートフォン) - 完全刷新
    ============================================================ */
@@ -1197,19 +1202,74 @@ input[type=range]::-webkit-slider-thumb {
     .isel-btn svg { width: 16px; height: 16px; }
     .isel-btn span { font-size: 6.5px; }
 
-    /* Row4: アクションボタン (全幅・1行6個・常時表示・タッチしやすく) */
+    /* Row4: 親アクションバー + ポップオーバー */
     .action-panel {
         grid-column: 1 / -1;
         grid-row: 4;
         width: auto; min-width: 0;
-        padding: 3px 4px;
+        padding: 0;
         border-top: 1px solid rgba(0,255,170,0.18);
+        position: relative;
     }
     .action-panel .panel-header { display: none; }
-    .action-grid {
-        grid-template-columns: repeat(6, 1fr);
-        gap: 4px;
-        margin-top: 0;
+    .action-grid { display: none !important; }
+
+    /* ポップオーバー: 親ボタン押下で action-panel の真上に展開 */
+    #action-popover {
+        display: none;
+        position: absolute;
+        bottom: 100%;
+        left: 0; right: 0;
+        background: rgba(2,6,12,0.97);
+        border: 1px solid rgba(0,255,170,0.22);
+        border-bottom: none;
+        padding: 5px;
+        z-index: 30;
+        backdrop-filter: blur(10px);
+        grid-template-columns: repeat(4, 1fr);
+        gap: 5px;
+    }
+    #action-popover.open { display: grid; }
+    #action-popover .act-icon-btn {
+        min-height: 50px;
+        padding: 4px 2px;
+    }
+    #action-popover .act-icon-btn svg { width: 22px; height: 22px; }
+    #action-popover .act-icon-btn span { font-size: 7.5px; }
+
+    /* 親アクションバー: 1行6ボタン */
+    #abar {
+        display: flex;
+        gap: 3px;
+        padding: 3px 3px calc(3px + env(safe-area-inset-bottom, 0px));
+    }
+    .abar-group { flex: 1; min-width: 0; }
+    .abar-group.abar-solo { flex: 1.1; }
+    .abar-btn {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        min-height: 46px;
+        padding: 4px 2px 3px;
+        background: rgba(0,0,0,0.65);
+        border: 1px solid #1c2430;
+        color: #3a4a5a;
+        cursor: pointer;
+        border-radius: 4px;
+        gap: 3px;
+        font-family: 'Orbitron', monospace;
+        transition: border-color 0.15s, color 0.15s, background 0.15s;
+    }
+    .abar-btn svg { width: 22px; height: 22px; flex-shrink: 0; }
+    .abar-btn span { font-size: 7px; letter-spacing: 0.4px; line-height: 1; }
+    .abar-btn.btn-info    { border-color: #1a3d6a; color: #4da6ff; }
+    .abar-btn.btn-warning { border-color: #4a2800; color: #ffaa00; }
+    .abar-btn.abar-active {
+        background: rgba(0,255,170,0.1) !important;
+        border-color: #00ffaa !important;
+        color: #00ffaa !important;
     }
     .act-icon-btn { min-height: 42px; padding: 3px 2px; }
     .act-icon-btn svg { width: 20px; height: 20px; }
