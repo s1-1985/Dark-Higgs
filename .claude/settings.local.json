@@ -20,7 +20,8 @@
       "Bash(powershell -NoProfile -ExecutionPolicy Bypass -File \"C:/Users/user/Desktop/Dark higgs/server.ps1\")",
       "Bash(curl -s http://localhost:3000/)",
       "Bash(grep -v \"//.*\\\\\\(heat\\\\|optic\\\\|em\\\\\\)\")",
-      "Bash(node --check \"/c/Users/user/Desktop/Dark higgs/prototype/game.js\")"
+      "Bash(node --check \"/c/Users/user/Desktop/Dark higgs/prototype/game.js\")",
+      "mcp__Higgsfield__generate_image"
     ]
   }
 }
