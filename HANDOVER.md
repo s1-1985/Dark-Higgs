@@ -10,6 +10,24 @@
 
 ## セッションログ（新しい順）
 
+### 2026-06-15（PR#68・`claude/sprite-thruster-fix-20260615`）— スプライト screen合成復活 + 停止中スラスター修正
+- **背景**: PR#65で「プレイヤー船体スプライトブロックを全削除してCanvasのみ」という修正を行ったが、ユーザーからのフィードバックは「前のクソダサデザインに戻っちゃったんだけど。機体のデザインはhiggsfieldでやり直し、スラスターはもとに戻せ」。
+  - PR#65の解釈が間違いだった。正しい意図は「**Higgsfieldスプライトは残す（hull描画用）**、スラスターだけ元のCanvasグラデーションに戻せ」。
+- **PR#68で実装した内容**:
+  - **スプライト screen合成モード**: プレイヤー艦スプライトブロックを復元。`lighter`→`screen`に変更（`screen`の数式: `1-(1-src)(1-dst)`, 黒→透明, hull色は正常表示, 過飽和なし）
+  - **スラスター速度ゲーティング**: 全艦種（assault/stealth/carrier）のスラスター描画を `state === 'moving'` でガード（停止中スラスター常時発光バグを修正）
+  - **`drawThrusterParticles`削除**: PR#65で追加したパーティクルシステムを削除。元のCanvas放射グラデーション（`drawThruster`ヘルパー関数）を維持
+  - `?v=20260615e`。PR#68マージ済み。
+- **`screen` vs `lighter` の決着**（今後のスプライト追加時に参照）:
+  - `lighter` = 加算合成 `src*alpha + dst`。暗いhull(0.2)×alpha(0.55)+bg(0.05)≈0.16 **→ ほぼ不可視（NG）**
+  - `screen` = `1-(1-src)(1-dst)`。黒背景(0.05)×hull(0.2) → `1-0.95×0.8=0.24` **→ hull見える（OK）**。完全黒(0)は完全透明。加算合成の発光も適度に表現。
+  - **結論**: 黒背景スプライトに `screen+globalAlpha=0.9` が最適。`lighter` は明るい発光エフェクト限定。
+- **⚠️ 申し送り（次セッションの最優先タスク）**:
+  - **船体スプライト全面再生成（未完）**: ユーザーから「機体のデザインはhiggsfieldでやり直し」の指示。現在のスプライトは「リアル軍艦/ステルス爆撃機寄りすぎ・アイソメ視点」が問題。
+  - 対象: `ship_assault`, `ship_stealth`, `ship_carrier`, `enemy_corvette`（旧スプライトのまま）, `enemy_destroyer`, `enemy_carrier`, `enemy_fighter`（計7種）
+  - **推奨プロンプト方針**: "Science fiction space warship, [TYPE], strictly overhead top-down view 90 degrees directly above, flat orthographic bird-eye projection, no perspective no foreshortening, symmetrical design, [TYPE-SPECIFIC DETAILS], anime sci-fi space opera style like Homeworld or Macross, stylized illustration not photorealistic, isolated on pure solid black background, 1024x1024"
+  - **Higgsfield承認問題**: `mcp__Higgsfield__generate_image` は `settings.local.json` の allow リストに追加済み（PR#64）。新セッションで自動承認されるはず。旧セッション継続だと承認がキャッシュされない。
+
 ### 2026-06-15（PR#63→65）— 船体スプライト視点修正・透明バグ修正・Canvas粒子スラスター復元
 - **PR#63（真上視点再生成）**: 「空母がアイソメ・デザインが現実の軍艦寄り」の指摘受け、7種を真上90度正射影・SF宇宙潜水艦デザインで再生成。`globalAlpha=0.55`追加（→これが透明バグを悪化させた）。
 - **PR#65（根本修正）**: 「透けてる・スラスター白四角・エンジン演出欲しい」の再フィードバックで根本原因を特定・修正。
@@ -22,7 +40,7 @@
 - **⚠️ 申し送り**:
   - `enemy_corvette`は旧スプライトのまま（Higgsfield承認問題で再生成できず。次セッションで可能、settings.local.jsonに承認済み）
   - 敵スプライト（destroyer/carrier/fighter）はscreen+0.92で描画 → 実機で暗すぎ/明るすぎなら`globalAlpha`調整
-  - 船体スプライトは「photorealistic touchは良かった」評価あり。将来再度sprites導入を検討する場合は`screen`モードを使うべき
+  - 船体スプライトは「photorealistic touchは良かった」評価あり。**PR#68で`screen`モードによる復活実装済み**（詳細は上記PR#68エントリ参照）
 
 ### 2026-06-15（PR#61・`claude/continuation-vm5eu3`）— フォトリアルスプライト全面刷新 + モバイルアイコン化
 - **背景**: 前セッション（PR#60 モバイルアクションバー）のスクショに「戦艦デザインをフォトリアルでかっこよく / UIアイコン生成 / 爆発も画像で / lighter合成追加」の引き継ぎが記録されていた。HANDOVER.mdへのプロンプト記録はコミットされていなかったため、プロンプトを独自に再設計して実施。
