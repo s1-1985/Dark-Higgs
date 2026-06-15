@@ -10,6 +10,21 @@
 
 ## セッションログ（新しい順）
 
+### 2026-06-15（PR#61→63→65）— 船体スプライト試行・透明バグ修正・Canvas粒子スラスター復元
+- **PR#61**: 自機3種＋敵4種＋爆発2種をフォトリアルで再生成、UIアイコン6種追加。hull sprite を `lighter` 加算合成で描画。アイコンボタンは `<img>` タグへ置換。
+- **PR#63（実機フィードバック後）**: 「空母アイソメ視点・デザインがリアル寄り・スラスター白四角バグ」の指摘。船体6種を真上90度視点・SF宇宙潜水艦デザインで再生成、`lighter`に`globalAlpha=0.55`を追加（→これが透明バグを悪化）。
+- **PR#65（根本修正）**: 「攻撃型ださすぎ・透けてる・スラスター白点四角」の再フィードバックで根本原因を特定。
+  - **透明バグ原因**: `lighter`ブレンド＋暗いhull = `0.55×0.2(hull)+0.05(bg)=0.16`でほぼ不可視
+  - **修正**: プレイヤー船体スプライトブロック全削除 → Canvas描画を常時使用（形状・グラデは元のまま）
+  - **スラスター**: `fx_thruster_jet`スプライト廃止 → `drawThrusterParticles()`で細かい丸粒子描画
+  - **エンジン別演出**: thermonuclear=橙白12粒子広め / pulse=青紫9粒子バースト点滅 / higgs=暗紫5粒子ほぼ不可視 / photon=白青15粒子タイト
+  - **敵スプライト**: `lighter+0.55` → `screen+0.92`（screenはblack=背景と同化、hull正常表示、過飽和なし）
+  - `ENGINE_THRUST`にHex定数`p1/p2`追加（GC抑制: ループ内rgba文字列生成を廃止）
+- **⚠️ 申し送り**:
+  - `enemy_corvette`は旧スプライトのまま（Higgsfield承認問題で再生成できず）。次セッションで生成可能（settings.local.jsonに承認済み）。
+  - 敵スプライト（destroyer/carrier/fighter）はscreen+0.92で描画 → 実機で暗すぎ/明るすぎなら`globalAlpha`調整。
+  - 船体スプライトは「photorealistic touchは良かった」との評価あり。透明バグが解消したら再度sprites導入検討余地あり（その場合は`screen`モードで試すべき）。
+
 ### 2026-06-14（深夜⑥）— Higgsfield ビジュアルエフェクト Phase2（PR#58・`claude/higgsfield-visual-effects-nhbaey`）
 - **Phase1（PR#57、前セッションでマージ済み）**: `fx_explosion_big/small`, `fx_kinetic_flash`, `fx_beam_impact`, `fx_thruster_jet`, `fx_missile_exhaust` の6スプライトを生成・適用。
 - **Phase2（本セッション・PR#58）**: さらに12スプライトを Higgsfield nano_banana_pro で生成し適用。
