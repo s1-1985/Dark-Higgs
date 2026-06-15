@@ -1052,12 +1052,18 @@ input[type=range]::-webkit-slider-thumb {
     }
     .minimap-label { font-size: 7px; letter-spacing: 1px; }
 
-    /* ─── LOG PANEL: コンパクト ─── */
+    /* ─── LOG PANEL: コンパクト・固定高 ─── */
     #log-panel {
         top: 40px;
         right: 4px;
         width: 195px;
+        height: 110px;
         max-height: 110px;
+        overflow: hidden;
+    }
+    #message-log {
+        overflow-y: auto;
+        max-height: 88px;
     }
     #log-header { padding: 3px 6px; font-size: 7px; }
     .message { font-size: 7px; padding: 2px 6px; }

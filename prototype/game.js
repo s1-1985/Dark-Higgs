@@ -6254,8 +6254,6 @@ function gameLoop() {
         ctx.translate(-camera.x + sx, -camera.y + sy);
 
         drawBackground(ctx);
-        stations.forEach(s => s.draw(ctx));
-        structures.forEach(s => s.draw(ctx));
         drawTargetLine(ctx);
 
         // ズームアウト時 or デバッグフラグでshadowBlurをスキップ (描画コスト削減)
@@ -6263,86 +6261,6 @@ function gameLoop() {
         // ビューポート境界 (ワールド座標)
         const _vpX = camera.x, _vpY = camera.y;
         const _vpW = cssW / camera.zoom, _vpH = cssH / camera.zoom;
-
-        // リソースノード描画 (全センサーで常時表示; HIGGSで最大輝度)
-        if (player && player.hp > 0) {
-            const higgsNodeRange = effectiveRadarRange * 6;
-            const isHiggsSnsr = currentSensor === 'higgs';
-            resourceNodes.forEach(n => {
-                if (!n.active) return;
-                // ビューポートカリング
-                if (n.x < _vpX - 60 || n.x > _vpX + _vpW + 60 ||
-                    n.y < _vpY - 60 || n.y > _vpY + _vpH + 60) return;
-                const distToNode = Math.hypot(n.x - player.x, n.y - player.y);
-                const t = Date.now();
-                const pulse = 0.5 + Math.sin(t * 0.003 + n.x * 0.001) * 0.5;
-                const spin = (t * 0.0008 + n.x * 0.0003) % (Math.PI * 2);
-                const inRange = distToNode < higgsNodeRange;
-                const brightness = isHiggsSnsr
-                    ? (0.5 + pulse * 0.5)
-                    : (inRange ? 0.15 + pulse * 0.12 : 0.04 + pulse * 0.04);
-                ctx.save();
-                ctx.translate(n.x, n.y);
-                ctx.rotate(spin);
-                const _nsp = SPRITES.node_higgs;
-                if (spriteReady(_nsp)) {
-                    // スプライト (被探知ステルス: brightnessでアルファ変調)
-                    ctx.globalAlpha = brightness;
-                    drawSpriteCentered(ctx, _nsp, 72);
-                    ctx.globalAlpha = 1;
-                } else {
-                // 外側グロー
-                ctx.globalAlpha = brightness * 0.5;
-                ctx.fillStyle = '#50c8ff';
-                if (_blurEnabled) { ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = isHiggsSnsr ? 20 : 8; }
-                ctx.beginPath(); ctx.arc(0, 0, 26, 0, Math.PI * 2); ctx.fill();
-                // 外リング
-                ctx.globalAlpha = brightness * 0.35;
-                ctx.strokeStyle = '#80e0ff'; ctx.lineWidth = 1.5 / camera.zoom;
-                ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.stroke();
-                // メインクリスタル六角形
-                ctx.globalAlpha = brightness;
-                ctx.fillStyle = '#50c8ff';
-                if (_blurEnabled) { ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = isHiggsSnsr ? 12 : 5; }
-                ctx.beginPath();
-                for (let i = 0; i < 6; i++) {
-                    const a = (i / 6) * Math.PI * 2;
-                    const px = Math.cos(a) * 16, py = Math.sin(a) * 16;
-                    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-                }
-                ctx.closePath(); ctx.fill();
-                // インナーコア (白)
-                ctx.globalAlpha = brightness * 0.9;
-                ctx.fillStyle = '#ffffff';
-                if (_blurEnabled) ctx.shadowBlur = 4;
-                ctx.beginPath();
-                for (let i = 0; i < 6; i++) {
-                    const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
-                    const px = Math.cos(a) * 7, py = Math.sin(a) * 7;
-                    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-                }
-                ctx.closePath(); ctx.fill();
-                ctx.shadowBlur = 0;
-                }
-                ctx.restore();
-                // Crystal name label (adaptive scale)
-                if (inRange || isHiggsSnsr) {
-                    const _cIconS = Math.max(4, Math.min(28, camera.zoom * 28)) / (camera.zoom * 28);
-                    ctx.save();
-                    ctx.translate(n.x, n.y);
-                    ctx.scale(_cIconS, _cIconS);
-                    ctx.globalAlpha = brightness;
-                    ctx.fillStyle = '#80e8ff';
-                    ctx.font = 'bold 10px Orbitron, monospace';
-                    ctx.textAlign = 'center';
-                    if (_blurEnabled) { ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = 4; }
-                    ctx.fillText('HIGGS CRYSTAL', 0, -36);
-                    ctx.shadowBlur = 0;
-                    ctx.restore();
-                }
-                ctx.globalAlpha = 1;
-            });
-        }
 
         // Render scrap (rotating data fragment squares, fades over time)
         scrapDrops.forEach(s => {
@@ -6374,6 +6292,81 @@ function gameLoop() {
         // すべて最前面に重ねる。これらがヒッグスに隠れると索敵・射撃ができずゲームにならないため。
         // マップモード中はフォグを抑制して全体を戦術マップとして表示(索敵済みの情報のみ可視)。
         if (player && player.hp > 0 && !mapMode) drawFogOfWar(ctx);
+
+        // ── ランドマーク（ステーション・構造物・ヒッグスノード）— ヒッグスより手前に表示 ──
+        stations.forEach(s => s.draw(ctx));
+        structures.forEach(s => s.draw(ctx));
+        if (player && player.hp > 0) {
+            const higgsNodeRange = effectiveRadarRange * 6;
+            const isHiggsSnsr = currentSensor === 'higgs';
+            resourceNodes.forEach(n => {
+                if (!n.active) return;
+                if (n.x < _vpX - 60 || n.x > _vpX + _vpW + 60 ||
+                    n.y < _vpY - 60 || n.y > _vpY + _vpH + 60) return;
+                const distToNode = Math.hypot(n.x - player.x, n.y - player.y);
+                const t = Date.now();
+                const pulse = 0.5 + Math.sin(t * 0.003 + n.x * 0.001) * 0.5;
+                const spin = (t * 0.0008 + n.x * 0.0003) % (Math.PI * 2);
+                const inRange = distToNode < higgsNodeRange;
+                const brightness = isHiggsSnsr
+                    ? (0.5 + pulse * 0.5)
+                    : (inRange ? 0.15 + pulse * 0.12 : 0.04 + pulse * 0.04);
+                ctx.save();
+                ctx.translate(n.x, n.y);
+                ctx.rotate(spin);
+                const _nsp = SPRITES.node_higgs;
+                if (spriteReady(_nsp)) {
+                    ctx.globalAlpha = brightness;
+                    drawSpriteCentered(ctx, _nsp, 72);
+                    ctx.globalAlpha = 1;
+                } else {
+                ctx.globalAlpha = brightness * 0.5;
+                ctx.fillStyle = '#50c8ff';
+                if (_blurEnabled) { ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = isHiggsSnsr ? 20 : 8; }
+                ctx.beginPath(); ctx.arc(0, 0, 26, 0, Math.PI * 2); ctx.fill();
+                ctx.globalAlpha = brightness * 0.35;
+                ctx.strokeStyle = '#80e0ff'; ctx.lineWidth = 1.5 / camera.zoom;
+                ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.stroke();
+                ctx.globalAlpha = brightness;
+                ctx.fillStyle = '#50c8ff';
+                if (_blurEnabled) { ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = isHiggsSnsr ? 12 : 5; }
+                ctx.beginPath();
+                for (let i = 0; i < 6; i++) {
+                    const a = (i / 6) * Math.PI * 2;
+                    const px = Math.cos(a) * 16, py = Math.sin(a) * 16;
+                    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                }
+                ctx.closePath(); ctx.fill();
+                ctx.globalAlpha = brightness * 0.9;
+                ctx.fillStyle = '#ffffff';
+                if (_blurEnabled) ctx.shadowBlur = 4;
+                ctx.beginPath();
+                for (let i = 0; i < 6; i++) {
+                    const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+                    const px = Math.cos(a) * 7, py = Math.sin(a) * 7;
+                    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                }
+                ctx.closePath(); ctx.fill();
+                ctx.shadowBlur = 0;
+                }
+                ctx.restore();
+                if (inRange || isHiggsSnsr) {
+                    const _cIconS = Math.max(4, Math.min(28, camera.zoom * 28)) / (camera.zoom * 28);
+                    ctx.save();
+                    ctx.translate(n.x, n.y);
+                    ctx.scale(_cIconS, _cIconS);
+                    ctx.globalAlpha = brightness;
+                    ctx.fillStyle = '#80e8ff';
+                    ctx.font = 'bold 10px Orbitron, monospace';
+                    ctx.textAlign = 'center';
+                    if (_blurEnabled) { ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = 4; }
+                    ctx.fillText('HIGGS CRYSTAL', 0, -36);
+                    ctx.shadowBlur = 0;
+                    ctx.restore();
+                }
+                ctx.globalAlpha = 1;
+            });
+        }
 
         // ── センサー痕跡(ソナーの影/コンタクト) — ヒッグスより手前に表示 ──
         for (const e of enemies) e.drawSensorTrace(ctx);
