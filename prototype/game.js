@@ -91,6 +91,14 @@ const ENGINE_THRUST = {
     photon:        { core:'255,255,255', mid:'120,210,255',a:1.0, p1:'#ffffff', p2:'#78d2ff' }  // 純白青白
 };
 
+// バーニア位置定義 [lxFrac, lyFrac] × vr(=radius*2.8)。bow=+X、stern=-X。
+// 移動時のみCanvasグロー描画。スプライト自体にはスラスター不要（船体のみ生成）。
+const THRUSTER_DEFS = {
+    assault: [[-0.88,-0.35],[-0.88,-0.12],[-0.88, 0.12],[-0.88, 0.35]], // 4基
+    stealth: [[-0.88,-0.07],[-0.88, 0.07]],                              // 2基
+    carrier: [[-0.90,-0.48],[-0.90,-0.28],[-0.90,-0.09],[-0.90, 0.09],[-0.90, 0.28],[-0.90, 0.48]], // 6基
+};
+
 // ============================================================
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
@@ -2224,42 +2232,7 @@ class Ship {
             }
         }
 
-        // Exhaust particle logic
-        if (this.state === 'moving' || (this.targetEntity && Math.hypot(this.targetEntity.x - this.x, this.targetEntity.y - this.y) > 200)) {
-            if (this.isPlayer) {
-                // 攻撃型戦艦 - 上下2基のスラスター排気 (多層構造)
-                const fwdX = Math.cos(this.angle), fwdY = Math.sin(this.angle);
-                const perpX = -Math.sin(this.angle), perpY = Math.cos(this.angle);
-                const vr = this.radius * 2.8;
-                // スラスター口の位置 (ローカル座標 -> ワールド座標)
-                const thrusterSlots = [
-                    { lx: -vr * 0.85, ly: -vr * 0.38 }, // 上スラスター
-                    { lx: -vr * 0.85, ly:  vr * 0.38 }, // 下スラスター
-                ];
-                const LAYERS = [
-                    { spread: 0.10, color: '#ffffff', size: 3.2, speed: 4.5, decay: 0.055 },
-                    { spread: 0.18, color: '#80e8ff', size: 2.6, speed: 3.8, decay: 0.045 },
-                    { spread: 0.28, color: '#0088ff', size: 2.0, speed: 3.0, decay: 0.038 },
-                    { spread: 0.40, color: '#001850', size: 1.4, speed: 2.2, decay: 0.030 },
-                ];
-                thrusterSlots.forEach(slot => {
-                    const wx = this.x + slot.lx * fwdX + slot.ly * perpX;
-                    const wy = this.y + slot.lx * fwdY + slot.ly * perpY;
-                    LAYERS.forEach(layer => {
-                        if (Math.random() > 0.75) return; // 間引き
-                        const drift = (Math.random() - 0.5) * vr * layer.spread;
-                        particles.push({
-                            x: wx + perpX * drift, y: wy + perpY * drift,
-                            vx: -fwdX * (layer.speed + Math.random() * 1.5) + perpX * drift * 0.1,
-                            vy: -fwdY * (layer.speed + Math.random() * 1.5) + perpY * drift * 0.1,
-                            life: 1.0, decay: layer.decay + Math.random() * 0.015,
-                            size: layer.size, color: layer.color
-                        });
-                    });
-                });
-            }
-            // 敵艦: エンジン排気エフェクトは非表示 (スタルス設計 — センサー検知のみで捕捉)
-        }
+        // 敵艦: エンジン排気エフェクトは非表示 (センサー検知のみで捕捉)
 
         // ============================================================
         // マルチセンサーシグネチャ更新 (敵のみ)
@@ -2397,17 +2370,23 @@ class Ship {
             const _psprite = SPRITES[_pstype];
             if (spriteReady(_psprite)) {
                 if (this.state === 'moving') {
+                    // バーニア数連動スラスターグロー: THRUSTER_DEFS で艦種別位置を定義
                     const ecp = ENGINE_THRUST[gameState.engineType] || ENGINE_THRUST.thermonuclear;
                     const tpz = 0.6 + Math.sin(Date.now() * 0.008) * 0.4;
-                    const grr = this.radius * 2.8;
-                    const tg = ctx.createRadialGradient(-grr * 0.95, 0, 0, -grr * 0.95, 0, grr * 0.75);
-                    tg.addColorStop(0,   `rgba(${ecp.core},${0.85 * tpz * ecp.a})`);
-                    tg.addColorStop(0.4, `rgba(${ecp.mid},${0.45 * tpz * ecp.a})`);
-                    tg.addColorStop(1,   'rgba(0,10,40,0)');
-                    ctx.fillStyle = tg;
-                    ctx.beginPath();
-                    ctx.ellipse(-grr * 0.95, 0, grr * 0.75, grr * 0.52, 0, 0, Math.PI * 2);
-                    ctx.fill();
+                    const vr  = this.radius * 2.8;
+                    const slots = THRUSTER_DEFS[_pstype] || THRUSTER_DEFS.assault;
+                    slots.forEach(([lxF, lyF]) => {
+                        const tx = lxF * vr - vr * 0.10; // バーニア口から後方へ
+                        const ty = lyF * vr;
+                        const tg = ctx.createRadialGradient(tx, ty, 0, tx, ty, vr * 0.28);
+                        tg.addColorStop(0,   `rgba(${ecp.core},${0.88 * tpz * ecp.a})`);
+                        tg.addColorStop(0.4, `rgba(${ecp.mid},${0.48 * tpz * ecp.a})`);
+                        tg.addColorStop(1,   'rgba(0,10,40,0)');
+                        ctx.fillStyle = tg;
+                        ctx.beginPath();
+                        ctx.ellipse(tx, ty, vr * 0.28, vr * 0.10, 0, 0, Math.PI * 2);
+                        ctx.fill();
+                    });
                 }
                 ctx.globalCompositeOperation = 'screen';
                 ctx.globalAlpha = 0.9;
