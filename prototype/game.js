@@ -48,6 +48,7 @@ let omniSonarCooldown = 0;
 let dirSonarCooldown = 0;
 let passiveAlertTimer = 0;
 let passiveCheckTimer = 0;
+let demoMode = false; // デモモード: フォグなし・全エンティティ可視
 // パッシブ方位ウェッジ: 計測時のワールド位置にアンカーした方位扇形。
 // 強信号=狭い確信、弱信号=広いボケ。移動して2回計測→三角測量で敵位置が絞れる。
 // { ox, oy, angle, halfWidth, range, quality, color, life, maxLife }
@@ -115,6 +116,7 @@ const SPRITE_FILES = {
     colony:     'assets/structure_colony.png',
     derelict:   'assets/structure_derelict.png',
     // Higgsfield生成エフェクトスプライト (黒背景 → 'lighter'加算合成で黒=透明)
+    fx_beam_main:       'assets/fx_beam_main.png',
     fx_explosion_big:   'assets/fx_explosion_big.png',
     fx_explosion_small: 'assets/fx_explosion_small.png',
     fx_kinetic_flash:   'assets/fx_kinetic_flash.png',
@@ -212,6 +214,7 @@ function playSound(type) {
 let gameState = {
     shipType: 'assault',
     mode: 'br',
+    enemyType: 'destroyer', // 敵艦種 (ロビーで選択)
     sector: 1,
     credits: 0,       // スクラップ (アップグレード素材 + 修理費)
     engineType: 'thermonuclear',
@@ -300,10 +303,15 @@ let resourceNodes = []; // リソースノード {x, y, active, emFlashTimer}
 
 // ── ゲームスピード制御 ──────────────────────────────────────
 let gameSpeedFactor = 1.0; // 0.5=低速 / 1.0=通常 / 2.0=高速
-const PLAYER_TURN_RATE = 0.018; // 自機最大回頭レート (rad/frame) - assault基準
-const PLAYER_TURN_RATES = { assault: 0.018, stealth: 0.026, carrier: 0.010 }; // 艦種別回頭レート
-const ENEMY_TURN_RATES  = { corvette: 0.038, fighter: 0.052, destroyer: 0.020, carrier: 0.010 }; // 敵艦種別回頭レート
-const PLAYER_FIRE_ARC  = Math.PI * 0.67; // 前方射撃弧 ±120° (π*2/3)
+const PLAYER_TURN_RATE = 0.010; // 自機最大回頭レート (rad/frame) - assault基準
+const PLAYER_TURN_RATES = { assault: 0.010, stealth: 0.015, carrier: 0.004 }; // 艦種別回頭レート (重量感重視)
+const ENEMY_TURN_RATES  = { corvette: 0.030, fighter: 0.040, destroyer: 0.014, carrier: 0.006 }; // 敵艦種別回頭レート
+// 慣性ベース速度システム
+const SHIP_MAX_SPEED_MULT = { assault: 0.58, stealth: 1.05, carrier: 0.38 }; // 艦種別最高速度倍率(全体的に低速化)
+const SHIP_ACCEL_RATE = { carrier: 0.003, assault: 0.008, stealth: 0.016 }; // 最高速度到達まで加速率/frame (空母最遅・潜航最速)
+const SHIP_TURN_SLOW  = { carrier: 0.78, assault: 0.52, stealth: 0.22 }; // 旋回時の速度低下率最大値 (空母最重・潜航身軽)
+// 武器別射角 (前方からの角度差の許容最大値)
+const WEAPON_FIRE_ARC = { kinetic: Math.PI * 5/6, missile: Math.PI/4, beam: Math.PI/18 }; // kinetic±150° / missile±45° / beam±10°
 const LOCK_PERSIST_BASE = 2.0; // ロック保持倍率 (visionRadius × N)
 // ─────────────────────────────────────────────────────────────
 
@@ -416,6 +424,7 @@ function getAmoebaPoints(cx, cy, baseR, numPts, timeSec) {
 
 function drawFogOfWar(ctx) {
     if (!player || player.hp <= 0) return;
+    if (demoMode) return; // デモモード: ヒッグス暗幕解除
 
     playerVisionRadius = computeVisionRadius();
     const cx = player.x;
@@ -512,6 +521,7 @@ function drawFogOfWar(ctx) {
 // 視野内の敵を自動ロックオン (毎フレーム呼び出し)
 function updateVisionLockOn() {
     if (!player || player.hp <= 0) return;
+    if (demoMode) { enemies.forEach(e => { e.visible = true; e.inVision = true; }); return; }
 
     // 視野半径をヒッグス濃度に応じて毎フレーム更新 (描画OFFでもロックオン判定が正しく動く)
     playerVisionRadius = computeVisionRadius();
@@ -941,7 +951,77 @@ canvas.addEventListener('wheel', e => {
     camera.y += my_b - after.y;
     clampCamera();
 }, { passive: false });
-canvas.addEventListener('contextmenu', e => { if (e.target.id === 'gameCanvas') e.preventDefault() });
+canvas.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    if (!player || player.hp <= 0 || !gameLoopRunning) return;
+    const wType = document.getElementById('weapon-select')?.value;
+    if (wType !== 'missile' && wType !== 'beam') return;
+    const rect = canvas.getBoundingClientRect();
+    const _ffSx = (e.clientX - rect.left) * (cssW / rect.width);
+    const _ffSy = (e.clientY - rect.top) * (cssH / rect.height);
+    const _ffWx = (_ffSx / camera.zoom) + camera.x;
+    const _ffWy = (_ffSy / camera.zoom) + camera.y;
+    const _ffAng = Math.atan2(_ffWy - player.y, _ffWx - player.x);
+    let _ffDiff = _ffAng - player.angle;
+    while (_ffDiff < -Math.PI) _ffDiff += Math.PI * 2;
+    while (_ffDiff > Math.PI) _ffDiff -= Math.PI * 2;
+    const _ffMaxArc = WEAPON_FIRE_ARC[wType] || (Math.PI / 4);
+    if (Math.abs(_ffDiff) > _ffMaxArc) {
+        logMessage(`WEP: 射角外 — 艦首±${Math.round(_ffMaxArc * 180 / Math.PI)}°以内に向けてから発射`, 'warning-msg');
+        return;
+    }
+    if (player.fireCooldown > 0) return;
+    const _ffGenFactor = Math.max(0.3, 1.5 - (genAlloc.weapons / 100));
+    if (wType === 'missile') {
+        if (player.missileReloading) { logMessage('WEP: MISSILEリロード中', 'warning-msg'); return; }
+        const _ffTarget = { x: _ffWx, y: _ffWy, hp: 999, radius: 1 };
+        projectiles.push(new Projectile(player.x, player.y, _ffTarget, true, 'missile', 1.0));
+        playSound('shoot');
+        player.fireCooldown = WEAPON_COOLDOWNS.missile * _ffGenFactor;
+        player.missileReloading = true;
+        player.missileReloadTimer = Math.round(MISSILE_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0));
+        if (opticTrails.length < 600) opticTrails.push({ x: player.x, y: player.y, intensity: 0.8, life: 1.0 });
+        if (heatTrails.length < 600) heatTrails.push({ x: player.x, y: player.y, intensity: 0.9, life: 1.0, isPlayerTrail: false });
+        logMessage('WEP: MISSILE 自由射撃 — 命中不問・自位置シグネチャ露出', 'warning-msg');
+    } else if (wType === 'beam') {
+        if (player.beamReloading) { logMessage('WEP: BEAMリロード中', 'warning-msg'); return; }
+        const _bRange = 8000 * (WEAPONS_UPG_RANGE_MULT[gameState.upgrades.weapons] || 1.0);
+        const _bDistToClick = Math.hypot(_ffWx - player.x, _ffWy - player.y);
+        const _bLen = Math.min(_bRange, Math.max(100, _bDistToClick));
+        const _bEndX = player.x + Math.cos(_ffAng) * _bLen;
+        const _bEndY = player.y + Math.sin(_ffAng) * _bLen;
+        effects.push({ x: player.x, y: player.y, tx: _bEndX, ty: _bEndY, type: 'beam', a: 1, c: '#00ffaa' });
+        enemies.forEach(en => {
+            if (en.hp <= 0) return;
+            const _bdx = _bEndX - player.x, _bdy2 = _bEndY - player.y;
+            const _bSqLen = _bdx * _bdx + _bdy2 * _bdy2;
+            const _bt = _bSqLen > 0 ? Math.max(0, Math.min(1, ((en.x - player.x) * _bdx + (en.y - player.y) * _bdy2) / _bSqLen)) : 0;
+            const _bcx = player.x + _bt * _bdx, _bcy = player.y + _bt * _bdy2;
+            if (Math.hypot(en.x - _bcx, en.y - _bcy) < en.radius * 1.5) {
+                const _hb = getHiggsIntensity((_bcx + en.x) / 2, (_bcy + en.y) / 2);
+                en.hp -= 150 * (1 - _hb * 0.8);
+                createHitEffect(en.x, en.y, '#00ffaa');
+                addShake(15);
+                logMessage('WEP: BEAM 命中！', 'system-msg');
+            }
+        });
+        const _bSteps = Math.max(5, Math.floor(_bLen / 60));
+        for (let _bs = 0; _bs <= _bSteps; _bs++) {
+            const _bT = _bs / _bSteps;
+            const _bwx = player.x + (_bEndX - player.x) * _bT;
+            const _bwy = player.y + (_bEndY - player.y) * _bT;
+            const _bh = getHiggsIntensity(_bwx, _bwy);
+            if (_bh > 0.08 && higgsWakes.length < 800) higgsWakes.push({ x: _bwx, y: _bwy, intensity: _bh * 1.4, life: 1.0 });
+            if (_bs % 3 === 0 && opticTrails.length < 600) opticTrails.push({ x: _bwx, y: _bwy, intensity: 0.9, life: 1.0 });
+        }
+        if (emTrails.length < 600) emTrails.push({ x: player.x, y: player.y, intensity: 1.0, life: 1.0 });
+        playSound('shoot');
+        player.fireCooldown = WEAPON_COOLDOWNS.beam * _ffGenFactor;
+        player.beamReloading = true;
+        player.beamReloadTimer = BEAM_RELOAD_TIME;
+        logMessage('WEP: BEAM 自由射撃 — ダークチャネル生成・EM/光学シグネチャ全露出', 'warning-msg');
+    }
+});
 
 // ============================================================
 // タッチ入力対応（スマホ用）
@@ -1430,6 +1510,17 @@ class Projectile {
             }
             let dmgMult = 1;
             let preemptive = false;
+            // 後部取得ボーナス: 背後±99°から被弾=+50%ダメージ
+            const _hitAng = Math.atan2(this.y - hitTarget.y, this.x - hitTarget.x);
+            let _hitAngDiff = _hitAng - hitTarget.angle;
+            while (_hitAngDiff < -Math.PI) _hitAngDiff += Math.PI * 2;
+            while (_hitAngDiff > Math.PI) _hitAngDiff -= Math.PI * 2;
+            if (Math.abs(_hitAngDiff) > Math.PI * 0.55) {
+                dmgMult *= 1.5;
+                if (!this.isPlayer && hitTarget === player) {
+                    effects.push({ x: hitTarget.x, y: hitTarget.y - 28, text: '後方被弾 ×1.5', life: 1.0, type: 'floatText', c: '#ff6666' });
+                }
+            }
             // 先制攻撃ボーナス: 2x damage on unaware enemies
             if (this.isPlayer && hitTarget.detectionState === 'unaware') {
                 dmgMult *= 2.0;
@@ -1607,6 +1698,7 @@ class Ship {
         this.higgsSig = 0;   // ヒッグスシグネチャ: ヒッグス雲内での乱流・ウェイク
         this.prevX = x;
         this.prevY = y;
+        this.currentSpeed = 0; // 慣性: 現在速度 (0=停止、移動ブロックで徐々に加速)
         // ソナーコンタクト
         this.contactAccuracy = 0;
         this.contactLife = 0;
@@ -1664,14 +1756,14 @@ class Ship {
             if (jamPulse > 0)   jamPulse--;
             if (jamPulseCD > 0) jamPulseCD--;
 
-            // Speed defined by GEN engine allocation + 艦種補正 + ヒッグス減速
-            // §3-1 エンジンアップグレード: ヒッグス減速軽減 (旧UPGRADE_MULT速度増加→廃止)
-            const speedMult = { assault: 0.8, stealth: 1.4, carrier: 0.6 };
-            const engType = ENGINE_TYPES[gameState.engineType] || ENGINE_TYPES.thermonuclear;
-            const higgsHereEng = getHiggsIntensity(this.x, this.y);
-            const higgsSlowdown = 1 - higgsHereEng * 0.45 * (1 - ENGINE_UPG_HIGGS_RESIST[gameState.upgrades.engine]);
-            const higgsBonusSpeed = higgsHereEng * engType.higgsSpeedBonus;
-            this.speed = ((genAlloc.engine / 100) * genGain * 2.4 * (speedMult[gameState.shipType] || 1.0) * higgsSlowdown * engType.speedMult + higgsBonusSpeed) * this.terrainSpeedMult() * gameSpeedFactor;
+            // §P1 慣性ベース速度: 最高速度目標(_baseTargetSpeed)を計算。実加速は各移動ブロックで行う
+            const _engTypeP = ENGINE_TYPES[gameState.engineType] || ENGINE_TYPES.thermonuclear;
+            const _higgsHereEng = getHiggsIntensity(this.x, this.y);
+            const _higgsSlowdown = 1 - _higgsHereEng * 0.45 * (1 - ENGINE_UPG_HIGGS_RESIST[gameState.upgrades.engine]);
+            const _higgsBonusSpeed = _higgsHereEng * _engTypeP.higgsSpeedBonus;
+            const _baseTargetSpeed = ((genAlloc.engine / 100) * genGain * 1.4 * (SHIP_MAX_SPEED_MULT[gameState.shipType] || 1.0) * _higgsSlowdown * _engTypeP.speedMult + _higgsBonusSpeed) * this.terrainSpeedMult() * gameSpeedFactor;
+            if (this.currentSpeed === undefined) this.currentSpeed = 0;
+            this.speed = this.currentSpeed; // 移動ブロックで更新される
 
             // 円形マップ境界検知
             if (Math.hypot(this.x - MAP_CX, this.y - MAP_CY) > MAP_RADIUS - 100 && !dialogOpen) {
@@ -1733,13 +1825,24 @@ class Ship {
                 const _pTR = (PLAYER_TURN_RATES[gameState.shipType] || PLAYER_TURN_RATE) * gameSpeedFactor;
                 this.angle += Math.sign(diff) * Math.min(Math.abs(diff), _pTR);
 
+                // 旋回量に応じた速度低下 + 慣性加速
+                const _tmC = Math.min(1, Math.abs(diff) / (Math.PI * 0.12));
+                const _tsC = _baseTargetSpeed * (1 - (SHIP_TURN_SLOW[gameState.shipType] || 0.5) * _tmC);
+                const _arC = (SHIP_ACCEL_RATE[gameState.shipType] || 0.008) * gameSpeedFactor;
+                this.currentSpeed = this.currentSpeed < _tsC ? Math.min(_tsC, this.currentSpeed + _arC) : Math.max(_tsC, this.currentSpeed - _arC * 2.5);
+                this.speed = this.currentSpeed;
+
                 if (dist > wRange * 0.8) {
                     this.x += Math.cos(this.angle) * this.speed;
                     this.y += Math.sin(this.angle) * this.speed;
+                } else if (this.currentSpeed > 0.02) {
+                    this.x += Math.cos(this.angle) * this.currentSpeed;
+                    this.y += Math.sin(this.angle) * this.currentSpeed;
                 }
 
-                // 射撃弧チェック: 前方±120° 以内のみ発射可。後方60°は死角。
-                if (dist < wRange && this.fireCooldown <= 0 && Math.abs(diff) < PLAYER_FIRE_ARC) {
+                // 射撃弧チェック: kinetic±150°/missile±45°/beam±10° (武器別射角)
+                const _fireArc = WEAPON_FIRE_ARC[wType] || (Math.PI * 5/6);
+                if (dist < wRange && this.fireCooldown <= 0 && Math.abs(diff) < _fireArc) {
                     // 想定ロックオン: 完全ロック=フルダメージ / 想定ロック=精度依存のダメージデバフ。
                     const _acc = _fullLock ? 1 : Math.max(0, Math.min(1, this.targetEntity.contactAccuracy || 0));
                     const _lockDmg = _fullLock ? 1 : (0.3 + 0.5 * _acc); // 想定=30〜80%
@@ -1839,18 +1942,37 @@ class Ship {
                     }
                 }
             } else if (this.state === 'moving') {
-                const dist = Math.hypot(this.targetX - this.x, this.targetY - this.y);
-                if (dist > this.speed * 1.5) {
-                    const ta = Math.atan2(this.targetY - this.y, this.targetX - this.x);
-                    let diff = ta - this.angle;
-                    while (diff < -Math.PI) diff += Math.PI * 2;
-                    while (diff > Math.PI) diff -= Math.PI * 2;
+                const _wpDist = Math.hypot(this.targetX - this.x, this.targetY - this.y);
+                if (_wpDist > Math.max(20, this.currentSpeed * 2)) {
+                    const _wpTa = Math.atan2(this.targetY - this.y, this.targetX - this.x);
+                    let _wpDiff = _wpTa - this.angle;
+                    while (_wpDiff < -Math.PI) _wpDiff += Math.PI * 2;
+                    while (_wpDiff > Math.PI) _wpDiff -= Math.PI * 2;
                     const _wpTR = (PLAYER_TURN_RATES[gameState.shipType] || PLAYER_TURN_RATE) * gameSpeedFactor;
-                    this.angle += Math.sign(diff) * Math.min(Math.abs(diff), _wpTR);
-                    // 艦首方向へ前進（旋回慣性）
+                    this.angle += Math.sign(_wpDiff) * Math.min(Math.abs(_wpDiff), _wpTR);
+                    // 旋回量→速度低下 + 慣性加速
+                    const _tmWP = Math.min(1, Math.abs(_wpDiff) / (Math.PI * 0.12));
+                    const _tsWP = _baseTargetSpeed * (1 - (SHIP_TURN_SLOW[gameState.shipType] || 0.5) * _tmWP);
+                    const _arWP = (SHIP_ACCEL_RATE[gameState.shipType] || 0.008) * gameSpeedFactor;
+                    this.currentSpeed = this.currentSpeed < _tsWP ? Math.min(_tsWP, this.currentSpeed + _arWP) : Math.max(_tsWP, this.currentSpeed - _arWP * 2.5);
+                    this.speed = this.currentSpeed;
                     this.x += Math.cos(this.angle) * this.speed;
                     this.y += Math.sin(this.angle) * this.speed;
-                } else this.state = 'idle';
+                } else {
+                    this.state = 'idle';
+                    const _arStop = (SHIP_ACCEL_RATE[gameState.shipType] || 0.008) * gameSpeedFactor;
+                    this.currentSpeed = Math.max(0, this.currentSpeed - _arStop * 3);
+                    this.speed = this.currentSpeed;
+                    if (this.currentSpeed > 0.02) {
+                        this.x += Math.cos(this.angle) * this.currentSpeed;
+                        this.y += Math.sin(this.angle) * this.currentSpeed;
+                    }
+                }
+            } else {
+                // idle: 慣性で停止へ
+                const _arIdle = (SHIP_ACCEL_RATE[gameState.shipType] || 0.008) * gameSpeedFactor;
+                this.currentSpeed = Math.max(0, this.currentSpeed - _arIdle * 3);
+                this.speed = this.currentSpeed;
             }
 
             // 前フレーム位置を保存 (次フレームの速度計算用)
@@ -3058,10 +3180,34 @@ function updateDrawEffects(ctx) {
             ctx.globalAlpha = 1;
             if (ef.life <= 0) effects.splice(i, 1);
         } else if (ef.type === 'beam') {
-            ef.a -= 0.05;
-            ctx.beginPath(); ctx.moveTo(ef.x, ef.y); ctx.lineTo(ef.tx, ef.ty);
-            ctx.strokeStyle = ef.c; ctx.lineWidth = 4 * ef.a; ctx.stroke();
-            if (ef.a <= 0) effects.splice(i, 1);
+            ef.a -= 0.04;
+            if (ef.a <= 0) { effects.splice(i, 1); continue; }
+            const _bdx = ef.tx - ef.x, _bdy = ef.ty - ef.y;
+            const _bAng = Math.atan2(_bdy, _bdx);
+            const _bLen = Math.hypot(_bdx, _bdy);
+            ctx.save();
+            ctx.translate(ef.x, ef.y);
+            ctx.rotate(_bAng);
+            ctx.lineCap = 'round';
+            // 外側拡散グロウ
+            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(_bLen, 0);
+            ctx.strokeStyle = ef.c; ctx.lineWidth = 28 * ef.a; ctx.globalAlpha = ef.a * 0.10; ctx.stroke();
+            // 中間グロウ
+            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(_bLen, 0);
+            ctx.lineWidth = 12 * ef.a; ctx.globalAlpha = ef.a * 0.35; ctx.stroke();
+            // コア白線
+            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(_bLen, 0);
+            ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3 * ef.a; ctx.globalAlpha = ef.a * 0.95; ctx.stroke();
+            ctx.restore();
+            // 着弾点フラッシュ
+            if (ef.a > 0.65) {
+                const _flashR = 20 * ef.a;
+                ctx.beginPath(); ctx.arc(ef.tx, ef.ty, _flashR, 0, Math.PI * 2);
+                ctx.fillStyle = ef.c; ctx.globalAlpha = ef.a * 0.5; ctx.fill();
+                ctx.beginPath(); ctx.arc(ef.tx, ef.ty, _flashR * 0.4, 0, Math.PI * 2);
+                ctx.fillStyle = '#ffffff'; ctx.globalAlpha = ef.a * 0.9; ctx.fill();
+            }
+            ctx.globalAlpha = 1;
         } else if (ef.type === 'sonar') {
             ef.r += ef.speed;
             if (ef.r >= ef.maxR) {
@@ -3348,7 +3494,7 @@ function generateSector() {
     const spawnCenterX = MAP_CX + Math.cos(spawnAngle) * spawnDist;
     const spawnCenterY = MAP_CY + Math.sin(spawnAngle) * spawnDist;
     const bossSpawn = findHidingSpot(spawnCenterX, spawnCenterY, 2000);
-    const boss = new Ship(bossSpawn.x, bossSpawn.y, false, 'destroyer');
+    const boss = new Ship(bossSpawn.x, bossSpawn.y, false, gameState.enemyType || 'destroyer');
     // セクターが深いほど高HP・高速化
     boss.maxHp = 500 + gameState.sector * 200;
     boss.hp = boss.maxHp;
@@ -3403,8 +3549,22 @@ function generateSector() {
     logMessage(`SYSTEM: ワープ完了。セクター ${gameState.sector} に到着しました [${shipLabel[gameState.shipType] || '不明'}]。環境マッピング中...`, 'system-msg');
 }
 
+function toggleDemoMode() {
+    demoMode = !demoMode;
+    const btn = document.getElementById('btn-demo-mode');
+    if (btn) {
+        btn.style.borderColor = demoMode ? '#ffff00' : '';
+        btn.style.color = demoMode ? '#ffff00' : '';
+        btn.textContent = demoMode ? 'DEMO: ON' : 'DEMO';
+    }
+    logMessage(demoMode ? 'DEMO MODE: 全視界・ヒッグス暗幕解除 (AI挙動は通常と同一)' : 'DEMO MODE: 解除', 'system-msg');
+}
+
 function startGame(shipType) {
     gameState.shipType = shipType;
+    // 敵艦種: ロビーで選択された値をセット
+    const _selEt = document.querySelector('.enemy-select-btn.active')?.dataset?.type || 'destroyer';
+    gameState.enemyType = _selEt;
     document.getElementById('ship-select-lobby').classList.add('hidden');
     // 潜航型専用ジャミングボタンの表示制御
     document.querySelectorAll('.jam-btn').forEach(b => { b.style.display = shipType === 'stealth' ? '' : 'none'; });
@@ -3441,6 +3601,19 @@ document.querySelectorAll('.mode-card').forEach(card => {
 // 艦種選択ボタン
 document.querySelectorAll('.ship-select-btn').forEach(btn => {
     btn.addEventListener('click', () => startGame(btn.dataset.type));
+});
+
+// 敵艦種選択ボタン
+document.querySelectorAll('.enemy-select-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.enemy-select-btn').forEach(b => {
+            b.classList.remove('active');
+            b.style.borderColor = '';
+        });
+        btn.classList.add('active');
+        btn.style.borderColor = '#ff4444';
+        playSound('ui');
+    });
 });
 
 // UI Binding Logic for gameplay
