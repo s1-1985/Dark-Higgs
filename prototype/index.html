@@ -11,7 +11,7 @@
     <title>Dark Echo: Tactical Space RTS</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23000' stroke='%2300ff88' stroke-width='2'/><circle cx='16' cy='16' r='6' fill='none' stroke='%2300ff88' stroke-width='1.5'/><line x1='16' y1='2' x2='16' y2='30' stroke='%2300ff88' stroke-width='1' opacity='0.4'/><line x1='2' y1='16' x2='30' y2='16' stroke='%2300ff88' stroke-width='1' opacity='0.4'/></svg>" type="image/svg+xml">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20260615a">
+    <link rel="stylesheet" href="style.css?v=20260615b">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -302,68 +302,38 @@
                     <div id="abar">
                         <div class="abar-group" data-group="scan">
                             <button class="abar-btn btn-info" title="索敵 — SONAR / DIR">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-                                    <circle cx="12" cy="12" r="2" fill="currentColor" fill-opacity=".5"/>
-                                    <path d="M6,12 a6,6 0 0,1 6,-6"/><path d="M3,12 a9,9 0 0,1 9,-9"/>
-                                    <path d="M18,12 a6,6 0 0,1 -6,6"/><path d="M21,12 a9,9 0 0,1 -9,9"/>
-                                </svg>
+                                <img src="assets/icon_scan.png" alt="" class="abar-icon">
                                 <span>SCAN</span>
                             </button>
                         </div>
                         <div class="abar-group" data-group="ew">
                             <button class="abar-btn btn-warning" title="電子戦 — EW / JAM / DECOY">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                                    <polyline points="13,3 8,12 12,12 7,21"/>
-                                    <path d="M16,7 a4,4 0 0,1 0,10" stroke-width="1.2"/>
-                                    <path d="M19,4.5 a7.5,7.5 0 0,1 0,15" stroke-width="1" stroke-opacity=".5"/>
-                                </svg>
+                                <img src="assets/icon_ew.png" alt="" class="abar-icon">
                                 <span>EW</span>
                             </button>
                         </div>
                         <div class="abar-group" data-group="nav">
                             <button class="abar-btn" title="航法 — STOP / 追従 / SPD" style="border-color:#1a2a3a;color:#88aacc;">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-                                    <circle cx="12" cy="12" r="9" stroke-opacity=".4"/>
-                                    <line x1="12" y1="3" x2="12" y2="7"/>
-                                    <line x1="12" y1="17" x2="12" y2="21"/>
-                                    <line x1="3" y1="12" x2="7" y2="12"/>
-                                    <line x1="17" y1="12" x2="21" y2="12"/>
-                                    <polygon points="12,6 10.2,10.5 13.8,10.5" fill="currentColor"/>
-                                </svg>
+                                <img src="assets/icon_nav.png" alt="" class="abar-icon">
                                 <span>NAV</span>
                             </button>
                         </div>
                         <div class="abar-group" data-group="drone">
                             <button class="abar-btn" id="abar-btn-drone" title="ドローン展開 — 空母専用" style="border-color:#1a4a2a;color:#33cc88;">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-                                    <circle cx="6" cy="6" r="2.2"/><circle cx="18" cy="6" r="2.2"/>
-                                    <circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="18" r="2.2"/>
-                                    <rect x="9.5" y="9.5" width="5" height="5" rx="1" fill="currentColor" fill-opacity=".25"/>
-                                    <line x1="6" y1="8.2" x2="9.5" y2="10.5"/><line x1="18" y1="8.2" x2="14.5" y2="10.5"/>
-                                    <line x1="6" y1="15.8" x2="9.5" y2="13.5"/><line x1="18" y1="15.8" x2="14.5" y2="13.5"/>
-                                </svg>
+                                <img src="assets/icon_drone.png" alt="" class="abar-icon">
                                 <span>DRONE</span>
                             </button>
                         </div>
                         <div class="abar-group" data-group="sup">
                             <button class="abar-btn btn-info" title="支援システム — MSL / REGEN">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-                                    <line x1="12" y1="4" x2="12" y2="20"/>
-                                    <line x1="4" y1="12" x2="20" y2="12"/>
-                                    <circle cx="12" cy="12" r="7" stroke-width="1" stroke-opacity=".4"/>
-                                </svg>
+                                <img src="assets/icon_sup.png" alt="" class="abar-icon">
                                 <span>SUP</span>
                             </button>
                         </div>
                         <!-- 攻撃ON/OFF: standalone proxy (always visible) -->
                         <div class="abar-group abar-solo">
                             <button class="abar-btn" id="abar-atk-proxy" title="自動攻撃 ON/OFF" style="border-color:#00b43c;color:#00ff66;">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                                    <circle cx="12" cy="12" r="7"/>
-                                    <line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
-                                    <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
-                                    <circle cx="12" cy="12" r="2.5" fill="currentColor"/>
-                                </svg>
+                                <img src="assets/icon_atk.png" alt="" class="abar-icon">
                                 <span id="abar-atk-label">攻撃 ON</span>
                             </button>
                         </div>
@@ -715,7 +685,7 @@
 
     </div>
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20260615a"></script>
+    <script src="game.js?v=20260615b"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
