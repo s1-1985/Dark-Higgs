@@ -1263,6 +1263,7 @@ input[type=range]::-webkit-slider-thumb {
         transition: border-color 0.15s, color 0.15s, background 0.15s;
     }
     .abar-btn svg { width: 22px; height: 22px; flex-shrink: 0; }
+    .abar-btn .abar-icon { width: 26px; height: 26px; flex-shrink: 0; object-fit: contain; }
     .abar-btn span { font-size: 7px; letter-spacing: 0.4px; line-height: 1; }
     .abar-btn.btn-info    { border-color: #1a3d6a; color: #4da6ff; }
     .abar-btn.btn-warning { border-color: #4a2800; color: #ffaa00; }

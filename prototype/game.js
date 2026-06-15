@@ -128,6 +128,13 @@ const SPRITE_FILES = {
     particle_heat:      'assets/particle_heat.png',
     particle_optic:     'assets/particle_optic.png',
     particle_higgs:     'assets/particle_higgs.png',
+    // モバイルアクションバーアイコン
+    icon_scan:   'assets/icon_scan.png',
+    icon_ew:     'assets/icon_ew.png',
+    icon_nav:    'assets/icon_nav.png',
+    icon_drone:  'assets/icon_drone.png',
+    icon_sup:    'assets/icon_sup.png',
+    icon_atk:    'assets/icon_atk.png',
 };
 const SPRITES = {};
 for (const k in SPRITE_FILES) {
@@ -2410,8 +2417,10 @@ class Ship {
                     ctx.globalCompositeOperation = 'source-over';
                     ctx.globalAlpha = 1;
                 }
-                // ハルスプライト
+                // ハルスプライト (加算合成で黒背景=透明・発光部だけ輝く)
+                ctx.globalCompositeOperation = 'lighter';
                 drawSpriteCentered(ctx, _psprite, this.radius * 6.4);
+                ctx.globalCompositeOperation = 'source-over';
                 ctx.restore();
                 return;
             }
@@ -2761,7 +2770,9 @@ class Ship {
                     ctx.fillStyle = fg;
                     ctx.beginPath(); ctx.arc(0, 0, this.radius * 3.5, 0, Math.PI * 2); ctx.fill();
                 }
+                ctx.globalCompositeOperation = 'lighter';
                 drawSpriteCentered(ctx, _esprite, this.radius * (isFlashing ? 6.2 : 5.6));
+                ctx.globalCompositeOperation = 'source-over';
                 ctx.restore();
                 return;
             }
