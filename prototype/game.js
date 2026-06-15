@@ -96,7 +96,7 @@ const ENGINE_THRUST = {
 const THRUSTER_DEFS = {
     assault: [[-0.88,-0.35],[-0.88,-0.12],[-0.88, 0.12],[-0.88, 0.35]], // 4基
     stealth: [[-0.88,-0.07],[-0.88, 0.07]],                              // 2基
-    carrier: [[-0.90,-0.48],[-0.90,-0.28],[-0.90,-0.09],[-0.90, 0.09],[-0.90, 0.28],[-0.90, 0.48]], // 6基
+    carrier: [[-0.90,-0.30],[-0.90,-0.10],[-0.90, 0.10],[-0.90, 0.30]], // 4基(新スプライト合わせ)
 };
 
 // ============================================================
@@ -300,7 +300,9 @@ let resourceNodes = []; // リソースノード {x, y, active, emFlashTimer}
 
 // ── ゲームスピード制御 ──────────────────────────────────────
 let gameSpeedFactor = 1.0; // 0.5=低速 / 1.0=通常 / 2.0=高速
-const PLAYER_TURN_RATE = 0.022; // 自機最大回頭レート (rad/frame)
+const PLAYER_TURN_RATE = 0.018; // 自機最大回頭レート (rad/frame) - assault基準
+const PLAYER_TURN_RATES = { assault: 0.018, stealth: 0.026, carrier: 0.010 }; // 艦種別回頭レート
+const ENEMY_TURN_RATES  = { corvette: 0.038, fighter: 0.052, destroyer: 0.020, carrier: 0.010 }; // 敵艦種別回頭レート
 const PLAYER_FIRE_ARC  = Math.PI * 0.67; // 前方射撃弧 ±120° (π*2/3)
 const LOCK_PERSIST_BASE = 2.0; // ロック保持倍率 (visionRadius × N)
 // ─────────────────────────────────────────────────────────────
@@ -1727,8 +1729,9 @@ class Ship {
                 let diff = targetAngle - this.angle;
                 while (diff < -Math.PI) diff += Math.PI * 2;
                 while (diff > Math.PI) diff -= Math.PI * 2;
-                // 最大回頭レート制限 (旧: diff*0.03 = 無制限比例ターン)
-                this.angle += Math.sign(diff) * Math.min(Math.abs(diff), PLAYER_TURN_RATE * gameSpeedFactor);
+                // 艦種別最大回頭レート制限
+                const _pTR = (PLAYER_TURN_RATES[gameState.shipType] || PLAYER_TURN_RATE) * gameSpeedFactor;
+                this.angle += Math.sign(diff) * Math.min(Math.abs(diff), _pTR);
 
                 if (dist > wRange * 0.8) {
                     this.x += Math.cos(this.angle) * this.speed;
@@ -1837,14 +1840,16 @@ class Ship {
                 }
             } else if (this.state === 'moving') {
                 const dist = Math.hypot(this.targetX - this.x, this.targetY - this.y);
-                if (dist > this.speed) {
-                    this.x += ((this.targetX - this.x) / dist) * this.speed;
-                    this.y += ((this.targetY - this.y) / dist) * this.speed;
+                if (dist > this.speed * 1.5) {
                     const ta = Math.atan2(this.targetY - this.y, this.targetX - this.x);
                     let diff = ta - this.angle;
                     while (diff < -Math.PI) diff += Math.PI * 2;
                     while (diff > Math.PI) diff -= Math.PI * 2;
-                    this.angle += diff * 0.02; // slow turn
+                    const _wpTR = (PLAYER_TURN_RATES[gameState.shipType] || PLAYER_TURN_RATE) * gameSpeedFactor;
+                    this.angle += Math.sign(diff) * Math.min(Math.abs(diff), _wpTR);
+                    // 艦首方向へ前進（旋回慣性）
+                    this.x += Math.cos(this.angle) * this.speed;
+                    this.y += Math.sin(this.angle) * this.speed;
                 } else this.state = 'idle';
             }
 
@@ -1901,7 +1906,8 @@ class Ship {
                     let diff = ta - this.angle;
                     while (diff < -Math.PI) diff += Math.PI * 2;
                     while (diff > Math.PI) diff -= Math.PI * 2;
-                    this.angle += diff * 0.05;
+                    const _eTR_dc = (ENEMY_TURN_RATES[this.type] || 0.035) * gameSpeedFactor;
+                    this.angle += Math.sign(diff) * Math.min(Math.abs(diff), _eTR_dc);
                     this.speed = 0.8;
                     this.x += Math.cos(this.angle) * this.speed;
                     this.y += Math.sin(this.angle) * this.speed;
@@ -1924,7 +1930,8 @@ class Ship {
                         let diff = ta - this.angle;
                         while (diff < -Math.PI) diff += Math.PI * 2;
                         while (diff > Math.PI) diff -= Math.PI * 2;
-                        this.angle += diff * 0.04;
+                        const _eTR_pf = (ENEMY_TURN_RATES[this.type] || 0.035) * gameSpeedFactor;
+                        this.angle += Math.sign(diff) * Math.min(Math.abs(diff), _eTR_pf);
                     } else {
                         this.state = 'idle';
                         this.lurking = true; // 新しい場所に着いたら潜伏再開
@@ -2095,7 +2102,8 @@ class Ship {
                     let diff = ta - this.angle;
                     while (diff < -Math.PI) diff += Math.PI * 2;
                     while (diff > Math.PI) diff -= Math.PI * 2;
-                    this.angle += diff * 0.1;
+                    const _eTR_cb = (ENEMY_TURN_RATES[this.type] || 0.035) * gameSpeedFactor;
+                    this.angle += Math.sign(diff) * Math.min(Math.abs(diff), _eTR_cb);
                     let wType = gameState.sector <= 2 ? 'kinetic' : (gameState.sector <= 4 ? 'missile' : 'beam');
                     // 適応: プレイヤーが実弾近接戦と推定されたら長射程へ切替 (アウトレンジ)
                     if (this.predictedBehavior === 'kinetic' && wType === 'kinetic') wType = 'missile';
@@ -2135,7 +2143,8 @@ class Ship {
                         let diff = moveAngle - this.angle;
                         while (diff < -Math.PI) diff += Math.PI * 2;
                         while (diff > Math.PI) diff -= Math.PI * 2;
-                        this.angle += diff * 0.05;
+                        const _eTR_cm = (ENEMY_TURN_RATES[this.type] || 0.035) * gameSpeedFactor;
+                        this.angle += Math.sign(diff) * Math.min(Math.abs(diff), _eTR_cm);
                         this.x += Math.cos(this.angle) * this.speed;
                         this.y += Math.sin(this.angle) * this.speed;
                     }
@@ -2159,7 +2168,8 @@ class Ship {
                         let diff = ta - this.angle;
                         while (diff < -Math.PI) diff += Math.PI * 2;
                         while (diff > Math.PI) diff -= Math.PI * 2;
-                        this.angle += diff * 0.05;
+                        const _eTR_hn = (ENEMY_TURN_RATES[this.type] || 0.035) * gameSpeedFactor;
+                        this.angle += Math.sign(diff) * Math.min(Math.abs(diff), _eTR_hn);
                         this.x += Math.cos(this.angle) * this.speed;
                         this.y += Math.sin(this.angle) * this.speed;
                     } else {
@@ -2185,7 +2195,8 @@ class Ship {
                         let diff = ta - this.angle;
                         while (diff < -Math.PI) diff += Math.PI * 2;
                         while (diff > Math.PI) diff -= Math.PI * 2;
-                        this.angle += diff * 0.05;
+                        const _eTR_ga = (ENEMY_TURN_RATES[this.type] || 0.035) * gameSpeedFactor;
+                        this.angle += Math.sign(diff) * Math.min(Math.abs(diff), _eTR_ga);
                         this.x += Math.cos(this.angle) * this.speed;
                         this.y += Math.sin(this.angle) * this.speed;
                     } else if (this.gatherTarget.active) {
@@ -2226,7 +2237,8 @@ class Ship {
                         let diff = ta - this.angle;
                         while (diff < -Math.PI) diff += Math.PI * 2;
                         while (diff > Math.PI) diff -= Math.PI * 2;
-                        this.angle += diff * 0.02;
+                        const _eTR_lk = (ENEMY_TURN_RATES[this.type] || 0.035) * gameSpeedFactor;
+                        this.angle += Math.sign(diff) * Math.min(Math.abs(diff), _eTR_lk);
                     } else this.state = 'idle';
                 }
             }
@@ -4091,6 +4103,7 @@ function drawPassiveAntenna(ctx) {
         const _hsp = SPRITES['particle_heat'];
         ctx.globalCompositeOperation = 'lighter';
         heatTrails.forEach(w => {
+            if (w.isPlayerTrail) return; // 自機の排気は自センサーには映らない
             if (Math.hypot(w.x - player.x, w.y - player.y) > sensorRange) return;
             const r = Math.max(3, 6 * w.intensity);
             ctx.globalAlpha = w.life * 0.65;
@@ -5980,7 +5993,7 @@ function gameLoop() {
             }
             // §3-12 HEAT trail: エンジン熱排気 (移動時)
             if (!repairActive && player.heatSig > 0.07 && Math.random() < 0.22) {
-                if (heatTrails.length < 600) heatTrails.push({ x: player.x, y: player.y, intensity: player.heatSig, life: 1.0 });
+                if (heatTrails.length < 600) heatTrails.push({ x: player.x, y: player.y, intensity: player.heatSig, life: 1.0, isPlayerTrail: true });
             }
         }
         // §3-12 EM trail: AI処理放射 (移動に関係なく高EM時)
