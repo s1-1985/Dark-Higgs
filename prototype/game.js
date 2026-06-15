@@ -2417,9 +2417,11 @@ class Ship {
                     ctx.globalCompositeOperation = 'source-over';
                     ctx.globalAlpha = 1;
                 }
-                // ハルスプライト (加算合成で黒背景=透明・発光部だけ輝く)
+                // ハルスプライト (lighter+alpha制限で過飽和防止)
                 ctx.globalCompositeOperation = 'lighter';
+                ctx.globalAlpha = 0.55;
                 drawSpriteCentered(ctx, _psprite, this.radius * 6.4);
+                ctx.globalAlpha = 1;
                 ctx.globalCompositeOperation = 'source-over';
                 ctx.restore();
                 return;
@@ -2771,7 +2773,9 @@ class Ship {
                     ctx.beginPath(); ctx.arc(0, 0, this.radius * 3.5, 0, Math.PI * 2); ctx.fill();
                 }
                 ctx.globalCompositeOperation = 'lighter';
+                ctx.globalAlpha = 0.55;
                 drawSpriteCentered(ctx, _esprite, this.radius * (isFlashing ? 6.2 : 5.6));
+                ctx.globalAlpha = 1;
                 ctx.globalCompositeOperation = 'source-over';
                 ctx.restore();
                 return;
