@@ -358,4 +358,27 @@
 
 ---
 
-*最終更新: 2026-06-14 — PR#57・#58でHiggsfield全スプライト Phase1+2を適用。`origin/main`(PR#34-58)全反映済。全壁打ちタスク実装完了。残は任意拡張のみ。*
+---
+
+## 6. スプライト全面リデザイン（2026-06-15 着手予定）
+
+> 詳細な手順・プロンプトは **`HANDOVER.md` → 2026-06-15 セッションログ** を参照。
+
+### 6-1. ❌ UIアイコン6枚（#abar 親ボタン用）
+- `icon_scan.png` / `icon_ew.png` / `icon_nav.png` / `icon_drone.png` / `icon_sup.png` / `icon_atk.png`
+- Higgsfield `nano_banana_pro`、黒背景、1:1。48px以下でも読める最小デザイン
+- index.html の `.abar-btn` 内に `<img style="mix-blend-mode:screen">` として挿入
+
+### 6-2. ❌ 船体スプライト全面フォトリアル置換
+- 自機3種: `ship_assault.png` / `ship_stealth.png` / `ship_carrier.png`
+- 敵4種: `enemy_corvette.png` / `enemy_destroyer.png` / `enemy_carrier.png` / `enemy_fighter.png`
+- Higgsfield `nano_banana_pro`、黒背景、俯瞰、艦首右向き
+- game.js: `drawSpriteCentered` 呼び出し前後に `globalCompositeOperation = 'lighter'` を追加（自機~2413行、敵~2764行）
+
+### 6-3. ❌ 爆発エフェクト2枚フォトリアル置換
+- `fx_explosion_big.png` / `fx_explosion_small.png`
+- 既存スプライトを上書き（game.js 側は変更不要）
+
+---
+
+*最終更新: 2026-06-15 — スプライト全面リデザイン計画策定。mcp__Higgsfield__generate_image をallowlist追加済（新セッションから有効）。次セッションで15枚並列生成・実装予定。*
