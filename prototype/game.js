@@ -253,7 +253,8 @@ loadGame();
 function updateTopUI() {
     const modeLabel = gameState.mode === 'sd' ? 'S&D' : 'BR';
     document.getElementById('sector-display').textContent = `セクター: ${gameState.sector} [${modeLabel}]`;
-    document.getElementById('currency-display').textContent = `スクラップ: ${gameState.credits} SCR`;
+    const _cd = document.getElementById('currency-display');
+    if (_cd) _cd.textContent = `スクラップ: ${gameState.credits} SCR`;
 }
 updateTopUI();
 
@@ -1195,8 +1196,8 @@ class Structure {
         const t = Date.now();
         const hColor = this.hacked ? '#00aaff' : null;
 
-        // Adaptive icon scale: full size at zoom>=1, shrinks proportionally below
-        const _iconS = Math.max(4, Math.min(28, camera.zoom * 28)) / (camera.zoom * 28);
+        // アイコンスケール: 最低20px画面サイズを保証（Stationと同様の視認性）
+        const _iconS = Math.max(20, Math.min(28, camera.zoom * 28)) / (camera.zoom * 28);
         // スプライト優先 (読み込めていればベクターより優先)
         const _ssp = SPRITES[this.type === 'colony' ? 'colony' : 'derelict'];
         if (spriteReady(_ssp)) {
@@ -1283,17 +1284,17 @@ class Structure {
             ctx.lineWidth = 1 / camera.zoom; ctx.stroke();
         }
 
-        // Name label (same adaptive scale as icon)
+        // ランドマークラベル: Station スタイルで最低9px確保
         ctx.save();
         ctx.translate(this.x, this.y);
-        ctx.scale(_iconS, _iconS);
         const _lColor = this.type === 'colony' ? (this.hacked ? '#00ffcc' : '#6699ff') : (this.hacked ? '#00ffcc' : '#bb9966');
         const _lText  = this.type === 'colony' ? (this.hacked ? 'COLONY [HACKED]' : 'COLONY NODE') : (this.hacked ? 'DERELICT [HACKED]' : 'DERELICT');
+        const _lFontPx = Math.max(9, Math.min(14, camera.zoom * 14)) / camera.zoom;
         ctx.fillStyle = _lColor;
-        ctx.font = 'bold 11px Orbitron, monospace';
+        ctx.font = `bold ${_lFontPx.toFixed(1)}px Orbitron, monospace`;
         ctx.textAlign = 'center';
-        ctx.shadowColor = _lColor; ctx.shadowBlur = 3;
-        ctx.fillText(_lText, 0, -46);
+        ctx.shadowColor = _lColor; ctx.shadowBlur = 2;
+        ctx.fillText(_lText, 0, -60 / camera.zoom);
         ctx.shadowBlur = 0;
         ctx.restore();
 
@@ -2522,11 +2523,8 @@ class Ship {
                         ctx.fill();
                     });
                 }
-                ctx.globalCompositeOperation = 'screen';
-                ctx.globalAlpha = 0.9;
-                drawSpriteCentered(ctx, _psprite, this.radius * 6.4);
                 ctx.globalAlpha = 1;
-                ctx.globalCompositeOperation = 'source-over';
+                drawSpriteCentered(ctx, _psprite, this.radius * 6.4);
                 ctx.restore();
                 return;
             }
@@ -2882,11 +2880,8 @@ class Ship {
                     ctx.fillStyle = fg;
                     ctx.beginPath(); ctx.arc(0, 0, this.radius * 3.5, 0, Math.PI * 2); ctx.fill();
                 }
-                ctx.globalCompositeOperation = 'screen';
-                ctx.globalAlpha = 0.92;
-                drawSpriteCentered(ctx, _esprite, this.radius * (isFlashing ? 6.2 : 5.6));
                 ctx.globalAlpha = 1;
-                ctx.globalCompositeOperation = 'source-over';
+                drawSpriteCentered(ctx, _esprite, this.radius * (isFlashing ? 6.2 : 5.6));
                 ctx.restore();
                 return;
             }
@@ -3562,6 +3557,34 @@ function toggleDemoMode() {
     logMessage(demoMode ? 'DEMO MODE: 全視界・ヒッグス暗幕解除 (AI挙動は通常と同一)' : 'DEMO MODE: 解除', 'system-msg');
 }
 
+function updateLandmarkBanner() {
+    if (!player || player.hp <= 0) return;
+    const banner = document.getElementById('landmark-banner');
+    if (!banner) return;
+    const range = effectiveRadarRange * 4;
+    const items = [];
+    for (const s of structures) {
+        const d = Math.hypot(s.x - player.x, s.y - player.y);
+        if (d < range) {
+            const icon = s.type === 'colony' ? '◈' : '⊗';
+            const name = s.type === 'colony'
+                ? (s.hacked ? 'COLONY [HACKED]' : 'COLONY NODE')
+                : (s.hacked ? 'DERELICT [HACKED]' : 'DERELICT');
+            items.push(`${icon} ${name} ${Math.round(d)}u`);
+        }
+    }
+    for (const st of stations) {
+        const d = Math.hypot(st.x - player.x, st.y - player.y);
+        if (d < range) items.push(`⊕ SUPPLY STATION ${Math.round(d)}u`);
+    }
+    if (items.length > 0) {
+        banner.textContent = items.join('  ·  ');
+        banner.style.display = 'block';
+    } else {
+        banner.style.display = 'none';
+    }
+}
+
 function startGame(shipType) {
     gameState.shipType = shipType;
     // 敵艦種: ロビーで選択された値をセット
@@ -3889,7 +3912,7 @@ document.getElementById('btn-repair-drone')?.addEventListener('click', () => {
 
 // ── モバイルメニュー ──
 (function initMobileMenu() {
-    const menuBtn = document.getElementById('mobile-menu-btn');
+    const menuBtn = document.getElementById('menu-btn');
     const menuModal = document.getElementById('mobile-menu-modal');
     if (!menuBtn || !menuModal) return;
     menuBtn.addEventListener('click', () => menuModal.classList.toggle('hidden'));
@@ -6351,16 +6374,15 @@ function gameLoop() {
                 }
                 ctx.restore();
                 if (inRange || isHiggsSnsr) {
-                    const _cIconS = Math.max(4, Math.min(28, camera.zoom * 28)) / (camera.zoom * 28);
                     ctx.save();
                     ctx.translate(n.x, n.y);
-                    ctx.scale(_cIconS, _cIconS);
                     ctx.globalAlpha = brightness;
                     ctx.fillStyle = '#80e8ff';
-                    ctx.font = 'bold 10px Orbitron, monospace';
+                    const _nFontPx = Math.max(9, Math.min(13, camera.zoom * 13)) / camera.zoom;
+                    ctx.font = `bold ${_nFontPx.toFixed(1)}px Orbitron, monospace`;
                     ctx.textAlign = 'center';
-                    if (_blurEnabled) { ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = 4; }
-                    ctx.fillText('HIGGS CRYSTAL', 0, -36);
+                    if (_blurEnabled) { ctx.shadowColor = '#50c8ff'; ctx.shadowBlur = 3; }
+                    ctx.fillText('HIGGS CRYSTAL', 0, -52 / camera.zoom);
                     ctx.shadowBlur = 0;
                     ctx.restore();
                 }
@@ -6439,6 +6461,7 @@ function gameLoop() {
         if (_frameCount % 2 === 0) updateSigCanvas();
         if (_frameCount % 3 === 0) drawMinimap();
         if (_frameCount % 10 === 0) updateEnvInfo();
+        if (_frameCount % 20 === 0) updateLandmarkBanner();
 
         // FPS表示 (デバッグ用) — 左下コーナー・コンソール上方
         if (PERF_SHOW_FPS) {
