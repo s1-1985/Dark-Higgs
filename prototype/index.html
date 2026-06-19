@@ -11,7 +11,7 @@
     <title>Dark Echo: Tactical Space RTS</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23000' stroke='%2300ff88' stroke-width='2'/><circle cx='16' cy='16' r='6' fill='none' stroke='%2300ff88' stroke-width='1.5'/><line x1='16' y1='2' x2='16' y2='30' stroke='%2300ff88' stroke-width='1' opacity='0.4'/><line x1='2' y1='16' x2='30' y2='16' stroke='%2300ff88' stroke-width='1' opacity='0.4'/></svg>" type="image/svg+xml">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20260615k">
+    <link rel="stylesheet" href="style.css?v=20260615l">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -24,19 +24,19 @@
 
         <!-- マップモード バナー (ミニマップタップで表示) -->
         <div id="map-mode-banner" style="display:none; position:absolute; top:54px; left:50%; transform:translateX(-50%); z-index:60; padding:4px 14px; background:rgba(0,20,16,0.8); border:1px solid #00ffaa; border-radius:4px; color:#00ffaa; font-family:'Orbitron',monospace; font-size:11px; letter-spacing:1px; pointer-events:none; box-shadow:0 0 12px rgba(0,255,170,0.3);">◰ MAP MODE — タップで航路設定 / ミニマップ再タップで戻る</div>
+        <!-- ランドマークバナー (近接ランドマーク名を表示) -->
+        <div id="landmark-banner" style="display:none; position:absolute; top:54px; left:50%; transform:translateX(-50%); z-index:55; padding:3px 12px; background:rgba(0,8,20,0.88); border:1px solid rgba(77,166,255,0.35); border-radius:4px; color:#88bbff; font-family:'Orbitron',monospace; font-size:9px; letter-spacing:1px; pointer-events:none; white-space:nowrap; max-width:92vw; overflow:hidden; text-overflow:ellipsis;"></div>
 
         <!-- UI Overlay -->
         <div id="ui-layer">
             <!-- Top Bar (New feature for Save & Currency) -->
             <div id="top-bar">
                 <span id="sector-display">セクター: 1</span>
-                <div id="top-bar-desktop">
-                    <span id="currency-display">クレジット: 0 CR</span>
-                    <button class="btn btn-primary btn-small" id="btn-save">データ保存 (ローカル)</button>
-                    <button class="btn btn-primary btn-small" id="btn-reset">リセット</button>
-                </div>
+                <!-- btn-save/btn-reset はモーダル経由で操作 (JS参照用に非表示で保持) -->
+                <button id="btn-save" style="display:none">save</button>
+                <button id="btn-reset" style="display:none">reset</button>
                 <button class="btn btn-small" id="btn-demo-mode" onclick="toggleDemoMode()" style="border-color:#44aa44; color:#88cc88; font-size:10px; padding:3px 8px;">DEMO</button>
-                <button class="btn btn-small" id="mobile-menu-btn">≡</button>
+                <button class="btn btn-small" id="menu-btn">≡</button>
             </div>
 
             <!-- Minimap -->
@@ -695,7 +695,7 @@
 
     </div>
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20260615k"></script>
+    <script src="game.js?v=20260615l"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {

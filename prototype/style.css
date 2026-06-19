@@ -942,13 +942,16 @@ input[type=range]::-webkit-slider-thumb {
 }
 
 /* ============================================================
-   モバイルステータスバー / モバイルメニュー (デスクトップでは非表示)
+   モバイルステータスバー / メニュー
    ============================================================ */
 #mobile-status-bar {
     display: none;
 }
-#mobile-menu-btn {
-    display: none;
+#menu-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
 }
 #mobile-menu-modal {
     position: fixed;
@@ -1030,7 +1033,7 @@ input[type=range]::-webkit-slider-thumb {
         letter-spacing: 0.5px;
     }
     #top-bar-desktop { display: none !important; }
-    #mobile-menu-btn {
+    #menu-btn {
         display: flex !important;
         align-items: center;
         justify-content: center;
