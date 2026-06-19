@@ -11,7 +11,7 @@
     <title>Dark Echo: Tactical Space RTS</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23000' stroke='%2300ff88' stroke-width='2'/><circle cx='16' cy='16' r='6' fill='none' stroke='%2300ff88' stroke-width='1.5'/><line x1='16' y1='2' x2='16' y2='30' stroke='%2300ff88' stroke-width='1' opacity='0.4'/><line x1='2' y1='16' x2='30' y2='16' stroke='%2300ff88' stroke-width='1' opacity='0.4'/></svg>" type="image/svg+xml">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20260619a">
+    <link rel="stylesheet" href="style.css?v=20260619b">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -84,6 +84,12 @@
                     <span class="msb-sep">ノード:<span id="msb-nodes" class="msb-val" style="color:#00ffaa;">--</span></span>
                 </div>
 
+                <!-- タブバー (モバイル用) -->
+                <div id="bottom-tab-bar">
+                    <button class="bottom-tab active" data-tab="combat">COMBAT</button>
+                    <button class="bottom-tab" data-tab="system">SYSTEM</button>
+                </div>
+
                 <!-- 左: 艦体ステータス -->
                 <div class="console-panel left-panel">
                     <div class="panel-header">SHIP STATUS</div>
@@ -112,7 +118,7 @@
 
                 <!-- 中央: GEN配分 + 兵装 + センサー -->
                 <div class="console-panel center-panel">
-                    <div class="gen-control">
+                    <div class="gen-control" data-tab-group="system">
                         <div class="gen-header"><span>GEN配分</span><span id="gen-total" class="gen-total">計100%</span></div>
                         <div class="gen-sliders">
                             <div class="gen-row">
@@ -172,7 +178,7 @@
                         <option value="missile">missile</option>
                         <option value="beam">beam</option>
                     </select>
-                    <div class="isel-section">
+                    <div class="isel-section" data-tab-group="combat">
                         <span class="isel-label">WEAPON</span>
                         <div class="isel-group" id="weapon-icon-group">
                             <button class="isel-btn active" data-val="kinetic" title="キネティック弾 — 短距離・高速連射">
@@ -220,7 +226,7 @@
                         <option value="higgs">higgs</option>
                         <option value="photon">photon</option>
                     </select>
-                    <div class="isel-section">
+                    <div class="isel-section" data-tab-group="system">
                         <span class="isel-label">ENGINE</span>
                         <div class="isel-group" id="engine-icon-group">
                             <button class="isel-btn active" data-val="thermonuclear" title="熱核エンジン — 高出力・熱源大">
@@ -265,7 +271,7 @@
                     </div>
 
                     <!-- センサーアイコン選択 -->
-                    <div class="isel-section">
+                    <div class="isel-section" data-tab-group="combat">
                         <span class="isel-label">SENSOR</span>
                         <div class="isel-group">
                             <button class="isel-btn sns-btn active" id="sensor-heat" title="熱源センサー — 推進熱・発砲熱検知">
@@ -306,7 +312,7 @@
                 </div>
 
                 <!-- 右: アクションボタン -->
-                <div class="console-panel action-panel">
+                <div class="console-panel action-panel" data-tab-group="combat">
                     <!-- Mobile: アクションポップオーバー (親タップで展開) -->
                     <div id="action-popover"></div>
                     <!-- Mobile: 親アクションバー (1行・常時表示) -->
@@ -705,7 +711,7 @@
 
     </div>
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20260619a"></script>
+    <script src="game.js?v=20260619b"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -817,6 +823,25 @@
             }
         }
         setInterval(syncAtkLabel, 400);
+    })();
+
+    // ── 下部タブ切り替え (モバイル用) ────────────────────────────────────────
+    (function() {
+        var tabBar = document.getElementById('bottom-tab-bar');
+        if (!tabBar) return;
+        var bc = document.getElementById('bottom-console');
+        bc.classList.add('tab-combat'); // 初期タブ: COMBAT
+
+        tabBar.querySelectorAll('.bottom-tab').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                tabBar.querySelectorAll('.bottom-tab').forEach(function(b) {
+                    b.classList.remove('active');
+                });
+                btn.classList.add('active');
+                bc.classList.remove('tab-combat', 'tab-system');
+                bc.classList.add('tab-' + btn.dataset.tab);
+            });
+        });
     })();
     </script>
 </body>
