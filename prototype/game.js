@@ -252,9 +252,9 @@ loadGame();
 
 function updateTopUI() {
     const modeLabel = gameState.mode === 'sd' ? 'S&D' : 'BR';
-    document.getElementById('sector-display').textContent = `セクター: ${gameState.sector} [${modeLabel}]`;
+    document.getElementById('sector-display').textContent = `SECTOR ${gameState.sector} · ${modeLabel}`;
     const _cd = document.getElementById('currency-display');
-    if (_cd) _cd.textContent = `スクラップ: ${gameState.credits} SCR`;
+    if (_cd) _cd.textContent = `${gameState.credits}`;
 }
 updateTopUI();
 
