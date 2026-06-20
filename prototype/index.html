@@ -11,7 +11,7 @@
     <title>Dark Echo: Tactical Space RTS</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23000' stroke='%2300ff88' stroke-width='2'/><circle cx='16' cy='16' r='6' fill='none' stroke='%2300ff88' stroke-width='1.5'/><line x1='16' y1='2' x2='16' y2='30' stroke='%2300ff88' stroke-width='1' opacity='0.4'/><line x1='2' y1='16' x2='30' y2='16' stroke='%2300ff88' stroke-width='1' opacity='0.4'/></svg>" type="image/svg+xml">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20260702">
+    <link rel="stylesheet" href="style.css?v=20260703">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -189,8 +189,8 @@
                         <div style="display:flex; flex-direction:row; gap:4px; align-items:stretch;">
                             <!-- Left: engine/sensor icon toggle column -->
                             <div style="display:flex; flex-direction:column; justify-content:space-between; flex-shrink:0; width:34px; gap:4px;">
-                                <button class="gcb gcb-active-thr" id="engine-gcb" title="エンジン種別 (タップで選択)" style="flex:1; height:auto;"><span id="engine-gcb-label">THR</span></button>
-                                <button class="gcb gcb-active-heat" id="sensor-gcb" title="センサー種別 (タップで選択)" style="flex:1; height:auto;"><span id="sensor-gcb-label">HEAT</span></button>
+                                <button class="gcb gcb-active-thr" id="engine-gcb" title="エンジン種別 (タップで切替)" style="flex:1; height:auto; display:flex; flex-direction:column; align-items:center; gap:1px; padding:2px 1px;"><div id="engine-gcb-icon" style="width:18px; height:18px; display:flex; align-items:center; justify-content:center;"></div><span id="engine-gcb-label" style="font-size:7px; line-height:1;">THR</span></button>
+                                <button class="gcb gcb-active-heat" id="sensor-gcb" title="センサー種別 (タップで切替)" style="flex:1; height:auto; display:flex; flex-direction:column; align-items:center; gap:1px; padding:2px 1px;"><div id="sensor-gcb-icon" style="width:18px; height:18px; display:flex; align-items:center; justify-content:center;"></div><span id="sensor-gcb-label" style="font-size:7px; line-height:1;">HEAT</span></button>
                             </div>
                             <!-- Right: all sliders -->
                             <div style="flex:1; min-width:0;">
@@ -821,7 +821,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20260702"></script>
+    <script src="game.js?v=20260703"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -965,78 +965,77 @@
         applyWeapon(_sel.value || 'kinetic');
     })();
 
-    // ── GCB (コンパクトボタン) フライアウト: エンジン & センサー ─────────────────
+    // ── GCB (コンパクトボタン) タップでサイクル: エンジン & センサー ──────────────
     (function() {
-        var ENGINE_COLORS = {
-            thermonuclear: { gcbClass: 'gcb-active-thr',   optClass: 'opt-thr',   label: 'THR' },
-            pulse:         { gcbClass: 'gcb-active-pls',   optClass: 'opt-pls',   label: 'PLS' },
-            higgs:         { gcbClass: 'gcb-active-hgs',   optClass: 'opt-hgs',   label: 'HGS' },
-            photon:        { gcbClass: 'gcb-active-pht',   optClass: 'opt-pht',   label: 'PHT' },
+        var ENGINE_CYCLE = ['thermonuclear', 'photon', 'pulse', 'higgs'];
+        var SENSOR_CYCLE = ['heat', 'optic', 'em', 'higgs'];
+        var ENGINE_INFO = {
+            thermonuclear: { gcbClass: 'gcb-active-thr', label: 'THR' },
+            pulse:         { gcbClass: 'gcb-active-pls', label: 'PLS' },
+            higgs:         { gcbClass: 'gcb-active-hgs', label: 'HGS' },
+            photon:        { gcbClass: 'gcb-active-pht', label: 'PHT' },
         };
-        var SENSOR_COLORS = {
-            heat:  { gcbClass: 'gcb-active-heat',  optClass: 'opt-heat',  label: 'HEAT' },
-            optic: { gcbClass: 'gcb-active-optic', optClass: 'opt-optic', label: 'OPT'  },
-            em:    { gcbClass: 'gcb-active-em',    optClass: 'opt-em',    label: 'EM'   },
-            higgs: { gcbClass: 'gcb-active-higgs', optClass: 'opt-higgs', label: 'HGS'  },
+        var SENSOR_INFO = {
+            heat:  { gcbClass: 'gcb-active-heat',  label: 'HEAT' },
+            optic: { gcbClass: 'gcb-active-optic', label: 'OPT'  },
+            em:    { gcbClass: 'gcb-active-em',    label: 'EM'   },
+            higgs: { gcbClass: 'gcb-active-higgs', label: 'HGS'  },
         };
 
-        var _engGcb     = document.getElementById('engine-gcb');
-        var _engLabel   = document.getElementById('engine-gcb-label');
-        var _engFlyout  = document.getElementById('engine-gcb-flyout');
-        var _engSel     = document.getElementById('engine-type-select');
-        var _engIsel    = document.getElementById('engine-isel-section');
+        var _engGcb    = document.getElementById('engine-gcb');
+        var _engLabel  = document.getElementById('engine-gcb-label');
+        var _engIcon   = document.getElementById('engine-gcb-icon');
+        var _engFlyout = document.getElementById('engine-gcb-flyout');
+        var _engSel    = document.getElementById('engine-type-select');
 
-        var _snsGcb     = document.getElementById('sensor-gcb');
-        var _snsLabel   = document.getElementById('sensor-gcb-label');
-        var _snsFlyout  = document.getElementById('sensor-gcb-flyout');
-        var _snsIsel    = document.getElementById('sensor-isel-section');
+        var _snsGcb    = document.getElementById('sensor-gcb');
+        var _snsLabel  = document.getElementById('sensor-gcb-label');
+        var _snsIcon   = document.getElementById('sensor-gcb-icon');
+        var _snsFlyout = document.getElementById('sensor-gcb-flyout');
+        var _snsIsel   = document.getElementById('sensor-isel-section');
 
-        function closeFlyouts(except) {
-            if (except !== 'engine') {
-                if (_engFlyout) _engFlyout.classList.remove('open');
-            }
-            if (except !== 'sensor') {
-                if (_snsFlyout) _snsFlyout.classList.remove('open');
-            }
+        var _curEngine = 'thermonuclear';
+        var _curSensor = 'heat';
+
+        function _injectSvg(iconDiv, flyout, attrKey, val) {
+            if (!iconDiv || !flyout) return;
+            var srcBtn = flyout.querySelector('[' + attrKey + '="' + val + '"]');
+            var svg = srcBtn ? srcBtn.querySelector('svg') : null;
+            iconDiv.innerHTML = svg ? svg.outerHTML : '';
+            var el = iconDiv.querySelector('svg');
+            if (el) { el.style.width = '18px'; el.style.height = '18px'; }
         }
 
-        // ── エンジン GCB ──────────────────────────────────────────────
         function applyEngineGcb(val) {
-            var info = ENGINE_COLORS[val];
+            var info = ENGINE_INFO[val];
             if (!info || !_engGcb) return;
-            Object.keys(ENGINE_COLORS).forEach(function(k) {
-                _engGcb.classList.remove(ENGINE_COLORS[k].gcbClass);
-            });
+            _curEngine = val;
+            Object.keys(ENGINE_INFO).forEach(function(k) { _engGcb.classList.remove(ENGINE_INFO[k].gcbClass); });
             _engGcb.classList.add(info.gcbClass);
             if (_engLabel) _engLabel.textContent = info.label;
-            if (_engFlyout) _engFlyout.querySelectorAll('.gcb-opt').forEach(function(b) {
-                b.classList.toggle('active', b.dataset.engineVal === val);
-            });
+            _injectSvg(_engIcon, _engFlyout, 'data-engine-val', val);
         }
 
+        function applySensorGcb(val) {
+            var info = SENSOR_INFO[val];
+            if (!info || !_snsGcb) return;
+            _curSensor = val;
+            Object.keys(SENSOR_INFO).forEach(function(k) { _snsGcb.classList.remove(SENSOR_INFO[k].gcbClass); });
+            _snsGcb.classList.add(info.gcbClass);
+            if (_snsLabel) _snsLabel.textContent = info.label;
+            _injectSvg(_snsIcon, _snsFlyout, 'data-sensor-val', val);
+        }
+
+        // エンジン: タップでサイクル
         if (_engGcb) {
             _engGcb.addEventListener('click', function(e) {
                 e.stopPropagation();
-                var isOpen = _engFlyout && _engFlyout.classList.contains('open');
-                closeFlyouts();
-                if (!isOpen && _engFlyout) _engFlyout.classList.add('open');
-            });
-        }
-
-        if (_engFlyout) {
-            _engFlyout.querySelectorAll('.gcb-opt').forEach(function(btn) {
-                btn.addEventListener('click', function(e) {
-                    e.stopPropagation();
-                    var val = btn.dataset.engineVal;
-                    if (!val) return;
-                    applyEngineGcb(val);
-                    // 既存の hidden select + isel-group を同期
-                    if (_engSel) { _engSel.value = val; _engSel.dispatchEvent(new Event('change')); }
-                    var engGrp = document.getElementById('engine-icon-group');
-                    if (engGrp) engGrp.querySelectorAll('.isel-btn').forEach(function(b) {
-                        b.classList.toggle('active', b.dataset.val === val);
-                    });
-                    closeFlyouts();
+                var next = ENGINE_CYCLE[(ENGINE_CYCLE.indexOf(_curEngine) + 1) % ENGINE_CYCLE.length];
+                applyEngineGcb(next);
+                if (_engSel) { _engSel.value = next; _engSel.dispatchEvent(new Event('change')); }
+                var engGrp = document.getElementById('engine-icon-group');
+                if (engGrp) engGrp.querySelectorAll('.isel-btn').forEach(function(b) {
+                    b.classList.toggle('active', b.dataset.val === next);
                 });
             });
         }
@@ -1052,41 +1051,14 @@
             });
         }
 
-        // ── センサー GCB ──────────────────────────────────────────────
-        function applySensorGcb(val) {
-            var info = SENSOR_COLORS[val];
-            if (!info || !_snsGcb) return;
-            Object.keys(SENSOR_COLORS).forEach(function(k) {
-                _snsGcb.classList.remove(SENSOR_COLORS[k].gcbClass);
-            });
-            _snsGcb.classList.add(info.gcbClass);
-            if (_snsLabel) _snsLabel.textContent = info.label;
-            if (_snsFlyout) _snsFlyout.querySelectorAll('.gcb-opt').forEach(function(b) {
-                b.classList.toggle('active', b.dataset.sensorVal === val);
-            });
-        }
-
+        // センサー: タップでサイクル
         if (_snsGcb) {
             _snsGcb.addEventListener('click', function(e) {
                 e.stopPropagation();
-                var isOpen = _snsFlyout && _snsFlyout.classList.contains('open');
-                closeFlyouts();
-                if (!isOpen && _snsFlyout) _snsFlyout.classList.add('open');
-            });
-        }
-
-        if (_snsFlyout) {
-            _snsFlyout.querySelectorAll('.gcb-opt').forEach(function(btn) {
-                btn.addEventListener('click', function(e) {
-                    e.stopPropagation();
-                    var val = btn.dataset.sensorVal;
-                    if (!val) return;
-                    applySensorGcb(val);
-                    // game.js の既存センサーボタンをクリックして currentSensor を更新
-                    var realBtn = document.getElementById('sensor-' + val);
-                    if (realBtn) realBtn.click();
-                    closeFlyouts();
-                });
+                var next = SENSOR_CYCLE[(SENSOR_CYCLE.indexOf(_curSensor) + 1) % SENSOR_CYCLE.length];
+                applySensorGcb(next);
+                var realBtn = document.getElementById('sensor-' + next);
+                if (realBtn) realBtn.click();
             });
         }
 
@@ -1101,18 +1073,9 @@
             });
         }
 
-        // フライアウト外クリックで閉じる
-        document.addEventListener('click', function(e) {
-            if (_engGcb && !_engGcb.contains(e.target) && _engFlyout && !_engFlyout.contains(e.target)) {
-                _engFlyout.classList.remove('open');
-            }
-            if (_snsGcb && !_snsGcb.contains(e.target) && _snsFlyout && !_snsFlyout.contains(e.target)) {
-                _snsFlyout.classList.remove('open');
-            }
-        });
-
         // 初期状態を設定
         if (_engSel) applyEngineGcb(_engSel.value || 'thermonuclear');
+        else applyEngineGcb('thermonuclear');
         applySensorGcb('heat');
     })();
 
