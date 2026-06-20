@@ -58,6 +58,7 @@ let triangulationResult = null; // {x, y, precision, radius, frame}
 let _trigLastFrame = -999;
 let _prevTrigResult = null;      // Phase3: 前回の三角測量結果 (速度外挿用)
 let triangulationVelocity = null; // Phase3: 推定速度ベクトル {vx, vy} (world units/frame)
+let _lpmWorld = null;            // 長押しラジアルメニューのワールド座標
 const PASSIVE_BEARING_LIFE = 480;  // 8秒フェード (@60fps)
 const PASSIVE_BEARING_MAX  = 8;    // 同時表示上限 (古いものから破棄)
 let mouseWorldX = MAP_CX;
@@ -1107,14 +1108,9 @@ canvas.addEventListener('touchstart', (e) => {
                     touch.waypointFired = true;
                     return;
                 }
-                player.targetEntity = null;
-                player.setTarget(worldX, worldY);
-                createClickEffect(worldX, worldY, '#00ffaa');
-                const dist = Math.hypot(worldX - player.x, worldY - player.y);
-                const speedEst = Math.max(0.1, (genAlloc.engine / 100) * 3.0);
-                const timeSeconds = Math.max(1, Math.floor(dist / (speedEst * 60)));
-                logMessage(`NAV: 進路設定完了。到着予定時間はおよそ ${timeSeconds} 秒です。`, 'system-msg');
-                playSound('ui');
+                // 長押しラジアルメニューを表示（移動/射撃/キャンセル）
+                _lpmWorld = { x: worldX, y: worldY };
+                showLongPressMenu(touch.holdSX, touch.holdSY);
                 touch.waypointFired = true;
             }
         }, TOUCH_WAYPOINT_DELAY);
@@ -4457,6 +4453,92 @@ function drawTriangulationCircle(ctx) {
     ctx.restore();
 }
 
+// §4-4: 長押しラジアルメニュー表示/非表示
+function showLongPressMenu(sx, sy) {
+    const menu = document.getElementById('long-press-menu');
+    if (!menu) return;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let left = sx - 52, top = sy - 90;
+    if (left < 6) left = 6;
+    if (left + 108 > vw) left = vw - 114;
+    if (top < 6) top = 6;
+    if (top + 130 > vh) top = vh - 136;
+    menu.style.left = left + 'px';
+    menu.style.top  = top  + 'px';
+    menu.style.display = '';
+}
+function hideLongPressMenu() {
+    const menu = document.getElementById('long-press-menu');
+    if (menu) menu.style.display = 'none';
+}
+// 長押しメニュー「移動」選択
+function lpmSelectMove() {
+    hideLongPressMenu();
+    if (!_lpmWorld || !player) return;
+    player.targetEntity = null;
+    player.setTarget(_lpmWorld.x, _lpmWorld.y);
+    createClickEffect(_lpmWorld.x, _lpmWorld.y, '#00ffaa');
+    const dist = Math.hypot(_lpmWorld.x - player.x, _lpmWorld.y - player.y);
+    const speedEst = Math.max(0.1, (genAlloc.engine / 100) * 3.0);
+    const timeSeconds = Math.max(1, Math.floor(dist / (speedEst * 60)));
+    logMessage(`NAV: 進路設定完了。到着予定時間はおよそ ${timeSeconds} 秒です。`, 'system-msg');
+    playSound('ui');
+}
+// 長押しメニュー「射撃」選択 — 指定ワールド座標へ自由射撃 (MSL/BEAM)
+function lpmSelectFire() {
+    hideLongPressMenu();
+    if (!_lpmWorld || !player || player.hp <= 0) return;
+    const wx = _lpmWorld.x, wy = _lpmWorld.y;
+    const wType = document.getElementById('weapon-select')?.value;
+    if (wType !== 'missile' && wType !== 'beam') {
+        logMessage('WEP: 座標射撃はミサイル/ビームのみ有効', 'warning-msg'); return;
+    }
+    const _ffAng = Math.atan2(wy - player.y, wx - player.x);
+    let _ffDiff = _ffAng - player.angle;
+    while (_ffDiff < -Math.PI) _ffDiff += Math.PI * 2;
+    while (_ffDiff >  Math.PI) _ffDiff -= Math.PI * 2;
+    const _ffMaxArc = WEAPON_FIRE_ARC[wType] || (Math.PI / 4);
+    if (Math.abs(_ffDiff) > _ffMaxArc) {
+        logMessage(`WEP: 射角外 — 艦首±${Math.round(_ffMaxArc * 180 / Math.PI)}°以内に向けてから発射`, 'warning-msg'); return;
+    }
+    if (player.fireCooldown > 0) return;
+    const _ffGen = Math.max(0.3, 1.5 - (genAlloc.weapons / 100));
+    if (wType === 'missile') {
+        if (player.missileReloading) { logMessage('WEP: MISSILEリロード中', 'warning-msg'); return; }
+        projectiles.push(new Projectile(player.x, player.y, { x: wx, y: wy, hp: 999, radius: 1 }, true, 'missile', 1.0));
+        playSound('shoot');
+        player.fireCooldown = WEAPON_COOLDOWNS.missile * _ffGen;
+        player.missileReloading = true;
+        player.missileReloadTimer = Math.round(MISSILE_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0));
+        if (heatTrails.length < 600) heatTrails.push({ x: player.x, y: player.y, intensity: 0.9, life: 1.0, isPlayerTrail: false });
+        logMessage('WEP: 座標射撃(MSL) — 自位置シグネチャ露出', 'warning-msg');
+    } else {
+        if (player.beamReloading) { logMessage('WEP: BEAMリロード中', 'warning-msg'); return; }
+        const _bRange = 8000 * (WEAPONS_UPG_RANGE_MULT[gameState.upgrades.weapons] || 1.0);
+        const _bLen = Math.min(_bRange, Math.max(100, Math.hypot(wx - player.x, wy - player.y)));
+        const _bEx = player.x + Math.cos(_ffAng) * _bLen, _bEy = player.y + Math.sin(_ffAng) * _bLen;
+        effects.push({ x: player.x, y: player.y, tx: _bEx, ty: _bEy, type: 'beam', a: 1, c: '#00ffaa' });
+        enemies.forEach(en => {
+            if (en.hp <= 0) return;
+            const _bdx = _bEx - player.x, _bdy = _bEy - player.y, _bSq = _bdx*_bdx + _bdy*_bdy;
+            const _bt = _bSq > 0 ? Math.max(0, Math.min(1, ((en.x - player.x)*_bdx + (en.y - player.y)*_bdy) / _bSq)) : 0;
+            if (Math.hypot(en.x - (player.x + _bt*_bdx), en.y - (player.y + _bt*_bdy)) < en.radius * 1.5) {
+                const _hb = getHiggsIntensity((player.x + _bt*_bdx + en.x)/2, (player.y + _bt*_bdy + en.y)/2);
+                en.hp -= 150 * (1 - _hb * 0.8);
+                createHitEffect(en.x, en.y, '#00ffaa'); addShake(15);
+                logMessage('WEP: BEAM 命中！', 'system-msg');
+            }
+        });
+        player.emSig = Math.min(1, player.emSig + 0.3);
+        player.opticalSig = Math.min(1, player.opticalSig + 0.35);
+        player.beamReloading = true;
+        player.beamReloadTimer = Math.round(BEAM_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0));
+        player.fireCooldown = WEAPON_COOLDOWNS.beam * _ffGen;
+        addHiggsWake(player.x, player.y, 0.5);
+        logMessage('WEP: 座標射撃(BEAM) — 自位置シグネチャ露出', 'warning-msg');
+    }
+}
+
 // §4-4 Phase2: 三角測量推定座標への射撃 (解析パネルの「COORD FIRE」ボタンから呼ぶ)
 function coordFireAtTriangulation() {
     if (!triangulationResult || !player || player.hp <= 0) {
@@ -5171,6 +5253,36 @@ function drawMinimap() {
             minimapCtx.beginPath(); minimapCtx.arc(mx, my, 3, 0, Math.PI * 2); minimapCtx.fill();
             minimapCtx.shadowBlur = 0;
         });
+    }
+
+    // §4-4: 三角測量サークルをミニマップに表示
+    if (triangulationResult) {
+        const { x: tx, y: ty, precision: tp, radius: tr, frame: tf } = triangulationResult;
+        const _mmAf = Math.max(0, 1 - (_frameCount - tf) * TRIG_DECAY_PER_FRAME);
+        if (_mmAf > 0.01) {
+            const _mmx = tx * mmScale + offX, _mmy = ty * mmScale + offY;
+            const _mmr = Math.max(3, tr * mmScale);
+            const _mmCol = tp < 0.3 ? '255,80,0' : tp < 0.6 ? '255,160,0' : tp < 0.9 ? '80,255,120' : '100,200,255';
+            minimapCtx.globalAlpha = 0.7 * _mmAf;
+            minimapCtx.strokeStyle = `rgb(${_mmCol})`;
+            minimapCtx.lineWidth = 1;
+            minimapCtx.setLineDash([3, 3]);
+            minimapCtx.beginPath(); minimapCtx.arc(_mmx, _mmy, _mmr, 0, Math.PI * 2); minimapCtx.stroke();
+            minimapCtx.setLineDash([]);
+            minimapCtx.lineWidth = 1;
+            minimapCtx.beginPath(); minimapCtx.moveTo(_mmx - 4, _mmy); minimapCtx.lineTo(_mmx + 4, _mmy); minimapCtx.stroke();
+            minimapCtx.beginPath(); minimapCtx.moveTo(_mmx, _mmy - 4); minimapCtx.lineTo(_mmx, _mmy + 4); minimapCtx.stroke();
+            // ゴースト点 (精度≥80%かつ速度既知)
+            if (tp >= 0.80 && triangulationVelocity && (_frameCount - triangulationVelocity.frame) < 1200) {
+                const _mmDt = _frameCount - tf;
+                const _gmx = (tx + triangulationVelocity.vx * _mmDt) * mmScale + offX;
+                const _gmy = (ty + triangulationVelocity.vy * _mmDt) * mmScale + offY;
+                minimapCtx.globalAlpha = 0.75 * _mmAf;
+                minimapCtx.fillStyle = `rgb(${_mmCol})`;
+                minimapCtx.beginPath(); minimapCtx.arc(_gmx, _gmy, 3, 0, Math.PI * 2); minimapCtx.fill();
+            }
+            minimapCtx.globalAlpha = 1;
+        }
     }
 
     // クリップ解除後に円形境界線
