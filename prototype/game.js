@@ -2531,7 +2531,8 @@ class Ship {
                         ctx.fill();
                     });
                 }
-                ctx.globalAlpha = 1;
+                ctx.globalCompositeOperation = 'screen';
+                ctx.globalAlpha = 0.9;
                 drawSpriteCentered(ctx, _psprite, this.radius * 6.4);
                 ctx.restore();
                 return;
@@ -2888,7 +2889,8 @@ class Ship {
                     ctx.fillStyle = fg;
                     ctx.beginPath(); ctx.arc(0, 0, this.radius * 3.5, 0, Math.PI * 2); ctx.fill();
                 }
-                ctx.globalAlpha = 1;
+                ctx.globalCompositeOperation = 'screen';
+                ctx.globalAlpha = 0.92;
                 drawSpriteCentered(ctx, _esprite, this.radius * (isFlashing ? 6.2 : 5.6));
                 ctx.restore();
                 return;
