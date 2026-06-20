@@ -1919,18 +1919,22 @@ class Ship {
                             // リロード中は発射しない
                         } else {
                             this.weaponType = wType;
+                            // §2-1残: 想定ロック時はキネティックに射角ジッター (精度低いほど外れやすい)
+                            const _kBaseAng = Math.atan2(this.targetEntity.y - this.y, this.targetEntity.x - this.x);
+                            const _kJit = _assumedLock ? (Math.random() - 0.5) * (1 - _acc) * 0.55 : 0;
                             const proj = new Projectile(this.x, this.y, this.targetEntity, true, wType, _lockDmg);
+                            if (_kJit !== 0) proj.angle = _kBaseAng + _kJit;
                             projectiles.push(proj);
                             // 攻撃型特殊: 3連装同時発射 (kinetic時のみ)
                             if (gameState.shipType === 'assault') {
                                 const spread = 0.12;
-                                const baseAngle = Math.atan2(this.targetEntity.y - this.y, this.targetEntity.x - this.x);
                                 [-spread, spread].forEach(offset => {
                                     const p = new Projectile(this.x, this.y, this.targetEntity, true, 'kinetic', _lockDmg);
-                                    p.angle = baseAngle + offset;
+                                    p.angle = _kBaseAng + offset + _kJit;
                                     projectiles.push(p);
                                 });
                             }
+                            if (_assumedLock && Math.abs(_kJit) > 0.1) logMessage('WEP: KINETIC 想定射撃 — 推定位置ブレで射角散弾', 'warning-msg');
                             playSound('shoot');
                             const weaponGenFactor = Math.max(0.3, 1.5 - (genAlloc.weapons / 100));
                             this.fireCooldown = WEAPON_COOLDOWNS[wType] * weaponGenFactor;
@@ -1953,9 +1957,17 @@ class Ship {
                             // リロード中は発射しない
                         } else {
                             this.weaponType = wType;
-                            const proj = new Projectile(this.x, this.y, this.targetEntity, true, wType, _lockDmg);
+                            // §2-1残: 想定ロック時はミサイル誘導先に位置ジッター (精度低いほど外れやすい)
+                            let _mTgt = this.targetEntity;
+                            if (_assumedLock) {
+                                const _mJit = (1 - _acc) * 500;
+                                _mTgt = { x: this.targetEntity.x + (Math.random() - 0.5) * _mJit,
+                                          y: this.targetEntity.y + (Math.random() - 0.5) * _mJit, hp: 1 };
+                            }
+                            const proj = new Projectile(this.x, this.y, _mTgt, true, wType, _lockDmg);
                             projectiles.push(proj);
-                            if (missileMode === 'smart') logMessage('WEP: MISSILE [AI追跡] 発射 — EM強・ジャミング耐性・大閃光', 'system-msg');
+                            if (_assumedLock) logMessage('WEP: MISSILE 想定射撃 — 推定座標へ誘導 (外れる可能性あり)', 'warning-msg');
+                            else if (missileMode === 'smart') logMessage('WEP: MISSILE [AI追跡] 発射 — EM強・ジャミング耐性・大閃光', 'system-msg');
                             playSound('shoot');
                             const weaponGenFactor = Math.max(0.3, 1.5 - (genAlloc.weapons / 100));
                             this.fireCooldown = WEAPON_COOLDOWNS[wType] * weaponGenFactor;
