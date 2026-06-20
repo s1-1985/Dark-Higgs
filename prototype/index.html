@@ -11,7 +11,7 @@
     <title>Dark Echo: Tactical Space RTS</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23000' stroke='%2300ff88' stroke-width='2'/><circle cx='16' cy='16' r='6' fill='none' stroke='%2300ff88' stroke-width='1.5'/><line x1='16' y1='2' x2='16' y2='30' stroke='%2300ff88' stroke-width='1' opacity='0.4'/><line x1='2' y1='16' x2='30' y2='16' stroke='%2300ff88' stroke-width='1' opacity='0.4'/></svg>" type="image/svg+xml">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20260629">
+    <link rel="stylesheet" href="style.css?v=20260630">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -810,7 +810,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20260629"></script>
+    <script src="game.js?v=20260630"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -1112,18 +1112,27 @@
         var sigCvs  = document.getElementById('sig-canvas');
         var SENSOR_COLORS_HEX = { heat: '#ff5000', optic: '#00ffaa', em: '#b432ff', higgs: '#50c8ff' };
 
+        function toggleAnalysisPanel() {
+            if (!panel) return;
+            if (panel.style.display === 'none' || !panel.style.display) {
+                updateSigAnalysisPanel();
+                panel.style.display = '';
+            } else {
+                panel.style.display = 'none';
+            }
+        }
+
         if (sigCvs) {
             sigCvs.style.cursor = 'pointer';
             sigCvs.title = 'タップで信号解析パネルを開く';
-            sigCvs.addEventListener('click', function() {
-                if (!panel) return;
-                if (panel.style.display === 'none' || !panel.style.display) {
-                    updateSigAnalysisPanel();
-                    panel.style.display = '';
-                } else {
-                    panel.style.display = 'none';
-                }
-            });
+            sigCvs.addEventListener('click', toggleAnalysisPanel);
+        }
+
+        var envCvs = document.getElementById('env-sig-canvas');
+        if (envCvs) {
+            envCvs.style.cursor = 'pointer';
+            envCvs.title = 'タップで信号解析パネルを開く';
+            envCvs.addEventListener('click', toggleAnalysisPanel);
         }
 
         // パッシブ方位ウェッジ一覧と三角測量結果を更新
