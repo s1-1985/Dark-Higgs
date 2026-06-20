@@ -1477,7 +1477,19 @@ class Projectile {
             while (diff < -Math.PI) diff += Math.PI * 2;
             while (diff > Math.PI) diff -= Math.PI * 2;
             // 磁気嵐帯: EM誘導が乱れ旋回精度が落ちる (§3-13 D) → 嵐内のミサイルは外れやすい
-            const _missileTurn = 0.05 * (1 - getStormIntensity(this.x, this.y) * STORM_MISSILE_DEGRADE);
+            // §3-10残: プレイヤーのジャミングが敵ミサイル誘導に干渉 (HON/AI共通)
+            let _jamMissileFactor = 1.0;
+            if (!this.isPlayer && player && player.hp > 0) {
+                const _jdist = Math.hypot(this.x - player.x, this.y - player.y);
+                if (jamPulse > 0 && _jdist < JAM_PULSE_RADIUS) {
+                    _jamMissileFactor = 0.02; // パルス: ほぼ誘導無効
+                    if (Math.random() < 0.15) this.angle += (Math.random() - 0.5) * 0.6;
+                } else {
+                    if (jamBurst > 0 && _jdist < JAM_BURST_RADIUS) _jamMissileFactor = Math.min(_jamMissileFactor, 0.40);
+                    if (jamCont      && _jdist < JAM_CONT_RADIUS)  _jamMissileFactor = Math.min(_jamMissileFactor, 0.65);
+                }
+            }
+            const _missileTurn = 0.05 * (1 - getStormIntensity(this.x, this.y) * STORM_MISSILE_DEGRADE) * _jamMissileFactor;
             this.angle += diff * _missileTurn;
             // デコイに到達したらミサイルは消費される(無害化)
             if (this._luredBy && Math.hypot(this._luredBy.x - this.x, this._luredBy.y - this.y) < 40) {
