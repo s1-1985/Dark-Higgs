@@ -306,7 +306,7 @@ let resourceNodes = []; // リソースノード {x, y, active, emFlashTimer}
 let gameSpeedFactor = 1.0; // 0.5=低速 / 1.0=通常 / 2.0=高速
 const PLAYER_TURN_RATE = 0.010; // 自機最大回頭レート (rad/frame) - assault基準
 const PLAYER_TURN_RATES = { assault: 0.010, stealth: 0.015, carrier: 0.004 }; // 艦種別回頭レート (重量感重視)
-const ENEMY_TURN_RATES  = { corvette: 0.030, fighter: 0.040, destroyer: 0.014, carrier: 0.006 }; // 敵艦種別回頭レート
+const ENEMY_TURN_RATES  = { corvette: 0.018, fighter: 0.025, destroyer: 0.009, carrier: 0.006 }; // 敵艦種別回頭レート
 // 慣性ベース速度システム
 const SHIP_MAX_SPEED_MULT = { assault: 0.58, stealth: 1.05, carrier: 0.38 }; // 艦種別最高速度倍率(全体的に低速化)
 const SHIP_ACCEL_RATE = { carrier: 0.003, assault: 0.008, stealth: 0.016 }; // 最高速度到達まで加速率/frame (空母最遅・潜航最速)
@@ -2064,13 +2064,17 @@ class Ship {
                         }
                     }
                 } else if (this.postFireCooldown < 200) {
-                    // 少し待ってから新しい隠れ場所へ移動
+                    // 少し待ってから新しい隠れ場所へ移動 (プレイヤーから遠ざかる方向)
+                    const _fleeAng = Math.atan2(this.y - player.y, this.x - player.x);
+                    const _jitter = (Math.random() - 0.5) * Math.PI * 0.5;
+                    const _fleeDist = 3500 + Math.random() * 2000;
                     const hideSpot = findHidingSpot(
-                        player.x + (Math.random() - 0.5) * FIELD_SIZE * 0.6,
-                        player.y + (Math.random() - 0.5) * FIELD_SIZE * 0.6,
-                        3000
+                        this.x + Math.cos(_fleeAng + _jitter) * _fleeDist,
+                        this.y + Math.sin(_fleeAng + _jitter) * _fleeDist,
+                        2500
                     );
                     this.setTarget(hideSpot.x, hideSpot.y);
+                    this.aiState = 'lurking'; // 逃走中は潜伏状態に戻す
                     this.repositionLogged = false;
                 }
                 return; // 再配置フェーズ中は他AIスキップ
@@ -2268,8 +2272,10 @@ class Ship {
                         while (diff > Math.PI) diff -= Math.PI * 2;
                         const _eTR_cm = (ENEMY_TURN_RATES[this.type] || 0.035) * gameSpeedFactor;
                         this.angle += Math.sign(diff) * Math.min(Math.abs(diff), _eTR_cm);
-                        this.x += Math.cos(this.angle) * this.speed;
-                        this.y += Math.sin(this.angle) * this.speed;
+                        const _turnFrac_cm = Math.abs(diff) / Math.PI;
+                        const _spdMult_cm = 1 - Math.min(0.6, _turnFrac_cm * 0.7);
+                        this.x += Math.cos(this.angle) * this.speed * _spdMult_cm;
+                        this.y += Math.sin(this.angle) * this.speed * _spdMult_cm;
                     }
                 }
                 // シグネチャ喪失 → lurking
@@ -2293,8 +2299,10 @@ class Ship {
                         while (diff > Math.PI) diff -= Math.PI * 2;
                         const _eTR_hn = (ENEMY_TURN_RATES[this.type] || 0.035) * gameSpeedFactor;
                         this.angle += Math.sign(diff) * Math.min(Math.abs(diff), _eTR_hn);
-                        this.x += Math.cos(this.angle) * this.speed;
-                        this.y += Math.sin(this.angle) * this.speed;
+                        const _turnFrac_hn = Math.abs(diff) / Math.PI;
+                        const _spdMult_hn = 1 - Math.min(0.5, _turnFrac_hn * 0.6);
+                        this.x += Math.cos(this.angle) * this.speed * _spdMult_hn;
+                        this.y += Math.sin(this.angle) * this.speed * _spdMult_hn;
                     } else {
                         this.huntTarget = null;
                     }
@@ -3935,7 +3943,7 @@ document.getElementById('engine-type-select')?.addEventListener('change', e => {
 });
 
 document.getElementById('gen-gain')?.addEventListener('input', e => {
-    genGain = parseInt(e.target.value) / 100;
+    genGain = parseInt(e.target.value) / 50;
     const valEl = document.getElementById('gen-gain-val');
     if (valEl) valEl.textContent = `×${genGain.toFixed(1)}`;
 });
