@@ -1120,6 +1120,12 @@ input[type=range]::-webkit-slider-thumb {
 #weapon-isel-section { display: flex; }
 
 /* ============================================================
+   GCB (コンパクトボタン) + フライアウト — デスクトップでは非表示
+   ============================================================ */
+.gcb { display: none; }
+.gcb-flyout { display: none; }
+
+/* ============================================================
    モバイル対応 (スマートフォン) - 完全刷新
    ============================================================ */
 @media (max-width: 768px) {
@@ -1312,6 +1318,78 @@ input[type=range]::-webkit-slider-thumb {
     .isel-btn { width: 44px; height: 30px; padding: 2px; }
     .isel-btn svg { width: 16px; height: 16px; }
     .isel-btn span { font-size: 6.5px; }
+
+    /* ENGINE/SENSOR isel-section: モバイルでは gcb フライアウトで操作するため非表示 */
+    #engine-isel-section { display: none !important; }
+    #sensor-isel-section { display: none !important; }
+
+    /* ── GCB コンパクトトグルボタン ── */
+    .gcb {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 32px;
+        height: 22px;
+        padding: 0 6px;
+        border: 1px solid #333;
+        border-radius: 3px;
+        background: rgba(0,20,16,0.8);
+        color: #aaa;
+        font-family: 'Orbitron', monospace;
+        font-size: 8px;
+        cursor: pointer;
+        flex-shrink: 0;
+        letter-spacing: 0.5px;
+    }
+    /* エンジン種別カラー */
+    .gcb.gcb-active-thr { border-color: #ff6622; color: #ff8844; background: rgba(60,20,0,0.7); }
+    .gcb.gcb-active-pls { border-color: #cc44ff; color: #dd88ff; background: rgba(40,0,60,0.7); }
+    .gcb.gcb-active-hgs { border-color: #00ffcc; color: #00ffcc; background: rgba(0,40,30,0.7); }
+    .gcb.gcb-active-pht { border-color: #ffdd44; color: #ffee66; background: rgba(40,30,0,0.7); }
+    /* センサー種別カラー */
+    .gcb.gcb-active-heat  { border-color: #ff6633; color: #ff8855; background: rgba(50,15,0,0.7); }
+    .gcb.gcb-active-optic { border-color: #88ccff; color: #aaddff; background: rgba(0,20,50,0.7); }
+    .gcb.gcb-active-em    { border-color: #cc44ff; color: #dd88ff; background: rgba(40,0,60,0.7); }
+    .gcb.gcb-active-higgs { border-color: #00ffaa; color: #00ffaa; background: rgba(0,40,30,0.7); }
+
+    /* ── GCB フライアウトパネル ── */
+    .center-panel { position: relative; overflow: visible !important; }
+    .gcb-flyout {
+        display: none;
+        position: absolute;
+        bottom: calc(100% + 2px);
+        left: 4px;
+        z-index: 250;
+        flex-direction: row;
+        gap: 4px;
+        padding: 4px;
+        background: rgba(0,10,8,0.95);
+        border: 1px solid rgba(0,255,170,0.25);
+        border-radius: 4px;
+    }
+    .gcb-flyout.open { display: flex; }
+
+    .gcb-opt {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        width: 42px;
+        height: 40px;
+        padding: 2px;
+        border: 1px solid #333;
+        border-radius: 3px;
+        background: rgba(0,20,16,0.7);
+        color: #778;
+        font-family: 'Orbitron', monospace;
+        font-size: 7px;
+        cursor: pointer;
+        gap: 2px;
+    }
+    .gcb-opt svg { width: 18px; height: 18px; flex-shrink: 0; }
+    .gcb-opt span { font-size: 6.5px; line-height: 1; }
+    .gcb-opt:hover { border-color: #555; color: #99a; }
+    .gcb-opt.active { border-color: #00ffaa; color: #00ffaa; background: rgba(0,40,30,0.6); }
 
     /* Row4: 親アクションバー + ポップオーバー */
     .action-panel {
