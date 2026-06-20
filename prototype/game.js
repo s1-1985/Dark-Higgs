@@ -1419,8 +1419,11 @@ class Projectile {
                 const higgsBeamPenalty = 1 - higgsBetween * 0.8; // 最大80%ダメージ減衰
                 // §3-1 装甲: beam耐性 (敵ビームが自機に当たる時)
                 const beamArmorRes = (!isPlayer && target === player) ? ARMOR_RES_BEAM[gameState.upgrades.armor] : 0;
-                target.hp -= 150 * higgsBeamPenalty * dmgScale * (1 - beamArmorRes);
+                const _beamDmg = Math.floor(150 * higgsBeamPenalty * dmgScale * (1 - beamArmorRes));
+                target.hp -= _beamDmg;
                 createHitEffect(target.x, target.y, isPlayer ? '#00ffaa' : '#ff4d4d');
+                effects.push({ x: target.x, y: target.y - 30, text: `-${_beamDmg}`, life: 1.0, type: 'floatText', c: isPlayer ? '#00ffdd' : '#ff5555' });
+                if (isPlayer) logMessage(`HIT [BEAM] → ${_beamDmg} ダメージ`, 'warning-msg');
                 // ビーム着弾スプライトエフェクト
                 const _bfxImg = SPRITES['fx_beam_impact'];
                 if (spriteReady(_bfxImg)) {
@@ -1561,9 +1564,14 @@ class Projectile {
                            : this.type === 'missile' ? ARMOR_RES_MISSILE[armorLv] : 0);
                 dmgMult *= (1 - res);
             }
-            hitTarget.hp -= this.dmg * dmgMult;
+            const _hitDmg = Math.floor(this.dmg * dmgMult);
+            hitTarget.hp -= _hitDmg;
             this.active = false;
             createHitEffect(this.x, this.y, this.isPlayer ? '#ffaa00' : '#ff4d4d');
+            if (!preemptive) {
+                effects.push({ x: hitTarget.x, y: hitTarget.y - 30, text: `-${_hitDmg}`, life: 1.0, type: 'floatText', c: this.isPlayer ? '#ffdd00' : '#ff5555' });
+            }
+            if (this.isPlayer) logMessage(`HIT [${this.type.toUpperCase()}] → ${_hitDmg} ダメージ`, 'warning-msg');
             addShake((this.dmg * dmgMult) / 10);
             // kinetic着弾フラッシュスプライト
             if (this.type === 'kinetic') {
@@ -1582,7 +1590,7 @@ class Projectile {
                 }
             }
             if (preemptive) {
-                effects.push({ x: hitTarget.x, y: hitTarget.y - 30, text: `先制! x2 (${Math.floor(this.dmg * dmgMult)})`, life: 1.0, type: 'floatText', c: '#ffff00' });
+                effects.push({ x: hitTarget.x, y: hitTarget.y - 30, text: `先制! x2 (${_hitDmg})`, life: 1.0, type: 'floatText', c: '#ffff00' });
             }
         }
         // §3-6残: 敵弾がプレイヤードローンに被弾 (自機を外れた弾のみ判定)
@@ -2986,6 +2994,22 @@ class Ship {
                 ctx.globalCompositeOperation = 'screen';
                 ctx.globalAlpha = 0.92;
                 drawSpriteCentered(ctx, _esprite, this.radius * (isFlashing ? 6.2 : 5.6));
+                // HP bar below sprite (local space, counter-rotate for axis-aligned bar)
+                ctx.globalCompositeOperation = 'source-over';
+                const _hpRatio = Math.max(0, this.hp / this.maxHp);
+                const _barA = isFlashing ? 1.0 : (this.visible ? 0.85 : (this.contactAccuracy > 0.4 ? Math.min(1, this.contactLife / 60) * this.contactAccuracy : 0));
+                if (_barA > 0.05) {
+                    ctx.save();
+                    ctx.rotate(-this.angle);
+                    const _bW = 36, _bH = 5, _bY = this.radius * 3.2 + 4;
+                    ctx.globalAlpha = _barA;
+                    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+                    ctx.fillRect(-_bW / 2, _bY, _bW, _bH);
+                    ctx.fillStyle = _hpRatio < 0.3 ? '#ff4400' : _hpRatio < 0.6 ? '#ffaa00' : '#44ff88';
+                    ctx.fillRect(-_bW / 2, _bY, _bW * _hpRatio, _bH);
+                    ctx.globalAlpha = 1;
+                    ctx.restore();
+                }
                 ctx.restore();
                 return;
             }
@@ -3130,13 +3154,15 @@ class Ship {
             // 精度サークル (不確実性ゾーン)
             // センサー痕跡(不確実性サークル+候補)は drawSensorTrace() でフォグの後に描画(ヒッグスより手前)
 
-            // HP バー (発砲フラッシュ中 or 高精度コンタクト時)
-            if (isFlashing || this.contactAccuracy > 0.6) {
-                const a = isFlashing ? 1.0 : Math.min(1, this.contactLife / 60) * this.contactAccuracy;
+            // HP バー (常時: visible時は常に表示、コンタクト精度が高い時も表示)
+            if (this.visible || isFlashing || this.contactAccuracy > 0.6) {
+                const a = isFlashing ? 1.0 : (this.visible ? 0.85 : Math.min(1, this.contactLife / 60) * this.contactAccuracy);
                 ctx.globalAlpha = a;
-                ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(dispX - 15, dispY - 28, 30, 4);
-                ctx.fillStyle = this.hp / this.maxHp < 0.3 ? '#ff8800' : '#ff4d4d';
-                ctx.fillRect(dispX - 15, dispY - 28, 30 * (this.hp / this.maxHp), 4);
+                const _hpR2 = Math.max(0, this.hp / this.maxHp);
+                const _bY2 = dispY + this.radius * 3.2 + 4;
+                ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(dispX - 18, _bY2, 36, 5);
+                ctx.fillStyle = _hpR2 < 0.3 ? '#ff4400' : _hpR2 < 0.6 ? '#ffaa00' : '#44ff88';
+                ctx.fillRect(dispX - 18, _bY2, 36 * _hpR2, 5);
                 ctx.globalAlpha = 1;
             }
             // 敵艦名 (発砲フラッシュ中のみ)
