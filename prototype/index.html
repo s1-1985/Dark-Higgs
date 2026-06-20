@@ -11,7 +11,7 @@
     <title>Dark Echo: Tactical Space RTS</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23000' stroke='%2300ff88' stroke-width='2'/><circle cx='16' cy='16' r='6' fill='none' stroke='%2300ff88' stroke-width='1.5'/><line x1='16' y1='2' x2='16' y2='30' stroke='%2300ff88' stroke-width='1' opacity='0.4'/><line x1='2' y1='16' x2='30' y2='16' stroke='%2300ff88' stroke-width='1' opacity='0.4'/></svg>" type="image/svg+xml">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20260623">
+    <link rel="stylesheet" href="style.css?v=20260624">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -794,8 +794,20 @@
         </div>
 
     </div>
+
+    <!-- §4-4: シグネチャ解析パネル (sig-canvas タップで開閉) -->
+    <div id="sig-analysis-panel" style="display:none; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:290px; max-height:80vh; overflow-y:auto; background:rgba(0,8,18,0.95); border:1px solid #00ffaa; border-radius:6px; padding:12px; z-index:600; font-family:'Orbitron',monospace; font-size:9px; color:#aaffdd; box-shadow:0 0 20px rgba(0,255,170,0.15);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:1px solid #114433; padding-bottom:6px;">
+            <span style="font-size:11px; color:#00ffaa; letter-spacing:1px;">SIGNAL ANALYSIS</span>
+            <button onclick="document.getElementById('sig-analysis-panel').style.display='none'" style="background:none; border:none; color:#ff6666; cursor:pointer; font-size:16px; line-height:1;">✕</button>
+        </div>
+        <div id="sig-analysis-bearings" style="margin-bottom:8px;"></div>
+        <div id="sig-analysis-result" style="padding:6px; border:1px solid #1a3322; border-radius:3px; min-height:36px; margin-bottom:8px; color:#88ffcc;"></div>
+        <button onclick="runSigAnalysis()" style="width:100%; background:#002211; border:1px solid #00ffaa; color:#00ffaa; padding:6px; cursor:pointer; font-family:'Orbitron',monospace; font-size:9px; border-radius:3px; letter-spacing:1px;">解析実行 / TRIANGULATE</button>
+    </div>
+
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20260623"></script>
+    <script src="game.js?v=20260624"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -1089,6 +1101,71 @@
         // 初期状態を設定
         if (_engSel) applyEngineGcb(_engSel.value || 'thermonuclear');
         applySensorGcb('heat');
+    })();
+
+    // ── §4-4: シグネチャ解析モーダル ──────────────────────────────────────
+    (function() {
+        var panel   = document.getElementById('sig-analysis-panel');
+        var sigCvs  = document.getElementById('sig-canvas');
+        var SENSOR_COLORS_HEX = { heat: '#ff5000', optic: '#00ffaa', em: '#b432ff', higgs: '#50c8ff' };
+
+        if (sigCvs) {
+            sigCvs.style.cursor = 'pointer';
+            sigCvs.title = 'タップで信号解析パネルを開く';
+            sigCvs.addEventListener('click', function() {
+                if (!panel) return;
+                if (panel.style.display === 'none' || !panel.style.display) {
+                    updateSigAnalysisPanel();
+                    panel.style.display = '';
+                } else {
+                    panel.style.display = 'none';
+                }
+            });
+        }
+
+        // パッシブ方位ウェッジ一覧と三角測量結果を更新
+        window.updateSigAnalysisPanel = function() {
+            var bEl = document.getElementById('sig-analysis-bearings');
+            var rEl = document.getElementById('sig-analysis-result');
+            if (!bEl || !rEl) return;
+            // 方位線リスト (game.js グローバルにアクセス)
+            var bs = (typeof passiveBearings !== 'undefined') ? passiveBearings : [];
+            if (bs.length === 0) {
+                bEl.innerHTML = '<div style="color:#556655; text-align:center; padding:8px 0;">方位データなし<br><span style="font-size:8px;">パッシブ探知を待機中…</span></div>';
+            } else {
+                var rows = bs.slice().reverse().map(function(b, idx) {
+                    var freshPct = Math.round(b.life / b.maxLife * 100);
+                    var col = SENSOR_COLORS_HEX[b.sensor] || '#aaffdd';
+                    var bMin = ((b.bearingDeg || 0) - (b.halfWidthDeg || 0) + 360) % 360;
+                    var bMax = ((b.bearingDeg || 0) + (b.halfWidthDeg || 0)) % 360;
+                    return '<div style="display:flex; justify-content:space-between; align-items:center; padding:3px 0; border-bottom:1px solid #0a1a12;">'
+                        + '<span style="color:' + col + '; min-width:36px;">' + (b.sensorLabel || b.sensor || '?') + '</span>'
+                        + '<span style="color:#88aa88; min-width:32px; text-align:right;">' + Math.round((b.strength || 0) * 100) + '%</span>'
+                        + '<span style="min-width:90px; text-align:right;">' + Math.round(bMin) + '°〜' + Math.round(bMax) + '°</span>'
+                        + '<span style="color:#667766; min-width:28px; text-align:right;">' + freshPct + '%</span>'
+                        + '</div>';
+                }).join('');
+                bEl.innerHTML = '<div style="display:flex; justify-content:space-between; color:#667766; margin-bottom:3px; padding-bottom:2px; border-bottom:1px solid #224422;">'
+                    + '<span>センサー</span><span>強度</span><span>方位範囲</span><span>鮮度</span></div>' + rows;
+            }
+            // 三角測量結果
+            var tri = (typeof triangulationResult !== 'undefined') ? triangulationResult : null;
+            if (!tri) {
+                rEl.innerHTML = '<div style="color:#667766;">三角測量: データ不足<br><span style="font-size:8px;">異なる位置から複数計測で精度向上</span></div>';
+            } else {
+                var age = (typeof _frameCount !== 'undefined') ? Math.round((_frameCount - tri.frame) / 60) : '?';
+                var precPct = Math.round(tri.precision * 100);
+                var col2 = precPct < 30 ? '#ff5000' : (precPct < 60 ? '#ffaa00' : (precPct < 90 ? '#50ff80' : '#50c8ff'));
+                rEl.innerHTML = '<div style="color:' + col2 + '; font-size:10px; margin-bottom:4px;">推定精度: ' + precPct + '%</div>'
+                    + '<div>誤差半径: ±' + Math.round(tri.radius) + ' wu</div>'
+                    + '<div style="color:#667766; font-size:8px;">解析から ' + age + '秒経過 | 移動して再計測で精度向上</div>';
+            }
+        };
+
+        window.runSigAnalysis = function() {
+            if (typeof computeTriangulation === 'function') computeTriangulation();
+            updateSigAnalysisPanel();
+        };
     })();
     </script>
 </body>

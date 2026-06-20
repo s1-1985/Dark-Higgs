@@ -53,6 +53,9 @@ let demoMode = false; // デモモード: フォグなし・全エンティテ�
 // 強信号=狭い確信、弱信号=広いボケ。移動して2回計測→三角測量で敵位置が絞れる。
 // { ox, oy, angle, halfWidth, range, quality, color, life, maxLife }
 let passiveBearings = [];
+// §4-4: 三角測量エンジン状態
+let triangulationResult = null; // {x, y, precision, radius, frame}
+let _trigLastFrame = -999;
 const PASSIVE_BEARING_LIFE = 480;  // 8秒フェード (@60fps)
 const PASSIVE_BEARING_MAX  = 8;    // 同時表示上限 (古いものから破棄)
 let mouseWorldX = MAP_CX;
@@ -399,6 +402,11 @@ const STORM_EM_MASK      = 0.65; // 磁気嵐内に居る機体のEMシグネチ
 const THERMAL_HEAT_MASK  = 0.60; // 熱雲内の機体のheatSig低減率 (HEATセンサーから隠れやすい)
 const THERMAL_HEAT_MOD   = 0.80; // 熱雲経路によるHEAT探知の減衰係数
 const STORM_SONAR_DEGRADE = 0.70; // 磁気嵐内でのアクティブソナー最大レンジ減衰率 (§3-13残)
+// §4-4: 三角測量エンジン定数
+const TRIG_MIN_BASELINE     = 500;    // 有効ベースライン最小値 (wu)
+const TRIG_MAX_RADIUS       = 4500;   // 最低精度の誤差円半径 (wu)
+const TRIG_DECAY_PER_FRAME  = 0.0025; // 精度の経時劣化レート (per frame)
+const TRIG_UPDATE_INTERVAL  = 90;     // 三角測量自動再計算インターバル (フレーム)
 const DECOY_MISDIRECT_RADIUS = 2500; // デコイの強EMで敵lastKnownPosを書き換える半径 (§3-5残)
 // §3-6残: 建設停止フロー
 let buildingTimer = 0;
@@ -3357,6 +3365,7 @@ function generateSector() {
     dirSonarVisual = null;
     dirSonarPendingFire = false;
     passiveBearings = [];
+    triangulationResult = null; _trigLastFrame = -999;
     player = new Ship(MAP_CX, MAP_CY, true);
     player.generatorOutput = genAlloc.engine;
     enemies = []; structures = []; projectiles = []; effects = []; particles = []; debris = []; scrapDrops = [];
@@ -4185,10 +4194,13 @@ function checkPassiveDetection() {
         // ズレは halfWidth 内に収まるので、別位置からの2計測で交差が真値付近に絞れる。
         const noise = (Math.random() - 0.5) * 2 * halfWidth * 0.55;
         const angle = c.angle + noise;
+        const compassDeg = Math.round((Math.atan2(c.e.x - player.x, -(c.e.y - player.y)) * 180 / Math.PI + 360) % 360);
         passiveBearings.push({
             ox: player.x, oy: player.y,
             angle, halfWidth, range,
             quality, color: colorRgb,
+            sensor: currentSensor, strength: c.sig, sensorLabel: sc.label,
+            bearingDeg: compassDeg, halfWidthDeg: Math.round(halfWidth * 180 / Math.PI),
             life: PASSIVE_BEARING_LIFE, maxLife: PASSIVE_BEARING_LIFE
         });
         if (c.sig > strongest) {
@@ -4252,6 +4264,82 @@ function drawPassiveBearings(ctx) {
         ctx.stroke();
         ctx.restore();
     }
+}
+
+// ============================================================
+// §4-4: 三角測量エンジン
+// ============================================================
+// 複数のパッシブ方位線の交点から推定位置と精度を算出する。
+// 計算タイミング: gameLoop で TRIG_UPDATE_INTERVAL フレームごとに呼ぶ。
+function computeTriangulation() {
+    const bs = passiveBearings.filter(b => b.life > 60);
+    if (bs.length < 2) { triangulationResult = null; return; }
+    let sumX = 0, sumY = 0, sumW = 0;
+    for (let i = 0; i < bs.length - 1; i++) {
+        for (let j = i + 1; j < bs.length; j++) {
+            const bi = bs[i], bj = bs[j];
+            const baseline = Math.hypot(bj.ox - bi.ox, bj.oy - bi.oy);
+            if (baseline < TRIG_MIN_BASELINE) continue;
+            // 2直線の交点: Cramer則
+            // Ray i: (bi.ox + t*cos(ai), bi.oy + t*sin(ai))
+            // det = sin(ai - aj)
+            const det = Math.sin(bi.angle - bj.angle);
+            if (Math.abs(det) < 0.05) continue; // ほぼ平行
+            const dx = bj.ox - bi.ox, dy = bj.oy - bi.oy;
+            const t = (-dx * Math.sin(bj.angle) + dy * Math.cos(bj.angle)) / det;
+            const s = ( dx * Math.sin(bi.angle) - dy * Math.cos(bi.angle)) / (-det);
+            if (t < 50 || s < 50) continue; // 後方 or 近すぎる交差は無効
+            const ix = bi.ox + t * Math.cos(bi.angle);
+            const iy = bi.oy + t * Math.sin(bi.angle);
+            // 重み: ベースライン × sin(角度差) × 新鮮度 / 方位線幅
+            const freshI = bi.life / bi.maxLife, freshJ = bj.life / bj.maxLife;
+            const angQ = Math.abs(det); // sin(角度差), 直角=1が最大
+            const w = (baseline / 4000) * angQ * Math.sqrt(freshI * freshJ)
+                      / ((bi.halfWidth + bj.halfWidth) * 1.5 + 0.1);
+            sumX += ix * w; sumY += iy * w; sumW += w;
+        }
+    }
+    if (sumW < 0.01) { triangulationResult = null; return; }
+    const ex = sumX / sumW, ey = sumY / sumW;
+    const precision = Math.min(0.97, sumW / (1.5 + sumW)); // 漸近: 重みが増えるほど精度↑
+    const radius = TRIG_MAX_RADIUS * (1 - precision) + 200;
+    triangulationResult = { x: ex, y: ey, precision, radius, frame: _frameCount };
+}
+
+// §4-4: 三角測量精度円描画 (ワールド空間)
+// 低精度=赤大円 / 中=橙 / 高=緑 / 超高=シアン
+function drawTriangulationCircle(ctx) {
+    if (!triangulationResult) return;
+    const { x, y, precision, radius, frame } = triangulationResult;
+    const age = _frameCount - frame;
+    const ageFactor = Math.max(0, 1 - age * TRIG_DECAY_PER_FRAME);
+    if (ageFactor <= 0.01) { triangulationResult = null; return; }
+    let color;
+    if      (precision < 0.3) color = '255,80,0';
+    else if (precision < 0.6) color = '255,160,0';
+    else if (precision < 0.9) color = '80,255,120';
+    else                      color = '100,200,255';
+    const inv = 1 / camera.zoom;
+    ctx.save();
+    ctx.globalAlpha = 0.25 * ageFactor;
+    ctx.strokeStyle = `rgb(${color})`;
+    ctx.lineWidth = 2 * inv;
+    ctx.setLineDash([12 * inv, 8 * inv]);
+    ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+    // 十字マーカー
+    ctx.globalAlpha = 0.65 * ageFactor;
+    ctx.lineWidth = 1.5 * inv;
+    const ms = 20 * inv;
+    ctx.beginPath(); ctx.moveTo(x - ms, y); ctx.lineTo(x + ms, y); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x, y - ms); ctx.lineTo(x, y + ms); ctx.stroke();
+    // 精度ラベル
+    ctx.globalAlpha = 0.8 * ageFactor;
+    ctx.fillStyle = `rgb(${color})`;
+    ctx.font = `bold ${Math.round(9 * inv)}px Orbitron, monospace`;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+    ctx.fillText(`TRI ${Math.round(precision * 100)}%`, x + (radius + 8) * 0.12, y - 6 * inv);
+    ctx.restore();
 }
 
 // ============================================================
@@ -6544,6 +6632,14 @@ function gameLoop() {
 
         // ── パッシブ方位ウェッジ (ワールド空間・三角測量用) ──
         if (player && player.hp > 0) drawPassiveBearings(ctx);
+        // §4-4: 三角測量 — 定期計算 + 精度円描画 (ワールド空間)
+        if (player && player.hp > 0) {
+            if (_frameCount - _trigLastFrame >= TRIG_UPDATE_INTERVAL) {
+                _trigLastFrame = _frameCount;
+                computeTriangulation();
+            }
+            drawTriangulationCircle(ctx);
+        }
 
         ctx.restore();
 
