@@ -4339,12 +4339,108 @@ function drawTriangulationCircle(ctx) {
     ctx.font = `bold ${Math.round(9 * inv)}px Orbitron, monospace`;
     ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
     ctx.fillText(`TRI ${Math.round(precision * 100)}%`, x + (radius + 8) * 0.12, y - 6 * inv);
+    // §4-4 Phase2: ゴースト表示 (精度≥80%で半透明シルエット)
+    if (precision >= 0.80) {
+        const ghostA = Math.min(0.55, (precision - 0.80) / 0.17) * ageFactor;
+        ctx.globalAlpha = ghostA;
+        ctx.strokeStyle = `rgb(${color})`;
+        ctx.lineWidth = 1.5 * inv;
+        ctx.save();
+        ctx.translate(x, y);
+        // 艦形シルエット (菱形、向き不明=真上向き固定)
+        const fw = 42 * inv, sw = 14 * inv, rw = 24 * inv;
+        ctx.beginPath();
+        ctx.moveTo(0, -fw);  ctx.lineTo(sw, 0);
+        ctx.lineTo(0, rw);   ctx.lineTo(-sw, 0);
+        ctx.closePath(); ctx.stroke();
+        // 「?」マーカー (精度<95%では不確定を明示)
+        if (precision < 0.95) {
+            ctx.globalAlpha = (ghostA + 0.1) * ageFactor;
+            ctx.fillStyle = `rgb(${color})`;
+            ctx.font = `bold ${18 * inv}px monospace`;
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText('?', 0, 0);
+        } else {
+            // 95%超: ゴーストに「GHOST」ラベル
+            ctx.globalAlpha = 0.5 * ageFactor;
+            ctx.fillStyle = `rgb(${color})`;
+            ctx.font = `${7 * inv}px Orbitron, monospace`;
+            ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+            ctx.fillText('GHOST', 0, rw + 4 * inv);
+        }
+        ctx.restore();
+    }
     ctx.restore();
 }
 
-// ============================================================
-// 精度計算ユーティリティ
-// ============================================================
+// §4-4 Phase2: 三角測量推定座標への射撃 (解析パネルの「COORD FIRE」ボタンから呼ぶ)
+function coordFireAtTriangulation() {
+    if (!triangulationResult || !player || player.hp <= 0) {
+        logMessage('COORD: 三角測量データなし — まず解析を実行してください', 'warning-msg');
+        return;
+    }
+    const wType = document.getElementById('weapon-select')?.value;
+    if (wType !== 'missile' && wType !== 'beam') {
+        logMessage('COORD: ミサイル / ビームのみ座標射撃可能', 'warning-msg');
+        return;
+    }
+    const tri = triangulationResult;
+    const _ang = Math.atan2(tri.y - player.y, tri.x - player.x);
+    let _diff = _ang - player.angle;
+    while (_diff < -Math.PI) _diff += Math.PI * 2;
+    while (_diff > Math.PI) _diff -= Math.PI * 2;
+    const _maxArc = WEAPON_FIRE_ARC[wType] || (Math.PI / 4);
+    if (Math.abs(_diff) > _maxArc) {
+        logMessage(`COORD: 推定位置が射角外 (±${Math.round(_maxArc * 180 / Math.PI)}°以内に艦首を向けてから発射)`, 'warning-msg');
+        return;
+    }
+    if (player.fireCooldown > 0) { logMessage('COORD: 武器クールダウン中', 'warning-msg'); return; }
+    const precPct  = Math.round(tri.precision * 100);
+    const hitChance = Math.round(tri.precision * 65); // 命中推定% = 精度×0.65
+    const _gf = Math.max(0.3, 1.5 - genAlloc.weapons / 100);
+    if (wType === 'missile') {
+        if (player.missileReloading) { logMessage('COORD: MISSILEリロード中', 'warning-msg'); return; }
+        const _ft = { x: tri.x, y: tri.y, hp: 999, radius: 1 };
+        projectiles.push(new Projectile(player.x, player.y, _ft, true, 'missile', 1.0));
+        playSound('shoot');
+        player.fireCooldown = WEAPON_COOLDOWNS.missile * _gf;
+        player.missileReloading = true;
+        player.missileReloadTimer = Math.round(MISSILE_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0));
+        if (heatTrails.length < 600) heatTrails.push({ x: player.x, y: player.y, intensity: 0.9, life: 1.0 });
+        logMessage(`COORD[MISSILE] 精度 ${precPct}% → 推定命中率 ${hitChance}% — 自位置シグネチャ露出`, 'warning-msg');
+    } else {
+        if (player.beamReloading) { logMessage('COORD: BEAMリロード中', 'warning-msg'); return; }
+        const _bRange = 8000 * (WEAPONS_UPG_RANGE_MULT[gameState.upgrades.weapons] || 1.0);
+        const _dist  = Math.hypot(tri.x - player.x, tri.y - player.y);
+        const _bLen  = Math.min(_bRange, Math.max(100, _dist));
+        const _bEx = player.x + Math.cos(_ang) * _bLen;
+        const _bEy = player.y + Math.sin(_ang) * _bLen;
+        effects.push({ x: player.x, y: player.y, tx: _bEx, ty: _bEy, type: 'beam', a: 1, c: '#00ffaa' });
+        enemies.forEach(en => {
+            if (en.hp <= 0) return;
+            const _bdx = _bEx - player.x, _bdy = _bEy - player.y;
+            const _bSq = _bdx * _bdx + _bdy * _bdy;
+            const _bt = _bSq > 0 ? Math.max(0, Math.min(1, ((en.x - player.x) * _bdx + (en.y - player.y) * _bdy) / _bSq)) : 0;
+            const _bcx = player.x + _bt * _bdx, _bcy = player.y + _bt * _bdy;
+            if (Math.hypot(en.x - _bcx, en.y - _bcy) < en.radius * 1.5) {
+                const _hb = getHiggsIntensity((_bcx + en.x) / 2, (_bcy + en.y) / 2);
+                en.hp -= 150 * (1 - _hb * 0.8);
+                createHitEffect(en.x, en.y, '#00ffaa');
+                addShake(15);
+            }
+        });
+        const _bSteps = Math.max(5, Math.floor(_bLen / 60));
+        for (let _bi = 0; _bi <= _bSteps; _bi++) {
+            const _bT = _bi / _bSteps;
+            if (higgsWakes.length < 400) higgsWakes.push({ x: player.x + (_bEx - player.x) * _bT, y: player.y + (_bEy - player.y) * _bT, intensity: 0.7, life: 1.0 });
+        }
+        if (opticTrails.length < 600) opticTrails.push({ x: player.x, y: player.y, intensity: 1.0, life: 1.0 });
+        player.beamReloading = true;
+        player.beamReloadTimer = 300;
+        player.fireCooldown = WEAPON_COOLDOWNS.beam * _gf;
+        logMessage(`COORD[BEAM] 精度 ${precPct}% → 推定命中率 ${hitChance}% — ダークチャネル暴露`, 'warning-msg');
+    }
+}
 function calcAccuracy(dist, maxRange, distDecay0, higgsBlock) {
     const distDecay = 1.0 - distDecay0 * (dist / maxRange);
     const aiCoeff   = 0.5 + (genAlloc.ai / 100);

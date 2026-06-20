@@ -11,7 +11,7 @@
     <title>Dark Echo: Tactical Space RTS</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23000' stroke='%2300ff88' stroke-width='2'/><circle cx='16' cy='16' r='6' fill='none' stroke='%2300ff88' stroke-width='1.5'/><line x1='16' y1='2' x2='16' y2='30' stroke='%2300ff88' stroke-width='1' opacity='0.4'/><line x1='2' y1='16' x2='30' y2='16' stroke='%2300ff88' stroke-width='1' opacity='0.4'/></svg>" type="image/svg+xml">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20260624">
+    <link rel="stylesheet" href="style.css?v=20260625">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -803,11 +803,14 @@
         </div>
         <div id="sig-analysis-bearings" style="margin-bottom:8px;"></div>
         <div id="sig-analysis-result" style="padding:6px; border:1px solid #1a3322; border-radius:3px; min-height:36px; margin-bottom:8px; color:#88ffcc;"></div>
-        <button onclick="runSigAnalysis()" style="width:100%; background:#002211; border:1px solid #00ffaa; color:#00ffaa; padding:6px; cursor:pointer; font-family:'Orbitron',monospace; font-size:9px; border-radius:3px; letter-spacing:1px;">解析実行 / TRIANGULATE</button>
+        <div style="display:flex; gap:6px; margin-top:0;">
+            <button onclick="runSigAnalysis()" style="flex:1; background:#002211; border:1px solid #00ffaa; color:#00ffaa; padding:6px; cursor:pointer; font-family:'Orbitron',monospace; font-size:9px; border-radius:3px; letter-spacing:1px;">解析実行 / TRIANGULATE</button>
+            <button id="sig-coordfire-btn" onclick="runCoordFire()" style="flex:1; background:#1a0008; border:1px solid #ff4466; color:#ff4466; padding:6px; cursor:pointer; font-family:'Orbitron',monospace; font-size:9px; border-radius:3px; letter-spacing:1px;" title="現在の武器(MSL/BEAM)で推定座標へ射撃">COORD FIRE</button>
+        </div>
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20260624"></script>
+    <script src="game.js?v=20260625"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -1165,6 +1168,14 @@
         window.runSigAnalysis = function() {
             if (typeof computeTriangulation === 'function') computeTriangulation();
             updateSigAnalysisPanel();
+        };
+
+        window.runCoordFire = function() {
+            if (typeof coordFireAtTriangulation === 'function') {
+                coordFireAtTriangulation();
+                // パネルを閉じる
+                if (panel) panel.style.display = 'none';
+            }
         };
     })();
     </script>
