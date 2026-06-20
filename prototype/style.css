@@ -1116,8 +1116,8 @@ input[type=range]::-webkit-slider-thumb {
 #abar { display: none; }
 #action-popover { display: none; }
 
-/* タブバー: デスクトップでは非表示 */
-#bottom-tab-bar { display: none; }
+/* 兵装セクション: デスクトップでは表示 (モバイルはabarのWEPボタンで操作) */
+#weapon-isel-section { display: flex; }
 
 /* ============================================================
    モバイル対応 (スマートフォン) - 完全刷新
@@ -1173,50 +1173,19 @@ input[type=range]::-webkit-slider-thumb {
     #log-header { padding: 3px 6px; font-size: 7px; }
     .message { font-size: 7px; padding: 2px 6px; }
 
-    /* ─── BOTTOM CONSOLE: タブ構成 ─── */
+    /* ─── BOTTOM CONSOLE: 縦積み構成 ─── */
     #bottom-console {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        grid-template-rows: auto auto auto auto auto;
+        grid-template-rows: auto auto auto auto;
         height: auto;
         padding: 0 0 env(safe-area-inset-bottom, 0px) 0;
         gap: 0;
         overflow: visible;
     }
 
-    /* タブバー (Row 3) */
-    #bottom-tab-bar {
-        display: flex;
-        grid-column: 1 / -1;
-        grid-row: 3;
-        background: #020a0d;
-        border-top: 1px solid rgba(0,255,136,.2);
-        border-bottom: 1px solid rgba(0,255,136,.2);
-    }
-    .bottom-tab {
-        flex: 1;
-        height: 32px;
-        font-family: 'Orbitron', monospace;
-        font-size: 11px;
-        font-weight: 700;
-        letter-spacing: 2px;
-        cursor: pointer;
-        border: none;
-        background: transparent;
-        color: rgba(136,255,136,.45);
-        border-bottom: 2px solid transparent;
-        transition: all 0.15s;
-    }
-    .bottom-tab.active {
-        color: #00ff88;
-        border-bottom-color: #00ff88;
-        background: rgba(0,255,136,.08);
-        text-shadow: 0 0 10px rgba(0,255,136,.4);
-    }
-
-    /* タブコンテンツ visibility */
-    #bottom-console.tab-combat [data-tab-group="system"] { display: none !important; }
-    #bottom-console.tab-system [data-tab-group="combat"] { display: none !important; }
+    /* 兵装選択: モバイルではabarのWEPボタンで操作するため非表示 */
+    #weapon-isel-section { display: none !important; }
 
     /* Row1: モバイルステータスバー (全幅) */
     #mobile-status-bar {
@@ -1269,10 +1238,10 @@ input[type=range]::-webkit-slider-thumb {
     .right-panel .env-info > div { display: none !important; }
     #env-sig-canvas { height: 28px !important; display: block !important; width: 100% !important; }
 
-    /* Row4: タブコンテンツ (center-panel) */
+    /* Row3: GEN/ENGINE/SENSOR (center-panel) */
     .center-panel {
         grid-column: 1 / -1;
-        grid-row: 4;
+        grid-row: 3;
         display: flex !important;
         flex-direction: column;
         gap: 0;
@@ -1344,10 +1313,10 @@ input[type=range]::-webkit-slider-thumb {
     .isel-btn svg { width: 16px; height: 16px; }
     .isel-btn span { font-size: 6.5px; }
 
-    /* Row5: 親アクションバー + ポップオーバー */
+    /* Row4: 親アクションバー + ポップオーバー */
     .action-panel {
         grid-column: 1 / -1;
-        grid-row: 5;
+        grid-row: 4;
         width: auto; min-width: 0;
         padding: 0;
         border-top: 1px solid rgba(0,255,170,0.18);
