@@ -10,6 +10,70 @@
 
 ## セッションログ（新しい順）
 
+### 2026-06-20（PR#83・`claude/demo-mode-implementation-hfhqkw`）— UI再設計・敵AI修正・壁打ち2件記録
+
+**背景**: 3点同時変更 + 壁打ち2件の記録。PR#83はオーナーマージ済み。
+
+#### UIリストラ（タブ廃止・武器サイクルボタン化）
+- **COMBAT/SYSTEMタブを完全廃止**: `#bottom-tab-bar` div を index.html から削除。`data-tab-group` 属性も全撤去。style.css からタブ関連スタイルをすべて除去。
+- **武器切替をアクションバー最左ボタンへ**: `#abar-wep-cycle`（KIN/MSL/BEM テキスト + 色変化）を `#abar` 最初に追加。武器 isel-section はモバイルで `display:none`、デスクトップでは残す。タブJSは武器サイクルIIFE（武器選択`<select>`と連動）に置換。
+- **SENSOR を ENGINE 直下へ移動**: center-panel 内の並び順を ENGINE → SENSOR に変更（従来は別タブ内）。
+- **モバイルグリッド 5行→4行**: `grid-template-rows` を `auto auto auto auto auto` → `auto auto auto auto` に削減。center-panel=grid-row:3、action-panel=grid-row:4 へ繰り上げ。
+
+#### GAIN スライダー修正
+- 旧: `min=50 max=200 value=100`、計算式 `value/100` → 50%→0.5倍（速度半減）の誤り
+- 新: `min=50 max=100 value=50`、計算式 `value/50` → 50%→×1.0（基準速度）、100%→×2.0（2倍速）
+
+#### 敵AI修正（flee-turn-fire-turn パターン解消）
+- **ENEMY_TURN_RATES 削減**: `corvette:0.018 / fighter:0.025 / destroyer:0.009 / carrier:0.006`（旧比40%前後削減）
+- **逃走方向バグ修正**: postFireCooldown の hide spot が `player.x + random*FIELD_SIZE*0.6` → プレイヤー周辺にランダム配置で敵が戻り続けていた。逃走角 `atan2(this.y-player.y, this.x-player.x)` を計算し、**プレイヤーから遠ざかる方向** `this.x + cos(fleeAng+jitter)*dist` に hide spot を設定。`aiState='lurking'` で逃走状態を明示。
+- **旋回中速度ペナルティ追加**: combat/hunting 移動時に `turnFrac = |diff|/π` を算出し、旋回量に比例して速度を低下させる。`1 - min(0.6, turnFrac*0.7)`（combat）/ `1 - min(0.5, turnFrac*0.6)`（hunting）。
+
+#### キャッシュバスティング
+- `?v=20260620`（index.html）
+
+#### ⚠️ 申し送り
+- GAIN スライダーと敵AI修正は実機フィールドで体感確認要（数値はtunable）。
+- モバイルUIは武器切替をアクションバーサイクルボタンのみで行う設計。デスクトップは isel-section も表示。
+
+---
+
+#### 壁打ち①: 艦級×艦種マトリクス（§4-1）— 設計確定・実装保留
+
+Fighter/Corvette/Frigate/Destroyer/Battleship/Mothership の6艦級と、攻撃型/潜航型/輸送空母型の3艦種の2軸マトリクスを設計。設計法則:
+- 速度: 艦級が小さいほど速い / 耐久: 艦級が大きいほど高い
+- 武器: 大型ほど威力・射程上位の武器を扱える（kinetic/missile/beam を軽→重でティア展開）
+- ドローン: Destroyer以上の輸送/空母型のみ展開可。ドローン本体はFighter/Corvette止まり
+- Mothership はプレイヤーが操作可能（最終艦級、敵専用ではない）✅確定
+- **実装は将来。現行 corvette/destroyer/carrier/fighter は敵ユニット型として存続**
+
+→ TODO §4-1 に高解像度で記録済み
+
+#### 壁打ち②: シグネチャ解析 → 座標射撃システム（§4-4）— 設計確定・実装保留
+
+センサーで受信したシグネチャを「解析→三角測量→精度サークル→座標射撃」するループ。ゲーム性の核。
+
+**3原則**:
+1. 移動方向がデータ品質を決める（垂直移動=三角測量に最有効）
+2. 位置特定精度と命中率は別物（精度95%でも命中率は低い）
+3. 解析が逆用される（自機シグネチャ放出で位置特定される）
+
+**設計概要**:
+- シグネチャ受信ログ: センサー種別・強度・方位範囲（角度差=不確実性）・受信座標・タイムスタンプ
+- 解析モーダル: オシロスコープタップ → シグネチャリスト表示（センサー/強度/%/方位範囲/[解析する]ボタン）
+- 三角測量エンジン: ベースライン長×sin(方位角変化量)、交差方位線本数、データ鮮度、ヒッグス濃度上限キャップ
+- 精度表示: 大赤円(〜30%) → 橙中円(30-60%) → 緑小円(60-80%) → 95%超でゴースト表示（外挿で動く）
+- 精度経時劣化: 91% → 78%(30秒後) → 45%(2分後) → 20%(5分後)。針路変更で急速劣化
+- 射撃UI: 長押しラジアルメニュー（ウェイポイント/座標射撃）→「解析精度% / 推定命中率%」確認後に発射
+- 武器別座標射撃: kinetic=精度円散弾 / missile=ターミナルスキャン / beam=ピンポイントのみ（外れ=自機露出）
+- 既存コードとの接続: `passiveBearings[]`拡張 / `sig-canvas`タッチ / `aiPrecision.sensor` / `contactCandidates` 描画転用
+
+**ヒッグスによる精度上限**: 高密度=上限20〜30% / クリアエリア=上限70〜80%。解析しても博打止まりがゲームバランスの肝。
+
+→ TODO §4-4 に高解像度で記録済み
+
+---
+
 ### 2026-06-15（PR#76+77・`claude/sleepy-davinci-alrc2s`）— 重慣性物理・武器射角・デモモード・敵艦種選択 + Round3スプライト + ビームVFX
 
 **背景**: 7機能の大型壁打ち（慣性物理・後方被弾ボーナス・武器射角・フリー射撃・デモモード・敵艦種選択・ビームVFX）+ スプライトRound3更新。PR#76で全実装、PR#77でバグ修正。

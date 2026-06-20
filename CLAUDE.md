@@ -24,8 +24,8 @@ CLAUDE.md       # 本書: 概要・確定仕様・クイックリファレンス
 TODO.md         # 実装タスク台帳（壁打ち企画・実装状況・未実装仕様）★着手前に必読
 HANDOVER.md     # セッションログ・決定経緯・パフォーマンス教訓
 prototype/
-├── index.html  # UI レイアウト（Homeworld2スタイル、日本語）
-├── game.js     # ゲームロジック全体（約5200行）
+├── index.html  # UI レイアウト（Homeworld2スタイル、日本語）※タブなし・武器切替はabarサイクルボタン
+├── game.js     # ゲームロジック全体（約6500行）
 ├── style.css   # SF緑パレット（Orbitronフォント）
 └── assets/     # 生成スプライト（透過PNG）: ship_*/enemy_*/structure_*/node_higgs/fx_beam_main
 ```
@@ -136,7 +136,9 @@ prototype/
 | `SHIP_ACCEL_RATE` | const | {carrier:0.003, assault:0.008, stealth:0.016} 加速レート |
 | `SHIP_TURN_SLOW` | const | {carrier:0.78, assault:0.52, stealth:0.22} 旋回中速度低下率 |
 | `PLAYER_TURN_RATES` | const | {assault:0.010, stealth:0.015, carrier:0.004} 旋回レート(rad/frame) |
+| `ENEMY_TURN_RATES` | const | {corvette:0.018, fighter:0.025, destroyer:0.009, carrier:0.006} 敵旋回レート(rad/frame) |
 | `WEAPON_FIRE_ARC` | const | {kinetic:π×5/6, missile:π/4, beam:π/18} 射角（半角ラジアン） |
+| `genGain` | number | GAINスライダー値/50（範囲50-100 → ×1.0〜×2.0、エンジン出力倍率） |
 
 ## 主要関数（game.js）
 
