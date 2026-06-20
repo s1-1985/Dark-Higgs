@@ -398,6 +398,8 @@ const STORM_EM_MOD       = 0.90; // 磁気嵐経路によるEM探知の減衰係
 const STORM_EM_MASK      = 0.65; // 磁気嵐内に居る機体のEMシグネチャ低減率 (AIを安全に回せる)
 const THERMAL_HEAT_MASK  = 0.60; // 熱雲内の機体のheatSig低減率 (HEATセンサーから隠れやすい)
 const THERMAL_HEAT_MOD   = 0.80; // 熱雲経路によるHEAT探知の減衰係数
+const STORM_SONAR_DEGRADE = 0.70; // 磁気嵐内でのアクティブソナー最大レンジ減衰率 (§3-13残)
+const DECOY_MISDIRECT_RADIUS = 2500; // デコイの強EMで敵lastKnownPosを書き換える半径 (§3-5残)
 function computeVisionRadius() {
     // ヒッグス連続濃度連動: 0% = 基準視野(100%), 濃度上昇に比例して縮小, 100%でほぼゼロ
     if (!player) return BASE_VISION_RADIUS;
@@ -2982,6 +2984,24 @@ class Ship {
                 ctx.globalAlpha = 0.15 + 0.1 * pulse;
                 ctx.beginPath(); ctx.arc(0, 0, vr2 * (1.65 + 0.22 * pulse), 0, Math.PI * 2); ctx.stroke();
             }
+            // §3-4残: ジャミング範囲可視リング (stealth専用 — burst=琥珀点線 / cont=紫点線)
+            if (gameState.shipType === 'stealth') {
+                if (jamBurst > 0) {
+                    const p = 0.5 + 0.5 * Math.sin(Date.now() * 0.006);
+                    ctx.globalAlpha = 0.18 + 0.12 * p;
+                    ctx.strokeStyle = '#ffaa33'; ctx.lineWidth = 2;
+                    ctx.setLineDash([30, 20]);
+                    ctx.beginPath(); ctx.arc(0, 0, JAM_BURST_RADIUS, 0, Math.PI * 2); ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+                if (jamCont) {
+                    ctx.globalAlpha = 0.15;
+                    ctx.strokeStyle = '#aa66ff'; ctx.lineWidth = 1.5;
+                    ctx.setLineDash([20, 14]);
+                    ctx.beginPath(); ctx.arc(0, 0, JAM_CONT_RADIUS, 0, Math.PI * 2); ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+            }
         }
         ctx.restore();
         ctx.globalAlpha = 1;
@@ -4228,7 +4248,8 @@ function fireOmniSonar() {
     }
     const sensorLv  = gameState.upgrades.sensor;
     const baseRange = OMNI_SONAR_RANGE[sensorLv];
-    const omniRange = baseRange * (genAlloc.sensors / 100) * genGain;
+    const stormAtPlayer = getStormIntensity(player.x, player.y);
+    const omniRange = baseRange * (genAlloc.sensors / 100) * genGain * (1 - stormAtPlayer * STORM_SONAR_DEGRADE);
     const sc = sensorConfig[currentSensor];
 
     playSound('ui');
@@ -4245,9 +4266,10 @@ function fireOmniSonar() {
     omniSonarCooldown = 900;
     enemies.forEach(e => { e.detectionState = 'alerted'; e.isAggro = true; e.aggroTimer = 400; });
     const rStr = Math.round(omniRange);
+    const stormSuffix = stormAtPlayer > 0.3 ? ` ⚡EM嵐による減衰 (${Math.round(stormAtPlayer * STORM_SONAR_DEGRADE * 100)}%低下)` : '';
     logMessage(detected > 0
-        ? `SONAR[全周囲] Lv${sensorLv}: ${detected}件の反応捕捉 (範囲: ${rStr}u) ─ 位置暴露注意`
-        : `SONAR[全周囲] Lv${sensorLv}: 有効範囲 ${rStr}u 内に反応なし`,
+        ? `SONAR[全周囲] Lv${sensorLv}: ${detected}件の反応捕捉 (範囲: ${rStr}u) ─ 位置暴露注意${stormSuffix}`
+        : `SONAR[全周囲] Lv${sensorLv}: 有効範囲 ${rStr}u 内に反応なし${stormSuffix}`,
         'system-msg');
     // ソナー伝播速度を遅く (1/3)、色はシアン系で鮮やかに
     effects.push({ x: player.x, y: player.y, r: 0, maxR: omniRange, a: 0.9, c: `rgba(0,255,220,1)`, type: 'sonar', speed: omniRange/60 });
@@ -4263,7 +4285,8 @@ function fireDirectionalSonar(targetAngle) {
     if (targetAngle === undefined) targetAngle = Math.atan2(mouseWorldY - player.y, mouseWorldX - player.x);
     const sensorLv  = gameState.upgrades.sensor;
     const halfAngle = DIR_SONAR_HALF_ANGLE[sensorLv];
-    const maxRange  = DIR_SONAR_MAX_RANGE * (genAlloc.sensors / 100) * genGain;
+    const stormAtPlayer2 = getStormIntensity(player.x, player.y);
+    const maxRange  = DIR_SONAR_MAX_RANGE * (genAlloc.sensors / 100) * genGain * (1 - stormAtPlayer2 * STORM_SONAR_DEGRADE);
 
     playSound('ui');
     let detected = 0;
@@ -5763,6 +5786,18 @@ function updateDecoys() {
         d.life--;
         // デコイは強EM源 → ヒッグスウェイクは出さないがEM波紋演出
         if (d.life % 24 === 0) effects.push({ x: d.x, y: d.y, r: 0, maxR: 220, a: 0.4, c: '#cc99ff', type: 'circle' });
+        // §3-5残: 強EMで接触が薄い敵のlastKnownPosをデコイ位置へ書き換える (誤誘導)
+        // contactFreshness < 0.5 = プレイヤーを~25フレーム以上未探知。視野外デコイ誘引の補完として機能。
+        if (d.life % 30 === 0 && enemies) {
+            for (const e of enemies) {
+                if (e.hp <= 0 || e.contactFreshness >= 0.5) continue;
+                const dd = Math.hypot(e.x - d.x, e.y - d.y);
+                if (dd < DECOY_MISDIRECT_RADIUS) {
+                    e.playerLastKnownPos = { x: d.x, y: d.y, vx: d.vx * 8, vy: d.vy * 8 };
+                    e.contactFreshness = 0.45; // 偽の確信 (次の真の探知で即上書き可)
+                }
+            }
+        }
         if (d.life <= 0) decoys.splice(i, 1);
     }
 }
