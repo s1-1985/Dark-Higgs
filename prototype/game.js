@@ -315,7 +315,7 @@ const PLAYER_TURN_RATES = { assault: 0.010, stealth: 0.015, carrier: 0.004 }; //
 const ENEMY_TURN_RATES  = { corvette: 0.018, fighter: 0.025, destroyer: 0.009, carrier: 0.006 }; // 敵艦種別回頭レート
 // 慣性ベース速度システム
 const SHIP_MAX_SPEED_MULT = { assault: 0.58, stealth: 1.05, carrier: 0.38 }; // 艦種別最高速度倍率(全体的に低速化)
-const SHIP_ACCEL_RATE = { carrier: 0.003, assault: 0.008, stealth: 0.016 }; // 最高速度到達まで加速率/frame (空母最遅・潜航最速)
+const SHIP_ACCEL_RATE = { carrier: 0.00075, assault: 0.002, stealth: 0.004 }; // 最高速度到達まで加速率/frame (×0.25: 初速を遅く)
 const SHIP_TURN_SLOW  = { carrier: 0.78, assault: 0.52, stealth: 0.22 }; // 旋回時の速度低下率最大値 (空母最重・潜航身軽)
 // 武器別射角 (前方からの角度差の許容最大値)
 const WEAPON_FIRE_ARC = { kinetic: Math.PI * 5/6, missile: Math.PI/4, beam: Math.PI/18 }; // kinetic±150° / missile±45° / beam±10°
@@ -831,8 +831,7 @@ function enterMapMode() {
     camera.zoom = Math.max(camera.minZoom, Math.min(cw, ch) / FIELD_SIZE * 0.92);
     camera.x = MAP_CX - (cw / camera.zoom) / 2;
     camera.y = MAP_CY - (ch / camera.zoom) / 2;
-    const banner = document.getElementById('map-mode-banner');
-    if (banner) banner.style.display = 'block';
+    // map-mode-banner は廃止（非表示）
     const fb = document.getElementById('btn-camera-follow');
     if (fb) fb.textContent = '追従 OFF';
     logMessage('NAV: マップモード ON — タップで航路設定、ミニマップ再タップで戻る', 'system-msg');
@@ -1032,7 +1031,6 @@ canvas.addEventListener('contextmenu', e => {
             if (_bh > 0.08 && higgsWakes.length < 800) higgsWakes.push({ x: _bwx, y: _bwy, intensity: _bh * 1.4, life: 1.0 });
             if (_bs % 3 === 0 && opticTrails.length < 600) opticTrails.push({ x: _bwx, y: _bwy, intensity: 0.9, life: 1.0 });
         }
-        if (emTrails.length < 600) emTrails.push({ x: player.x, y: player.y, intensity: 1.0, life: 1.0 });
         playSound('shoot');
         player.fireCooldown = WEAPON_COOLDOWNS.beam * _ffGenFactor;
         player.beamReloading = true;
@@ -1408,7 +1406,7 @@ class Projectile {
             // §3-10 ミサイル2タイプ: homing=熱源誘導 / smart=AI追跡(EM強・デコイ耐性・大閃光)
             this.missileMode = isPlayer ? missileMode : 'homing';
             this.speed = this.missileMode === 'smart' ? 7.5 : 6;
-            this.maxDist = (this.missileMode === 'smart' ? 2200 : 1500) * _wRange;
+            this.maxDist = (this.missileMode === 'smart' ? 4400 : 3000) * _wRange;
             this.dmg = (this.missileMode === 'smart' ? 65 : 50) * dmgScale;
             this.angle = Math.atan2(target.y - y, target.x - x);
         } else if (type === 'beam') {
@@ -1871,9 +1869,9 @@ class Ship {
                 const _fullLock = !!this.targetEntity.inVision || (!!this.targetEntity._wasLocked && _distToTgt < _lockPersistRange);
                 const _hasContact = (this.targetEntity.contactLife > 0) || ((this.targetEntity.contactAccuracy || 0) > 0);
                 const _assumedLock = !_fullLock && _hasContact;
-                let wRange = wType === 'missile' ? 1300 : (wType === 'beam' ? 800 : 500);
+                let wRange = wType === 'missile' ? 2600 : (wType === 'beam' ? 1600 : 1000);
                 // 想定ロック時、beamはヒッグスダークチャネル狙撃で長射程化 (設計: マップ端から狙撃可)
-                if (wType === 'beam' && _assumedLock) wRange = 8000;
+                if (wType === 'beam' && _assumedLock) wRange = 16000;
 
                 let targetAngle = Math.atan2(this.targetEntity.y - this.y, this.targetEntity.x - this.x);
                 let diff = targetAngle - this.angle;
@@ -3488,41 +3486,51 @@ function generateSector() {
     higgsCloudCanvas = null;
     debrisField = []; stormField = []; thermalField = [];
     debrisCanvas = null; stormCanvas = null; thermalCanvas = null;
-    // 星雲色: 紫・青・赤紫・緑青・琥珀 — より鮮やかな値
+    // 円内ランダム配置ヘルパー (uniformなdisk sampling)
+    const _rndCirc = (maxR) => {
+        const r = Math.sqrt(Math.random()) * maxR;
+        const a = Math.random() * Math.PI * 2;
+        return { x: MAP_CX + r * Math.cos(a), y: MAP_CY + r * Math.sin(a) };
+    };
+    // 均等角度セクターで配置するヘルパー (地形ブロブの偏り防止)
+    const _rndSector = (i, n, maxR) => {
+        const a = (i + Math.random()) * (Math.PI * 2 / n);
+        const r = Math.sqrt(0.1 + Math.random() * 0.9) * maxR;
+        return { x: MAP_CX + r * Math.cos(a), y: MAP_CY + r * Math.sin(a) };
+    };
+
+    // 星雲色: 紫・青・赤紫・緑青・琥珀
     const mistColors = ['70,20,140','25,60,160','130,20,70','10,90,110','80,50,10','15,110,80'];
-    for (let i = 0; i < 30; i++) {
-        const density = Math.random() * 0.65 + 0.1;
-        bgMist.push({
-            x: Math.random() * FIELD_SIZE, y: Math.random() * FIELD_SIZE,
-            r: Math.random() * 5000 + 2000,
-            color: mistColors[Math.floor(Math.random() * mistColors.length)],
-            density,
-            phase: Math.random() * Math.PI * 2
-        });
+    // ヒッグス濃度設計: 20-50%が60%/0%が10%/51-90%が20%/100%が10%
+    // Layer1: 中密度ベース (20-50%, マップ面積60%をカバー)
+    for (let i = 0; i < 20; i++) {
+        const p = _rndCirc(MAP_RADIUS * 0.90);
+        bgMist.push({ ...p, r: Math.random() * 3000 + 4500, color: mistColors[i % mistColors.length], density: 0.20 + Math.random() * 0.25, phase: Math.random() * Math.PI * 2 });
     }
-    // デブリ帯 (岩礁帯): ヒッグスより薄く散在 (スピード感を損なわない程度=「程々」)
-    for (let i = 0; i < 10; i++) {
-        debrisField.push({
-            x: Math.random() * FIELD_SIZE, y: Math.random() * FIELD_SIZE,
-            r: Math.random() * 3500 + 1800,
-            density: Math.random() * 0.5 + 0.25
-        });
-    }
-    // 磁気嵐帯: さらに少なめ
-    for (let i = 0; i < 6; i++) {
-        stormField.push({
-            x: Math.random() * FIELD_SIZE, y: Math.random() * FIELD_SIZE,
-            r: Math.random() * 4000 + 2200,
-            density: Math.random() * 0.55 + 0.25
-        });
-    }
-    // 熱雲(プラズマ雲): 少なめ (§3-13 Phase3)
+    // Layer2: 高密度 (51-90%, 20%カバー)
     for (let i = 0; i < 7; i++) {
-        thermalField.push({
-            x: Math.random() * FIELD_SIZE, y: Math.random() * FIELD_SIZE,
-            r: Math.random() * 3800 + 1600,
-            density: Math.random() * 0.50 + 0.20
-        });
+        const p = _rndCirc(MAP_RADIUS * 0.72);
+        bgMist.push({ ...p, r: Math.random() * 1800 + 2400, color: mistColors[i % mistColors.length], density: 0.48 + Math.random() * 0.35, phase: Math.random() * Math.PI * 2 });
+    }
+    // Layer3: 超高密度スポット (100%, 10%カバー)
+    for (let i = 0; i < 4; i++) {
+        const p = _rndCirc(MAP_RADIUS * 0.65);
+        bgMist.push({ ...p, r: Math.random() * 1100 + 900, color: mistColors[i % mistColors.length], density: 0.85 + Math.random() * 0.15, phase: Math.random() * Math.PI * 2 });
+    }
+    // デブリ帯 (岩礁帯): 2倍・均等分散 (旧10→20)
+    for (let i = 0; i < 20; i++) {
+        const p = _rndSector(i, 20, MAP_RADIUS * 0.90);
+        debrisField.push({ ...p, r: Math.random() * 3500 + 1800, density: Math.random() * 0.5 + 0.25 });
+    }
+    // 磁気嵐帯: 2倍・均等分散 (旧6→12)
+    for (let i = 0; i < 12; i++) {
+        const p = _rndSector(i, 12, MAP_RADIUS * 0.85);
+        stormField.push({ ...p, r: Math.random() * 4000 + 2200, density: Math.random() * 0.55 + 0.25 });
+    }
+    // 熱雲(プラズマ雲): 2倍・均等分散 (旧7→14)
+    for (let i = 0; i < 14; i++) {
+        const p = _rndSector(i, 14, MAP_RADIUS * 0.88);
+        thermalField.push({ ...p, r: Math.random() * 3800 + 1600, density: Math.random() * 0.50 + 0.20 });
     }
     // bgMistをオフスクリーンキャンバスに事前焼き付け (毎フレームのcreateRadialGradientを排除)
     // サイズを512に抑える: 4096x4096=64MBは生成に数秒かかりモバイルをフリーズさせるため
@@ -3706,33 +3714,7 @@ function toggleDemoMode() {
     logMessage(demoMode ? 'DEMO MODE: 全視界・ヒッグス暗幕解除 (AI挙動は通常と同一)' : 'DEMO MODE: 解除', 'system-msg');
 }
 
-function updateLandmarkBanner() {
-    if (!player || player.hp <= 0) return;
-    const banner = document.getElementById('landmark-banner');
-    if (!banner) return;
-    const range = effectiveRadarRange * 4;
-    const items = [];
-    for (const s of structures) {
-        const d = Math.hypot(s.x - player.x, s.y - player.y);
-        if (d < range) {
-            const icon = s.type === 'colony' ? '◈' : '⊗';
-            const name = s.type === 'colony'
-                ? (s.hacked ? 'COLONY [HACKED]' : 'COLONY NODE')
-                : (s.hacked ? 'DERELICT [HACKED]' : 'DERELICT');
-            items.push(`${icon} ${name} ${Math.round(d)}u`);
-        }
-    }
-    for (const st of stations) {
-        const d = Math.hypot(st.x - player.x, st.y - player.y);
-        if (d < range) items.push(`⊕ SUPPLY STATION ${Math.round(d)}u`);
-    }
-    if (items.length > 0) {
-        banner.textContent = items.join('  ·  ');
-        banner.style.display = 'block';
-    } else {
-        banner.style.display = 'none';
-    }
-}
+function updateLandmarkBanner() { /* ランドマーク距離表示廃止 */ }
 
 function startGame(shipType) {
     gameState.shipType = shipType;
@@ -5972,12 +5954,27 @@ function updateEnvInfo() {
         if (msbAmmo) {
             const wTypeMsb = document.getElementById('weapon-select')?.value || 'kinetic';
             if (wTypeMsb === 'kinetic') {
-                msbAmmo.textContent = player.kineticReloading ? 'RLD' : `${player.kineticAmmo}/${player.kineticMaxAmmo}`;
+                if (player.kineticReloading) {
+                    const _kMax = KINETIC_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0);
+                    const _kPct = Math.round((1 - player.kineticReloadTimer / _kMax) * 100);
+                    msbAmmo.textContent = `RLD(${_kPct}%)`;
+                } else {
+                    msbAmmo.textContent = `${player.kineticAmmo}/${player.kineticMaxAmmo}`;
+                }
                 msbAmmo.style.color = player.kineticReloading ? '#ff4444' : '#ffaa00';
             } else {
-                const rld = (wTypeMsb === 'missile' ? player.missileReloading : player.beamReloading);
-                msbAmmo.textContent = rld ? 'RLD' : 'RDY';
-                msbAmmo.style.color = rld ? '#ff4444' : '#00ff88';
+                const _rld = (wTypeMsb === 'missile' ? player.missileReloading : player.beamReloading);
+                if (_rld) {
+                    const _rldTimer = wTypeMsb === 'missile' ? player.missileReloadTimer : player.beamReloadTimer;
+                    const _rldMax = wTypeMsb === 'missile'
+                        ? MISSILE_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0)
+                        : BEAM_RELOAD_TIME;
+                    const _rldPct = Math.round((1 - _rldTimer / _rldMax) * 100);
+                    msbAmmo.textContent = `RLD(${_rldPct}%)`;
+                } else {
+                    msbAmmo.textContent = 'RDY';
+                }
+                msbAmmo.style.color = _rld ? '#ff4444' : '#00ff88';
             }
         }
         if (msbNodes) {
@@ -6710,10 +6707,7 @@ function gameLoop() {
                 if (heatTrails.length < 600) heatTrails.push({ x: player.x, y: player.y, intensity: player.heatSig, life: 1.0, isPlayerTrail: true });
             }
         }
-        // §3-12 EM trail: AI処理放射 (移動に関係なく高EM時)
-        if (player && player.hp > 0 && !repairActive && player.emSig > 0.2 && Math.random() < 0.14) {
-            if (emTrails.length < 600) emTrails.push({ x: player.x, y: player.y, intensity: player.emSig * 0.9, life: 1.0 });
-        }
+        // §3-12 EM trail: AI処理放射 — プレイヤー自身の紫粒子は削除済み
 
         // リソースノード収集チェック (プレイヤー接近で自動収集)
         for (let i = resourceNodes.length - 1; i >= 0; i--) {
@@ -6942,7 +6936,7 @@ function gameLoop() {
         // ── 武器射程サークルインジケータ + ラベル (ワールド空間) ──
         if (player && player.hp > 0) {
             const wTypeCircle = document.getElementById('weapon-select') ? document.getElementById('weapon-select').value : 'kinetic';
-            const wRangeCircle = wTypeCircle === 'missile' ? 2200 : (wTypeCircle === 'beam' ? 8000 : 800);
+            const wRangeCircle = wTypeCircle === 'missile' ? 4400 : (wTypeCircle === 'beam' ? 16000 : 1600);
             const wRangeColor = wTypeCircle === 'missile' ? '#ffaa00' : (wTypeCircle === 'beam' ? '#00aaff' : '#88ff44');
             const wLabel = wTypeCircle === 'missile' ? 'MISSILE' : (wTypeCircle === 'beam' ? 'BEAM' : 'KINETIC');
             ctx.save();
