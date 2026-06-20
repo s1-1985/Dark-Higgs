@@ -400,6 +400,10 @@ const THERMAL_HEAT_MASK  = 0.60; // 熱雲内の機体のheatSig低減率 (HEAT�
 const THERMAL_HEAT_MOD   = 0.80; // 熱雲経路によるHEAT探知の減衰係数
 const STORM_SONAR_DEGRADE = 0.70; // 磁気嵐内でのアクティブソナー最大レンジ減衰率 (§3-13残)
 const DECOY_MISDIRECT_RADIUS = 2500; // デコイの強EMで敵lastKnownPosを書き換える半径 (§3-5残)
+// §3-6残: 建設停止フロー
+let buildingTimer = 0;
+const BUILD_STOP_DUR  = 180; // 建設中停止フレーム数 (3秒)
+const BUILD_SIG_MULT  = 2.0; // 建設中シグネチャ増大倍率
 function computeVisionRadius() {
     // ヒッグス連続濃度連動: 0% = 基準視野(100%), 濃度上昇に比例して縮小, 100%でほぼゼロ
     if (!player) return BASE_VISION_RADIUS;
@@ -1563,6 +1567,16 @@ class Projectile {
                 effects.push({ x: hitTarget.x, y: hitTarget.y - 30, text: `先制! x2 (${Math.floor(this.dmg * dmgMult)})`, life: 1.0, type: 'floatText', c: '#ffff00' });
             }
         }
+        // §3-6残: 敵弾がプレイヤードローンに被弾 (自機を外れた弾のみ判定)
+        if (!this.isPlayer && this.active && playerDrones.length > 0) {
+            const hitDrone = playerDrones.find(d => d.hp > 0 && Math.hypot(d.x - this.x, d.y - this.y) < 18);
+            if (hitDrone) {
+                hitDrone.hp -= this.dmg * 0.8;
+                this.active = false;
+                createHitEffect(this.x, this.y, '#ffaa00');
+                if (hitDrone.hp <= 0) logMessage(`DRONE: ${DRONE_LABELS[hitDrone.type] || hitDrone.type} 撃墜`, 'warning-msg');
+            }
+        }
     }
     draw(ctx) {
         if (!this.active) return;
@@ -1791,6 +1805,19 @@ class Ship {
                     if (_rbl) _rbl.textContent = 'REGEN';
                     if (_rbtn) { _rbtn.style.borderColor = '#44bbff'; _rbtn.style.color = '#88ddff'; }
                 }
+                return; // 移動・発射をスキップ
+            }
+
+            // §3-6残: 建設中停止フロー (carrier が建設系ドローン展開中は完全停止 + シグネチャ増大)
+            if (buildingTimer > 0) {
+                buildingTimer--;
+                this.currentSpeed = 0;
+                this._baseTargetSpeed = 0;
+                this.heatSig    = Math.min(1, this.heatSig    + 0.20 * BUILD_SIG_MULT);
+                this.emSig      = Math.min(1, this.emSig      + 0.30 * BUILD_SIG_MULT);
+                this.opticalSig = Math.min(1, this.opticalSig + 0.10 * BUILD_SIG_MULT);
+                this.higgsSig   = Math.min(1, this.higgsSig   + 0.08 * BUILD_SIG_MULT);
+                if (buildingTimer === 0) logMessage('DRONE: 建設完了 — 航行再開', 'system-msg');
                 return; // 移動・発射をスキップ
             }
 
@@ -2141,6 +2168,17 @@ class Ship {
                 this.contactFreshness = 1.0;
             } else {
                 this.contactFreshness = Math.max(0, this.contactFreshness - 0.02);
+                // §3-6残: 攻撃型ドローンの熱シグネチャ — コンタクト薄い時のみ誤誘引
+                if (playerDrones.length > 0 && this.contactFreshness < 0.3) {
+                    for (const dr of playerDrones) {
+                        if (dr.type !== 'attack') continue;
+                        if (Math.hypot(this.x - dr.x, this.y - dr.y) < myDetectRange * 0.7) {
+                            this.playerLastKnownPos = { x: dr.x, y: dr.y, vx: 0, vy: 0 };
+                            this.contactFreshness = 0.35;
+                            break;
+                        }
+                    }
+                }
             }
 
             // ──────────────────────────────────────
@@ -3627,8 +3665,9 @@ function startGame(shipType) {
     document.querySelectorAll('.drone-btn').forEach(b => { b.style.display = shipType === 'carrier' ? '' : 'none'; });
     // 全艦種共通ボタン (ミサイルモード・修復) — ゲーム開始後に表示
     document.querySelectorAll('.common-btn').forEach(b => { b.style.display = ''; });
-    // 修復状態をリセット
+    // 修復/建設状態をリセット
     repairActive = false;
+    buildingTimer = 0;
     missileMode = 'homing';
     const _mml = document.getElementById('missile-mode-label'); if (_mml) _mml.textContent = 'MSL:HON';
     const _rgl = document.getElementById('repair-drone-label'); if (_rgl) _rgl.textContent = 'REGEN';
@@ -6028,7 +6067,13 @@ function deployDrone(type) {
     if (playerDrones.length >= CARGO_CAP.carrier) { logMessage(`DRONE: 同時展開上限 (${CARGO_CAP.carrier}機) に到達`, 'warning-msg'); return; }
     const ang = player.angle + (Math.random() - 0.5);
     playerDrones.push(new Drone(type, player.x + Math.cos(ang) * 45, player.y + Math.sin(ang) * 45));
-    logMessage(`DRONE: ${DRONE_LABELS[type]} 展開 (${playerDrones.length}/${CARGO_CAP.carrier})`, 'system-msg');
+    // §3-6残: 建設系ドローン展開中は空母が停止 (脆弱ウィンドウ)
+    if (['build', 'barrier', 'buoy', 'higgs'].includes(type)) {
+        buildingTimer = BUILD_STOP_DUR;
+        logMessage(`DRONE: ${DRONE_LABELS[type]} 展開 — 建設中 (${(BUILD_STOP_DUR/60).toFixed(0)}秒停止・全センサーに脆弱)`, 'warning-msg');
+    } else {
+        logMessage(`DRONE: ${DRONE_LABELS[type]} 展開 (${playerDrones.length}/${CARGO_CAP.carrier})`, 'system-msg');
+    }
     playSound('ui');
 }
 function updatePlayerDrones() {
