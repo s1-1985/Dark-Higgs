@@ -2184,8 +2184,22 @@ class Ship {
 
             // センサー制約型: 探知中のみ最終既知位置を更新。喪失後は古い予測が凍結される。
             if (playerSigDetected && player && player.hp > 0) {
+                let _lkx = player.x, _lky = player.y;
+                // §3-12残: ジャミングで相手の方位を広げる — JAM中は探知位置にノイズを加算
+                // 方位の不確かさ↑＝位置推定がズレる＝発砲精度が下がる
+                if (gameState.shipType === 'stealth') {
+                    if (jamBurst > 0 && distToPlayer < JAM_BURST_RADIUS) {
+                        const _ja = Math.random() * Math.PI * 2;
+                        _lkx += Math.cos(_ja) * Math.random() * 400;
+                        _lky += Math.sin(_ja) * Math.random() * 400;
+                    } else if (jamCont && distToPlayer < JAM_CONT_RADIUS) {
+                        const _ja = Math.random() * Math.PI * 2;
+                        _lkx += Math.cos(_ja) * Math.random() * 250;
+                        _lky += Math.sin(_ja) * Math.random() * 250;
+                    }
+                }
                 this.playerLastKnownPos = {
-                    x: player.x, y: player.y,
+                    x: _lkx, y: _lky,
                     vx: player.x - (player.prevX ?? player.x),
                     vy: player.y - (player.prevY ?? player.y)
                 };
@@ -6095,6 +6109,7 @@ function updateDecoys() {
                 if (dd < DECOY_MISDIRECT_RADIUS) {
                     e.playerLastKnownPos = { x: d.x, y: d.y, vx: d.vx * 8, vy: d.vy * 8 };
                     e.contactFreshness = 0.45; // 偽の確信 (次の真の探知で即上書き可)
+                    if (!d.misdirected) { d.misdirected = true; logMessage('DECOY: 敵AIが誤誘引 — 追尾が偽位置へシフト', 'warning-msg'); }
                 }
             }
         }
