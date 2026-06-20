@@ -342,11 +342,29 @@
 - 現在の `corvette/destroyer/carrier/fighter` は**すべて敵ユニット型**（`ENEMY_TURN_RATES` 等）。自機は艦種（assault/stealth/carrier）で管理。将来的には統一した`shipClass`×`shipRole`の2軸に整理する想定
 - `gameState.enemyType: 'assault'|'stealth'|'carrier'` → 敵の艦種選択は実装済。艦級スケールは未実装
 
+#### 艦級別スペック骨格（2026-06-20 確定方針）
+
+| 艦級 | 速度 | 耐久 | 扱える武器 | ドローン |
+|---|---|---|---|---|
+| **Fighter**    | ★★★★★ | ☆ | 軽量Kinetic | — |
+| **Corvette**   | ★★★★ | ★ | Kinetic / 軽Missile | — |
+| **Frigate**    | ★★★ | ★★★ | Kinetic / Missile / 軽Beam | — |
+| **Destroyer**  | ★★ | ★★★★ | Missile / Beam / 重Missile | Fighterサイズ |
+| **Battleship** | ★ | ★★★★★ | 全種・最大威力 / 多門同時発射 | Fighter/Corvette |
+| **Mothership** | ☆ | ∞ | 艦隊規模武器 | Fighter/Corvette |
+
+**設計法則**:
+- **速度**: 艦級が小さいほど速い（Fighter ≈ 現stealth×1.5 / Mothership ≈ 現carrier×0.5 想定）
+- **耐久**: 艦級が大きいほど高HP（Fighter ≈ 現stealth程度 / Mothership ≈ 現carrier×5+ 想定）
+- **武器**: 大型艦ほど威力・射程が高い武器を装備可。現行3種（kinetic/missile/beam）を「軽→重」でティア展開
+- **ドローン**: Destroyer以上の輸送/空母型が展開可。ドローン本体サイズはFighterまたはCorvetteクラス（それ以上の大型ドローンは存在しない）
+
 #### 未確定（要オーナー決定）
-- 各艦級のHP/速度/旋回率/積載量の具体数値
-- セクター進行と敵艦級スケールの対応（序盤=Fighter/Corvette、終盤=Battleship/Mothership など）
+- 各艦級の具体数値（速度倍率・HP値・旋回率・積載量）
+- 武器ティアの詳細（「重Missile」「軽Beam」等の数値差分）
+- セクター進行と敵艦級スケールの対応（序盤=Fighter/Corvette、終盤=Battleship/Mothership）
 - 自機の艦級アンロック条件（SCR購入 / セクタークリア など）
-- Fighter/Corvette の潜航型が「なし」の理由の明示（ゲームバランス上の制約）
+- Mothershipの扱い（ラスボス固定 or プレイヤーも乗れる）
 
 ### 4-2. 🧊 自機乗り換え・カスタマイズショップ
 - **構想**（`MEMORY:192-195`）: SCRで自機乗り換え・装備購入。各クラスのカスタマイズで戦略特化。将来のショップ/カスタマイズメニュー
