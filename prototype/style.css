@@ -506,6 +506,53 @@ input[type=range]::-webkit-slider-thumb {
     to   { transform: translateX(0);    opacity: 1; }
 }
 
+/* シグネチャ解析ステータスバー (モバイルのみ表示) */
+#sig-info-bar {
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: 3px 5px;
+    background: rgba(0,5,12,0.9);
+    border-left: 1px solid rgba(0,255,170,0.15);
+    font-family: 'Orbitron', monospace;
+    overflow: hidden;
+    min-width: 0;
+}
+#sib-lock-status {
+    font-size: 6.5px;
+    color: #888;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#sib-lock-status.locked {
+    color: #00ffaa;
+    text-shadow: 0 0 4px rgba(0,255,170,0.5);
+}
+.sib-param {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+.sib-label {
+    font-size: 6px;
+    color: #556;
+    letter-spacing: 0.3px;
+}
+.sib-val {
+    font-size: 8px;
+    color: #00ddaa;
+    letter-spacing: 0.5px;
+}
+.sib-rate {
+    font-size: 6px;
+    color: #557755;
+    letter-spacing: 0.3px;
+    min-height: 7px;
+}
+
 /* Dialog */
 .hidden {
     display: none !important;
@@ -1163,26 +1210,27 @@ input[type=range]::-webkit-slider-thumb {
     }
     .minimap-label { font-size: 7px; letter-spacing: 1px; }
 
-    /* ─── LOG PANEL: コンパクト・固定高 ─── */
+    /* ─── LOG PANEL: ミニマップと同高・横幅を隙間まで拡張 ─── */
     #log-panel {
         top: 40px;
+        left: 110px;
         right: 4px;
-        width: 195px;
-        height: 110px;
-        max-height: 110px;
+        width: auto;
+        height: 100px;
+        max-height: 100px;
         overflow: hidden;
     }
     #message-log {
         overflow-y: auto;
-        max-height: 88px;
+        max-height: 78px;
     }
     #log-header { padding: 3px 6px; font-size: 7px; }
     .message { font-size: 7px; padding: 2px 6px; }
 
-    /* ─── BOTTOM CONSOLE: 縦積み構成 ─── */
+    /* ─── BOTTOM CONSOLE: 縦積み構成 (Row2は3列: 35% 35% 30%) ─── */
     #bottom-console {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: 1fr 1fr 30%;
         grid-template-rows: auto auto auto auto;
         height: auto;
         padding: 0 0 env(safe-area-inset-bottom, 0px) 0;
@@ -1218,7 +1266,7 @@ input[type=range]::-webkit-slider-thumb {
     .msb-val { color: #00ffaa; }
     .msb-sep { color: #666; flex-shrink: 0; }
 
-    /* Row2: 自機SIG (左) | 環境SIG (右) — 28px高で波形が読める高さに */
+    /* Row2: 自機SIG (col1) | 環境SIG (col2) | 解析ステータス (col3) */
     .left-panel {
         display: block !important;
         grid-column: 1; grid-row: 2;
@@ -1236,13 +1284,26 @@ input[type=range]::-webkit-slider-thumb {
         grid-column: 2; grid-row: 2;
         width: auto; min-width: 0;
         padding: 2px 4px;
-        border-right: none;
+        border-right: 1px solid rgba(0,255,170,0.12);
         border-bottom: 1px solid rgba(0,255,170,0.12);
         overflow: hidden;
     }
-    .right-panel .panel-header { display: none !important; } /* 「環境情報」ヘッダーを非表示 */
+    .right-panel .panel-header { display: none !important; }
     .right-panel .env-info > div { display: none !important; }
     #env-sig-canvas { height: 28px !important; display: block !important; width: 100% !important; }
+
+    /* Row2 col3: シグネチャ解析ステータス */
+    #sig-info-bar {
+        display: flex !important;
+        grid-column: 3; grid-row: 2;
+        flex-direction: column;
+        justify-content: center;
+        gap: 1px;
+        padding: 2px 4px;
+        border-bottom: 1px solid rgba(0,255,170,0.12);
+        overflow: hidden;
+        min-width: 0;
+    }
 
     /* Row3: GEN/ENGINE/SENSOR (center-panel) */
     .center-panel {

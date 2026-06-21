@@ -1218,6 +1218,7 @@ class Structure {
         this.radius = type === 'colony' ? 60 : 30;
         this.hacked = false;
         this.discovered = false;
+        this.identified = false;
         this.color = type === 'colony' ? 'rgba(34, 68, 170, 0.5)' : 'rgba(85, 85, 85, 0.5)';
         // 偽装ビーコン (ハッキング後)
         this.decoyActive = false;
@@ -3442,8 +3443,8 @@ function logMessage(text, className) {
     const ts = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
     msg.textContent = `[${ts}] ${text}`;
     log.appendChild(msg);
-    // 最大100件
-    while (log.children.length > 100) log.removeChild(log.firstChild);
+    // 最大20件
+    while (log.children.length > 20) log.removeChild(log.firstChild);
     // 自動スクロール (下端付近の時のみ)
     const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
     if (atBottom) log.scrollTop = log.scrollHeight;
@@ -3690,7 +3691,6 @@ function generateSector() {
         const a = (i / colonyCount) * Math.PI * 2 + Math.random() * 0.8;
         const r = 5000 + Math.random() * (MAP_RADIUS - 7000);
         const col = new Structure(MAP_CX + Math.cos(a) * r, MAP_CY + Math.sin(a) * r, 'colony');
-        col.discovered = true; // ゲーム開始時からミニマップに表示
         structures.push(col);
     }
     for (let i = 0; i < 5; i++) {
@@ -3699,7 +3699,6 @@ function generateSector() {
             MAP_CY + (Math.random() - 0.5) * MAP_RADIUS * 1.6
         );
         const der = new Structure(sp.x, sp.y, 'derelict');
-        der.discovered = true; // ゲーム開始時からミニマップに表示
         structures.push(der);
     }
     for (let i = 0; i < 3; i++) {
@@ -3712,7 +3711,7 @@ function generateSector() {
     for (let i = 0; i < nodeCount; i++) {
         const na = Math.random() * Math.PI * 2, nr = Math.random() * (MAP_RADIUS - 3000);
         const spot = findHidingSpot(MAP_CX + Math.cos(na) * nr, MAP_CY + Math.sin(na) * nr, 2000);
-        resourceNodes.push({ x: spot.x, y: spot.y, active: true, emFlashTimer: 0 });
+        resourceNodes.push({ x: spot.x, y: spot.y, active: true, emFlashTimer: 0, identified: false });
     }
 
     // S&D進捗バーをリセット
@@ -4303,7 +4302,7 @@ function checkPassiveDetection() {
         if (best && best.sig > thr * 0.2) allContacts.push(best);
     }
 
-    // ─ 中立コロニー → HEAT + OPTIC ─
+    // ─ 中立コロニー → HEAT + OPTIC + EM ─
     if (currentSensor === 'heat' || currentSensor === 'optic') {
         structures.forEach((s, si) => {
             if (s.type !== 'colony') return;
@@ -4314,14 +4313,55 @@ function checkPassiveDetection() {
                 allContacts.push({ x: s.x, y: s.y, sig, angle: Math.atan2(s.y - player.y, s.x - player.x), sourceId: 'colony-' + si });
         });
     }
+    if (currentSensor === 'em') {
+        structures.forEach((s, si) => {
+            if (s.type !== 'colony') return;
+            const dist = Math.hypot(s.x - player.x, s.y - player.y);
+            if (dist > terrRange) return;
+            const sig = 0.35 * Math.max(0, 1 - dist / terrRange);
+            if (sig > thr * 0.25)
+                allContacts.push({ x: s.x, y: s.y, sig, angle: Math.atan2(s.y - player.y, s.x - player.x), sourceId: 'colony-' + si });
+        });
+    }
+    // ─ 難破船 → OPTIC (残骸フラッシュ) + HEAT (残留熱) ─
+    if (currentSensor === 'optic') {
+        structures.forEach((s, si) => {
+            if (s.type !== 'derelict') return;
+            const dist = Math.hypot(s.x - player.x, s.y - player.y);
+            if (dist > terrRange) return;
+            const sig = 0.40 * Math.max(0, 1 - dist / terrRange);
+            if (sig > thr * 0.25)
+                allContacts.push({ x: s.x, y: s.y, sig, angle: Math.atan2(s.y - player.y, s.x - player.x), sourceId: 'derelict-' + si });
+        });
+    }
+    if (currentSensor === 'heat') {
+        structures.forEach((s, si) => {
+            if (s.type !== 'derelict') return;
+            const dist = Math.hypot(s.x - player.x, s.y - player.y);
+            if (dist > terrRange) return;
+            const sig = 0.20 * Math.max(0, 1 - dist / terrRange);
+            if (sig > thr * 0.25)
+                allContacts.push({ x: s.x, y: s.y, sig, angle: Math.atan2(s.y - player.y, s.x - player.x), sourceId: 'derelict-' + si });
+        });
+    }
 
-    // ─ ヒッグスノード → HIGGS + EM ─
-    if (currentSensor === 'higgs' || currentSensor === 'em') {
+    // ─ ヒッグスノード → HIGGS 0.70 + EM 0.25 ─
+    if (currentSensor === 'higgs') {
         resourceNodes.forEach((n, ni) => {
             if (!n.active) return;
             const dist = Math.hypot(n.x - player.x, n.y - player.y);
             if (dist > terrRange) return;
-            const sig = 0.62 * Math.max(0, 1 - dist / terrRange);
+            const sig = 0.70 * Math.max(0, 1 - dist / terrRange);
+            if (sig > thr * 0.25)
+                allContacts.push({ x: n.x, y: n.y, sig, angle: Math.atan2(n.y - player.y, n.x - player.x), sourceId: 'node-' + ni });
+        });
+    }
+    if (currentSensor === 'em') {
+        resourceNodes.forEach((n, ni) => {
+            if (!n.active) return;
+            const dist = Math.hypot(n.x - player.x, n.y - player.y);
+            if (dist > terrRange) return;
+            const sig = 0.25 * Math.max(0, 1 - dist / terrRange);
             if (sig > thr * 0.25)
                 allContacts.push({ x: n.x, y: n.y, sig, angle: Math.atan2(n.y - player.y, n.x - player.x), sourceId: 'node-' + ni });
         });
@@ -4404,6 +4444,29 @@ function checkPassiveDetection() {
             const _ptJD = _ptJr * Math.sqrt(Math.random());
             _ptSa.displayCenterX = triangulationResult.x + _ptJD * Math.cos(_ptJA);
             _ptSa.displayCenterY = triangulationResult.y + _ptJD * Math.sin(_ptJA);
+        }
+    }
+
+    // ランドマーク特定チェック: locked signal の (dirAnalysis+triParam)/2 > 30% → identified
+    if (lockedSignalId && _signalAnalysis[lockedSignalId]) {
+        const _idSa = _signalAnalysis[lockedSignalId];
+        const _idAvg = (_idSa.dirAnalysis + _idSa.triParam) / 2;
+        if (_idAvg > 30) {
+            structures.forEach((s, si) => {
+                if (lockedSignalId === 'colony-' + si || lockedSignalId === 'derelict-' + si) {
+                    if (!s.identified) {
+                        s.identified = true;
+                        const _idLabel = s.type === 'colony' ? 'コロニーノード' : 'ディレリクト';
+                        logMessage(`ANALYSIS: ランドマーク特定 — ${_idLabel}`, 'system-msg');
+                    }
+                }
+            });
+            resourceNodes.forEach((n, ni) => {
+                if (lockedSignalId === 'node-' + ni && !n.identified) {
+                    n.identified = true;
+                    logMessage('ANALYSIS: HIGGSクリスタルノード特定', 'system-msg');
+                }
+            });
         }
     }
 
@@ -5367,7 +5430,7 @@ function drawMinimap() {
     minimapCtx.strokeStyle = 'rgba(255,255,0,0.5)'; minimapCtx.lineWidth = 1;
     minimapCtx.strokeRect(camera.x * mmScale + offX, camera.y * mmScale + offY, (cssW / camera.zoom) * mmScale, (cssH / camera.zoom) * mmScale);
 
-    // Structures (discovered: with icon, undiscovered: very faint)
+    // Structures (discovered/identified: with icon; unknown: hidden)
     structures.forEach(st => {
         const mx = st.x * mmScale + offX, my = st.y * mmScale + offY;
         if (st.discovered || st.hacked) {
@@ -5378,9 +5441,17 @@ function drawMinimap() {
             minimapCtx.lineTo(mx, my + 4); minimapCtx.lineTo(mx - 4, my);
             minimapCtx.closePath(); minimapCtx.fill();
             minimapCtx.shadowBlur = 0;
-        } else {
-            minimapCtx.fillStyle = 'rgba(255,255,255,0.1)';
-            minimapCtx.fillRect(mx - 2, my - 2, 4, 4);
+        } else if (st.identified) {
+            // 特定済み: やや薄い菱形アイコンで表示
+            minimapCtx.globalAlpha = 0.65;
+            minimapCtx.fillStyle = st.type === 'colony' ? '#ffaa00' : '#888888';
+            minimapCtx.shadowColor = minimapCtx.fillStyle; minimapCtx.shadowBlur = 1;
+            minimapCtx.beginPath();
+            minimapCtx.moveTo(mx, my - 3); minimapCtx.lineTo(mx + 3, my);
+            minimapCtx.lineTo(mx, my + 3); minimapCtx.lineTo(mx - 3, my);
+            minimapCtx.closePath(); minimapCtx.fill();
+            minimapCtx.shadowBlur = 0;
+            minimapCtx.globalAlpha = 1;
         }
     });
 
@@ -5442,9 +5513,12 @@ function drawMinimap() {
         }
     });
 
-    // リソースノード (常時ミニマップ表示; HIGGSセンサーで明るく)
+    // リソースノード (特定済みは通常表示; HIGGSセンサー時は微かに表示)
     resourceNodes.forEach(n => {
         if (!n.active) return;
+        if (!n.identified && currentSensor !== 'higgs') return; // HIGGS以外で未特定は非表示
+        const _nAlpha = n.identified ? 1 : 0.35;
+        minimapCtx.globalAlpha = _nAlpha;
         minimapCtx.fillStyle = currentSensor === 'higgs' ? '#50c8ff' : 'rgba(80,200,255,0.4)';
         minimapCtx.shadowColor = '#50c8ff';
         minimapCtx.shadowBlur = currentSensor === 'higgs' ? 6 : 2;
@@ -5452,6 +5526,7 @@ function drawMinimap() {
         minimapCtx.arc(n.x * mmScale + offX, n.y * mmScale + offY, currentSensor === 'higgs' ? 4 : 2.5, 0, Math.PI * 2);
         minimapCtx.fill();
         minimapCtx.shadowBlur = 0;
+        minimapCtx.globalAlpha = 1;
     });
 
     // ソナーリング & 探知コンタクト (ミニマップ上)
@@ -5533,12 +5608,6 @@ function drawMinimap() {
         minimapCtx.strokeStyle = '#00ffcc';
         minimapCtx.lineWidth = isCardinal ? 1.5 : isMid ? 1.0 : 0.6;
         minimapCtx.beginPath(); minimapCtx.moveTo(x0, y0); minimapCtx.lineTo(x1, y1); minimapCtx.stroke();
-        if (isMid) {
-            minimapCtx.globalAlpha = isCardinal ? 0.75 : 0.50;
-            minimapCtx.fillStyle = '#00ffcc';
-            minimapCtx.font = `${isCardinal ? 7 : 5.5}px "Orbitron",monospace`;
-            minimapCtx.fillText(deg + '°', cxM + Math.cos(rad) * (rM - tickIn - 6), cyM + Math.sin(rad) * (rM - tickIn - 6));
-        }
     }
     minimapCtx.restore();
 }
@@ -5838,8 +5907,7 @@ function drawBackground(ctx) {
         ctx.fill();
         ctx.restore();
     }
-    // ラジアル方位目盛り (境界が見えている時のみ描画)
-    if (_distToEdge < Math.max(vw, vh) * 0.9 + 2000) drawRadialScale(ctx);
+    // ラジアル方位目盛りはヒッグスフォグより手前に描画するためgameLoopへ移動
 }
 
 // オシロスコープ風シグネチャ表示
@@ -5965,6 +6033,51 @@ function updateSigCanvas() {
         sc.fillRect(w - 4, cy - barH/2, 3, barH);
         sc.globalAlpha = 1;
     });
+}
+
+// ============================================================
+// シグネチャ解析ステータスバー更新 (sig-info-bar)
+// ============================================================
+let _sibPrev = { dir: 0, tri: 0, ts: 0 };
+function updateSigInfoBar() {
+    const lockEl  = document.getElementById('sib-lock-status');
+    const dirEl   = document.getElementById('sib-dir');
+    const dirRate = document.getElementById('sib-dir-rate');
+    const triEl   = document.getElementById('sib-tri');
+    const triRate = document.getElementById('sib-tri-rate');
+    if (!lockEl) return;
+
+    if (!lockedSignalId || !_signalAnalysis[lockedSignalId]) {
+        lockEl.textContent = '-- UNLOCKED --';
+        lockEl.className = '';
+        if (dirEl) dirEl.textContent = '--.-- %';
+        if (triEl) triEl.textContent = '--.-- %';
+        if (dirRate) dirRate.textContent = '';
+        if (triRate) triRate.textContent = '';
+        return;
+    }
+
+    const sa = _signalAnalysis[lockedSignalId];
+    const dir = sa.dirAnalysis || 0;
+    const tri = sa.triParam   || 0;
+    const now = Date.now();
+    const dt  = (now - _sibPrev.ts) / 1000; // seconds since last update
+
+    let dRateStr = '', tRateStr = '';
+    if (dt > 0.1 && _sibPrev.ts > 0) {
+        const dRate = (dir - _sibPrev.dir) / dt;
+        const tRate = (tri - _sibPrev.tri) / dt;
+        if (Math.abs(dRate) > 0.01) dRateStr = `(${dRate >= 0 ? '+' : ''}${dRate.toFixed(2)}%/s)`;
+        if (Math.abs(tRate) > 0.01) tRateStr = `(${tRate >= 0 ? '+' : ''}${tRate.toFixed(2)}%/s)`;
+    }
+    _sibPrev = { dir, tri, ts: now };
+
+    lockEl.textContent = `LOCKED: ${lockedSignalId}`;
+    lockEl.className = 'locked';
+    if (dirEl) dirEl.textContent = dir.toFixed(2) + ' %';
+    if (triEl) triEl.textContent = tri.toFixed(2) + ' %';
+    if (dirRate) dirRate.textContent = dRateStr;
+    if (triRate) triRate.textContent = tRateStr;
 }
 
 // ============================================================
@@ -6973,10 +7086,11 @@ function gameLoop() {
             }
         }
 
-        // 構造物・ステーションの発見チェック
+        // 構造物・ステーションの発見チェック (有視界距離内に入ると発見)
         if (player && player.hp > 0) {
+            const _visionR = computeVisionRadius();
             [...structures, ...stations].forEach(s => {
-                if (!s.discovered && Math.hypot(player.x - s.x, player.y - s.y) < effectiveRadarRange * 2) {
+                if (!s.discovered && Math.hypot(player.x - s.x, player.y - s.y) < _visionR) {
                     s.discovered = true;
                 }
             });
@@ -7067,14 +7181,25 @@ function gameLoop() {
         // マップモード中はフォグを抑制して全体を戦術マップとして表示(索敵済みの情報のみ可視)。
         if (player && player.hp > 0 && !mapMode) drawFogOfWar(ctx);
 
+        // ── ラジアル方位目盛り: ヒッグスフォグより手前に描画 ──
+        {
+            const _rlVw = cssW / camera.zoom, _rlVh = cssH / camera.zoom;
+            const _rlCx = camera.x + _rlVw * 0.5, _rlCy = camera.y + _rlVh * 0.5;
+            const _rlDist = Math.abs(Math.hypot(_rlCx - MAP_CX, _rlCy - MAP_CY) - MAP_RADIUS);
+            if (_rlDist < Math.max(_rlVw, _rlVh) * 0.9 + 2000) drawRadialScale(ctx);
+        }
+
         // ── ランドマーク（ステーション・構造物・ヒッグスノード）— ヒッグスより手前に表示 ──
+        // 未発見・未特定の構造物は非表示; 有視界発見(discovered)または信号特定(identified)時のみ表示
         stations.forEach(s => s.draw(ctx));
-        structures.forEach(s => s.draw(ctx));
+        structures.forEach(s => { if (s.discovered || s.identified) s.draw(ctx); });
         if (player && player.hp > 0) {
             const higgsNodeRange = effectiveRadarRange * 6;
             const isHiggsSnsr = currentSensor === 'higgs';
             resourceNodes.forEach(n => {
                 if (!n.active) return;
+                // 未特定かつHIGGSセンサー以外では非表示
+                if (!n.identified && !isHiggsSnsr) return;
                 if (n.x < _vpX - 60 || n.x > _vpX + _vpW + 60 ||
                     n.y < _vpY - 60 || n.y > _vpY + _vpH + 60) return;
                 const distToNode = Math.hypot(n.x - player.x, n.y - player.y);
@@ -7082,9 +7207,11 @@ function gameLoop() {
                 const pulse = 0.5 + Math.sin(t * 0.003 + n.x * 0.001) * 0.5;
                 const spin = (t * 0.0008 + n.x * 0.0003) % (Math.PI * 2);
                 const inRange = distToNode < higgsNodeRange;
-                const brightness = isHiggsSnsr
+                // 未特定時(HIGGSセンサーのみ)は微かな輝き; 特定済みは通常表示
+                const _nodeVis = n.identified ? 1 : 0.4;
+                const brightness = _nodeVis * (isHiggsSnsr
                     ? (0.5 + pulse * 0.5)
-                    : (inRange ? 0.15 + pulse * 0.12 : 0.04 + pulse * 0.04);
+                    : (inRange ? 0.15 + pulse * 0.12 : 0.04 + pulse * 0.04));
                 ctx.save();
                 ctx.translate(n.x, n.y);
                 ctx.rotate(spin);
@@ -7124,7 +7251,7 @@ function gameLoop() {
                 ctx.shadowBlur = 0;
                 }
                 ctx.restore();
-                if (inRange || isHiggsSnsr) {
+                if (n.identified && (inRange || isHiggsSnsr)) {
                     ctx.save();
                     ctx.translate(n.x, n.y);
                     ctx.globalAlpha = brightness;
@@ -7213,6 +7340,7 @@ function gameLoop() {
         drawHUDOverlay(ctx);
         if (_frameCount % 2 === 0) updateSigCanvas();
         if (_frameCount % 3 === 0) drawMinimap();
+        if (_frameCount % 6 === 0) updateSigInfoBar();
         if (_frameCount % 10 === 0) updateEnvInfo();
         if (_frameCount % 20 === 0) updateLandmarkBanner();
 

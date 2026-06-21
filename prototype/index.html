@@ -11,7 +11,7 @@
     <title>Dark Echo: Tactical Space RTS</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23000' stroke='%2300ff88' stroke-width='2'/><circle cx='16' cy='16' r='6' fill='none' stroke='%2300ff88' stroke-width='1.5'/><line x1='16' y1='2' x2='16' y2='30' stroke='%2300ff88' stroke-width='1' opacity='0.4'/><line x1='2' y1='16' x2='30' y2='16' stroke='%2300ff88' stroke-width='1' opacity='0.4'/></svg>" type="image/svg+xml">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20260625">
+    <link rel="stylesheet" href="style.css?v=20260621b">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -53,7 +53,6 @@
             <div id="minimap-container">
                 <canvas id="minimapCanvas"></canvas>
                 <div class="minimap-overlay">
-                    <span class="minimap-label">レーダーリンク</span>
                 </div>
                 <!-- S&D進捗バー (S&Dモード時のみ表示) -->
                 <div id="sd-progress-bar" style="display:none; margin-top:4px;">
@@ -596,6 +595,21 @@
                         <canvas id="env-sig-canvas" width="400" height="100" style="width:100%; height:80px; border:1px solid rgba(0,255,170,0.2); background:rgba(0,5,10,0.8); border-radius:2px; display:block; margin-top:2px;"></canvas>
                     </div>
                 </div>
+
+                <!-- シグネチャ解析ステータスバー (モバイル: row2 col3) -->
+                <div id="sig-info-bar">
+                    <div id="sib-lock-status">-- UNLOCKED --</div>
+                    <div class="sib-param">
+                        <div class="sib-label">方向解析</div>
+                        <div><span id="sib-dir" class="sib-val">--.-- %</span></div>
+                        <div id="sib-dir-rate" class="sib-rate"></div>
+                    </div>
+                    <div class="sib-param">
+                        <div class="sib-label">三角測量</div>
+                        <div><span id="sib-tri" class="sib-val">--.-- %</span></div>
+                        <div id="sib-tri-rate" class="sib-rate"></div>
+                    </div>
+                </div>
             </div>
 
             <div id="log-panel">
@@ -833,7 +847,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20260626"></script>
+    <script src="game.js?v=20260621b"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
