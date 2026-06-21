@@ -11,7 +11,7 @@
     <title>Dark Echo: Tactical Space RTS</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23000' stroke='%2300ff88' stroke-width='2'/><circle cx='16' cy='16' r='6' fill='none' stroke='%2300ff88' stroke-width='1.5'/><line x1='16' y1='2' x2='16' y2='30' stroke='%2300ff88' stroke-width='1' opacity='0.4'/><line x1='2' y1='16' x2='30' y2='16' stroke='%2300ff88' stroke-width='1' opacity='0.4'/></svg>" type="image/svg+xml">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20260624">
+    <link rel="stylesheet" href="style.css?v=20260625">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -194,11 +194,17 @@
                             </div>
                             <!-- Right: all sliders -->
                             <div style="flex:1; min-width:0;">
+                                <!-- 艦体操作 -->
                                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
-                                    <span style="font-size:8px; color:#9bb; font-family:'Orbitron',monospace; letter-spacing:0.5px;">Operation</span>
+                                    <span style="font-size:8px; color:#9bb; font-family:'Orbitron',monospace; letter-spacing:0.5px;">艦体操作</span>
                                     <span id="gen-total" class="gen-total">計100%</span>
                                 </div>
                                 <div class="gen-sliders">
+                                    <div class="gen-row">
+                                        <label class="gen-label" style="color:#ffaa00" title="艦体操作ゲイン (0-100%) — 上げるとエンジン・センサーシグネチャ増大">GAIN</label>
+                                        <input type="range" class="gen-slider" id="gen-gain" min="0" max="100" value="100">
+                                        <span class="gen-val" id="gen-gain-val">100%</span>
+                                    </div>
                                     <div class="gen-row">
                                         <label class="gen-label eng-label" title="エンジン出力 → 移動速度">ENG</label>
                                         <input type="range" class="gen-slider" id="gen-engine" min="0" max="100" value="40">
@@ -215,18 +221,16 @@
                                         <span class="gen-val" id="gen-sensors-val">30%</span>
                                     </div>
                                 </div>
-                                <div style="border-top:1px solid rgba(77,166,255,0.2); margin-top:4px; padding-top:4px;">
+                                <!-- AI操作 -->
+                                <div style="border-top:1px solid rgba(204,136,255,0.3); margin-top:4px; padding-top:4px;">
+                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+                                        <span style="font-size:8px; color:#cc88ff; font-family:'Orbitron',monospace; letter-spacing:0.5px;">AI操作</span>
+                                        <span id="aiprec-total" class="gen-total" style="font-size:9px;">計100%</span>
+                                    </div>
                                     <div class="gen-row">
-                                        <label class="gen-label ai-label" title="AI処理出力 → 精度の総量・EM放射強度 (独立)">AI</label>
+                                        <label class="gen-label ai-label" title="AI演算電力 (0-100%) — 上げると精度総量↑・EM放射↑・熱シグネチャ↑ (独立)">電力</label>
                                         <input type="range" class="gen-slider" id="gen-ai" min="0" max="100" value="50">
                                         <span class="gen-val" id="gen-ai-val">50%</span>
-                                    </div>
-                                </div>
-                                <!-- AI精度配分 (§3-2): AI出力を 解析/命中/回避 にゼロサム配分 -->
-                                <div style="border-top:1px solid rgba(204,136,255,0.25); margin-top:4px; padding-top:4px;">
-                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
-                                        <span style="font-size:8px; color:#cc88ff; font-family:'Orbitron',monospace; letter-spacing:0.5px;">AI</span>
-                                        <span id="aiprec-total" class="gen-total" style="font-size:9px;">計100%</span>
                                     </div>
                                     <div class="gen-row">
                                         <label class="gen-label" style="color:#cc88ff" title="解析精度 → コンタクト精度↑・候補絞り込み">解析</label>
@@ -242,13 +246,6 @@
                                         <label class="gen-label" style="color:#cc88ff" title="回避精度 → 被弾を確率回避">回避</label>
                                         <input type="range" class="gen-slider" id="aiprec-engine" min="0" max="100" value="33">
                                         <span class="gen-val" id="aiprec-engine-val">33%</span>
-                                    </div>
-                                </div>
-                                <div style="border-top:1px solid rgba(0,255,170,0.2); margin-top:4px; padding-top:4px;">
-                                    <div class="gen-row">
-                                        <label class="gen-label" style="color:#ffaa00" title="ジェネレーター総出力ゲイン (50-200%)">GAIN</label>
-                                        <input type="range" class="gen-slider" id="gen-gain" min="50" max="100" value="50">
-                                        <span class="gen-val" id="gen-gain-val">×1.0</span>
                                     </div>
                                 </div>
                             </div>
@@ -826,7 +823,6 @@
         <div id="sig-analysis-contacts" style="overflow-y:auto; flex:1; min-height:80px; max-height:40vh; margin-bottom:8px; border:1px solid #0a1a12; border-radius:3px; padding:2px;"></div>
         <!-- 三角測量結果 -->
         <div id="sig-analysis-result" style="padding:6px; border:1px solid #1a3322; border-radius:3px; min-height:32px; margin-bottom:8px; color:#88ffcc; flex-shrink:0;"></div>
-        <button onclick="runSigAnalysis()" style="width:100%; background:#002211; border:1px solid #00ffaa; color:#00ffaa; padding:7px; cursor:pointer; font-family:'Orbitron',monospace; font-size:9px; border-radius:3px; letter-spacing:1px; flex-shrink:0;">解析実行 / TRIANGULATE</button>
     </div>
 
     <!-- §4-4: 長押しラジアルメニュー (移動/射撃/キャンセル) -->
@@ -837,7 +833,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20260624"></script>
+    <script src="game.js?v=20260625"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
