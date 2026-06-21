@@ -715,4 +715,38 @@ radius    = MAP_RADIUS × (1 - avg_param / 100)
 
 ---
 
-*最終更新: 2026-06-21 — §3-14 追加: Operation/AI リネーム + Gain アーキテクチャ設計確定。§4-4 H/I 追加: 方向解析パラメータ（dirAnalysis）・三角測量パラメータ（triParam）設計確定（2026-06-21 壁打ち）。PR#89: kinetic/missile想定ロック散弾・オフセット。PR#90: 解析モーダル移動ペナルティ=なし（オーナー決定）。PR#91: 右オシロスコープ(env-sig-canvas)→解析パネル開閉。PR#92: 長押しラジアルメニュー+ミニマップ三角測量円。PR#93: SUP削除・GEN配分2列化・ダメージ浮き文字・システムログHIT表示・敵HPバー常時表示。PR#95: エンジン/センサーGCBサイクルUI・キャッシュバスティング。PR#96: センサー依存型マップ表示・リロード÷2・地形シグネチャ放射・信号解析モーダル刷新・360°方位目盛り。*
+### 3-15. ✅ ランドマーク発見/識別システム（2026-06-21 実装済・PR#107）
+
+#### 発見（discovered）フロー
+- `Structure` コンストラクタ: `discovered=false; identified=false` 追加
+- `generateSector` で `col.discovered=true`/`der.discovered=true` を削除（スタート時は不可視）
+- resourceNodes にも `identified:false` を追加
+- gameLoop 毎フレーム: `computeVisionRadius()` 範囲内に入ると `s.discovered=true`
+
+#### 識別（identified）フロー
+- `checkPassiveDetection()` 内の識別しきい値: `(dirAnalysis + triParam) / 2 > 30%` → `identified=true`
+- 識別対象: colony / derelict (sourceId='colony-N'/'derelict-N') / resourceNodes ('node-N')
+- 識別時にシステムログ出力
+
+#### 描画制御
+- フィールド: `if (s.discovered || s.identified) s.draw(ctx)`（drawFogOfWar後に描画=ヒッグス層前面）
+- ミニマップ: `discovered || hacked` → フルアイコン / `identified` → `globalAlpha=0.65` のdimアイコン / 未発見 → 非表示
+- リソースノード: 未識別かつHIGGSセンサー以外は非表示。識別済み=alpha1.0 / HIGGS直視のみ=alpha0.4
+
+#### ランドマークのパッシブ探知シグネチャ追加
+- colony: HEAT+OPTIC(0.52) ✅既存 + **EM 0.35 追加**
+- derelict: **OPTIC 0.40 + HEAT 0.20 新規追加**（旧=なし）
+- resourceNode: **HIGGS 0.70 + EM 0.25**（旧 HIGGS 0.62 単独から分割）
+
+### 3-16. ✅ sig-info-bar（方向解析/三角測量インジケータ）（2026-06-21 実装済・PR#107+#108）
+
+- **レイアウト**: モバイル3列グリッド3列目（`grid-column:3; grid-row:2`）。両オシロスコープを各35%に縮小し右30%にsig-info-barを新設。
+- **表示内容**: LCKステータス / 方向解析 XX.X%（±X.XX%/s）/ 三角測量 XX.X%（±X.XX%/s）
+- **1秒スナップショットレート**: `_sibSnap{dir,tri,snapTime}` で1秒ごとにΔ計算。near-zeroは非表示。
+- **高さ制約**: `height:28px; max-height:28px`（オシロスコープと同行高さ）
+- **更新頻度**: `gameLoop`内で `_frameCount % 6 === 0` （約10fps）
+- **パッシブ検知サイクル**: 2秒→1秒（`passiveCheckTimer < 60`）。`dirAnalysis`積算係数×2→×1で実効レート維持。
+
+---
+
+*最終更新: 2026-06-21 — §3-14 追加: Operation/AI リネーム + Gain アーキテクチャ設計確定。§4-4 H/I 追加: 方向解析パラメータ（dirAnalysis）・三角測量パラメータ（triParam）設計確定（2026-06-21 壁打ち）。PR#89: kinetic/missile想定ロック散弾・オフセット。PR#90: 解析モーダル移動ペナルティ=なし（オーナー決定）。PR#91: 右オシロスコープ(env-sig-canvas)→解析パネル開閉。PR#92: 長押しラジアルメニュー+ミニマップ三角測量円。PR#93: SUP削除・GEN配分2列化・ダメージ浮き文字・システムログHIT表示・敵HPバー常時表示。PR#95: エンジン/センサーGCBサイクルUI・キャッシュバスティング。PR#96: センサー依存型マップ表示・リロード÷2・地形シグネチャ放射・信号解析モーダル刷新・360°方位目盛り。PR#107: ランドマーク発見/識別システム（§3-15）・sig-info-bar（§3-16）・drawRadialScale fog後移動・ミニマップ目盛り度数削除・レーダーリンク削除・システムログ改善。PR#108: sig-info-bar横1行化・28px高さ固定・1秒スナップショットレート・パッシブ検知1秒サイクル。*

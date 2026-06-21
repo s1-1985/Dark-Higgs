@@ -10,6 +10,50 @@
 
 ## セッションログ（新しい順）
 
+### 2026-06-21（PR#107・#108・`claude/battleship-sprite-ui-layout-cdc1tw`）— ランドマーク発見/識別システム・sig-info-bar・UI整理
+
+**背景**: 大型11項目リクエスト（PR#107）→ UIレイアウトフィードバック修正（PR#108）の2PR。
+
+#### PR#107 — 11項目一括実装
+
+1. **レーダーリンク削除**: ミニマップオーバーレイから「レーダーリンク」spanを削除。
+2. **ミニマップ目盛り度数削除**: `drawMinimap`の15°刻みtick描画で `fillText` 数字を削除（tick線は維持）。
+3. **システムログ高さ = ミニマップ高さ**: モバイルCSS `#log-panel { height:100px }` に統一。`top:40px; left:110px; right:4px; width:auto` でミニマップ右端まで拡張。
+4. **システムログ幅**: ミニマップ右端〜ログパネル左端の隙間を埋めるよう `left:110px; right:4px` で自動伸縮。
+5. **システムログ最大20件・スクロール**: `while (log.children.length > 20) log.removeChild(log.firstChild)`。`overflow-y:auto`。
+6. **drawRadialScale をヒッグス霧の後へ移動**: `drawBackground`（fog前の旧位置`game.js:5842`付近）から削除→ gameLoop の `drawFogOfWar()` 直後に移動。距離チェックロジックをインラインで再現。
+7. **ランドマーク未発見時は非表示**: `Structure`コンストラクタに `discovered=false; identified=false` 追加。`generateSector`で `col.discovered=true` / `der.discovered=true` を削除（発見前は不可視）。毎フレーム `computeVisionRadius()` 範囲内に入ると `discovered=true` に。フィールド描画は `if (s.discovered || s.identified) s.draw(ctx)`。ミニマップも発見/識別状態で分岐（未発見=非表示）。リソースノードにも `identified:false` を追加し、HIGGS/EMセンサー以外かつ未識別は非表示。
+8. **ランドマークのパッシブ探知シグネチャ追加**:
+   - colony: 既存HEAT/OPTIC(0.52)に加え EM 0.35 追加
+   - derelict: OPTIC 0.40 + HEAT 0.20 を新規追加
+   - resourceNode: HIGGS 0.70 + EM 0.25（旧0.62から分割）
+9. **識別しきい値**: `(dirAnalysis + triParam) / 2 > 30%` → `identified=true`。識別時にシステムログ表示。
+10. **識別済みランドマーク**: ヒッグス層の前面に表示（drawFogOfWar後に描画）。ミニマップ/フィールド上で `globalAlpha=0.65` のdimアイコン表示。
+11. **sig-info-bar**: 両オシロスコープ（`sig-canvas` + `env-sig-canvas`）を合計幅70%（各35%）に縮小。右30%に `#sig-info-bar` を新設。LCKステータス・方向解析%・三角測量%・レートを表示。`updateSigInfoBar()` 関数を追加（`gameLoop`内で6フレーム毎呼出）。
+
+- **キャッシュバスティング**: `?v=20260621c`
+
+#### PR#108 — sig-info-bar レイアウト・レート修正
+
+- **各パラメータ横1行化**: 初実装で label/value/rate が別divで縦3行になっていた問題を修正。`.sib-row` flex行に label+value+rate をまとめてインライン配置。
+- **高さ上限28px固定**: `height:28px; max-height:28px` でレイアウト行がオシロスコープ高さを超えないよう制約。
+- **1秒スナップショット方式レート表示**: 前実装は呼出間隔（≈100ms）でレートを計算→ほぼ0に見えていた。`_sibSnap`（dir/tri/snapTime）を保持し1秒ごとにΔ計算→ `_sibDirRate`/`_sibTriRate` に格納。表示: `(+X.XX%/s)` or `(-X.XX%/s)` 形式。
+- **パッシブ検知サイクル 2秒→1秒**: `passiveCheckTimer < 60` (1秒)に変更。
+- **dirAnalysis積算係数 ×2→×1**: サイクルを半分にしたため積算量も半分に→実効レートは同じまま。
+
+#### Q&A: 赤い丸について
+ユーザーから「移動中に自機から出ているあかいまるはなに？」という質問。
+**回答**: シグネチャ・スレットリング（`drawPassiveAntenna`）のHEATセクター。移動で `heatSig` が速度比例で上昇し、HEAT弧（`#ffa03c` オレンジ赤）が光る。バグではなく仕様通り。止まれば冷える。
+
+#### ⚠️ 申し送り
+- **ランドマーク発見フロー未実機検証**: 発見→識別の2段階、ミニマップ表示切替のUXはGitHub Pagesで要確認。
+- **識別30%しきい値のバランス**: 現状は固定値。ゲームセッションで溜まりやすすぎ/遅すぎの場合はしきい値調整。
+- **sig-info-bar**: モバイル3列グリッド（`1fr 1fr 30%`）の3列目に配置。デスクトップでは `display:none`。
+- **right-panel に border-right 追加**: 元 `border-right:none` だったが `1px solid rgba(0,255,170,0.12)` に変更（sig-info-barの視覚的区切り）。
+- **キャッシュバスティング**: `?v=20260621c`（PR#108マージ時点）。
+
+---
+
 ### 2026-06-20（PR#89〜#93・`claude/battleship-sprite-ui-layout-cdc1tw`）— 想定ロックジッター・解析パネル拡張・ラジアルメニュー・ダメージUI・敵HPバー
 
 **背景**: 前セッションから続くTODO消化。計5PR。
