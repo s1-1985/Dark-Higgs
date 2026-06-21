@@ -317,6 +317,41 @@
 - 地形ブロブは**事前焼き付けキャンバス（≤1024px）**にベイク（`bgMistCanvas`方式）。`shadowBlur`禁止・動的色文字列禁止（HANDOVERパフォーマンス教訓）。
 - 地形種が増えるほどコスト増 → ブロブ数は控えめ＋LOD（画面外・遠景は密度ルックアップ省略）。
 
+### 3-14. ❌ Operation/AI リネーム + Gain アーキテクチャ（2026-06-21 設計確定）
+
+#### UI リネーム（index.html）
+- **`GEN配分` パネル** → **`Operation`** にリネーム（パネルヘッダー・ラベル等）
+- **`AI精度配分` パネル** → **`AI`** にリネーム
+
+#### Gain パラメータ（Operation セクションに追加）
+- Operation に **`gain` スライダー**（0〜100%）を追加。全体出力の倍率
+  - 実出力 = `gain × individual_slider（engine / weapon / sensor）/ 100`
+  - **gain 低** → 全スライダー最大でもシグネチャが小 = ステルスモード
+  - **gain 高** → 高性能だが強シグネチャ → 逆探知リスク増
+- AI セクションも同様に **`AI gain` スライダー**を追加
+  - AI 実出力 = `AI_gain × (analysis / accuracy / evasion スライダー) / 100`
+  - 既存の `aiPrec(key) = (genAlloc.ai/100) × (aiPrecision[key]/100)` は同式採用済み。
+    `genAlloc.ai` を「AI gain」として UI 上に明示するリネームが必要
+  - §4-4 H の「analysis power」= `AI_gain × analysis_slider / 100`
+
+#### プレイヤーシグネチャ計算の検証・修正
+- **目的**: `heatSig`, `emSig`, `opticalSig`, `higgsSig` が `Operation gain × slider` ベースか確認・修正
+- **既知実装**:
+  - `playerEmBoost = 0.5 + ai/100*0.5` @`game.js:1532` — EM ∝ AI gain、動作中
+  - `ENGINE_UPG_HEAT_REDUCE` — エンジンアップグレードが heat 低減、動作中
+- **要確認**:
+  - エンジン配分 `genAlloc.engine` がヒート・ヒッグスシグネチャに乗算されているか
+  - 武器配分 `genAlloc.weapons` が発射時シグネチャ（kinetic=光学 / missile=熱+EM / beam=EM+光学）に乗算されているか
+- **修正後の式（Operation gain 導入後）**:
+  - `engine_output = gain × engine_slider / 100`（ヒート・ヒッグスシグネチャのベース）
+  - `weapon_output = gain × weapon_slider / 100`（発射シグネチャのベース）
+  - `sensor_output = gain × sensor_slider / 100`（ソナーレンジのベース）
+  - `ai_output = ai_gain × aiPrecision[key] / 100`（AI 精度のベース）
+
+#### 実装対象ファイル
+- `index.html`: パネルラベルリネーム + gain スライダー HTML 追加 + JS ハンドラ
+- `game.js`: `genAlloc` に `gain` フィールド追加 → 各シグネチャ計算式を `gain` 乗算へ更新 + `aiPrec()` を `ai_gain` 乗算形に更新
+
 ---
 
 ## 4. 🧊 構想段階（仕様未確定・将来）
@@ -546,6 +581,86 @@
 - 1画面に同時表示できる解析結果サークルの上限数
 - デコイを解析してゴーストが出た場合のプレイヤーへのフィードバック（現状は「わからない」が正しい）
 
+#### H. 方向解析パラメータ（dirAnalysis）— ❌ 未実装（2026-06-21 設計確定）
+
+> **役割**: シグネチャ受信後に積算される「方向特定の確度」(0〜100%)。値が上がるほど表示方位範囲が狭く（精確に）なる。
+
+**初期化**: シグネチャ初受信時に `dirAnalysis = 0.1%` からスタート
+
+**積算レート（毎秒）**:
+```
+base_rate      = 0.1 × (1 + strength_pct / 100)
+  例: strength 24% → 0.124%/sec / strength 100% → 0.200%/sec
+
+analysis_power = AI_gain × analysis_slider / 100
+  例: AI_gain=100%, analysis_slider=50% → analysis_power = 50%
+
+analysis_bonus = base_rate × analysis_power / 100 × K   ← K は調整定数（設計例 K=0.4）
+  例: base_rate=0.124, power=50%, K=0.4 → bonus ≈ 0.025%/sec → total ≈ 0.149%/sec
+
+total_rate     = base_rate + analysis_bonus
+```
+
+**表示しきい値（dirAnalysis → 表示内容）**:
+| dirAnalysis | 表示方位範囲 | 備考 |
+|---|---|---|
+| > 20% | 信号強度を表示 | 実在確認レベル |
+| > 40% | 180° ± 20°（扇形幅 160°） | 大まかな方向 |
+| > 60% | 150° ± 15°（幅 120°） | 絞られてきた |
+| > 80% | 120° ± 10°（幅 100°） | かなり精確 |
+| = 100% | 90° ± 5°（幅 80°） | 最大精度 |
+
+**実装ポイント**:
+- 各 `sourceId` 単位で `dirAnalysis` を管理（別 Map `_signalAnalysis{}` を推奨）
+- 60fps ベースで積算: `dirAnalysis += total_rate / 60 / 100`（%→割合変換）
+- 上限 100%。ロック解除時の挙動は要決定（リセット or 据え置き）
+- `drawPassiveBearings()` で `dirAnalysis` に応じて扇形の `halfWidthDeg` を上書き
+- `dirAnalysis < 20%` の間は方位扇形を描画しない（強度も非表示）
+
+#### I. 三角測量パラメータ（triParam）— ❌ 未実装（2026-06-21 設計確定）
+
+> **役割**: シグナルロック後の「三角測量の進捗」(0〜100%)。自機が有効な移動（測量に適した方向・距離）をとると積算。`dirAnalysis` との平均で推定位置円の半径が縮まる。
+
+**開始条件**: `lockedSignalId` を設定した瞬間、自機位置を **lock origin** として記録
+
+**積算ルール（good maneuver 判定）**:
+```
+α = 移動ベクトルと（lock origin → 推定方位方向）のなす角
+d = 前回計測から今回計測までの移動距離（u）
+
+quality = |sin(α)| × min(d / 2000, 1.0)
+  ← 移動が推定方位に対して垂直（α=90°）かつ ≥2000u で最大=1.0
+
+analysis_power    = AI_gain × analysis_slider / 100
+gain_per_maneuver = 10 × (1 + analysis_power / 100)
+  例: analysis_power=50% → +15% / analysis_power=0% → +10%
+
+triParam += quality × gain_per_maneuver
+```
+- maneuver イベントは `checkPassiveDetection()` の 2 秒周期に同期して評価
+- 移動距離が最低閾値未満（例: 200u 以下）の場合はスキップ
+
+**推定位置円（triCircle）の半径**:
+```
+avg_param = (dirAnalysis + triParam) / 2
+radius    = MAP_RADIUS × (1 - avg_param / 100)
+
+例: 両方 50% → avg=50 → radius = MAP_RADIUS × 0.5 = 17500u
+例: 両方 0%  → radius = MAP_RADIUS（全マップ = 非表示）
+例: 両方 100% → radius ≈ 0（点収束）
+```
+- 表示条件: `dirAnalysis > 0 || triParam > 0`
+- 両方 0% → 非表示 or 極薄表示
+
+**ロックアイコン**:
+- `lockedSignalId` 設定時 → 解析パネルのスキャンアイコンに **△（三角測量）アイコンをオーバーレイ**
+- 実装: `index.html` のロックボタン/アイコン部分に CSS クラス or 追加 SVG
+
+**既存コードとの関係**:
+- 既存の自動 `computeTriangulation()` は本パラメータ（手動積算型）に置き換え or 並走
+- `drawTriangulationCircle()` の半径式を上記 `avg_param` ベースに更新
+- 別 Map `_signalAnalysis{}` に `{ dirAnalysis, triParam, lockOrigin }` をキー=sourceId で保持
+
 ---
 
 ### 4-5. 🧊 中長期（未着手）
@@ -584,4 +699,4 @@
 
 ---
 
-*最終更新: 2026-06-20 — PR#89: kinetic/missile想定ロック散弾・オフセット。PR#90: 解析モーダル移動ペナルティ=なし（オーナー決定）。PR#91: 右オシロスコープ(env-sig-canvas)→解析パネル開閉。PR#92: 長押しラジアルメニュー+ミニマップ三角測量円。PR#93: SUP削除・GEN配分2列化・ダメージ浮き文字・システムログHIT表示・敵HPバー常時表示。*
+*最終更新: 2026-06-21 — §3-14 追加: Operation/AI リネーム + Gain アーキテクチャ設計確定。§4-4 H/I 追加: 方向解析パラメータ（dirAnalysis）・三角測量パラメータ（triParam）設計確定（2026-06-21 壁打ち）。PR#89: kinetic/missile想定ロック散弾・オフセット。PR#90: 解析モーダル移動ペナルティ=なし（オーナー決定）。PR#91: 右オシロスコープ(env-sig-canvas)→解析パネル開閉。PR#92: 長押しラジアルメニュー+ミニマップ三角測量円。PR#93: SUP削除・GEN配分2列化・ダメージ浮き文字・システムログHIT表示・敵HPバー常時表示。PR#95: エンジン/センサーGCBサイクルUI・キャッシュバスティング。PR#96: センサー依存型マップ表示・リロード÷2・地形シグネチャ放射・信号解析モーダル刷新・360°方位目盛り。*
