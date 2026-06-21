@@ -55,7 +55,6 @@ let demoMode = false; // デモモード: フォグなし・全エンティテ�
 let passiveBearings = [];
 // §4-4: 三角測量エンジン状態
 let triangulationResult = null; // {x, y, precision, radius, frame}
-let _trigLastFrame = -999;
 let _prevTrigResult = null;      // Phase3: 前回の三角測量結果 (速度外挿用)
 let triangulationVelocity = null; // Phase3: 推定速度ベクトル {vx, vy} (world units/frame)
 let lockedSignalId = null;       // 解析モードでロックしたシグネチャのsourceId
@@ -436,7 +435,6 @@ const STORM_SONAR_DEGRADE = 0.70; // 磁気嵐内でのアクティブソナー�
 const TRIG_MIN_BASELINE     = 500;    // 有効ベースライン最小値 (wu)
 const TRIG_MAX_RADIUS       = 4500;   // 最低精度の誤差円半径 (wu)
 const TRIG_DECAY_PER_FRAME  = 0.0025; // 精度の経時劣化レート (per frame)
-const TRIG_UPDATE_INTERVAL  = 90;     // 三角測量自動再計算インターバル (フレーム)
 const DECOY_MISDIRECT_RADIUS = 2500; // デコイの強EMで敵lastKnownPosを書き換える半径 (§3-5残)
 // §3-6残: 建設停止フロー
 let buildingTimer = 0;
@@ -3463,7 +3461,7 @@ function generateSector() {
     dirSonarVisual = null;
     dirSonarPendingFire = false;
     passiveBearings = [];
-    triangulationResult = null; _trigLastFrame = -999; _prevTrigResult = null; triangulationVelocity = null;
+    triangulationResult = null; _prevTrigResult = null; triangulationVelocity = null;
     lockedSignalId = null; _contactLabels = {}; _contactLabelNext = 1; _signalAnalysis = {};
     player = new Ship(MAP_CX, MAP_CY, true);
     player.generatorOutput = genAlloc.engine;
@@ -4478,8 +4476,7 @@ function drawPassiveBearings(ctx) {
 // ============================================================
 // §4-4: 三角測量エンジン
 // ============================================================
-// 複数のパッシブ方位線の交点から推定位置と精度を算出する。
-// 計算タイミング: gameLoop で TRIG_UPDATE_INTERVAL フレームごとに呼ぶ。
+// 複数のパッシブ方位線の交点から推定位置と精度を算出する。手動TRIボタンで呼び出す。
 function computeTriangulation() {
     // ロック中シグネチャがあれば、そのsourceIdの方位線だけで三角測量
     const bs = passiveBearings.filter(b => b.life > 60 && (!lockedSignalId || b.sourceId === lockedSignalId));
@@ -7208,14 +7205,8 @@ function gameLoop() {
 
         // ── パッシブ方位ウェッジ (ワールド空間・三角測量用) ──
         if (player && player.hp > 0) drawPassiveBearings(ctx);
-        // §4-4: 三角測量 — 定期計算 + 精度円描画 (ワールド空間)
-        if (player && player.hp > 0) {
-            if (_frameCount - _trigLastFrame >= TRIG_UPDATE_INTERVAL) {
-                _trigLastFrame = _frameCount;
-                computeTriangulation();
-            }
-            drawTriangulationCircle(ctx);
-        }
+        // §4-4: 三角測量精度円描画 (手動TRIボタンで実行した結果を表示)
+        if (player && player.hp > 0) drawTriangulationCircle(ctx);
 
         ctx.restore();
 
