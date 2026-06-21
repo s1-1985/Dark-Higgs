@@ -1803,7 +1803,8 @@ class Ship {
             const _thrust = Math.min(1, (0.05 + _spdN * 0.85 + _ep * 0.10) * (0.55 + _gain * 0.45));
             // 各シグネチャ = 推進強度 × エンジン種別倍率。エンジンごとに支配的シグネチャが変わる。
             // §3-1 エンジンアップグレード: 熱効率改善でheatSig低下
-            this.heatSig    = Math.min(1, _thrust * _engType.heatMult * 0.55 * (1 - ENGINE_UPG_HEAT_REDUCE[gameState.upgrades.engine]));
+            // 電力(genAlloc.ai)↑ → 処理熱放射も増大
+            this.heatSig    = Math.min(1, _thrust * _engType.heatMult * 0.55 * (1 - ENGINE_UPG_HEAT_REDUCE[gameState.upgrades.engine]) + genAlloc.ai / 100 * 0.10);
             this.opticalSig = Math.min(1, _thrust * _engType.optMult * 0.45 + (this.weaponType === 'beam' ? 0.5 : 0));
             // EM: 推進＋(センサー/AI処理放射)。ゲインで増幅。AI↑でEM↑(逆探知の法則)。
             this.emSig      = Math.min(1, (_thrust * 0.35 + genAlloc.sensors / 100 * 0.18 + genAlloc.ai / 100 * 0.40) * (0.6 + _gain * 0.4) * _engType.emMult);
@@ -4098,9 +4099,9 @@ document.getElementById('engine-type-select')?.addEventListener('change', e => {
 });
 
 document.getElementById('gen-gain')?.addEventListener('input', e => {
-    genGain = parseInt(e.target.value) / 50;
+    genGain = parseInt(e.target.value) / 100;
     const valEl = document.getElementById('gen-gain-val');
-    if (valEl) valEl.textContent = `×${genGain.toFixed(1)}`;
+    if (valEl) valEl.textContent = `${e.target.value}%`;
 });
 document.getElementById('btn-dir-sonar').addEventListener('click', () => {
     if (dirSonarCooldown > 0) {
