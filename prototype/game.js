@@ -3605,21 +3605,22 @@ function generateSector() {
         const drng = () => { _ds = (_ds * 1664525 + 1013904223) >>> 0; return _ds / 4294967296; };
         debrisField.forEach(m => {
             const sx = m.x * scale, sy = m.y * scale, sr = m.r * scale;
-            // 薄いベース(岩礁の影) + 岩片の点描
+            // ベース(岩礁の影) + 岩片の点描 — 濃度高いほど視認しやすく
             const g = dcx.createRadialGradient(sx, sy, 0, sx, sy, sr);
-            g.addColorStop(0, `rgba(120,118,110,${(0.10 * m.density).toFixed(3)})`);
+            g.addColorStop(0, `rgba(160,155,140,${(0.22 * m.density).toFixed(3)})`);
+            g.addColorStop(0.6, `rgba(100,98,88,${(0.12 * m.density).toFixed(3)})`);
             g.addColorStop(1, 'rgba(0,0,0,0)');
             dcx.fillStyle = g;
             dcx.beginPath(); dcx.arc(sx, sy, sr, 0, Math.PI * 2); dcx.fill();
-            const rocks = Math.floor(sr * sr * 0.0016 * m.density); // 面積×密度
+            const rocks = Math.floor(sr * sr * 0.0016 * m.density);
             for (let k = 0; k < rocks; k++) {
                 const a = drng() * Math.PI * 2;
                 const rr = Math.sqrt(drng()) * sr;
                 const px = sx + Math.cos(a) * rr, py = sy + Math.sin(a) * rr;
-                const sz = 0.6 + drng() * 1.6;
-                const sh = 80 + (drng() * 70) | 0;
-                dcx.globalAlpha = 0.25 + drng() * 0.4;
-                dcx.fillStyle = `rgb(${sh},${sh - 4},${sh - 12})`;
+                const sz = 0.6 + drng() * 1.8;
+                const sh = 90 + (drng() * 80) | 0;
+                dcx.globalAlpha = 0.35 + drng() * 0.55;
+                dcx.fillStyle = `rgb(${sh},${sh - 4},${sh - 14})`;
                 dcx.fillRect(px, py, sz, sz);
             }
             dcx.globalAlpha = 1;
@@ -3632,10 +3633,11 @@ function generateSector() {
         const scx = sc2c.getContext('2d');
         stormField.forEach(m => {
             const sx = m.x * scale, sy = m.y * scale, sr = m.r * scale;
-            const a = 0.10 + m.density * 0.16;
+            const a = 0.25 + m.density * 0.50; // 濃度連動: 0.38-0.69
             const g = scx.createRadialGradient(sx, sy, 0, sx, sy, sr);
-            g.addColorStop(0,    `rgba(150,70,220,${a.toFixed(3)})`);
-            g.addColorStop(0.5,  `rgba(70,120,230,${(a * 0.5).toFixed(3)})`);
+            g.addColorStop(0,    `rgba(160,60,240,${a.toFixed(3)})`);
+            g.addColorStop(0.4,  `rgba(80,130,255,${(a * 0.55).toFixed(3)})`);
+            g.addColorStop(0.75, `rgba(40,80,180,${(a * 0.20).toFixed(3)})`);
             g.addColorStop(1,    'rgba(0,0,0,0)');
             scx.fillStyle = g;
             scx.beginPath(); scx.arc(sx, sy, sr, 0, Math.PI * 2); scx.fill();
@@ -3648,10 +3650,11 @@ function generateSector() {
         const tcx = tc.getContext('2d');
         thermalField.forEach(m => {
             const sx = m.x * scale, sy = m.y * scale, sr = m.r * scale;
-            const a = 0.08 + m.density * 0.13;
+            const a = 0.22 + m.density * 0.52; // 濃度連動: 0.33-0.58
             const g = tcx.createRadialGradient(sx, sy, 0, sx, sy, sr);
-            g.addColorStop(0,    `rgba(255,80,20,${a.toFixed(3)})`);
-            g.addColorStop(0.5,  `rgba(220,120,0,${(a * 0.5).toFixed(3)})`);
+            g.addColorStop(0,    `rgba(255,90,10,${a.toFixed(3)})`);
+            g.addColorStop(0.4,  `rgba(240,140,0,${(a * 0.55).toFixed(3)})`);
+            g.addColorStop(0.75, `rgba(180,60,0,${(a * 0.20).toFixed(3)})`);
             g.addColorStop(1,    'rgba(0,0,0,0)');
             tcx.fillStyle = g;
             tcx.beginPath(); tcx.arc(sx, sy, sr, 0, Math.PI * 2); tcx.fill();
@@ -5331,22 +5334,22 @@ function drawMinimap() {
     // ミニマップ地形オーバーレイ: 現在センサーに対応する層を強調、他は薄く
     const _mmDim = 0.10; // 非対応層のフェード値
     if (bgMistCanvas) {
-        minimapCtx.globalAlpha = currentSensor === 'higgs' ? 0.55 : _mmDim;
+        minimapCtx.globalAlpha = currentSensor === 'higgs' ? 0.85 : _mmDim;
         minimapCtx.drawImage(bgMistCanvas, offX, offY, FIELD_SIZE * mmScale, FIELD_SIZE * mmScale);
         minimapCtx.globalAlpha = 1;
     }
     if (debrisCanvas) {
-        minimapCtx.globalAlpha = currentSensor === 'optic' ? 0.60 : _mmDim;
+        minimapCtx.globalAlpha = currentSensor === 'optic' ? 0.85 : _mmDim;
         minimapCtx.drawImage(debrisCanvas, offX, offY, FIELD_SIZE * mmScale, FIELD_SIZE * mmScale);
         minimapCtx.globalAlpha = 1;
     }
     if (stormCanvas) {
-        minimapCtx.globalAlpha = currentSensor === 'em' ? 0.55 : _mmDim;
+        minimapCtx.globalAlpha = currentSensor === 'em' ? 0.80 : _mmDim;
         minimapCtx.drawImage(stormCanvas, offX, offY, FIELD_SIZE * mmScale, FIELD_SIZE * mmScale);
         minimapCtx.globalAlpha = 1;
     }
     if (thermalCanvas) {
-        minimapCtx.globalAlpha = currentSensor === 'heat' ? 0.50 : _mmDim;
+        minimapCtx.globalAlpha = currentSensor === 'heat' ? 0.80 : _mmDim;
         minimapCtx.drawImage(thermalCanvas, offX, offY, FIELD_SIZE * mmScale, FIELD_SIZE * mmScale);
         minimapCtx.globalAlpha = 1;
     }
@@ -5779,12 +5782,12 @@ function drawBackground(ctx) {
         ctx.globalAlpha = 1;
     }
     if (stormCanvas) {
-        const _sa = (!mapMode || currentSensor === 'em') ? 0.6 + Math.sin(Date.now() * 0.006) * 0.18 : _mapFade;
+        const _sa = (!mapMode || currentSensor === 'em') ? 0.82 + Math.sin(Date.now() * 0.006) * 0.12 : _mapFade;
         ctx.save(); ctx.globalAlpha = _sa; ctx.imageSmoothingEnabled = true;
         ctx.drawImage(stormCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE); ctx.restore();
     }
     if (thermalCanvas) {
-        const _ta = (!mapMode || currentSensor === 'heat') ? 0.50 + Math.sin(Date.now() * 0.003 + 2.1) * 0.14 : _mapFade;
+        const _ta = (!mapMode || currentSensor === 'heat') ? 0.78 + Math.sin(Date.now() * 0.003 + 2.1) * 0.12 : _mapFade;
         ctx.save(); ctx.globalAlpha = _ta; ctx.imageSmoothingEnabled = true;
         ctx.drawImage(thermalCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE); ctx.restore();
     }
