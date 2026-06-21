@@ -11,7 +11,7 @@
     <title>Dark Echo: Tactical Space RTS</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23000' stroke='%2300ff88' stroke-width='2'/><circle cx='16' cy='16' r='6' fill='none' stroke='%2300ff88' stroke-width='1.5'/><line x1='16' y1='2' x2='16' y2='30' stroke='%2300ff88' stroke-width='1' opacity='0.4'/><line x1='2' y1='16' x2='30' y2='16' stroke='%2300ff88' stroke-width='1' opacity='0.4'/></svg>" type="image/svg+xml">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20260623">
+    <link rel="stylesheet" href="style.css?v=20260624">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -464,6 +464,15 @@
                             </svg>
                             <span>DIR</span>
                         </button>
+                        <button class="act-icon-btn btn-info" id="btn-triangulate" onclick="fireTriangulate()" title="三角測量 — シグネチャロックオン中に押すと測位実行">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <polygon points="12,3 21,19 3,19"/>
+                                <circle cx="12" cy="13" r="2" fill="currentColor" fill-opacity=".4"/>
+                                <line x1="6" y1="19" x2="12" y2="13" stroke-opacity=".5"/>
+                                <line x1="18" y1="19" x2="12" y2="13" stroke-opacity=".5"/>
+                            </svg>
+                            <span>TRI</span>
+                        </button>
                         <button class="act-icon-btn btn-warning" id="btn-hack" title="電子戦 EW">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                                 <polyline points="16,3 10,12 14,12 8,21"/>
@@ -828,7 +837,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20260623"></script>
+    <script src="game.js?v=20260624"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -864,7 +873,7 @@
     // ── アクションバー ポップオーバーシステム (mobile) ───────────────────────────
     (function() {
         var ACTION_GROUPS = {
-            scan:  ['btn-scan', 'btn-dir-sonar'],
+            scan:  ['btn-scan', 'btn-dir-sonar', 'btn-triangulate'],
             ew:    ['btn-hack', 'btn-jam-burst', 'btn-jam-cont', 'btn-jam-pulse', 'btn-decoy'],
             nav:   ['btn-cancel', 'btn-camera-follow', 'btn-game-speed'],
             drone: ['btn-drone-attack','btn-drone-decoy','btn-drone-scout','btn-drone-build',
