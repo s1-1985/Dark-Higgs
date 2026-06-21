@@ -11,7 +11,7 @@
     <title>Dark Echo: Tactical Space RTS</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23000' stroke='%2300ff88' stroke-width='2'/><circle cx='16' cy='16' r='6' fill='none' stroke='%2300ff88' stroke-width='1.5'/><line x1='16' y1='2' x2='16' y2='30' stroke='%2300ff88' stroke-width='1' opacity='0.4'/><line x1='2' y1='16' x2='30' y2='16' stroke='%2300ff88' stroke-width='1' opacity='0.4'/></svg>" type="image/svg+xml">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20260703">
+    <link rel="stylesheet" href="style.css?v=20260621">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -800,17 +800,24 @@
     </div>
 
     <!-- §4-4: シグネチャ解析パネル (sig-canvas タップで開閉) -->
-    <div id="sig-analysis-panel" style="display:none; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:290px; max-height:80vh; overflow-y:auto; background:rgba(0,8,18,0.95); border:1px solid #00ffaa; border-radius:6px; padding:12px; z-index:600; font-family:'Orbitron',monospace; font-size:9px; color:#aaffdd; box-shadow:0 0 20px rgba(0,255,170,0.15);">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:1px solid #114433; padding-bottom:6px;">
+    <div id="sig-analysis-panel" style="display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); width:340px; max-height:74vh; background:rgba(0,8,18,0.97); border:1px solid #00ffaa; border-radius:6px; padding:12px; z-index:600; font-family:'Orbitron',monospace; font-size:9px; color:#aaffdd; box-shadow:0 0 24px rgba(0,255,170,0.18); display:none; flex-direction:column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:1px solid #114433; padding-bottom:6px; flex-shrink:0;">
             <span style="font-size:11px; color:#00ffaa; letter-spacing:1px;">SIGNAL ANALYSIS</span>
             <button onclick="document.getElementById('sig-analysis-panel').style.display='none'" style="background:none; border:none; color:#ff6666; cursor:pointer; font-size:16px; line-height:1;">✕</button>
         </div>
-        <div id="sig-analysis-bearings" style="margin-bottom:8px;"></div>
-        <div id="sig-analysis-result" style="padding:6px; border:1px solid #1a3322; border-radius:3px; min-height:36px; margin-bottom:8px; color:#88ffcc;"></div>
-        <div style="display:flex; gap:6px; margin-top:0;">
-            <button onclick="runSigAnalysis()" style="flex:1; background:#002211; border:1px solid #00ffaa; color:#00ffaa; padding:6px; cursor:pointer; font-family:'Orbitron',monospace; font-size:9px; border-radius:3px; letter-spacing:1px;">解析実行 / TRIANGULATE</button>
-            <button id="sig-coordfire-btn" onclick="runCoordFire()" style="flex:1; background:#1a0008; border:1px solid #ff4466; color:#ff4466; padding:6px; cursor:pointer; font-family:'Orbitron',monospace; font-size:9px; border-radius:3px; letter-spacing:1px;" title="現在の武器(MSL/BEAM)で推定座標へ射撃">COORD FIRE</button>
+        <!-- ロック中シグネチャ表示 -->
+        <div id="sig-locked-bar" style="display:none; padding:4px 6px; margin-bottom:6px; background:rgba(0,80,40,0.5); border:1px solid #00ff88; border-radius:3px; font-size:8px; color:#00ff88; flex-shrink:0;">
+            TRACKING: <span id="sig-locked-label">--</span>
+            <button onclick="window.unlockSignal && window.unlockSignal()" style="float:right; background:none; border:none; color:#ff8866; cursor:pointer; font-size:9px; padding:0;">解除</button>
         </div>
+        <!-- シグネチャ一覧 (スクロール) -->
+        <div style="font-size:8px; color:#667766; margin-bottom:4px; flex-shrink:0;">
+            <span>─ 受信シグネチャ一覧 (タップで追跡) ─</span>
+        </div>
+        <div id="sig-analysis-contacts" style="overflow-y:auto; flex:1; min-height:80px; max-height:40vh; margin-bottom:8px; border:1px solid #0a1a12; border-radius:3px; padding:2px;"></div>
+        <!-- 三角測量結果 -->
+        <div id="sig-analysis-result" style="padding:6px; border:1px solid #1a3322; border-radius:3px; min-height:32px; margin-bottom:8px; color:#88ffcc; flex-shrink:0;"></div>
+        <button onclick="runSigAnalysis()" style="width:100%; background:#002211; border:1px solid #00ffaa; color:#00ffaa; padding:7px; cursor:pointer; font-family:'Orbitron',monospace; font-size:9px; border-radius:3px; letter-spacing:1px; flex-shrink:0;">解析実行 / TRIANGULATE</button>
     </div>
 
     <!-- §4-4: 長押しラジアルメニュー (移動/射撃/キャンセル) -->
@@ -821,7 +828,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20260703"></script>
+    <script src="game.js?v=20260621"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -1081,83 +1088,108 @@
 
     // ── §4-4: シグネチャ解析モーダル ──────────────────────────────────────
     (function() {
-        var panel   = document.getElementById('sig-analysis-panel');
-        var sigCvs  = document.getElementById('sig-canvas');
-        var SENSOR_COLORS_HEX = { heat: '#ff5000', optic: '#00ffaa', em: '#b432ff', higgs: '#50c8ff' };
+        var panel    = document.getElementById('sig-analysis-panel');
+        var sigCvs   = document.getElementById('sig-canvas');
+        var SENSOR_COL = { heat: '#ff5000', optic: '#00ffaa', em: '#b432ff', higgs: '#50c8ff' };
 
-        function toggleAnalysisPanel() {
+        function openPanel() {
             if (!panel) return;
-            if (panel.style.display === 'none' || !panel.style.display) {
-                updateSigAnalysisPanel();
-                panel.style.display = '';
-            } else {
-                panel.style.display = 'none';
-            }
+            updateSigAnalysisPanel();
+            panel.style.display = 'flex';
         }
+        function closePanel() { if (panel) panel.style.display = 'none'; }
 
-        if (sigCvs) {
-            sigCvs.style.cursor = 'pointer';
-            sigCvs.title = 'タップで信号解析パネルを開く';
-            sigCvs.addEventListener('click', toggleAnalysisPanel);
-        }
-
+        if (sigCvs) { sigCvs.style.cursor = 'pointer'; sigCvs.title = 'タップで信号解析'; sigCvs.addEventListener('click', openPanel); }
         var envCvs = document.getElementById('env-sig-canvas');
-        if (envCvs) {
-            envCvs.style.cursor = 'pointer';
-            envCvs.title = 'タップで信号解析パネルを開く';
-            envCvs.addEventListener('click', toggleAnalysisPanel);
-        }
+        if (envCvs) { envCvs.style.cursor = 'pointer'; envCvs.title = 'タップで信号解析'; envCvs.addEventListener('click', openPanel); }
 
-        // パッシブ方位ウェッジ一覧と三角測量結果を更新
+        // シグネチャをロック (追跡対象に設定) してパネルを閉じる
+        window.lockSignal = function(sourceId, label) {
+            if (typeof lockedSignalId !== 'undefined') {
+                // game.jsのグローバルを直接書き換え
+                window._lockSignal(sourceId);
+            }
+            var bar = document.getElementById('sig-locked-bar');
+            var lbl = document.getElementById('sig-locked-label');
+            if (bar) bar.style.display = 'block';
+            if (lbl) lbl.textContent = label;
+            closePanel();
+        };
+
+        window.unlockSignal = function() {
+            if (typeof window._lockSignal === 'function') window._lockSignal(null);
+            var bar = document.getElementById('sig-locked-bar');
+            if (bar) bar.style.display = 'none';
+            updateSigAnalysisPanel();
+        };
+
+        // パッシブ方位ウェッジからシグネチャ一覧と三角測量結果を更新
         window.updateSigAnalysisPanel = function() {
-            var bEl = document.getElementById('sig-analysis-bearings');
+            var cEl = document.getElementById('sig-analysis-contacts');
             var rEl = document.getElementById('sig-analysis-result');
-            if (!bEl || !rEl) return;
-            // 方位線リスト (game.js グローバルにアクセス)
+            if (!cEl || !rEl) return;
+
             var bs = (typeof passiveBearings !== 'undefined') ? passiveBearings : [];
+            var locked = (typeof lockedSignalId !== 'undefined') ? lockedSignalId : null;
+
             if (bs.length === 0) {
-                bEl.innerHTML = '<div style="color:#556655; text-align:center; padding:8px 0;">方位データなし<br><span style="font-size:8px;">パッシブ探知を待機中…</span></div>';
+                cEl.innerHTML = '<div style="color:#556655; text-align:center; padding:10px;">シグネチャなし — パッシブ探知を待機中</div>';
             } else {
-                var rows = bs.slice().reverse().map(function(b, idx) {
+                // sourceIdでグループ化 (最新の方位線を代表値に)
+                var groups = {};
+                bs.forEach(function(b) {
+                    var sid = b.sourceId || 'unknown';
+                    if (!groups[sid] || b.life > groups[sid].life) groups[sid] = b;
+                });
+
+                var rows = Object.keys(groups).map(function(sid) {
+                    var b = groups[sid];
+                    var col = SENSOR_COL[b.sensor] || '#aaffdd';
                     var freshPct = Math.round(b.life / b.maxLife * 100);
-                    var col = SENSOR_COLORS_HEX[b.sensor] || '#aaffdd';
                     var bMin = ((b.bearingDeg || 0) - (b.halfWidthDeg || 0) + 360) % 360;
                     var bMax = ((b.bearingDeg || 0) + (b.halfWidthDeg || 0)) % 360;
-                    return '<div style="display:flex; justify-content:space-between; align-items:center; padding:3px 0; border-bottom:1px solid #0a1a12;">'
-                        + '<span style="color:' + col + '; min-width:36px;">' + (b.sensorLabel || b.sensor || '?') + '</span>'
-                        + '<span style="color:#88aa88; min-width:32px; text-align:right;">' + Math.round((b.strength || 0) * 100) + '%</span>'
-                        + '<span style="min-width:90px; text-align:right;">' + Math.round(bMin) + '°〜' + Math.round(bMax) + '°</span>'
-                        + '<span style="color:#667766; min-width:28px; text-align:right;">' + freshPct + '%</span>'
+                    var isLocked = sid === locked;
+                    var no = b.contactNo || '?';
+                    var countAll = bs.filter(function(x) { return x.sourceId === sid; }).length;
+                    var label = 'SIG-' + String(no).padStart(2, '0');
+                    var bg = isLocked ? 'rgba(0,80,40,0.5)' : 'transparent';
+                    var border = isLocked ? '1px solid #00ff88' : '1px solid transparent';
+                    return '<div data-sid="' + sid + '" onclick="window.lockSignal(\'' + sid.replace(/'/g,"\\'")+'\',\'' + label + '\')" '
+                        + 'style="display:flex; justify-content:space-between; align-items:center; padding:5px 4px; '
+                        + 'border-bottom:1px solid #0a1a12; cursor:pointer; background:' + bg + '; border:' + border + '; border-radius:2px; margin-bottom:2px;">'
+                        + '<span style="color:' + col + '; min-width:42px; font-size:8px;">' + (b.sensorLabel || b.sensor) + '</span>'
+                        + '<span style="color:#cce; min-width:44px; font-size:9px; font-weight:bold;">' + label + '</span>'
+                        + '<span style="min-width:72px; font-size:8px; text-align:center;">' + Math.round(bMin) + '°〜' + Math.round(bMax) + '°</span>'
+                        + '<span style="color:#88aa88; min-width:26px; font-size:8px; text-align:right;">' + Math.round((b.strength||0)*100) + '%</span>'
+                        + '<span style="color:#' + (freshPct>50?'44aa44':'886644') + '; min-width:20px; font-size:8px; text-align:right;">' + countAll + '×</span>'
+                        + (isLocked ? '<span style="color:#00ff88; font-size:8px; margin-left:4px;">★</span>' : '<span style="font-size:8px; margin-left:4px; color:#334433;">▶</span>')
                         + '</div>';
                 }).join('');
-                bEl.innerHTML = '<div style="display:flex; justify-content:space-between; color:#667766; margin-bottom:3px; padding-bottom:2px; border-bottom:1px solid #224422;">'
-                    + '<span>センサー</span><span>強度</span><span>方位範囲</span><span>鮮度</span></div>' + rows;
+
+                cEl.innerHTML = '<div style="display:flex; justify-content:space-between; color:#445544; padding:2px 4px; margin-bottom:3px; border-bottom:1px solid #1a2a1a; font-size:7px;">'
+                    + '<span>センサー</span><span>ID</span><span>方位範囲</span><span>強度</span><span>計測</span><span></span></div>' + rows;
             }
+
             // 三角測量結果
             var tri = (typeof triangulationResult !== 'undefined') ? triangulationResult : null;
-            if (!tri) {
-                rEl.innerHTML = '<div style="color:#667766;">三角測量: データ不足<br><span style="font-size:8px;">異なる位置から複数計測で精度向上</span></div>';
+            if (!locked) {
+                rEl.innerHTML = '<div style="color:#556655; font-size:8px;">シグネチャを選択すると追跡・三角測量を開始</div>';
+            } else if (!tri) {
+                rEl.innerHTML = '<div style="color:#667766;">追跡中: <span style="color:#00ff88;">' + locked + '</span><br>'
+                    + '<span style="font-size:8px;">移動して複数計測すると距離を特定</span></div>';
             } else {
                 var age = (typeof _frameCount !== 'undefined') ? Math.round((_frameCount - tri.frame) / 60) : '?';
                 var precPct = Math.round(tri.precision * 100);
                 var col2 = precPct < 30 ? '#ff5000' : (precPct < 60 ? '#ffaa00' : (precPct < 90 ? '#50ff80' : '#50c8ff'));
-                rEl.innerHTML = '<div style="color:' + col2 + '; font-size:10px; margin-bottom:4px;">推定精度: ' + precPct + '%</div>'
-                    + '<div>誤差半径: ±' + Math.round(tri.radius) + ' wu</div>'
-                    + '<div style="color:#667766; font-size:8px;">解析から ' + age + '秒経過 | 移動して再計測で精度向上</div>';
+                rEl.innerHTML = '<div style="color:' + col2 + '; font-size:10px; margin-bottom:3px;">推定精度: ' + precPct + '%</div>'
+                    + '<div style="font-size:8px;">誤差半径: ±' + Math.round(tri.radius) + ' wu</div>'
+                    + '<div style="color:#556655; font-size:7px; margin-top:2px;">' + age + '秒前に測定 | 移動・再計測で精度向上</div>';
             }
         };
 
         window.runSigAnalysis = function() {
             if (typeof computeTriangulation === 'function') computeTriangulation();
             updateSigAnalysisPanel();
-        };
-
-        window.runCoordFire = function() {
-            if (typeof coordFireAtTriangulation === 'function') {
-                coordFireAtTriangulation();
-                // パネルを閉じる
-                if (panel) panel.style.display = 'none';
-            }
         };
     })();
 
