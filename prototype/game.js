@@ -61,7 +61,21 @@ let triangulationVelocity = null; // Phase3: 推定速度ベクトル {vx, vy} (
 let lockedSignalId = null;       // 解析モードでロックしたシグネチャのsourceId
 let _contactLabels = {};         // sourceId → 連番ラベル番号
 let _contactLabelNext = 1;
-window._lockSignal = function(sid) { lockedSignalId = sid; triangulationResult = null; }; // index.htmlから呼出し
+let _signalAnalysis = {}; // §4-4 H/I: { [sourceId]: { dirAnalysis, triParam, lockOriginX/Y, displayCenterX/Y, lastPosX/Y } }
+window._lockSignal = function(sid) {
+    lockedSignalId = sid;
+    triangulationResult = null;
+    if (sid) {
+        if (!_signalAnalysis[sid]) {
+            _signalAnalysis[sid] = { dirAnalysis: 0.1, triParam: 0, displayCenterX: null, displayCenterY: null, lockOriginX: 0, lockOriginY: 0, lastPosX: 0, lastPosY: 0 };
+        }
+        const _lsSa = _signalAnalysis[sid];
+        _lsSa.lockOriginX = player ? player.x : 0;
+        _lsSa.lockOriginY = player ? player.y : 0;
+        _lsSa.lastPosX = player ? player.x : 0;
+        _lsSa.lastPosY = player ? player.y : 0;
+    }
+}; // index.htmlから呼出し
 let _lpmWorld = null;            // 長押しラジアルメニューのワールド座標
 const PASSIVE_BEARING_LIFE = 480;  // 8秒フェード (@60fps)
 const PASSIVE_BEARING_MAX  = 24;   // 同時表示上限 (地形+敵で増加)
@@ -3440,7 +3454,7 @@ function generateSector() {
     dirSonarPendingFire = false;
     passiveBearings = [];
     triangulationResult = null; _trigLastFrame = -999; _prevTrigResult = null; triangulationVelocity = null;
-    lockedSignalId = null; _contactLabels = {}; _contactLabelNext = 1;
+    lockedSignalId = null; _contactLabels = {}; _contactLabelNext = 1; _signalAnalysis = {};
     player = new Ship(MAP_CX, MAP_CY, true);
     player.generatorOutput = genAlloc.engine;
     enemies = []; structures = []; projectiles = []; effects = []; particles = []; debris = []; scrapDrops = [];
@@ -4336,6 +4350,52 @@ function checkPassiveDetection() {
     }
     while (passiveBearings.length > PASSIVE_BEARING_MAX) passiveBearings.shift();
 
+    // §4-4 H: dirAnalysis 積算 (検知できたコンタクト単位, 2秒サイクル)
+    for (const c of picks) {
+        if (!_signalAnalysis[c.sourceId]) {
+            _signalAnalysis[c.sourceId] = { dirAnalysis: 0.1, triParam: 0, displayCenterX: null, displayCenterY: null, lockOriginX: 0, lockOriginY: 0, lastPosX: 0, lastPosY: 0 };
+        }
+        const _pdSa = _signalAnalysis[c.sourceId];
+        const _pdStrPct = c.sig * 100;
+        const _pdAP = aiPrec('sensor') * 100; // 0-100
+        const _pdBase = 0.1 * (1 + _pdStrPct / 100); // %/sec: 0.1-0.2
+        const _pdBonus = _pdBase * (_pdAP / 100) * 0.4; // K=0.4
+        _pdSa.dirAnalysis = Math.min(100, _pdSa.dirAnalysis + (_pdBase + _pdBonus) * 2); // ×2sec
+    }
+
+    // §4-4 I: triParam 積算 (ロック中シグネチャ, 2秒サイクル)
+    if (lockedSignalId && _signalAnalysis[lockedSignalId] && player && player.hp > 0) {
+        const _ptSa = _signalAnalysis[lockedSignalId];
+        const _ptDx = player.x - _ptSa.lastPosX;
+        const _ptDy = player.y - _ptSa.lastPosY;
+        const _ptD = Math.hypot(_ptDx, _ptDy);
+        if (_ptD > 200) {
+            const _ptBearings = passiveBearings.filter(b => b.sourceId === lockedSignalId && b.life > 0);
+            if (_ptBearings.length > 0) {
+                _ptBearings.sort((a, b) => b.life - a.life);
+                const _ptBearing = _ptBearings[0];
+                const _ptMoveAngle = Math.atan2(_ptDy, _ptDx);
+                const _ptAlpha = _ptMoveAngle - _ptBearing.angle;
+                const _ptQuality = Math.abs(Math.sin(_ptAlpha)) * Math.min(_ptD / 2000, 1.0);
+                const _ptAP = aiPrec('sensor') * 100;
+                const _ptGain = 10 * (1 + _ptAP / 100);
+                _ptSa.triParam = Math.min(100, _ptSa.triParam + _ptQuality * _ptGain);
+            }
+        }
+        _ptSa.lastPosX = player.x;
+        _ptSa.lastPosY = player.y;
+        // ジッタ中心を更新 (triangulationResult が有効な場合のみ)
+        if (triangulationResult) {
+            const _ptAvg = (_ptSa.dirAnalysis + _ptSa.triParam) / 2;
+            const _ptR = Math.max(200, MAP_RADIUS * (1 - _ptAvg / 100));
+            const _ptJr = _ptR / 2;
+            const _ptJA = Math.random() * Math.PI * 2;
+            const _ptJD = _ptJr * Math.sqrt(Math.random());
+            _ptSa.displayCenterX = triangulationResult.x + _ptJD * Math.cos(_ptJA);
+            _ptSa.displayCenterY = triangulationResult.y + _ptJD * Math.sin(_ptJA);
+        }
+    }
+
     passiveAlertTimer = 180;
     logMessage(`PASSIVE: ${sc.label}放射源 ─ 方位 ${strongestDeg}° ±${strongestWidthDeg}°`, 'warning-msg');
     const ind = document.getElementById('passive-indicator');
@@ -4351,11 +4411,24 @@ function drawPassiveBearings(ctx) {
         b.life--;
         if (b.life <= 0) { passiveBearings.splice(i, 1); continue; }
         const lifeT = b.life / b.maxLife;        // 1→0
-        const a0 = b.angle - b.halfWidth;
-        const a1 = b.angle + b.halfWidth;
         const R = b.range;
         const col = b.color;
         ctx.save();
+        // §4-4 H: dirAnalysis に基づく表示制御
+        const _bSa = _signalAnalysis[b.sourceId];
+        const _bDa = _bSa ? (_bSa.dirAnalysis || 0) : 0;
+        if (_bDa > 0 && _bDa < 20) { ctx.restore(); continue; }
+        if (_bDa >= 20 && _bDa < 40) {
+            ctx.globalAlpha = 0.5 * lifeT; ctx.strokeStyle = `rgb(${col})`; ctx.lineWidth = 1.2 * invZoom;
+            ctx.beginPath(); ctx.arc(b.ox, b.oy, 6 * invZoom, 0, Math.PI * 2); ctx.stroke();
+            ctx.restore(); continue;
+        }
+        const _bHW = _bDa >= 100 ? 5 * Math.PI / 180 :
+                     _bDa >= 80  ? 10 * Math.PI / 180 :
+                     _bDa >= 60  ? 15 * Math.PI / 180 :
+                     _bDa >= 40  ? 20 * Math.PI / 180 : b.halfWidth;
+        const a0 = b.angle - _bHW;
+        const a1 = b.angle + _bHW;
         // 扇形フィル (弱信号ほど広い半透明のボケ) — shadowBlur不使用(モバイル配慮)
         ctx.globalAlpha = 0.10 * lifeT * (0.4 + b.quality * 0.6);
         ctx.beginPath();
@@ -4447,6 +4520,38 @@ function computeTriangulation() {
 // §4-4: 三角測量精度円描画 (ワールド空間)
 // 低精度=赤大円 / 中=橙 / 高=緑 / 超高=シアン
 function drawTriangulationCircle(ctx) {
+    // §4-4 I: sig-analysis ベースの推定位置円 (lockedSignalId がある場合に優先)
+    if (lockedSignalId && _signalAnalysis[lockedSignalId]) {
+        const _siSa = _signalAnalysis[lockedSignalId];
+        const _siDa = _siSa.dirAnalysis || 0;
+        const _siTp = _siSa.triParam || 0;
+        if (_siDa > 5 && _siSa.displayCenterX != null) {
+            const _siAvg = (_siDa + _siTp) / 2;
+            const _siR = Math.max(200, MAP_RADIUS * (1 - _siAvg / 100));
+            const _siCx = _siSa.displayCenterX, _siCy = _siSa.displayCenterY;
+            const _siCol = _siAvg < 30 ? '255,80,0' : _siAvg < 60 ? '255,160,0' : _siAvg < 85 ? '80,255,120' : '100,200,255';
+            const _siInv = 1 / camera.zoom;
+            ctx.save();
+            ctx.globalAlpha = 0.25;
+            ctx.strokeStyle = `rgb(${_siCol})`;
+            ctx.lineWidth = 2 * _siInv;
+            ctx.setLineDash([12 * _siInv, 8 * _siInv]);
+            ctx.beginPath(); ctx.arc(_siCx, _siCy, _siR, 0, Math.PI * 2); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.globalAlpha = 0.65;
+            ctx.lineWidth = 1.5 * _siInv;
+            const _siMs = 20 * _siInv;
+            ctx.beginPath(); ctx.moveTo(_siCx - _siMs, _siCy); ctx.lineTo(_siCx + _siMs, _siCy); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(_siCx, _siCy - _siMs); ctx.lineTo(_siCx, _siCy + _siMs); ctx.stroke();
+            ctx.globalAlpha = 0.8;
+            ctx.fillStyle = `rgb(${_siCol})`;
+            ctx.font = `bold ${Math.round(9 * _siInv)}px Orbitron, monospace`;
+            ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+            ctx.fillText(`DIR ${Math.round(_siDa)}%  TRI ${Math.round(_siTp)}%`, _siCx + _siR * 0.12 + 8 * _siInv, _siCy - 6 * _siInv);
+            ctx.restore();
+            return;
+        }
+    }
     if (!triangulationResult) return;
     const { x, y, precision, radius, frame } = triangulationResult;
     const age = _frameCount - frame;
