@@ -4642,27 +4642,28 @@ function drawRadialScale(ctx) {
     ctx.translate(MAP_CX, MAP_CY);
     const r = MAP_RADIUS;
     const iZ = 1 / camera.zoom;
-    const lw = iZ * 1.2;
-    ctx.font = `${Math.round(iZ * 9)}px "Orbitron",monospace`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (let deg = 0; deg < 360; deg += 10) {
         const rad = (deg - 90) * Math.PI / 180; // 0°=北(上)
-        const isMajor = deg % 30 === 0;
-        const tickLen = iZ * (isMajor ? 900 : 420);
+        const isCardinal = deg % 90 === 0;
+        const isMid     = deg % 30 === 0;
+        const tickLen   = iZ * (isCardinal ? 1200 : isMid ? 800 : 500);
+        const lw        = iZ * (isCardinal ? 2.5  : isMid ? 1.8 : 1.2);
+        const alpha     = isCardinal ? 0.75 : isMid ? 0.55 : 0.35;
         const x0 = Math.cos(rad) * r, y0 = Math.sin(rad) * r;
         const x1 = Math.cos(rad) * (r + tickLen), y1 = Math.sin(rad) * (r + tickLen);
-        ctx.globalAlpha = isMajor ? 0.60 : 0.28;
-        ctx.strokeStyle = isMajor ? '#00ffcc' : '#005533';
-        ctx.lineWidth = lw * (isMajor ? 2.0 : 1.0);
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = '#00ffcc';
+        ctx.lineWidth = lw;
         ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-        if (isMajor) {
-            const lx = Math.cos(rad) * (r + tickLen + iZ * 860);
-            const ly = Math.sin(rad) * (r + tickLen + iZ * 860);
-            ctx.globalAlpha = 0.55;
-            ctx.fillStyle = '#00ffcc';
-            ctx.fillText(deg + '°', lx, ly);
-        }
+        // 10°ごとに数字
+        const lx = Math.cos(rad) * (r + tickLen + iZ * 700);
+        const ly = Math.sin(rad) * (r + tickLen + iZ * 700);
+        ctx.globalAlpha = isCardinal ? 0.80 : isMid ? 0.60 : 0.40;
+        ctx.fillStyle = '#00ffcc';
+        ctx.font = `${Math.round(iZ * (isCardinal ? 11 : 9))}px "Orbitron",monospace`;
+        ctx.fillText(deg + '°', lx, ly);
     }
     ctx.restore();
 }
@@ -5506,23 +5507,25 @@ function drawMinimap() {
     minimapCtx.strokeStyle = 'rgba(0,255,170,0.5)';
     minimapCtx.lineWidth = 1.5;
     minimapCtx.stroke();
-    // ミニマップ外縁ラジアル目盛り (30°ごと)
+    // ミニマップ外縁ラジアル目盛り (10°ごとティック・30°ごと数字)
     minimapCtx.save();
-    minimapCtx.font = '6px "Orbitron",monospace';
     minimapCtx.textAlign = 'center'; minimapCtx.textBaseline = 'middle';
-    for (let deg = 0; deg < 360; deg += 30) {
+    for (let deg = 0; deg < 360; deg += 10) {
         const rad = (deg - 90) * Math.PI / 180;
-        const isMaj = deg % 90 === 0;
+        const isCardinal = deg % 90 === 0;
+        const isMid      = deg % 30 === 0;
+        const tickIn     = isCardinal ? 6 : isMid ? 4 : 2.5;
         const x0 = cxM + Math.cos(rad) * rM, y0 = cyM + Math.sin(rad) * rM;
-        const x1 = cxM + Math.cos(rad) * (rM - (isMaj ? 5 : 3));
-        const y1 = cyM + Math.sin(rad) * (rM - (isMaj ? 5 : 3));
-        minimapCtx.globalAlpha = isMaj ? 0.70 : 0.40;
-        minimapCtx.strokeStyle = '#00ffcc'; minimapCtx.lineWidth = isMaj ? 1.5 : 0.8;
+        const x1 = cxM + Math.cos(rad) * (rM - tickIn), y1 = cyM + Math.sin(rad) * (rM - tickIn);
+        minimapCtx.globalAlpha = isCardinal ? 0.75 : isMid ? 0.50 : 0.28;
+        minimapCtx.strokeStyle = '#00ffcc';
+        minimapCtx.lineWidth = isCardinal ? 1.5 : isMid ? 1.0 : 0.6;
         minimapCtx.beginPath(); minimapCtx.moveTo(x0, y0); minimapCtx.lineTo(x1, y1); minimapCtx.stroke();
-        if (isMaj) {
-            minimapCtx.globalAlpha = 0.60;
+        if (isMid) {
+            minimapCtx.globalAlpha = isCardinal ? 0.75 : 0.50;
             minimapCtx.fillStyle = '#00ffcc';
-            minimapCtx.fillText(deg + '°', cxM + Math.cos(rad) * (rM - 9), cyM + Math.sin(rad) * (rM - 9));
+            minimapCtx.font = `${isCardinal ? 7 : 5.5}px "Orbitron",monospace`;
+            minimapCtx.fillText(deg + '°', cxM + Math.cos(rad) * (rM - tickIn - 6), cyM + Math.sin(rad) * (rM - tickIn - 6));
         }
     }
     minimapCtx.restore();
