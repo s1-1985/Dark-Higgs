@@ -58,9 +58,13 @@ let triangulationResult = null; // {x, y, precision, radius, frame}
 let _trigLastFrame = -999;
 let _prevTrigResult = null;      // Phase3: 前回の三角測量結果 (速度外挿用)
 let triangulationVelocity = null; // Phase3: 推定速度ベクトル {vx, vy} (world units/frame)
+let lockedSignalId = null;       // 解析モードでロックしたシグネチャのsourceId
+let _contactLabels = {};         // sourceId → 連番ラベル番号
+let _contactLabelNext = 1;
+window._lockSignal = function(sid) { lockedSignalId = sid; triangulationResult = null; }; // index.htmlから呼出し
 let _lpmWorld = null;            // 長押しラジアルメニューのワールド座標
 const PASSIVE_BEARING_LIFE = 480;  // 8秒フェード (@60fps)
-const PASSIVE_BEARING_MAX  = 8;    // 同時表示上限 (古いものから破棄)
+const PASSIVE_BEARING_MAX  = 24;   // 同時表示上限 (地形+敵で増加)
 let mouseWorldX = MAP_CX;
 let mouseWorldY = MAP_CY;
 let dirSonarVisual = null; // { angle, halfAngle, range, life }
@@ -1669,8 +1673,8 @@ const WEAPON_COOLDOWNS = { kinetic: 15, missile: 100, beam: 200 };
 
 // 武器マガジン・リロード定数
 const KINETIC_RELOAD_TIME = 180; // 3秒 @60fps
-const MISSILE_RELOAD_TIME = 300; // 5秒
-const BEAM_RELOAD_TIME = 240;    // 4秒
+const MISSILE_RELOAD_TIME = 150; // 2.5秒 (÷2)
+const BEAM_RELOAD_TIME = 120;    // 2秒 (÷2)
 
 class Ship {
     constructor(x, y, isPlayer = false, type = 'corvette') {
@@ -3436,6 +3440,7 @@ function generateSector() {
     dirSonarPendingFire = false;
     passiveBearings = [];
     triangulationResult = null; _trigLastFrame = -999; _prevTrigResult = null; triangulationVelocity = null;
+    lockedSignalId = null; _contactLabels = {}; _contactLabelNext = 1;
     player = new Ship(MAP_CX, MAP_CY, true);
     player.generatorOutput = genAlloc.engine;
     enemies = []; structures = []; projectiles = []; effects = []; particles = []; debris = []; scrapDrops = [];
@@ -4203,7 +4208,7 @@ const sensorConfig = {
 };
 
 // ============================================================
-// パッシブアンテナ常時検知チェック
+// パッシブアンテナ常時検知チェック (敵 + 地形 + 構造物 + ノード)
 // ============================================================
 function checkPassiveDetection() {
     passiveCheckTimer++;
@@ -4213,62 +4218,126 @@ function checkPassiveDetection() {
 
     const sc = sensorConfig[currentSensor];
     const thr = sc.threshold;
-    // スレットリング/敵探知モデルと対称な距離・ヒッグス減衰でシグネチャを評価。
     const range = Math.max(effectiveRadarRange * 10, 8000);
-    // センサー配分 → 方位精度 (高いほど扇が鋭く・揺らぎが小さい)
-    const sensorPrec = 0.45 + (genAlloc.sensors / 100) * 0.55; // 0.45..1.0
+    const sensorPrec = 0.45 + (genAlloc.sensors / 100) * 0.55;
+    const colorRgb = sc.r;
+    const terrRange = range * 1.4; // 地形は広範囲から放射
 
-    // 検知できた敵ごとに減衰後シグネチャと方位を集計
-    const contacts = [];
-    for (const e of enemies) {
-        if (e.hp <= 0) continue;
+    // 全コンタクト (敵 + 地形 + 構造物 + ノード) を統一フォーマットで収集
+    const allContacts = [];
+
+    // ─ 敵艦シグネチャ ─
+    enemies.forEach((e, ei) => {
+        if (e.hp <= 0) return;
         const dist = Math.hypot(e.x - player.x, e.y - player.y);
         const hPath = getHiggsIntensity((e.x + player.x) / 2, (e.y + player.y) / 2);
         const distAtten = Math.max(0, 1 - dist / range);
         const sig = sc.sig(e) * distAtten * (1 - hPath * sc.higgsMod);
         if (sig > thr * 0.5) {
-            contacts.push({ e, sig, angle: Math.atan2(e.y - player.y, e.x - player.x) });
+            allContacts.push({ x: e.x, y: e.y, sig, angle: Math.atan2(e.y - player.y, e.x - player.x), sourceId: 'e-' + ei });
         }
+    });
+
+    // ─ 熱雲 → HEATセンサー ─
+    if (currentSensor === 'heat') {
+        let best = null;
+        thermalField.forEach((tf, ti) => {
+            const dist = Math.max(0, Math.hypot(tf.x - player.x, tf.y - player.y) - tf.r * 0.4);
+            if (dist > terrRange) return;
+            const sig = (tf.density || 0.4) * Math.max(0, 1 - dist / terrRange) * 0.80;
+            if (!best || sig > best.sig)
+                best = { x: tf.x, y: tf.y, sig, angle: Math.atan2(tf.y - player.y, tf.x - player.x), sourceId: 'thermal-' + ti };
+        });
+        if (best && best.sig > thr * 0.25) allContacts.push(best);
     }
-    if (contacts.length === 0) return;
 
-    // 強い順に最大2件だけ方位ウェッジ化 (画面を埋めない)
-    contacts.sort((a, b) => b.sig - a.sig);
-    const picks = contacts.slice(0, 2);
+    // ─ 磁気嵐 → EMセンサー ─
+    if (currentSensor === 'em') {
+        let best = null;
+        stormField.forEach((sf, si) => {
+            const dist = Math.max(0, Math.hypot(sf.x - player.x, sf.y - player.y) - sf.r * 0.4);
+            if (dist > terrRange) return;
+            const sig = sf.density * Math.max(0, 1 - dist / terrRange) * 0.75;
+            if (!best || sig > best.sig)
+                best = { x: sf.x, y: sf.y, sig, angle: Math.atan2(sf.y - player.y, sf.x - player.x), sourceId: 'storm-' + si };
+        });
+        if (best && best.sig > thr * 0.25) allContacts.push(best);
+    }
 
-    const colorRgb = sc.r; // 'r,g,b' 文字列
+    // ─ ヒッグス高密度スポット(density≥0.78) → HIGGSセンサー ─
+    if (currentSensor === 'higgs') {
+        let best = null;
+        bgMist.forEach((m, mi) => {
+            if ((m.density || 0.3) < 0.78) return;
+            const dist = Math.max(0, Math.hypot(m.x - player.x, m.y - player.y) - m.r * 0.4);
+            if (dist > terrRange * 0.8) return;
+            const sig = m.density * Math.max(0, 1 - dist / (terrRange * 0.8)) * 0.70;
+            if (!best || sig > best.sig)
+                best = { x: m.x, y: m.y, sig, angle: Math.atan2(m.y - player.y, m.x - player.x), sourceId: 'higgs-hot-' + mi };
+        });
+        if (best && best.sig > thr * 0.2) allContacts.push(best);
+    }
+
+    // ─ 中立コロニー → HEAT + OPTIC ─
+    if (currentSensor === 'heat' || currentSensor === 'optic') {
+        structures.forEach((s, si) => {
+            if (s.type !== 'colony') return;
+            const dist = Math.hypot(s.x - player.x, s.y - player.y);
+            if (dist > terrRange) return;
+            const sig = 0.52 * Math.max(0, 1 - dist / terrRange);
+            if (sig > thr * 0.25)
+                allContacts.push({ x: s.x, y: s.y, sig, angle: Math.atan2(s.y - player.y, s.x - player.x), sourceId: 'colony-' + si });
+        });
+    }
+
+    // ─ ヒッグスノード → HIGGS + EM ─
+    if (currentSensor === 'higgs' || currentSensor === 'em') {
+        resourceNodes.forEach((n, ni) => {
+            if (!n.active) return;
+            const dist = Math.hypot(n.x - player.x, n.y - player.y);
+            if (dist > terrRange) return;
+            const sig = 0.62 * Math.max(0, 1 - dist / terrRange);
+            if (sig > thr * 0.25)
+                allContacts.push({ x: n.x, y: n.y, sig, angle: Math.atan2(n.y - player.y, n.x - player.x), sourceId: 'node-' + ni });
+        });
+    }
+
+    if (allContacts.length === 0) return;
+
+    // 強い順に最大3件だけ方位ウェッジ化
+    allContacts.sort((a, b) => b.sig - a.sig);
+    const picks = allContacts.slice(0, 3);
+
     let strongestDeg = 0, strongestWidthDeg = 0, strongest = -1;
     for (const c of picks) {
-        // 閾値超過分を 0..1 の確信度へ。センサー精度で更に補正。
-        const conf = Math.max(0, Math.min(1, (c.sig - thr * 0.5) / (1 - thr * 0.5)));
+        const conf = Math.max(0, Math.min(1, (c.sig - thr * 0.25) / (1 - thr * 0.25)));
         const quality = Math.min(1, conf * sensorPrec * 1.35);
-        // 強信号=狭い (約7°)、弱信号=広いボケ (約49°)
         const halfWidth = 0.86 - quality * 0.74;
-        // 扇の中心を真方位から少しだけ揺らす (弱いほど大きくズレる)。
-        // ズレは halfWidth 内に収まるので、別位置からの2計測で交差が真値付近に絞れる。
         const noise = (Math.random() - 0.5) * 2 * halfWidth * 0.55;
         const angle = c.angle + noise;
-        const compassDeg = Math.round((Math.atan2(c.e.x - player.x, -(c.e.y - player.y)) * 180 / Math.PI + 360) % 360);
+        const compassDeg = Math.round((Math.atan2(c.x - player.x, -(c.y - player.y)) * 180 / Math.PI + 360) % 360);
+        // コンタクトラベルを連番割当 (sourceId初出時のみ)
+        if (!_contactLabels[c.sourceId]) _contactLabels[c.sourceId] = _contactLabelNext++;
         passiveBearings.push({
             ox: player.x, oy: player.y,
             angle, halfWidth, range,
             quality, color: colorRgb,
             sensor: currentSensor, strength: c.sig, sensorLabel: sc.label,
             bearingDeg: compassDeg, halfWidthDeg: Math.round(halfWidth * 180 / Math.PI),
+            sourceId: c.sourceId,
+            contactNo: _contactLabels[c.sourceId],
             life: PASSIVE_BEARING_LIFE, maxLife: PASSIVE_BEARING_LIFE
         });
         if (c.sig > strongest) {
             strongest = c.sig;
-            // コンパス方位 (0°=上/北, 時計回り) — ログ表示用
-            strongestDeg = Math.round((Math.atan2(c.e.x - player.x, -(c.e.y - player.y)) * 180 / Math.PI + 360) % 360);
+            strongestDeg = compassDeg;
             strongestWidthDeg = Math.round(halfWidth * 180 / Math.PI);
         }
     }
-    // 上限超過分は古いものから破棄
     while (passiveBearings.length > PASSIVE_BEARING_MAX) passiveBearings.shift();
 
     passiveAlertTimer = 180;
-    logMessage(`PASSIVE: ${sc.label}放射源 ─ 方位 ${strongestDeg}° ±${strongestWidthDeg}°（移動して再計測→三角測量）`, 'warning-msg');
+    logMessage(`PASSIVE: ${sc.label}放射源 ─ 方位 ${strongestDeg}° ±${strongestWidthDeg}°`, 'warning-msg');
     const ind = document.getElementById('passive-indicator');
     if (ind) { ind.classList.add('alert'); setTimeout(() => ind.classList.remove('alert'), 3000); }
 }
@@ -4326,7 +4395,8 @@ function drawPassiveBearings(ctx) {
 // 複数のパッシブ方位線の交点から推定位置と精度を算出する。
 // 計算タイミング: gameLoop で TRIG_UPDATE_INTERVAL フレームごとに呼ぶ。
 function computeTriangulation() {
-    const bs = passiveBearings.filter(b => b.life > 60);
+    // ロック中シグネチャがあれば、そのsourceIdの方位線だけで三角測量
+    const bs = passiveBearings.filter(b => b.life > 60 && (!lockedSignalId || b.sourceId === lockedSignalId));
     if (bs.length < 2) { triangulationResult = null; return; }
     let sumX = 0, sumY = 0, sumW = 0;
     for (let i = 0; i < bs.length - 1; i++) {
@@ -4457,6 +4527,37 @@ function drawTriangulationCircle(ctx) {
             ctx.fillText(_velLabel, 0, rw + 4 * inv);
         }
         ctx.restore();
+    }
+    ctx.restore();
+}
+
+// フィールド外縁 360° ラジアル方位目盛り (ワールド空間)
+function drawRadialScale(ctx) {
+    ctx.save();
+    ctx.translate(MAP_CX, MAP_CY);
+    const r = MAP_RADIUS;
+    const iZ = 1 / camera.zoom;
+    const lw = iZ * 1.2;
+    ctx.font = `${Math.round(iZ * 9)}px "Orbitron",monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (let deg = 0; deg < 360; deg += 10) {
+        const rad = (deg - 90) * Math.PI / 180; // 0°=北(上)
+        const isMajor = deg % 30 === 0;
+        const tickLen = iZ * (isMajor ? 900 : 420);
+        const x0 = Math.cos(rad) * r, y0 = Math.sin(rad) * r;
+        const x1 = Math.cos(rad) * (r + tickLen), y1 = Math.sin(rad) * (r + tickLen);
+        ctx.globalAlpha = isMajor ? 0.60 : 0.28;
+        ctx.strokeStyle = isMajor ? '#00ffcc' : '#005533';
+        ctx.lineWidth = lw * (isMajor ? 2.0 : 1.0);
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+        if (isMajor) {
+            const lx = Math.cos(rad) * (r + tickLen + iZ * 860);
+            const ly = Math.sin(rad) * (r + tickLen + iZ * 860);
+            ctx.globalAlpha = 0.55;
+            ctx.fillStyle = '#00ffcc';
+            ctx.fillText(deg + '°', lx, ly);
+        }
     }
     ctx.restore();
 }
@@ -5121,25 +5222,25 @@ function drawMinimap() {
     minimapCtx.arc(cxM, cyM, rM, 0, Math.PI * 2);
     minimapCtx.clip();
 
-    // ヒッグス濃度オーバーレイ: bgMistCanvasを縮小drawImageで代替 (毎回createRadialGradientせず)
+    // ミニマップ地形オーバーレイ: 現在センサーに対応する層を強調、他は薄く
+    const _mmDim = 0.10; // 非対応層のフェード値
     if (bgMistCanvas) {
-        minimapCtx.globalAlpha = 0.35;
+        minimapCtx.globalAlpha = currentSensor === 'higgs' ? 0.55 : _mmDim;
         minimapCtx.drawImage(bgMistCanvas, offX, offY, FIELD_SIZE * mmScale, FIELD_SIZE * mmScale);
         minimapCtx.globalAlpha = 1;
     }
-    // 地形オーバーレイ: デブリ帯(灰)/磁気嵐帯(紫) — 退避先の把握用
     if (debrisCanvas) {
-        minimapCtx.globalAlpha = 0.45;
+        minimapCtx.globalAlpha = currentSensor === 'optic' ? 0.60 : _mmDim;
         minimapCtx.drawImage(debrisCanvas, offX, offY, FIELD_SIZE * mmScale, FIELD_SIZE * mmScale);
         minimapCtx.globalAlpha = 1;
     }
     if (stormCanvas) {
-        minimapCtx.globalAlpha = 0.4;
+        minimapCtx.globalAlpha = currentSensor === 'em' ? 0.55 : _mmDim;
         minimapCtx.drawImage(stormCanvas, offX, offY, FIELD_SIZE * mmScale, FIELD_SIZE * mmScale);
         minimapCtx.globalAlpha = 1;
     }
     if (thermalCanvas) {
-        minimapCtx.globalAlpha = 0.35;
+        minimapCtx.globalAlpha = currentSensor === 'heat' ? 0.50 : _mmDim;
         minimapCtx.drawImage(thermalCanvas, offX, offY, FIELD_SIZE * mmScale, FIELD_SIZE * mmScale);
         minimapCtx.globalAlpha = 1;
     }
@@ -5300,6 +5401,26 @@ function drawMinimap() {
     minimapCtx.strokeStyle = 'rgba(0,255,170,0.5)';
     minimapCtx.lineWidth = 1.5;
     minimapCtx.stroke();
+    // ミニマップ外縁ラジアル目盛り (30°ごと)
+    minimapCtx.save();
+    minimapCtx.font = '6px "Orbitron",monospace';
+    minimapCtx.textAlign = 'center'; minimapCtx.textBaseline = 'middle';
+    for (let deg = 0; deg < 360; deg += 30) {
+        const rad = (deg - 90) * Math.PI / 180;
+        const isMaj = deg % 90 === 0;
+        const x0 = cxM + Math.cos(rad) * rM, y0 = cyM + Math.sin(rad) * rM;
+        const x1 = cxM + Math.cos(rad) * (rM - (isMaj ? 5 : 3));
+        const y1 = cyM + Math.sin(rad) * (rM - (isMaj ? 5 : 3));
+        minimapCtx.globalAlpha = isMaj ? 0.70 : 0.40;
+        minimapCtx.strokeStyle = '#00ffcc'; minimapCtx.lineWidth = isMaj ? 1.5 : 0.8;
+        minimapCtx.beginPath(); minimapCtx.moveTo(x0, y0); minimapCtx.lineTo(x1, y1); minimapCtx.stroke();
+        if (isMaj) {
+            minimapCtx.globalAlpha = 0.60;
+            minimapCtx.fillStyle = '#00ffcc';
+            minimapCtx.fillText(deg + '°', cxM + Math.cos(rad) * (rM - 9), cyM + Math.sin(rad) * (rM - 9));
+        }
+    }
+    minimapCtx.restore();
 }
 
 function handleMinimapInteraction(e) {
@@ -5534,32 +5655,30 @@ function drawBackground(ctx) {
         ctx.fillRect(cx, cy, vw, vh);
     }
 
-    // Higgs mist clouds — 密度別カラーで可視化
-    // bgMist: オフスクリーンキャンバスに事前焼き付け済み → drawImageで一発描画
+    // 地形層描画: 通常プレイは全層表示、マップモード時は現在センサーに対応する層のみ強調
+    // (センサー依存型マップ: HIGGS→ヒッグス雲 / OPTIC→デブリ / EM→磁気嵐 / HEAT→熱雲)
+    const _mapFade = 0.07; // マップモード時の非対応層のフェード値
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     if (bgMistCanvas) {
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
+        ctx.globalAlpha = (!mapMode || currentSensor === 'higgs') ? 1.0 : _mapFade;
         ctx.drawImage(bgMistCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
+        ctx.globalAlpha = 1;
     }
-
-    // 地形層 (§3-13 D): デブリ帯=岩片の点描 / 磁気嵐帯=EMノイズ(明滅)
     if (debrisCanvas) {
-        ctx.imageSmoothingEnabled = true;
+        ctx.globalAlpha = (!mapMode || currentSensor === 'optic') ? 1.0 : _mapFade;
         ctx.drawImage(debrisCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
+        ctx.globalAlpha = 1;
     }
     if (stormCanvas) {
-        ctx.save();
-        ctx.globalAlpha = 0.6 + Math.sin(Date.now() * 0.006) * 0.18; // EMノイズの明滅
-        ctx.imageSmoothingEnabled = true;
-        ctx.drawImage(stormCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
-        ctx.restore();
+        const _sa = (!mapMode || currentSensor === 'em') ? 0.6 + Math.sin(Date.now() * 0.006) * 0.18 : _mapFade;
+        ctx.save(); ctx.globalAlpha = _sa; ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(stormCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE); ctx.restore();
     }
     if (thermalCanvas) {
-        ctx.save();
-        ctx.globalAlpha = 0.50 + Math.sin(Date.now() * 0.003 + 2.1) * 0.14; // 熱ゆらぎ (嵐より遅い)
-        ctx.imageSmoothingEnabled = true;
-        ctx.drawImage(thermalCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
-        ctx.restore();
+        const _ta = (!mapMode || currentSensor === 'heat') ? 0.50 + Math.sin(Date.now() * 0.003 + 2.1) * 0.14 : _mapFade;
+        ctx.save(); ctx.globalAlpha = _ta; ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(thermalCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE); ctx.restore();
     }
 
     // Sparse coordinate grid (large cells)
@@ -5599,6 +5718,8 @@ function drawBackground(ctx) {
         ctx.fill();
         ctx.restore();
     }
+    // ラジアル方位目盛り (境界が見えている時のみ描画)
+    if (_distToEdge < Math.max(vw, vh) * 0.9 + 2000) drawRadialScale(ctx);
 }
 
 // オシロスコープ風シグネチャ表示
