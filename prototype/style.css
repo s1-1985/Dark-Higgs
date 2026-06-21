@@ -510,9 +510,9 @@ input[type=range]::-webkit-slider-thumb {
 #sig-info-bar {
     display: none;
     flex-direction: column;
-    justify-content: center;
-    gap: 2px;
-    padding: 3px 5px;
+    justify-content: space-evenly;
+    gap: 0;
+    padding: 1px 4px;
     background: rgba(0,5,12,0.9);
     border-left: 1px solid rgba(0,255,170,0.15);
     font-family: 'Orbitron', monospace;
@@ -520,37 +520,41 @@ input[type=range]::-webkit-slider-thumb {
     min-width: 0;
 }
 #sib-lock-status {
-    font-size: 6.5px;
-    color: #888;
-    letter-spacing: 0.5px;
+    font-size: 6px;
+    color: #666;
+    letter-spacing: 0.3px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    line-height: 1.2;
 }
 #sib-lock-status.locked {
     color: #00ffaa;
-    text-shadow: 0 0 4px rgba(0,255,170,0.5);
+    text-shadow: 0 0 3px rgba(0,255,170,0.4);
 }
-.sib-param {
+.sib-row {
     display: flex;
-    flex-direction: column;
-    gap: 0;
+    align-items: baseline;
+    gap: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    line-height: 1.2;
 }
 .sib-label {
     font-size: 6px;
     color: #556;
-    letter-spacing: 0.3px;
+    flex-shrink: 0;
 }
 .sib-val {
-    font-size: 8px;
+    font-size: 7.5px;
     color: #00ddaa;
-    letter-spacing: 0.5px;
+    flex-shrink: 0;
 }
 .sib-rate {
     font-size: 6px;
-    color: #557755;
-    letter-spacing: 0.3px;
-    min-height: 7px;
+    color: #3a8;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Dialog */
@@ -1292,17 +1296,20 @@ input[type=range]::-webkit-slider-thumb {
     .right-panel .env-info > div { display: none !important; }
     #env-sig-canvas { height: 28px !important; display: block !important; width: 100% !important; }
 
-    /* Row2 col3: シグネチャ解析ステータス */
+    /* Row2 col3: シグネチャ解析ステータス (高さはオシロスコープcanvasと同じ28pxに制限) */
     #sig-info-bar {
         display: flex !important;
         grid-column: 3; grid-row: 2;
         flex-direction: column;
-        justify-content: center;
-        gap: 1px;
-        padding: 2px 4px;
+        justify-content: space-evenly;
+        gap: 0;
+        padding: 1px 3px;
+        height: 28px;
+        max-height: 28px;
         border-bottom: 1px solid rgba(0,255,170,0.12);
         overflow: hidden;
         min-width: 0;
+        box-sizing: border-box;
     }
 
     /* Row3: GEN/ENGINE/SENSOR (center-panel) */
