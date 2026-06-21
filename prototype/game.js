@@ -4236,7 +4236,7 @@ const sensorConfig = {
 // ============================================================
 function checkPassiveDetection() {
     passiveCheckTimer++;
-    if (passiveCheckTimer < 120) return; // 2秒ごとに1計測
+    if (passiveCheckTimer < 60) return; // 1秒ごとに1計測
     passiveCheckTimer = 0;
     if (!player || player.hp <= 0) return;
 
@@ -4411,10 +4411,10 @@ function checkPassiveDetection() {
         const _pdAP = aiPrec('sensor') * 100; // 0-100
         const _pdBase = 0.1 * (1 + _pdStrPct / 100); // %/sec: 0.1-0.2
         const _pdBonus = _pdBase * (_pdAP / 100) * 0.4; // K=0.4
-        _pdSa.dirAnalysis = Math.min(100, _pdSa.dirAnalysis + (_pdBase + _pdBonus) * 2); // ×2sec
+        _pdSa.dirAnalysis = Math.min(100, _pdSa.dirAnalysis + (_pdBase + _pdBonus)); // ×1sec
     }
 
-    // §4-4 I: triParam 積算 (ロック中シグネチャ, 2秒サイクル)
+    // §4-4 I: triParam 積算 (ロック中シグネチャ, 1秒サイクル)
     if (lockedSignalId && _signalAnalysis[lockedSignalId] && player && player.hp > 0) {
         const _ptSa = _signalAnalysis[lockedSignalId];
         const _ptDx = player.x - _ptSa.lastPosX;
@@ -6037,8 +6037,11 @@ function updateSigCanvas() {
 
 // ============================================================
 // シグネチャ解析ステータスバー更新 (sig-info-bar)
+// 1秒前スナップショットとの差分でレートを計算
 // ============================================================
-let _sibPrev = { dir: 0, tri: 0, ts: 0 };
+let _sibSnap = { dir: 0, tri: 0, snapTime: 0 };  // 1秒前のスナップショット
+let _sibLastDir = 0, _sibLastTri = 0;             // 直前値 (レート保持用)
+let _sibDirRate = 0, _sibTriRate = 0;             // 最新レート (%/sec)
 function updateSigInfoBar() {
     const lockEl  = document.getElementById('sib-lock-status');
     const dirEl   = document.getElementById('sib-dir');
@@ -6048,36 +6051,39 @@ function updateSigInfoBar() {
     if (!lockEl) return;
 
     if (!lockedSignalId || !_signalAnalysis[lockedSignalId]) {
-        lockEl.textContent = '-- UNLOCKED --';
+        lockEl.textContent = 'UNLOCKED';
         lockEl.className = '';
-        if (dirEl) dirEl.textContent = '--.-- %';
-        if (triEl) triEl.textContent = '--.-- %';
+        if (dirEl) dirEl.textContent = '--.--%';
+        if (triEl) triEl.textContent = '--.--%';
         if (dirRate) dirRate.textContent = '';
         if (triRate) triRate.textContent = '';
+        _sibSnap.snapTime = 0;
         return;
     }
 
-    const sa = _signalAnalysis[lockedSignalId];
+    const sa  = _signalAnalysis[lockedSignalId];
     const dir = sa.dirAnalysis || 0;
     const tri = sa.triParam   || 0;
     const now = Date.now();
-    const dt  = (now - _sibPrev.ts) / 1000; // seconds since last update
 
-    let dRateStr = '', tRateStr = '';
-    if (dt > 0.1 && _sibPrev.ts > 0) {
-        const dRate = (dir - _sibPrev.dir) / dt;
-        const tRate = (tri - _sibPrev.tri) / dt;
-        if (Math.abs(dRate) > 0.01) dRateStr = `(${dRate >= 0 ? '+' : ''}${dRate.toFixed(2)}%/s)`;
-        if (Math.abs(tRate) > 0.01) tRateStr = `(${tRate >= 0 ? '+' : ''}${tRate.toFixed(2)}%/s)`;
+    // 1秒ごとにスナップを更新し、その差分をレートとして確定
+    if (_sibSnap.snapTime === 0) {
+        _sibSnap = { dir, tri, snapTime: now };
+    } else if (now - _sibSnap.snapTime >= 1000) {
+        const elapsed = (now - _sibSnap.snapTime) / 1000;
+        _sibDirRate = (dir - _sibSnap.dir) / elapsed;
+        _sibTriRate = (tri - _sibSnap.tri) / elapsed;
+        _sibSnap = { dir, tri, snapTime: now };
     }
-    _sibPrev = { dir, tri, ts: now };
 
-    lockEl.textContent = `LOCKED: ${lockedSignalId}`;
+    const fmtRate = r => Math.abs(r) < 0.005 ? '' : `(${r >= 0 ? '+' : ''}${r.toFixed(2)}%/s)`;
+
+    lockEl.textContent = `LCK:${lockedSignalId}`;
     lockEl.className = 'locked';
-    if (dirEl) dirEl.textContent = dir.toFixed(2) + ' %';
-    if (triEl) triEl.textContent = tri.toFixed(2) + ' %';
-    if (dirRate) dirRate.textContent = dRateStr;
-    if (triRate) triRate.textContent = tRateStr;
+    if (dirEl) dirEl.textContent = dir.toFixed(1) + '%';
+    if (triEl) triEl.textContent = tri.toFixed(1) + '%';
+    if (dirRate) dirRate.textContent = fmtRate(_sibDirRate);
+    if (triRate) triRate.textContent = fmtRate(_sibTriRate);
 }
 
 // ============================================================
