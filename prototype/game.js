@@ -4651,8 +4651,9 @@ function drawRadialScale(ctx) {
         const rad = (deg - 90) * Math.PI / 180; // 0°=北(上)
         const isCardinal = deg % 90 === 0;
         const isMid     = deg % 30 === 0;
-        const tickLen   = iZ * (isCardinal ? 1200 : isMid ? 800 : 500);
-        const lw        = iZ * (isCardinal ? 2.5  : isMid ? 1.8 : 1.2);
+        // 画面上 20/14/9 px 相当（colonyラベルの文字高さ程度）
+        const tickLen   = iZ * (isCardinal ? 20 : isMid ? 14 : 9);
+        const lw        = iZ * (isCardinal ? 2.5 : isMid ? 1.8 : 1.2);
         const alpha     = isCardinal ? 0.75 : isMid ? 0.55 : 0.35;
         const x0 = Math.cos(rad) * r, y0 = Math.sin(rad) * r;
         const x1 = Math.cos(rad) * (r + tickLen), y1 = Math.sin(rad) * (r + tickLen);
@@ -4660,12 +4661,13 @@ function drawRadialScale(ctx) {
         ctx.strokeStyle = '#00ffcc';
         ctx.lineWidth = lw;
         ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-        // 10°ごとに数字
-        const lx = Math.cos(rad) * (r + tickLen + iZ * 700);
-        const ly = Math.sin(rad) * (r + tickLen + iZ * 700);
+        // 数字: tickの先端から更に 36px 外側（リング外縁のすぐ外に収まる）
+        const labelR = r + tickLen + iZ * 36;
+        const lx = Math.cos(rad) * labelR;
+        const ly = Math.sin(rad) * labelR;
         ctx.globalAlpha = isCardinal ? 0.80 : isMid ? 0.60 : 0.40;
         ctx.fillStyle = '#00ffcc';
-        ctx.font = `${Math.round(iZ * (isCardinal ? 11 : 9))}px "Orbitron",monospace`;
+        ctx.font = `${Math.round(iZ * (isCardinal ? 12 : 9))}px "Orbitron",monospace`;
         ctx.fillText(deg + '°', lx, ly);
     }
     ctx.restore();
