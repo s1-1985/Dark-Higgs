@@ -656,10 +656,26 @@ radius    = MAP_RADIUS × (1 - avg_param / 100)
 - `lockedSignalId` 設定時 → 解析パネルのスキャンアイコンに **△（三角測量）アイコンをオーバーレイ**
 - 実装: `index.html` のロックボタン/アイコン部分に CSS クラス or 追加 SVG
 
+**表示サークルの中心点ジッタ（2026-06-21 設計確定）**:
+- 真の発信源をそのままサークル中心にすると「中央を狙えばいい」だけになってしまう問題への対処
+- **仮想ジッタ円**: 真の発信源を中心に、表示半径 `R` を直径とする不可視の円（=半径 `R/2`）
+- **表示中心** = 真の発信源 + この仮想ジッタ円内のランダムオフセット
+- **計算式（円内一様分布サンプリング）**:
+  ```js
+  const jitter_r = radius / 2;
+  const angle = Math.random() * Math.PI * 2;
+  const dist = jitter_r * Math.sqrt(Math.random()); // sqrtで面積要素補正→中心偏りなし一様分布
+  displayCenter = { x: true_x + dist*Math.cos(angle), y: true_y + dist*Math.sin(angle) };
+  ```
+- **保証**: オフセット最大 `R/2` < サークル半径 `R` → 真の発信源は常に表示サークル内に収まる
+- **収束**: 精度向上 → `R` が縮む → ジッタ円も縮む → 表示中心が真値に自然収束
+- **更新タイミング**: `checkPassiveDetection()` の2秒周期 or maneuver イベント時のみ再計算（毎フレーム更新するとサークルが震えるため）
+- `_signalAnalysis{}` に `displayCenter: {x, y}` も保存し、次の更新まで固定表示
+
 **既存コードとの関係**:
 - 既存の自動 `computeTriangulation()` は本パラメータ（手動積算型）に置き換え or 並走
 - `drawTriangulationCircle()` の半径式を上記 `avg_param` ベースに更新
-- 別 Map `_signalAnalysis{}` に `{ dirAnalysis, triParam, lockOrigin }` をキー=sourceId で保持
+- 別 Map `_signalAnalysis{}` に `{ dirAnalysis, triParam, lockOrigin, displayCenter }` をキー=sourceId で保持
 
 ---
 
