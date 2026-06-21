@@ -76,6 +76,15 @@ window._lockSignal = function(sid) {
         _lsSa.lastPosY = player ? player.y : 0;
     }
 }; // index.htmlから呼出し
+window.fireTriangulate = function() {
+    if (!lockedSignalId) {
+        logMessage('ANALYSIS: 特定のシグネチャの解析を開始してください', 'system-msg');
+        return;
+    }
+    computeTriangulation();
+    logMessage(`ANALYSIS: SIG ${lockedSignalId} — 三角測量実行`, 'system-msg');
+    if (typeof window.runSigAnalysis === 'function') window.runSigAnalysis();
+};
 let _lpmWorld = null;            // 長押しラジアルメニューのワールド座標
 const PASSIVE_BEARING_LIFE = 480;  // 8秒フェード (@60fps)
 const PASSIVE_BEARING_MAX  = 24;   // 同時表示上限 (地形+敵で増加)
