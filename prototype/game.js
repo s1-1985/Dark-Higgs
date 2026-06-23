@@ -359,6 +359,45 @@ const ENEMY_COMBAT = {
     // ファイター(ドローン): 突撃ハラサー。一直線に肉薄してkineticを浴びせる。
     fighter:   { rangeMult: 0.55, speedMult: 1.60, standoff: 0.32, fireCD: 90,  kite: false, strafe: 0.12, fleeClose: 0,    weaponEarly: 'kinetic', weaponLate: 'kinetic', burst: 1 },
 };
+// ── 敵の「性格」(マッチ毎ランダム・艦種でレンジを縛る) ──
+// 艦種ドクトリン(ENEMY_COMBAT)が土台。性格はその上の"気質"で、ドクトリンを覆さない範囲で行動を変調する。
+//  aggression: 距離を詰める/撃つ積極性  stealth: 隠密・低シグネチャ志向  greed: ノード奪取優先度  caution: 損傷時の退き際
+function rollEnemyPersonality(type) {
+    const R = (a, b) => a + Math.random() * (b - a);
+    if (type === 'destroyer')     return { aggression: R(0.45, 1.00), stealth: R(0.00, 0.50), greed: R(0.15, 0.80), caution: R(0.10, 0.55) };
+    if (type === 'corvette')      return { aggression: R(0.20, 0.65), stealth: R(0.50, 1.00), greed: R(0.20, 0.85), caution: R(0.40, 0.95) };
+    if (type === 'carrier')       return { aggression: R(0.10, 0.45), stealth: R(0.25, 0.70), greed: R(0.45, 1.00), caution: R(0.50, 1.00) };
+    return { aggression: R(0.70, 1.00), stealth: R(0.00, 0.25), greed: R(0.00, 0.20), caution: R(0.00, 0.20) }; // fighter=無謀
+}
+// 検知時フレーバー: 性格をふわっと言語化 (毎マッチ違う相手を感じさせる)
+function personalityTag(p) {
+    if (p.greed > 0.72)      return '物資集積を優先する';
+    if (p.aggression > 0.82) return '極めて攻撃的な';
+    if (p.stealth > 0.82)    return '隠密性を重んじる';
+    if (p.caution > 0.82)    return '慎重な';
+    if (p.aggression < 0.30) return '消極的な';
+    return '標準的な';
+}
+function nearestActiveNode(x, y, maxDist) {
+    let best = null, bd = maxDist || Infinity;
+    for (const n of resourceNodes) { if (!n.active) continue; const d = Math.hypot(n.x - x, n.y - y); if (d < bd) { bd = d; best = n; } }
+    return best;
+}
+// 敵のノード奪取による自己強化。強化先を性格で重み付け抽選 (攻撃的→火力 / 慎重→装甲 / 隠密→機関 / 貪欲→索敵)。
+function applyEnemyUpgrade(ship) {
+    const p = ship.personality || { aggression: 0.5, stealth: 0.3, greed: 0.4, caution: 0.4 };
+    const w = { weapon: 0.30 + p.aggression, armor: 0.30 + p.caution, engine: 0.20 + p.stealth, sensor: 0.20 + p.greed };
+    const total = w.weapon + w.armor + w.engine + w.sensor;
+    let r = Math.random() * total, pick = 'weapon';
+    for (const k of ['weapon', 'armor', 'engine', 'sensor']) { if ((r -= w[k]) <= 0) { pick = k; break; } }
+    ship.enemyUpgLv = (ship.enemyUpgLv || 0) + 1;
+    let label;
+    if (pick === 'weapon')      { ship.upgFireCD = Math.max(0.45, ship.upgFireCD * 0.86); ship.upgDmg = Math.min(2.2, ship.upgDmg * 1.13); label = '武装'; }
+    else if (pick === 'armor')  { ship.maxHp = Math.min(5000, ship.maxHp * 1.20); ship.hp = Math.min(ship.maxHp, ship.hp + ship.maxHp * 0.15); label = '装甲'; }
+    else if (pick === 'engine') { ship.upgSpeed = Math.min(1.8, ship.upgSpeed * 1.12); label = '機関'; }
+    else                        { ship.upgDetect = Math.min(2.5, ship.upgDetect * 1.18); label = '索敵'; }
+    logMessage(`SENSOR: 敵艦がノードを奪取し【${label}】を強化 (強化Lv${ship.enemyUpgLv})。`, 'warning-msg');
+}
 // 慣性ベース速度システム
 const SHIP_MAX_SPEED_MULT = { assault: 0.58, stealth: 1.05, carrier: 0.38 }; // 艦種別最高速度倍率(全体的に低速化)
 const SHIP_ACCEL_RATE = { carrier: 0.00075, assault: 0.002, stealth: 0.004 }; // 最高速度到達まで加速率/frame (×0.25: 初速を遅く)
@@ -1764,6 +1803,10 @@ class Ship {
             // 接触を断つと古い予測のまま撃つ→ステルス/沈黙で回避できる (プレイヤーと対称)。
             this.playerLastKnownPos = null; // {x, y, vx, vy}
             this.contactFreshness = 0;      // 1.0=今フレーム探知, 喪失で減衰
+            this.personality = rollEnemyPersonality(type); // マッチ毎の気質 (艦種でレンジを縛る)
+            this.upgFireCD = 1; this.upgDmg = 1; this.upgSpeed = 1; this.upgDetect = 1; // ノード奪取で変動
+            this.enemyUpgLv = 0;
+            this._desperateLogged = false;
         }
         if (isPlayer) {
             this.manualTarget = false;   // 手動ターゲット指定フラグ (自動ロックオン上書き防止)
@@ -2210,7 +2253,7 @@ class Ship {
                     if (jamCont && distToPlayer < JAM_CONT_RADIUS) jamDegrade = Math.max(jamDegrade, JAM_CONT_DEGRADE);
                 }
             }
-            const myDetectRange = ENEMY_DETECT_BASE * (1 - higgsHereDetect * 0.55) * (1 + gameState.sector * 0.05) * playerEmBoost * (1 - jamDegrade);
+            const myDetectRange = ENEMY_DETECT_BASE * (1 - higgsHereDetect * 0.55) * (1 + gameState.sector * 0.05) * playerEmBoost * (1 - jamDegrade) * (this.upgDetect || 1);
 
             let playerSigDetected = false;
             let detectedSigStrength = 0;
@@ -2319,7 +2362,7 @@ class Ship {
                         this.aiState = 'combat';
                         this.lurking = false;
                         this.detectionState = 'alerted';
-                        if (!this.alertLogged) { this.alertLogged = true; logMessage('WARN: 敵艦があなたのシグネチャを捕捉。迎撃態勢に入ります。', 'warning-msg'); }
+                        if (!this.alertLogged) { this.alertLogged = true; logMessage(`WARN: 敵艦(${personalityTag(this.personality || {})}個体)があなたのシグネチャを捕捉。迎撃態勢に入ります。`, 'warning-msg'); }
                     }
                 } else if (this.aiState === 'lurking' || this.aiState === 'gathering') {
                     this.aiState = 'hunting';
@@ -2357,8 +2400,9 @@ class Ship {
             if (this.aiState === 'combat') {
                 this.lurking = false;
                 const prof = ENEMY_COMBAT[this.type] || ENEMY_COMBAT.destroyer;
+                const pers = this.personality || { aggression: 0.5, stealth: 0.3, greed: 0.4, caution: 0.4 };
                 const fireRange = (700 + gameState.sector * 25) * prof.rangeMult;
-                this.speed = Math.min(2.0, 0.9 + gameState.sector * 0.08) * prof.speedMult * this.terrainSpeedMult() * gameSpeedFactor;
+                this.speed = Math.min(2.2, 0.9 + gameState.sector * 0.08) * prof.speedMult * (this.upgSpeed || 1) * this.terrainSpeedMult() * gameSpeedFactor;
 
                 // センサー制約型照準: 実プレイヤーではなく「最終既知位置」へ撃つ。
                 // 接触が新しいほど速度ぶんリード外挿、喪失するほど古い点で凍結 → 移動/沈黙で外れる。
@@ -2370,7 +2414,30 @@ class Ship {
                 // 側方機動の向きは時々反転させ、ストレイフを読まれにくくする
                 if (this._dodgeDir === undefined || Math.random() < 0.004) this._dodgeDir = (Math.random() < 0.5 ? 1 : -1);
 
-                if (distToBelief < fireRange && this.fireCooldown <= 0 && player && player.hp > 0) {
+                // ── HP状況による行動変容 (自他HP比 + 性格caution) ──
+                const hpFrac = this.hp / this.maxHp;
+                const playerHpFrac = (player && player.hp > 0) ? player.hp / player.maxHp : 1;
+                let retreatThresh = 0.12 + pers.caution * 0.43;          // 慎重なほど早く退く
+                if (playerHpFrac > hpFrac + 0.30) retreatThresh += 0.12; // 相手が格上 → さらに早く退く
+                const desperate = hpFrac < retreatThresh;
+                const killInstinct = hpFrac > 0.5 && playerHpFrac < 0.35; // 自分は健在で相手が瀕死 → 仕留めに踏み込む
+                // 撤退中の自己修復: ノードに触れたら回収して回復 (経済↔生存の結節点)
+                if (desperate) {
+                    if (!this._desperateLogged) { logMessage('SENSOR: 敵艦が損傷により後退 — 回復行動に移行。', 'system-msg'); this._desperateLogged = true; }
+                    for (const n of resourceNodes) {
+                        if (!n.active) continue;
+                        if (Math.hypot(n.x - this.x, n.y - this.y) < this.radius + 70) {
+                            n.active = false; n.emFlashTimer = 120;
+                            this.hp = Math.min(this.maxHp, this.hp + this.maxHp * 0.30);
+                            logMessage('SENSOR: 敵艦がノードで損傷を修復した。', 'warning-msg');
+                            break;
+                        }
+                    }
+                } else { this._desperateLogged = false; }
+
+                // 撤退中は射撃より離脱を優先。たまに振り向きざまに撃つ(fighting retreat)。
+                const _wantFire = distToBelief < fireRange && this.fireCooldown <= 0 && player && player.hp > 0 && (!desperate || Math.random() < 0.25);
+                if (_wantFire) {
                     const ta = Math.atan2(aimY - this.y, aimX - this.x);
                     let diff = ta - this.angle;
                     while (diff < -Math.PI) diff += Math.PI * 2;
@@ -2399,10 +2466,10 @@ class Ship {
                             const missDist = Math.hypot(player.x - tgX, player.y - tgY);
                             projTarget = (missDist < player.radius * 2.2) ? player : aimTarget;
                         }
-                        projectiles.push(new Projectile(this.x, this.y, projTarget, false, wType));
+                        projectiles.push(new Projectile(this.x, this.y, projTarget, false, wType, this.upgDmg || 1));
                     }
                     playSound('shoot');
-                    this.fireCooldown = prof.fireCD;
+                    this.fireCooldown = prof.fireCD * (this.upgFireCD || 1);
                     this.fireFlashTimer = 120;
                     this.visible = true;
                     const sigLabel = { kinetic: '銃口炎[光学]', missile: '推進炎[熱源+EM]', beam: 'EMパルス[EM+光学]' };
@@ -2410,25 +2477,35 @@ class Ship {
                     logMessage(`WARNING: 敵艦発砲 — ${sigLabel[wType]||''}シグネチャ捕捉。`, 'warning-msg');
                     this.postFireCooldown = 280;
                 } else {
-                    // 艦種別の機動: ブルーザー=接近継続 / ヒット&アウェイ=間合い維持+側方離脱 / スタンドオフ=接近されたら逃走
+                    // 艦種別の機動 (ドクトリン) を性格とHP状況で変調。
                     const pbv = this.predictedBehavior;
-                    const standoffDist = fireRange * prof.standoff;
+                    // 性格: 攻撃的ほど間合いを詰め・近接でも逃げない / killInstinctでさらに踏み込む
+                    let standoffDist = fireRange * prof.standoff * (1.25 - pers.aggression * 0.5);
+                    let fleeCloseFrac = prof.fleeClose * (1.1 - pers.aggression * 0.4);
+                    if (killInstinct) { standoffDist *= 0.5; fleeCloseFrac *= 0.35; }
                     let moveAngle = Math.atan2(aimY - this.y, aimX - this.x); // 既定: 信念点へ前進
                     let doMove = false;
-                    if (distToBelief > standoffDist) {
+                    if (desperate) {
+                        // 損傷大: 近くにノードがあれば回復に向かう、なければ獲物から離脱
+                        const nn = nearestActiveNode(this.x, this.y, 7000);
+                        moveAngle = nn ? Math.atan2(nn.y - this.y, nn.x - this.x) : Math.atan2(this.y - aimY, this.x - aimX);
+                        doMove = true;
+                    } else if (distToBelief > standoffDist) {
                         doMove = true;                                                                // 遠い → 接近
-                    } else if (prof.fleeClose > 0 && distToBelief < fireRange * prof.fleeClose) {
+                    } else if (fleeCloseFrac > 0 && distToBelief < fireRange * fleeCloseFrac) {
                         moveAngle += Math.PI; doMove = true;                                          // 近すぎ(脆弱) → 全力離脱
                     } else if (prof.kite && distToBelief < standoffDist * 0.8) {
                         moveAngle += Math.PI; doMove = true;                                          // 間合い詰められた → 下がる
                     }
-                    // 側方ストレイフ (潜航型ほど強い)。撃たないフレームは横っ飛びで的を絞らせない。
-                    if (prof.strafe > 0) {
-                        moveAngle += this._dodgeDir * (Math.PI / 2) * prof.strafe;
+                    // 側方ストレイフ (潜航型ほど強い)。間合いを保つ局面でのみ実施 — 大きく離れている時は
+                    // 直進で詰める(さもないと遠方を周回するだけで近寄れない)。撤退中・キル踏込時は抑制。
+                    const _nearHold = distToBelief <= standoffDist * 1.3;
+                    if (!desperate && prof.strafe > 0 && _nearHold) {
+                        moveAngle += this._dodgeDir * (Math.PI / 2) * prof.strafe * (killInstinct ? 0.4 : 1);
                         doMove = true;
                     }
-                    // ビームチャージ推定: 全艦種共通で側方回避を上乗せ
-                    if (pbv === 'charging') {
+                    // ビームチャージ推定: 側方回避を上乗せ
+                    if (!desperate && pbv === 'charging') {
                         moveAngle += this._dodgeDir * (Math.PI / 2.5);
                         doMove = true;
                     }
@@ -2455,7 +2532,7 @@ class Ship {
             } else if (this.aiState === 'hunting') {
                 this.lurking = false;
                 const _huntProf = ENEMY_COMBAT[this.type] || ENEMY_COMBAT.destroyer;
-                this.speed = Math.min(1.6, 0.8 + gameState.sector * 0.06) * _huntProf.speedMult * this.terrainSpeedMult() * gameSpeedFactor;
+                this.speed = Math.min(1.6, 0.8 + gameState.sector * 0.06) * _huntProf.speedMult * (this.upgSpeed || 1) * this.terrainSpeedMult() * gameSpeedFactor;
                 if (this.huntTimer > 0) this.huntTimer--;
                 if (this.huntTarget) {
                     const dist = Math.hypot(this.huntTarget.x - this.x, this.huntTarget.y - this.y);
@@ -2501,12 +2578,9 @@ class Ship {
                         this.gatherTarget.active = false;
                         this.gatherTarget.emFlashTimer = 120;
                         this.resourcePoints++;
-                        if (this.resourcePoints >= 2) {
-                            this.maxHp = Math.min(this.maxHp * 1.25, 4000);
-                            this.hp = Math.min(this.hp + 150, this.maxHp);
-                            this.resourcePoints = 0;
-                            logMessage('SENSOR: 敵艦がリソースを回収し戦力を強化した。警戒せよ！', 'warning-msg');
-                        }
+                        // ノード1個ごとに小回復。2個ごとに性格重み付けで自己強化 (放置すると相手が育つ)。
+                        this.hp = Math.min(this.maxHp, this.hp + this.maxHp * 0.06);
+                        if (this.resourcePoints % 2 === 0) applyEnemyUpgrade(this);
                         this.gatherTarget = null;
                         this.aiState = 'lurking'; this.lurking = true;
                     }
@@ -2515,10 +2589,10 @@ class Ship {
             } else {
                 // lurking (default)
                 this.lurking = true;
-                // 残り香(contactFreshness)がある間は獲物を追って徘徊速度を上げる(=能動的ストーキング)。
-                // 接触を完全に失えば再びほぼ静止して潜伏。
+                const _pers = this.personality || { aggression: 0.5, stealth: 0.3, greed: 0.4, caution: 0.4 };
+                // 残り香(contactFreshness)がある間は獲物を追って徘徊。攻撃的=速い追跡 / 隠密=低速で忍び寄る(低シグネチャ)。
                 const _hasScent = this.playerLastKnownPos && this.contactFreshness > 0.04;
-                this.speed = _hasScent ? ENEMY_STALK_SPEED : 0.08;
+                this.speed = _hasScent ? ENEMY_STALK_SPEED * (0.6 + _pers.aggression * 0.6) * (1 - _pers.stealth * 0.4) : 0.08;
                 const activeNodes = resourceNodes.filter(n => n.active);
                 if (this.state === 'idle') {
                     if (_hasScent && Math.random() < 0.05) {
@@ -2529,7 +2603,8 @@ class Ship {
                         const _leadY = _lkp.y + (_lkp.vy || 0) * 40;
                         const searchSpot = findHidingSpot(_leadX, _leadY, 3000);
                         this.setTarget(searchSpot.x, searchSpot.y);
-                    } else if (activeNodes.length > 0 && Math.random() < 0.003) {
+                    } else if (activeNodes.length > 0 && Math.random() < (0.0012 + _pers.greed * 0.012)) {
+                        // 貪欲な個体ほど積極的にノードを奪取しに行く (性格による行動分岐)
                         this.aiState = 'gathering';
                         logMessage('SENSOR: 敵艦がリソース収集パターンに移行。', 'system-msg');
                     } else if (this.predictedBehavior === 'silent' && Math.random() < 0.014) {
