@@ -339,6 +339,12 @@ let gameSpeedFactor = 1.0; // 0.5=低速 / 1.0=通常 / 2.0=高速
 const PLAYER_TURN_RATE = 0.010; // 自機最大回頭レート (rad/frame) - assault基準
 const PLAYER_TURN_RATES = { assault: 0.010, stealth: 0.015, carrier: 0.004 }; // 艦種別回頭レート (重量感重視)
 const ENEMY_TURN_RATES  = { corvette: 0.018, fighter: 0.025, destroyer: 0.009, carrier: 0.006 }; // 敵艦種別回頭レート
+// ── 敵センサー「間合い」チューニング (2026-06-23 レビュー: 探知が至近距離すぎて狩りが成立しない問題の解) ──
+// 探知を2層に分離: ①近接ハード探知=無音でも至近では見つかる ②シグネチャ探知=派手な機体ほど遠方から捕捉。
+// プレイヤーのパッシブ探知(range≧8000〜)に見合う遠距離で敵も能動的に狩れるようにする。静音プレイのステルスは維持。
+const ENEMY_DETECT_BASE = 1100;  // 近接ハード探知レンジの基準(旧800)。playerEmBoost等で増減
+const ENEMY_SIG_REACH   = 8.0;   // シグネチャ探知の到達倍率(旧2.5固定)。大きいほど遠方からシグネチャを拾う
+const ENEMY_STALK_SPEED = 0.55;  // 残り香(contactFreshness)を追って徘徊する際のlurking速度(通常lurking=0.08)
 // 慣性ベース速度システム
 const SHIP_MAX_SPEED_MULT = { assault: 0.58, stealth: 1.05, carrier: 0.38 }; // 艦種別最高速度倍率(全体的に低速化)
 const SHIP_ACCEL_RATE = { carrier: 0.00075, assault: 0.002, stealth: 0.004 }; // 最高速度到達まで加速率/frame (×0.25: 初速を遅く)
@@ -2190,7 +2196,7 @@ class Ship {
                     if (jamCont && distToPlayer < JAM_CONT_RADIUS) jamDegrade = Math.max(jamDegrade, JAM_CONT_DEGRADE);
                 }
             }
-            const myDetectRange = 800 * (1 - higgsHereDetect * 0.55) * (1 + gameState.sector * 0.05) * playerEmBoost * (1 - jamDegrade);
+            const myDetectRange = ENEMY_DETECT_BASE * (1 - higgsHereDetect * 0.55) * (1 + gameState.sector * 0.05) * playerEmBoost * (1 - jamDegrade);
 
             let playerSigDetected = false;
             let detectedSigStrength = 0;
@@ -2204,7 +2210,7 @@ class Ship {
                 ['heat','optic','em','higgs'].forEach(sName => {
                     const sc2 = sensorConfig[sName];
                     const higgsPath = getHiggsIntensity(_mx, _my);
-                    const distAtten = Math.max(0, 1 - distToPlayer / (myDetectRange * 2.5 * sc2.rangeScale));
+                    const distAtten = Math.max(0, 1 - distToPlayer / (myDetectRange * ENEMY_SIG_REACH * sc2.rangeScale));
                     // 地形ハザード: デブリ=OPTIC減衰 / 磁気嵐=EM減衰 / 熱雲=HEAT減衰 (§3-13)
                     let terrAtten = 1;
                     if (sName === 'optic') terrAtten = 1 - _debrisPath * DEBRIS_OPTIC_MOD;
@@ -2246,7 +2252,7 @@ class Ship {
                 };
                 this.contactFreshness = 1.0;
             } else {
-                this.contactFreshness = Math.max(0, this.contactFreshness - 0.02);
+                this.contactFreshness = Math.max(0, this.contactFreshness - 0.012); // 残り香の減衰(緩め): 静音化で振り切るには数秒の沈黙が要る
                 // §3-6残: 攻撃型ドローンの熱シグネチャ — コンタクト薄い時のみ誤誘引
                 if (playerDrones.length > 0 && this.contactFreshness < 0.3) {
                     for (const dr of playerDrones) {
@@ -2467,15 +2473,25 @@ class Ship {
             } else {
                 // lurking (default)
                 this.lurking = true;
-                this.speed = 0.08;
+                // 残り香(contactFreshness)がある間は獲物を追って徘徊速度を上げる(=能動的ストーキング)。
+                // 接触を完全に失えば再びほぼ静止して潜伏。
+                const _hasScent = this.playerLastKnownPos && this.contactFreshness > 0.04;
+                this.speed = _hasScent ? ENEMY_STALK_SPEED : 0.08;
                 const activeNodes = resourceNodes.filter(n => n.active);
                 if (this.state === 'idle') {
-                    if (activeNodes.length > 0 && Math.random() < 0.003) {
+                    if (_hasScent && Math.random() < 0.05) {
+                        // 残り香あり: 最終既知位置周辺を集中捜索しながらじわじわ詰める(獲物がヒッグス雲に潜伏と推定)
+                        const _lkp = this.playerLastKnownPos;
+                        // 速度ベクトル方向へ少しリード(逃げた先を読む)
+                        const _leadX = _lkp.x + (_lkp.vx || 0) * 40;
+                        const _leadY = _lkp.y + (_lkp.vy || 0) * 40;
+                        const searchSpot = findHidingSpot(_leadX, _leadY, 3000);
+                        this.setTarget(searchSpot.x, searchSpot.y);
+                    } else if (activeNodes.length > 0 && Math.random() < 0.003) {
                         this.aiState = 'gathering';
                         logMessage('SENSOR: 敵艦がリソース収集パターンに移行。', 'system-msg');
                     } else if (this.predictedBehavior === 'silent' && Math.random() < 0.014) {
                         // silent推定（接触喪失）: 最終既知位置周辺のヒッグス濃密域を集中捜索
-                        // — 獲物がヒッグス雲に潜伏していると推定して接近する
                         const _lkp = this.playerLastKnownPos;
                         const _searchCX = (_lkp && this.contactFreshness > 0.05) ? _lkp.x : this.x;
                         const _searchCY = (_lkp && this.contactFreshness > 0.05) ? _lkp.y : this.y;
@@ -3680,8 +3696,9 @@ function generateSector() {
     // 敵艦種: ロビー選択(assault/stealth/carrier)→内部型にマップ
     const _enemyTypeMap = { assault: 'destroyer', stealth: 'corvette', carrier: 'carrier' };
     const boss = new Ship(bossSpawn.x, bossSpawn.y, false, _enemyTypeMap[gameState.enemyType] || 'destroyer');
-    // セクターが深いほど高HP・高速化
-    boss.maxHp = 500 + gameState.sector * 200;
+    // セクターが深いほど高HP・高速化。艦種ラベル(攻撃型=高耐久 / 潜航型=脆い / 空母型=中)とHPを整合(2026-06-23)
+    const _bossHpMult = { destroyer: 2.4, corvette: 0.95, carrier: 1.7 };
+    boss.maxHp = Math.round((500 + gameState.sector * 200) * (_bossHpMult[boss.type] || 1));
     boss.hp = boss.maxHp;
     boss.lurking = true;
     enemies.push(boss);
@@ -4242,7 +4259,7 @@ function checkPassiveDetection() {
 
     const sc = sensorConfig[currentSensor];
     const thr = sc.threshold;
-    const range = Math.max(effectiveRadarRange * 10, 8000);
+    const range = Math.max(effectiveRadarRange * 10, 11000); // パッシブ探知の下限を拡張(8000→11000): 接近フェーズで早めに微弱方位を拾い「空白の航行」を緊張に変える
     const sensorPrec = 0.45 + (genAlloc.sensors / 100) * 0.55;
     const colorRgb = sc.r;
     const terrRange = range * 1.4; // 地形は広範囲から放射
