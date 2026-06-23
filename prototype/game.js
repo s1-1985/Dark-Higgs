@@ -345,6 +345,20 @@ const ENEMY_TURN_RATES  = { corvette: 0.018, fighter: 0.025, destroyer: 0.009, c
 const ENEMY_DETECT_BASE = 1100;  // 近接ハード探知レンジの基準(旧800)。playerEmBoost等で増減
 const ENEMY_SIG_REACH   = 8.0;   // シグネチャ探知の到達倍率(旧2.5固定)。大きいほど遠方からシグネチャを拾う
 const ENEMY_STALK_SPEED = 0.55;  // 残り香(contactFreshness)を追って徘徊する際のlurking速度(通常lurking=0.08)
+// ── 艦種別 戦闘プロファイル (2026-06-23: 艦種ごとに戦い方を分ける) ──
+// rangeMult: 交戦距離(基準fireRange倍率) / speedMult: 戦闘移動速度倍率 / standoff: 維持したい距離(自fireRange比)
+// fireCD: 連射間隔(小=速い) / kite: 間合いを保ち撃ったら離脱するか / strafe: 側方機動の強さ(0..1)
+// fleeClose: プレイヤーがこの距離(fireRange比)まで近づくと逃走 / weaponEarly/Late: 序盤/終盤の武器 / burst: kinetic同時発射数
+const ENEMY_COMBAT = {
+    // 攻撃型(destroyer): ブルーザー。正面から距離を詰め、3連装kineticで殴り続ける。退かない。
+    destroyer: { rangeMult: 1.05, speedMult: 1.05, standoff: 0.50, fireCD: 105, kite: false, strafe: 0.10, fleeClose: 0,    weaponEarly: 'kinetic', weaponLate: 'missile', burst: 3 },
+    // 潜航型(corvette): ヒット&アウェイ。高速で間合いを取り、ミサイルを撃ったら側方へ離脱して再び潜む。
+    corvette:  { rangeMult: 1.55, speedMult: 1.55, standoff: 0.88, fireCD: 165, kite: true,  strafe: 0.55, fleeClose: 0.55, weaponEarly: 'missile', weaponLate: 'missile', burst: 1 },
+    // 空母型(carrier): スタンドオフ。長射程から撃ちつつドローンを射出し、近づかれたら逃げる(近接=最大脆弱)。
+    carrier:   { rangeMult: 2.10, speedMult: 0.72, standoff: 0.90, fireCD: 200, kite: true,  strafe: 0.18, fleeClose: 0.70, weaponEarly: 'missile', weaponLate: 'beam',    burst: 1 },
+    // ファイター(ドローン): 突撃ハラサー。一直線に肉薄してkineticを浴びせる。
+    fighter:   { rangeMult: 0.55, speedMult: 1.60, standoff: 0.32, fireCD: 90,  kite: false, strafe: 0.12, fleeClose: 0,    weaponEarly: 'kinetic', weaponLate: 'kinetic', burst: 1 },
+};
 // 慣性ベース速度システム
 const SHIP_MAX_SPEED_MULT = { assault: 0.58, stealth: 1.05, carrier: 0.38 }; // 艦種別最高速度倍率(全体的に低速化)
 const SHIP_ACCEL_RATE = { carrier: 0.00075, assault: 0.002, stealth: 0.004 }; // 最高速度到達まで加速率/frame (×0.25: 初速を遅く)
@@ -2315,20 +2329,24 @@ class Ship {
                 }
             }
 
-            // キャリア: ドローン製造
+            // キャリア: ドローン製造 (空母型の主戦力)。コンタクトを得ている時だけ射出し、
+            // 交戦中は射出間隔を短縮。ドローンは"自分が信じている位置(最終既知位置)"へ向かわせる。
             if (this.type === 'carrier') {
                 this.droneSpawnTimer--;
-                if (this.droneSpawnTimer <= 0 && enemies.filter(e=>e.hp>0).length < 5) {
+                const _engaged = this.aiState === 'combat' || this.aiState === 'hunting';
+                const _hasContact = _engaged || this.contactFreshness > 0.1;
+                if (this.droneSpawnTimer <= 0 && _hasContact && enemies.filter(e=>e.hp>0).length < 6) {
+                    const _bel = this.playerLastKnownPos || (player ? { x: player.x, y: player.y } : { x: this.x, y: this.y });
                     const drone = new Ship(
                         this.x + (Math.random()-0.5)*300,
                         this.y + (Math.random()-0.5)*300, false, 'fighter'
                     );
                     drone.aiState = 'hunting';
-                    drone.huntTarget = { x: player.x, y: player.y };
+                    drone.huntTarget = { x: _bel.x, y: _bel.y };
                     drone.huntTimer = 600;
                     drone.lurking = false;
                     enemies.push(drone);
-                    this.droneSpawnTimer = 600 + Math.floor(Math.random() * 600);
+                    this.droneSpawnTimer = _engaged ? (380 + Math.floor(Math.random() * 320)) : (700 + Math.floor(Math.random() * 500));
                     logMessage('TACTICAL: 敵空母がファイタードローンを射出！', 'warning-msg');
                 }
             }
@@ -2338,8 +2356,9 @@ class Ship {
             // ──────────────────────────────────────
             if (this.aiState === 'combat') {
                 this.lurking = false;
-                const fireRange = 700 + gameState.sector * 25;
-                this.speed = Math.min(2.0, 0.9 + gameState.sector * 0.08) * this.terrainSpeedMult() * gameSpeedFactor;
+                const prof = ENEMY_COMBAT[this.type] || ENEMY_COMBAT.destroyer;
+                const fireRange = (700 + gameState.sector * 25) * prof.rangeMult;
+                this.speed = Math.min(2.0, 0.9 + gameState.sector * 0.08) * prof.speedMult * this.terrainSpeedMult() * gameSpeedFactor;
 
                 // センサー制約型照準: 実プレイヤーではなく「最終既知位置」へ撃つ。
                 // 接触が新しいほど速度ぶんリード外挿、喪失するほど古い点で凍結 → 移動/沈黙で外れる。
@@ -2348,6 +2367,8 @@ class Ship {
                 const aimX = lk ? lk.x + lk.vx * lead : (player ? player.x : this.x);
                 const aimY = lk ? lk.y + lk.vy * lead : (player ? player.y : this.y);
                 const distToBelief = Math.hypot(aimX - this.x, aimY - this.y);
+                // 側方機動の向きは時々反転させ、ストレイフを読まれにくくする
+                if (this._dodgeDir === undefined || Math.random() < 0.004) this._dodgeDir = (Math.random() < 0.5 ? 1 : -1);
 
                 if (distToBelief < fireRange && this.fireCooldown <= 0 && player && player.hp > 0) {
                     const ta = Math.atan2(aimY - this.y, aimX - this.x);
@@ -2356,22 +2377,32 @@ class Ship {
                     while (diff > Math.PI) diff -= Math.PI * 2;
                     const _eTR_cb = (ENEMY_TURN_RATES[this.type] || 0.035) * gameSpeedFactor;
                     this.angle += Math.sign(diff) * Math.min(Math.abs(diff), _eTR_cb);
-                    let wType = gameState.sector <= 2 ? 'kinetic' : (gameState.sector <= 4 ? 'missile' : 'beam');
-                    // 適応: プレイヤーが実弾近接戦と推定されたら長射程へ切替 (アウトレンジ)
+                    // 艦種別の武器選択 (序盤/終盤) + 既存の行動推定適応
+                    let wType = gameState.sector <= 3 ? prof.weaponEarly : prof.weaponLate;
+                    // 適応: プレイヤーが実弾近接戦と推定 & 自分も近接武器なら長射程へ (アウトレンジ)
                     if (this.predictedBehavior === 'kinetic' && wType === 'kinetic') wType = 'missile';
                     this.weaponType = wType;
-                    // 信じている照準点に向けて発射。kinetic/missileは飛翔体の命中判定が
-                    // 実プレイヤーとのズレを自然に処理する。beamは即着弾のため、照準点が
-                    // 実プレイヤーに十分近い時だけ実弾化し、外れていれば空撃ち(無害)にする。
-                    const aimTarget = { x: aimX, y: aimY, hp: 1 };
-                    let projTarget = aimTarget;
-                    if (wType === 'beam') {
-                        const missDist = Math.hypot(player.x - aimX, player.y - aimY);
-                        projTarget = (missDist < player.radius * 2.2) ? player : aimTarget;
+                    // kinetic は射程800しか飛ばないので、それを超える間合いでは強制的にミサイルへ
+                    if (wType === 'kinetic' && distToBelief > 760) wType = 'missile';
+                    // 攻撃型は3連装、それ以外は単発。kinetic時のみ弾幕、ミサイル/ビームは単発。
+                    const shots = (wType === 'kinetic') ? prof.burst : 1;
+                    const baseRange = Math.max(1, Math.hypot(aimX - this.x, aimY - this.y));
+                    for (let s = 0; s < shots; s++) {
+                        const spread = shots > 1 ? (s - (shots - 1) / 2) * 0.06 : 0; // 約3.4°/発
+                        const sa = ta + spread;
+                        const tgX = this.x + Math.cos(sa) * baseRange;
+                        const tgY = this.y + Math.sin(sa) * baseRange;
+                        const aimTarget = { x: tgX, y: tgY, hp: 1 };
+                        let projTarget = aimTarget;
+                        if (wType === 'beam') {
+                            // beamは即着弾。照準点が実プレイヤーに十分近い時だけ実弾化、外れなら空撃ち(無害)。
+                            const missDist = Math.hypot(player.x - tgX, player.y - tgY);
+                            projTarget = (missDist < player.radius * 2.2) ? player : aimTarget;
+                        }
+                        projectiles.push(new Projectile(this.x, this.y, projTarget, false, wType));
                     }
-                    projectiles.push(new Projectile(this.x, this.y, projTarget, false, wType));
                     playSound('shoot');
-                    this.fireCooldown = 150;
+                    this.fireCooldown = prof.fireCD;
                     this.fireFlashTimer = 120;
                     this.visible = true;
                     const sigLabel = { kinetic: '銃口炎[光学]', missile: '推進炎[熱源+EM]', beam: 'EMパルス[EM+光学]' };
@@ -2379,16 +2410,26 @@ class Ship {
                     logMessage(`WARNING: 敵艦発砲 — ${sigLabel[wType]||''}シグネチャ捕捉。`, 'warning-msg');
                     this.postFireCooldown = 280;
                 } else {
-                    // 適応移動: kinetic推定=距離を保つ(カイト) / charging推定=側方回避 / 他=予測点へ接近
+                    // 艦種別の機動: ブルーザー=接近継続 / ヒット&アウェイ=間合い維持+側方離脱 / スタンドオフ=接近されたら逃走
                     const pbv = this.predictedBehavior;
-                    const standoff = pbv === 'kinetic' ? fireRange * 1.15 : fireRange * 0.8;
-                    let moveAngle = Math.atan2(aimY - this.y, aimX - this.x);
+                    const standoffDist = fireRange * prof.standoff;
+                    let moveAngle = Math.atan2(aimY - this.y, aimX - this.x); // 既定: 信念点へ前進
                     let doMove = false;
-                    if (distToBelief > standoff) { doMove = true; }                                  // 接近
-                    else if (pbv === 'kinetic' && distToBelief < fireRange * 0.85) { moveAngle += Math.PI; doMove = true; } // 離脱(カイト)
-                    if (pbv === 'charging') {                                                          // ビーム回避: 側方ストレイフ
-                        const dodgeDir = this._dodgeDir || (this._dodgeDir = (Math.random() < 0.5 ? 1 : -1));
-                        moveAngle += dodgeDir * (Math.PI / 2.5);
+                    if (distToBelief > standoffDist) {
+                        doMove = true;                                                                // 遠い → 接近
+                    } else if (prof.fleeClose > 0 && distToBelief < fireRange * prof.fleeClose) {
+                        moveAngle += Math.PI; doMove = true;                                          // 近すぎ(脆弱) → 全力離脱
+                    } else if (prof.kite && distToBelief < standoffDist * 0.8) {
+                        moveAngle += Math.PI; doMove = true;                                          // 間合い詰められた → 下がる
+                    }
+                    // 側方ストレイフ (潜航型ほど強い)。撃たないフレームは横っ飛びで的を絞らせない。
+                    if (prof.strafe > 0) {
+                        moveAngle += this._dodgeDir * (Math.PI / 2) * prof.strafe;
+                        doMove = true;
+                    }
+                    // ビームチャージ推定: 全艦種共通で側方回避を上乗せ
+                    if (pbv === 'charging') {
+                        moveAngle += this._dodgeDir * (Math.PI / 2.5);
                         doMove = true;
                     }
                     if (doMove) {
@@ -2413,7 +2454,8 @@ class Ship {
 
             } else if (this.aiState === 'hunting') {
                 this.lurking = false;
-                this.speed = Math.min(1.5, 0.8 + gameState.sector * 0.06) * this.terrainSpeedMult() * gameSpeedFactor;
+                const _huntProf = ENEMY_COMBAT[this.type] || ENEMY_COMBAT.destroyer;
+                this.speed = Math.min(1.6, 0.8 + gameState.sector * 0.06) * _huntProf.speedMult * this.terrainSpeedMult() * gameSpeedFactor;
                 if (this.huntTimer > 0) this.huntTimer--;
                 if (this.huntTarget) {
                     const dist = Math.hypot(this.huntTarget.x - this.x, this.huntTarget.y - this.y);
