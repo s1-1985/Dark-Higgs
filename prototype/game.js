@@ -1750,12 +1750,12 @@ class Projectile {
 }
 
 
-const WEAPON_COOLDOWNS = { kinetic: 15, missile: 100, beam: 200 };
+const WEAPON_COOLDOWNS = { kinetic: 15, missile: 65, beam: 140 }; // 発射後クールダウン(frame)。beamが射撃サイクルの律速
 
-// 武器マガジン・リロード定数
-const KINETIC_RELOAD_TIME = 180; // 3秒 @60fps
-const MISSILE_RELOAD_TIME = 150; // 2.5秒 (÷2)
-const BEAM_RELOAD_TIME = 120;    // 2秒 (÷2)
+// 武器マガジン・リロード定数 (2026-06-23: missile/beamのリロードが体感的に遅いとの指摘で短縮)
+const KINETIC_RELOAD_TIME = 180; // 3秒 @60fps (マガジン8発撃ち切り後)
+const MISSILE_RELOAD_TIME = 90;  // 1.5秒 @60fps (旧150=2.5s)
+const BEAM_RELOAD_TIME = 90;     // 1.5秒 @60fps (旧120=2s)
 
 class Ship {
     constructor(x, y, isPlayer = false, type = 'corvette') {
