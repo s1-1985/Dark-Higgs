@@ -585,6 +585,29 @@ const DISTRESS_INTERVAL_VAR = 3600;  // +0〜60s
 const DISTRESS_LIFE = 3600;          // ビーコン持続 60s
 const WOUNDED_HP_FRAC = 0.20;        // 手負い判定: HP20%未満
 const WOUNDED_HEAT_FLOOR = 0.45;     // 手負いの熱シグネチャ下限 (冷却材漏洩)
+
+// ═══════════════════════════════════════════════════════════════
+// ゲーム性進化 第3弾「深淵の駆け引き」(2026-07-03):
+//   10. 着底: 岩礁帯で完全停止+静粛 → 岩に紛れて至近でも探知されない (潜水艦の古典戦術)
+//   11. ニアミス「息を殺せ」: 未発見のまま敵艦が至近を通過する恐怖演出
+//   12. チャージビーム: 2秒チャージで威力増。チャージ中は熱/EM激増=敵のcharging適応が本物になる
+//   13. 通信傍受: EMセンサーで敵の艦内通信 (状態・意図) を垣間見る
+//   14. 撃沈シーケンス: 漂流・誘爆→最終爆発+衝撃波。狩りの感情的報酬
+//   15. 戦闘詳報: クリア/撃沈時に狩りの統計を表示
+// 全数値は実機調整前提の tunable
+// ═══════════════════════════════════════════════════════════════
+let isBottomed = false;              // 着底状態 (岩礁+完全停止+静粛)
+const BOTTOM_DEBRIS_MIN = 0.30;      // 着底に必要な岩礁密度
+const BOTTOM_SIG_MULT = 0.30;        // 着底中の追加シグネチャ倍率 (静粛×0.55にさらに乗算)
+let nearMissActive = false;          // ニアミス状態 (息を殺せ)
+const NEAR_MISS_DIST = 1600;         // ニアミス発動距離
+const NEAR_MISS_CLEAR = 2100;        // ニアミス解除距離 (ヒステリシス)
+let beamChargeMode = false;          // チャージビームモード
+const BEAM_CHARGE_DUR = 120;         // チャージ時間 2s
+const BEAM_CHARGE_MULT = 2.2;        // チャージビーム威力倍率
+let _commsInterceptCD = 0;           // 通信傍受クールダウン
+const COMMS_INTERCEPT_RANGE = 2600;  // 傍受可能距離
+let huntStats = null;                // 戦闘詳報 (セクター毎リセット)
 const BUILD_STOP_DUR  = 180; // 建設中停止フレーム数 (3秒)
 const BUILD_SIG_MULT  = 2.0; // 建設中シグネチャ増大倍率
 function computeVisionRadius() {
@@ -1197,6 +1220,7 @@ canvas.addEventListener('contextmenu', e => {
                 const _ffSt = applyStrikeBonuses(true, null, en, Math.atan2(player.y - en.y, player.x - en.x));
                 const _ffD = Math.floor(150 * (1 - _hb * 0.8) * _ffSt.mult);
                 en.hp -= _ffD;
+                if (huntStats) huntStats.dmgDealt += _ffD;
                 createHitEffect(en.x, en.y, '#00ffaa');
                 addShake(15);
                 logMessage(`WEP: BEAM 命中！ → ${_ffD} ダメージ`, 'system-msg');
@@ -1600,6 +1624,7 @@ function applyStrikeBonuses(byPlayer, attacker, target, hitAng) {
             target._weaponJamTimer = Math.max(target._weaponJamTimer || 0, AMBUSH_WEAPON_JAM);
             logMessage('TAC: 奇襲成功！ 敵艦混乱 — 火器管制ダウン中は追撃ダメージ増', 'warning-msg');
             playSound('alert');
+            if (huntStats) huntStats.ambushes++;
         } else if (target._staggerTimer > 0) {
             mult *= AMBUSH_FOLLOW_MULT; // 混乱中の追撃
         }
@@ -1628,6 +1653,7 @@ function applyStrikeBonuses(byPlayer, attacker, target, hitAng) {
         else                  { target._weaponJamTimer = Math.max(target._weaponJamTimer || 0, SYS_WEAPON_DUR); label = '武器系統損傷'; }
         effects.push({ x: target.x, y: target.y - 58, text: label + '!', life: 1.3, type: 'floatText', c: '#ff9500' });
         logMessage(target === player ? `WARN: サブシステム被害 — ${label}` : `TAC: 敵艦に${label} — 好機`, 'warning-msg');
+        if (huntStats && target !== player) huntStats.crits++;
     }
     return { mult, preempt };
 }
@@ -1663,6 +1689,7 @@ class Projectile {
                 const _bStrike = applyStrikeBonuses(isPlayer, isPlayer ? null : _beamShooter, target, Math.atan2(y - target.y, x - target.x));
                 const _beamDmg = Math.floor(150 * higgsBeamPenalty * dmgScale * (1 - beamArmorRes) * _bStrike.mult);
                 target.hp -= _beamDmg;
+                if (huntStats) { if (isPlayer && target !== player) huntStats.dmgDealt += _beamDmg; else if (!isPlayer && target === player) huntStats.dmgTaken += _beamDmg; }
                 createHitEffect(target.x, target.y, isPlayer ? '#00ffaa' : '#ff4d4d');
                 effects.push({ x: target.x, y: target.y - 30, text: _bStrike.preempt ? `奇襲! -${_beamDmg}` : `-${_beamDmg}`, life: 1.0, type: 'floatText', c: _bStrike.preempt ? '#ffff00' : (isPlayer ? '#00ffdd' : '#ff5555') });
                 if (isPlayer) logMessage(`HIT [BEAM] → ${_beamDmg} ダメージ`, 'warning-msg');
@@ -1800,6 +1827,7 @@ class Projectile {
             }
             const _hitDmg = Math.floor(this.dmg * dmgMult);
             hitTarget.hp -= _hitDmg;
+            if (huntStats) { if (this.isPlayer) huntStats.dmgDealt += _hitDmg; else if (hitTarget === player) huntStats.dmgTaken += _hitDmg; }
             this.active = false;
             createHitEffect(this.x, this.y, this.isPlayer ? '#ffaa00' : '#ff4d4d');
             if (!preemptive) {
@@ -2048,6 +2076,23 @@ class Ship {
                 this.emSig      *= SILENT_SIG_MULT;
                 this.higgsSig   *= SILENT_SIG_MULT;
             }
+            // 着底: 岩礁に艦影が紛れ、さらに大幅低減 (敵の近接ハード探知も無効)
+            if (isBottomed) {
+                this.heatSig    *= BOTTOM_SIG_MULT;
+                this.opticalSig *= BOTTOM_SIG_MULT;
+                this.emSig      *= BOTTOM_SIG_MULT;
+                this.higgsSig   *= BOTTOM_SIG_MULT;
+            }
+            // ビームチャージ中: 熱/EM激増 — 敵の「chargingシグネチャ推定→回避行動」が本物になる
+            if ((this._beamCharge || 0) > 0) {
+                this.heatSig = Math.min(1, this.heatSig + 0.30);
+                this.emSig   = Math.min(1, this.emSig + 0.40);
+                // チャージが中断されたら放熱 (発射条件が30f以上満たされない場合)
+                if (_frameCount - (this._chargeFrame || 0) > 30) {
+                    this._beamCharge = Math.max(0, this._beamCharge - 2 * gameSpeedFactor);
+                    if (this._beamCharge === 0) this._chargeLogged = false;
+                }
+            }
             // 手負い: HP20%未満で冷却材漏洩 — 熱は隠しきれない (静粛航行でも下限あり)
             if (this.hp / this.maxHp < WOUNDED_HP_FRAC) {
                 this.heatSig = Math.max(this.heatSig, WOUNDED_HEAT_FLOOR * (silentRunning ? 0.7 : 1));
@@ -2255,8 +2300,15 @@ class Ship {
                                 logMessage('WEP: BEAMリロード完了', 'system-msg');
                             }
                             // リロード中は発射しない
+                        } else if (beamChargeMode && (this._beamCharge || 0) < BEAM_CHARGE_DUR) {
+                            // チャージビーム: 発射前に2秒溜める。チャージ中は熱/EM激増=敵に読まれ回避される
+                            this.weaponType = wType;
+                            this._beamCharge = (this._beamCharge || 0) + gameSpeedFactor;
+                            this._chargeFrame = _frameCount;
+                            if (!this._chargeLogged) { this._chargeLogged = true; logMessage('WEP: ビームチャージ開始 — 熱/EM放射激増中', 'warning-msg'); }
                         } else {
                             this.weaponType = wType;
+                            const _chgMult = (beamChargeMode && (this._beamCharge || 0) >= BEAM_CHARGE_DUR) ? BEAM_CHARGE_MULT : 1;
                             // 想定ロック長射程狙撃: 精度が低いほど推定位置を外す (命中ジッター)
                             const _beamMiss = _assumedLock && (Math.random() < (1 - _acc) * 0.6);
                             if (_beamMiss) {
@@ -2267,9 +2319,11 @@ class Ship {
                                 effects.push({ x: this.x, y: this.y, tx: _ex, ty: _ey, type: 'beam', a: 1, c: '#00ffaa' });
                                 logMessage('WEP: BEAM 想定射撃 — 推定位置を外れた (命中せず)', 'warning-msg');
                             } else {
-                                const proj = new Projectile(this.x, this.y, this.targetEntity, true, wType, _lockDmg);
+                                const proj = new Projectile(this.x, this.y, this.targetEntity, true, wType, _lockDmg * _chgMult);
                                 projectiles.push(proj);
+                                if (_chgMult > 1) logMessage('WEP: チャージビーム解放 — 威力×2.2', 'system-msg');
                             }
+                            this._beamCharge = 0; this._chargeLogged = false;
                             playSound('shoot');
                             cancelSilentRunning('発砲');
                             const weaponGenFactor = Math.max(0.3, 1.5 - (genAlloc.weapons / 100));
@@ -2462,8 +2516,8 @@ class Ship {
                     if (attenuated > sc2.threshold * 0.6) { playerSigDetected = true; detectedSigStrength = Math.max(detectedSigStrength, attenuated); }
                     if (attenuated > domVal) { domVal = attenuated; domSig = sName; }
                 });
-                // 接近探知
-                if (distToPlayer < myDetectRange) {
+                // 接近探知 (着底中は岩礁に紛れて至近でも掴めない — 頭上を通過されてもやり過ごせる)
+                if (!isBottomed && distToPlayer < myDetectRange) {
                     this.detectionTimer++;
                     if (this.detectionTimer > 60) playerSigDetected = true;
                 } else {
@@ -4087,6 +4141,8 @@ function generateSector() {
     silentRunning = false; _updateSilentBtn();
     distressBeacon = null;
     distressNextTimer = 4200 + Math.floor(Math.random() * 1800);
+    isBottomed = false; nearMissActive = false; _commsInterceptCD = 0;
+    huntStats = { startFrame: _frameCount, firstContact: -1, ambushes: 0, crits: 0, timesEngaged: 0, dmgDealt: 0, dmgTaken: 0, pings: 0 };
 
     // S&D進捗バーをリセット
     const sdFill = document.getElementById('sd-progress-fill');
@@ -4638,6 +4694,7 @@ function checkPassiveDetection() {
         const sig = sc.sig(e) * distAtten * (1 - hPath * sc.higgsMod);
         if (sig > thr * 0.5) {
             allContacts.push({ x: e.x, y: e.y, sig, angle: Math.atan2(e.y - player.y, e.x - player.x), sourceId: 'e-' + ei });
+            if (huntStats && huntStats.firstContact < 0) huntStats.firstContact = _frameCount - huntStats.startFrame; // 戦闘詳報: 初接触
         }
     });
 
@@ -5198,6 +5255,7 @@ function lpmSelectFire() {
                 const _lpSt = applyStrikeBonuses(true, null, en, Math.atan2(player.y - en.y, player.x - en.x));
                 const _lpD = Math.floor(150 * (1 - _hb * 0.8) * _lpSt.mult);
                 en.hp -= _lpD;
+                if (huntStats) huntStats.dmgDealt += _lpD;
                 createHitEffect(en.x, en.y, '#00ffaa'); addShake(15);
                 logMessage(`WEP: BEAM 命中！ → ${_lpD} ダメージ`, 'system-msg');
             }
@@ -5288,6 +5346,7 @@ function coordFireAtTriangulation() {
                 const _cfSt = applyStrikeBonuses(true, null, en, Math.atan2(player.y - en.y, player.x - en.x));
                 const _cfD = Math.floor(150 * (1 - _hb * 0.8) * _cfSt.mult);
                 en.hp -= _cfD;
+                if (huntStats) huntStats.dmgDealt += _cfD;
                 createHitEffect(en.x, en.y, '#00ffaa');
                 addShake(15);
             }
@@ -6760,6 +6819,8 @@ function showGameOver() {
     document.getElementById('go-sector').textContent = gameState.sector;
     document.getElementById('go-credits').textContent = gameState.credits;
     document.getElementById('go-kills').textContent = enemiesKilled;
+    const _rep = document.getElementById('go-report');
+    if (_rep) _rep.textContent = '戦闘詳報 — ' + formatHuntReport();
     document.getElementById('game-over-overlay').classList.remove('hidden');
 }
 
@@ -6863,12 +6924,40 @@ function drawHUDOverlay(ctx) {
             ctx.font = 'bold 12px Orbitron, monospace';
             ctx.fillText('奇襲可能 ×3.5', _tp.sx, _tp.sy - 36);
         }
-        // ── 静粛航行インジケータ ──
-        if (silentRunning) {
+        // ── 静粛航行 / 着底 インジケータ ──
+        if (isBottomed) {
+            ctx.globalAlpha = 0.75 + Math.sin(t * 0.004) * 0.2;
+            ctx.fillStyle = '#99bbcc';
+            ctx.font = 'bold 11px Orbitron, monospace';
+            ctx.fillText('着底中 — 岩礁に艦影が紛れている', cssW / 2, chipY - 10);
+        } else if (silentRunning) {
             ctx.globalAlpha = 0.7 + Math.sin(t * 0.006) * 0.2;
             ctx.fillStyle = '#66ccff';
             ctx.font = 'bold 11px Orbitron, monospace';
             ctx.fillText('静粛航行中 — 速度/シグネチャ抑制', cssW / 2, chipY - 10);
+        }
+        // ── ニアミス「息を殺せ」表示 ──
+        if (nearMissActive) {
+            ctx.globalAlpha = 0.6 + Math.sin(t * 0.02) * 0.35;
+            ctx.fillStyle = '#ffcc66';
+            ctx.font = 'bold 12px Orbitron, monospace';
+            ctx.fillText('敵艦至近 — 息を殺せ', cssW / 2, chipY + chipH + 28);
+        }
+        // ── チャージビーム進捗リング (自機周り) ──
+        if ((player._beamCharge || 0) > 0) {
+            const _cf = Math.min(1, player._beamCharge / BEAM_CHARGE_DUR);
+            ctx.globalAlpha = 0.30 + _cf * 0.55;
+            ctx.strokeStyle = '#00eaff';
+            ctx.lineWidth = 2 + _cf * 3;
+            ctx.beginPath();
+            ctx.arc(psx, psy, 26 + _cf * 16, -Math.PI / 2, -Math.PI / 2 + _cf * Math.PI * 2);
+            ctx.stroke();
+            if (_cf >= 1) {
+                ctx.globalAlpha = 0.8;
+                ctx.fillStyle = '#00eaff';
+                ctx.font = 'bold 11px Orbitron, monospace';
+                ctx.fillText('CHARGED', psx, psy - 48);
+            }
         }
         // ── 魚雷警報マーカー: 接近中の敵ミサイルの方位を自機周りに赤矢印表示 ──
         for (const pr of projectiles) {
@@ -7401,6 +7490,53 @@ function cancelSilentRunning(reason) {
     logMessage('SILENT: 静粛航行解除 — ' + reason, 'warning-msg');
 }
 
+// ═══ チャージビーム (第3弾) ═══
+// 発射前2秒チャージで威力×2.2。チャージ中は熱/EMが激増し、敵AIの「chargingシグネチャ推定→
+// 側方回避」が本物の駆け引きになる。撃ち切りの決断 vs 露出のリスク。
+function toggleBeamCharge() {
+    beamChargeMode = !beamChargeMode;
+    const b = document.getElementById('btn-beam-charge');
+    if (b) { b.style.borderColor = beamChargeMode ? '#00ddff' : '#1a3a4a'; b.style.color = beamChargeMode ? '#66eeff' : '#6699bb'; }
+    const l = document.getElementById('beam-charge-label');
+    if (l) l.textContent = beamChargeMode ? 'CHG ON' : 'CHG OFF';
+    logMessage(beamChargeMode
+        ? 'WEP: チャージビームモード — 発射前2秒チャージで威力×2.2。チャージ中は熱/EM激増'
+        : 'WEP: チャージビームモード解除 — 即時発射', 'system-msg');
+    playSound('ui');
+}
+
+// ═══ 通信傍受 (第3弾) ═══
+// EMセンサー選択中、近距離でEM放射の強い敵の艦内通信を垣間見る。
+// これまで完全に不可視だった敵AIの内面 (状態・性格・意図) がEMセンサーの新たな価値になる。
+function interceptEnemyComms() {
+    if (_commsInterceptCD > 0) { _commsInterceptCD -= gameSpeedFactor; return; }
+    if (currentSensor !== 'em' || !player || player.hp <= 0) return;
+    for (const e of enemies) {
+        if (e.hp <= 0 || e.type === 'fighter') continue;
+        if (Math.hypot(e.x - player.x, e.y - player.y) > COMMS_INTERCEPT_RANGE) continue;
+        if ((e.emSig || 0) < 0.20) continue;
+        let line;
+        const hpFrac = e.hp / e.maxHp;
+        if (hpFrac < 0.25)                line = '『被害甚大…離脱ベクトル要請…』';
+        else if (e.aiState === 'combat')  line = '『目標捕捉、火器管制回せ！』';
+        else if (e.aiState === 'hunting') line = (e.contactFreshness > 0.4) ? '『痕跡は新しい。近いぞ…』' : '『接触ロスト。捜索パターン継続』';
+        else if (e.aiState === 'gathering') line = '『資源回収を先行する』';
+        else line = (e.personality && e.personality.stealth > 0.55) ? '『無線封鎖を維持…静かにやれ』' : '『哨戒継続。異常なし』';
+        logMessage(`EM傍受: ${line}`, 'system-msg');
+        _commsInterceptCD = 900 + Math.random() * 600; // 15〜25s
+        return;
+    }
+}
+
+// ═══ 戦闘詳報 (第3弾) ═══
+function formatHuntReport() {
+    if (!huntStats) return '';
+    const _fmt = (f) => { const s = Math.max(0, Math.round(f / 60)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+    const fc = huntStats.firstContact >= 0 ? _fmt(huntStats.firstContact) : '—';
+    const dur = _fmt(_frameCount - huntStats.startFrame);
+    return `作戦時間 ${dur} / 初接触 ${fc} / 奇襲成功 ${huntStats.ambushes} / システム破壊 ${huntStats.crits} / 被捕捉 ${huntStats.timesEngaged}回 / 与ダメ ${huntStats.dmgDealt} / 被ダメ ${huntStats.dmgTaken} / 敵探信 ${huntStats.pings}回`;
+}
+
 // ═══ 遭難信号イベント (収束装置) ═══
 // 周期的に遭難信号が発生し、報酬 (SCR+修復 / 敵は自己強化) を賭けて両ハンターを
 // 同じ海域へ引き寄せる。先に着くか、着く敵を待ち伏せるか — 「場所を知っている」こと自体が武器になる。
@@ -7486,6 +7622,7 @@ function firePingFromEnemy(e) {
     });
     while (passiveBearings.length > PASSIVE_BEARING_MAX) passiveBearings.shift();
     logMessage(`SONAR: 敵アクティブソナー探信音！ — 方位 ${compassDeg}° (敵は接触を失っている。方位は正確だ)`, 'warning-msg');
+    if (huntStats) huntStats.pings++;
     // 敵への情報: 反射エコー。デコイが近くにあれば偽エコーで誤誘導。
     let echo = null, echoDist = ENEMY_PING_RANGE;
     for (const d of decoys) {
@@ -7518,6 +7655,12 @@ function firePingFromEnemy(e) {
 // 常時フィードバックを与える。エスカレーション時は警告音、追跡中は心音が鳴る。
 function updateHuntTension() {
     if (!player || player.hp <= 0) return;
+    // ── 着底判定: 岩礁帯で完全停止+静粛 → 岩に艦影が紛れる (潜水艦の古典戦術) ──
+    const _wasBottomed = isBottomed;
+    isBottomed = silentRunning && player.currentSpeed < 0.05 &&
+                 getDebrisIntensity(player.x, player.y) > BOTTOM_DEBRIS_MIN;
+    if (isBottomed && !_wasBottomed) logMessage('TAC: 着底 — 機関完全停止。岩礁に艦影が紛れ、至近でも探知されにくい', 'system-msg');
+    else if (!isBottomed && _wasBottomed) logMessage('TAC: 着底解除 — 岩礁から離脱', 'system-msg');
     let lvl = 0;
     for (const e of enemies) {
         if (e.hp <= 0) continue;
@@ -7530,7 +7673,10 @@ function updateHuntTension() {
         playSound('alert');
         if (lvl === 1)      logMessage('WARN: 敵が痕跡を掴んだ — シグネチャ管理を', 'warning-msg');
         else if (lvl === 2) logMessage('WARN: 敵艦が追跡行動 — 進路と出力を変えろ', 'warning-msg');
-        else                logMessage('CRITICAL: 捕捉された — 交戦か離脱か', 'warning-msg');
+        else {
+            logMessage('CRITICAL: 捕捉された — 交戦か離脱か', 'warning-msg');
+            if (huntStats) huntStats.timesEngaged++;
+        }
     } else if (lvl === 0 && playerExposureLevel > 0) {
         logMessage('TAC: 追跡を振り切った — 隠密状態に復帰', 'system-msg');
     }
@@ -7543,6 +7689,20 @@ function updateHuntTension() {
             _exposureHeartbeatTimer = lvl === 3 ? 42 : 78;
         }
     }
+    // ── ニアミス「息を殺せ」: 未発見のまま敵艦が至近を通過 ──
+    if (lvl <= 1) {
+        let nm = false;
+        for (const e of enemies) {
+            if (e.hp <= 0 || e.type === 'fighter') continue;
+            if (Math.hypot(e.x - player.x, e.y - player.y) < (nearMissActive ? NEAR_MISS_CLEAR : NEAR_MISS_DIST)) { nm = true; break; }
+        }
+        if (nm && !nearMissActive) logMessage('WARN: 敵艦が至近を通過中 — 息を殺せ', 'warning-msg');
+        nearMissActive = nm;
+        if (nearMissActive) {
+            _exposureHeartbeatTimer -= gameSpeedFactor;
+            if (_exposureHeartbeatTimer <= 0) { playSound('heartbeat'); _exposureHeartbeatTimer = 34; } // 速い鼓動
+        }
+    } else nearMissActive = false;
     // ── ヒッグスサージ: 予兆8s → 本体12s(全探知縮退・ウェイク増幅) → クリアリング6s(高感度) ──
     if (surgePhase === 'none') {
         surgeNextTimer -= gameSpeedFactor;
@@ -7638,14 +7798,42 @@ function gameLoop() {
         if (player && player.hp > 0 && _frameCount % 2 === 0) checkPassiveDetection();
         if (player && player.hp > 0) updateVisionLockOn();
 
-        // Process Enemy deaths
+        // Process Enemy deaths — 撃沈シーケンス: 数秒の漂流・誘爆 → 最終爆発+衝撃波 (狩りの報酬)
         for (let i = enemies.length - 1; i >= 0; i--) {
-            if (enemies[i].hp <= 0) {
-                createExplosion(enemies[i].x, enemies[i].y, '#ff4d4d', enemies[i].type === 'carrier' ? 40 : (enemies[i].type === 'destroyer' ? 20 : 10));
-                const reward = enemies[i].type === 'carrier' ? 300 : (enemies[i].type === 'destroyer' ? 100 : (enemies[i].type === 'fighter' ? 10 : 30));
-                scrapDrops.push({ x: enemies[i].x, y: enemies[i].y, value: reward, life: 1.0 });
-                enemiesKilled++;
-                enemies.splice(i, 1);
+            const de = enemies[i];
+            if (de.hp <= 0 && !de._dying) {
+                de._dying = de.type === 'fighter' ? 1 : 170; // 約3秒。fighterは即散
+                de._dyingVx = (de.x - (de.prevX ?? de.x)) * 0.7;
+                de._dyingVy = (de.y - (de.prevY ?? de.y)) * 0.7;
+                if (de.type !== 'fighter') {
+                    logMessage('TAC: 敵艦轟沈中 — 機関部誘爆を確認', 'system-msg');
+                    playSound('explosion');
+                }
+            }
+            if (de._dying) {
+                de._dying -= gameSpeedFactor;
+                de.x += de._dyingVx || 0;
+                de.y += de._dyingVy || 0;
+                de.angle += 0.012; // 姿勢制御を失って回頭
+                de.visible = true;
+                if (de._dying > 0 && Math.random() < 0.10) {
+                    createExplosion(de.x + (Math.random() - 0.5) * de.radius * 2.2,
+                                    de.y + (Math.random() - 0.5) * de.radius * 2.2, '#ff8844', 6 + Math.random() * 8);
+                }
+                if (de._dying <= 0) {
+                    createExplosion(de.x, de.y, '#ff4d4d', de.type === 'carrier' ? 46 : (de.type === 'destroyer' ? 26 : 12));
+                    effects.push({ x: de.x, y: de.y, r: 0, maxR: 900, a: 0.9, c: '#ffddaa', type: 'circle' }); // 衝撃波
+                    playSound('explosion');
+                    const reward = de.type === 'carrier' ? 300 : (de.type === 'destroyer' ? 100 : (de.type === 'fighter' ? 10 : 30));
+                    // スクラップを散らす (大型ほど多い) — 撃沈跡が漁場になる
+                    const _scraps = de.type === 'fighter' ? 1 : (de.type === 'carrier' ? 4 : 3);
+                    for (let s2 = 0; s2 < _scraps; s2++) {
+                        const _sa = Math.random() * Math.PI * 2, _sr = Math.random() * de.radius * 3;
+                        scrapDrops.push({ x: de.x + Math.cos(_sa) * _sr, y: de.y + Math.sin(_sa) * _sr, value: Math.ceil(reward / _scraps), life: 1.0 });
+                    }
+                    enemiesKilled++;
+                    enemies.splice(i, 1);
+                }
             }
         }
 
@@ -7669,6 +7857,7 @@ function gameLoop() {
                 } else {
                     logMessage(`MISSION: セクター${gameState.sector}の脅威排除完了。ボーナス: +${bonus} CR`, 'system-msg');
                 }
+                logMessage('戦闘詳報 — ' + formatHuntReport(), 'system-msg');
             }
 
             // S&Dモード: ハック進捗をUIに反映
@@ -7723,6 +7912,7 @@ function gameLoop() {
         updatePlayerDrones();
         updateHuntTension();
         updateDistressBeacon();
+        interceptEnemyComms();
 
         // Scrap Collection
         for (let i = scrapDrops.length - 1; i >= 0; i--) {
