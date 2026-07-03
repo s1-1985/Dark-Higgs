@@ -239,6 +239,22 @@ function playSound(type) {
         gain.gain.setValueAtTime(0.1, now);
         gain.gain.linearRampToValueAtTime(0.0, now + 0.1);
         osc.start(now); osc.stop(now + 0.1);
+    } else if (type === 'alert') {
+        // 露出度エスカレーション / 奇襲: 2音の警告スティンガー
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(880, now);
+        osc.frequency.setValueAtTime(660, now + 0.09);
+        gain.gain.setValueAtTime(0.06, now);
+        gain.gain.linearRampToValueAtTime(0.0, now + 0.22);
+        osc.start(now); osc.stop(now + 0.22);
+    } else if (type === 'heartbeat') {
+        // 被追跡中の低音パルス (潜水艦の心音)
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(55, now);
+        osc.frequency.exponentialRampToValueAtTime(38, now + 0.16);
+        gain.gain.setValueAtTime(0.09, now);
+        gain.gain.linearRampToValueAtTime(0.0, now + 0.18);
+        osc.start(now); osc.stop(now + 0.18);
     }
 }
 
@@ -497,6 +513,45 @@ const TRIG_DECAY_PER_FRAME  = 0.0025; // 精度の経時劣化レート (per fra
 const DECOY_MISDIRECT_RADIUS = 2500; // デコイの強EMで敵lastKnownPosを書き換える半径 (§3-5残)
 // §3-6残: 建設停止フロー
 let buildingTimer = 0;
+
+// ═══════════════════════════════════════════════════════════════
+// ゲーム性進化 (2026-07-03): 「先に見つけて撃つ」を決定的にする4システム
+//   1. 奇襲(アンブッシュ): 非警戒の敵への初弾が大ダメージ+混乱
+//   2. サブシステム損傷: 奇襲/後方被弾で機関・センサー・武器が一時破損
+//   3. 露出度メーター: 敵にどれだけ掴まれているかの常時フィードバック
+//   4. ヒッグスサージ: 周期的な全センサー攪乱イベント (マッチのリズム)
+// 全数値は実機調整前提の tunable
+// ═══════════════════════════════════════════════════════════════
+const AMBUSH_PREEMPT_MULT = 3.5;   // 非警戒の敵への初弾ダメージ倍率 (旧: 先制2.0)
+const AMBUSH_STAGGER_DUR  = 300;   // 奇襲被弾後の混乱時間 5s (混乱中は追撃被ダメ増)
+const AMBUSH_FOLLOW_MULT  = 1.75;  // 混乱中の追撃ダメージ倍率
+const AMBUSH_WEAPON_JAM   = 240;   // 奇襲された敵の火器管制ダウン 4s
+const PLAYER_SURPRISE_MULT = 1.6;  // 未探知の敵から自機への奇襲被弾倍率
+const PLAYER_SURPRISE_JAM  = 150;  // 奇襲された自機の火器管制ダウン 2.5s
+const SYS_CRIT_REAR_CHANCE = 0.30; // 後方被弾時のサブシステム損傷確率 (奇襲初弾は確定)
+const SYS_ENGINE_SLOW = 0.45;      // 機関損傷: 速度倍率 (遅くなり、熱漏洩で見つかりやすい)
+const SYS_ENGINE_DUR  = 480;       // 機関損傷 8s
+const SYS_SENSOR_DUR  = 480;       // センサー損傷 8s (探知ほぼ不能)
+const SYS_WEAPON_DUR  = 300;       // 武器系統損傷 5s (発砲不能)
+// 露出度 (敵にどれだけ掴まれているか): 0=隠密 / 1=痕跡 / 2=追跡 / 3=捕捉
+let playerExposureLevel = 0;
+let _exposureHeartbeatTimer = 0;
+// ヒッグスサージ (周期イベント: 全探知系が縮退→通過後に高感度ウィンドウ)
+let surgePhase = 'none';           // 'none' | 'warn' | 'active' | 'after'
+let surgePhaseTimer = 0;
+let surgeNextTimer = 7200;
+const SURGE_INTERVAL_MIN = 5400;   // 次サージまで最短 90s
+const SURGE_INTERVAL_VAR = 3600;   // +0〜60s のランダム
+const SURGE_WARN_DUR   = 480;      // 予兆 8s (行動を決める猶予)
+const SURGE_ACTIVE_DUR = 720;      // サージ本体 12s (両陣営とも探知激減・ウェイクは濃く残る)
+const SURGE_AFTER_DUR  = 360;      // 通過後クリアリング 6s (探知ブースト)
+const SURGE_DETECT_MULT  = 0.15;   // サージ中の探知レンジ倍率 (敵味方対称)
+const SURGE_VISION_MULT  = 0.6;    // サージ中の有視界倍率
+const SURGE_CLARITY_MULT = 1.5;    // クリアリング中の探知倍率
+const SURGE_WAKE_MULT    = 2.2;    // サージ中の移動ウェイク増幅 (動けば痕跡が残る)
+// 敵スポーン距離: パッシブ探知圏(11000)のすぐ外 → 接敵まで数分の空白を1〜2分に短縮
+const ENEMY_SPAWN_MIN = 13000;
+const ENEMY_SPAWN_VAR = 4000;
 const BUILD_STOP_DUR  = 180; // 建設中停止フレーム数 (3秒)
 const BUILD_SIG_MULT  = 2.0; // 建設中シグネチャ増大倍率
 function computeVisionRadius() {
@@ -505,7 +560,10 @@ function computeVisionRadius() {
     const h = getHiggsIntensity(player.x, player.y); // 0..1
     let factor = 1 - h * (1 - MIN_VISION_FACTOR);
     if (factor < MIN_VISION_FACTOR) factor = MIN_VISION_FACTOR;
-    return BASE_VISION_RADIUS * factor;
+    let r = BASE_VISION_RADIUS * factor;
+    if (surgePhase === 'active') r *= SURGE_VISION_MULT;        // ヒッグスサージ: 有視界も縮む
+    if (player._sysSensorTimer > 0) r *= 0.6;                    // センサー損傷
+    return r;
 }
 
 // アメーバ形状の頂点列を生成 (毎フレームアニメーション)
@@ -1055,6 +1113,7 @@ canvas.addEventListener('wheel', e => {
 canvas.addEventListener('contextmenu', e => {
     e.preventDefault();
     if (!player || player.hp <= 0 || !gameLoopRunning) return;
+    if (player._weaponJamTimer > 0) { logMessage('WEP: 火器管制ダウン — 復旧まで発砲不能', 'warning-msg'); return; }
     const wType = document.getElementById('weapon-select')?.value;
     if (wType !== 'missile' && wType !== 'beam') return;
     const rect = canvas.getBoundingClientRect();
@@ -1475,6 +1534,66 @@ class Station {
     }
 }
 
+// ═══ 奇襲・混乱・サブシステム損傷の一括判定 ═══
+// kinetic/missile着弾(Projectile.update)と beam即着弾(Projectile constructor)の共通処理。
+// 「先に見つけて撃つ」を決定的にする: 非警戒の敵への初弾=×3.5+混乱(火器管制ダウン)+確定クリット。
+// 対称ルール: 未探知の敵から撃たれた自機も奇襲被弾(×1.6+火器管制ダウン)を受ける。
+let _beamShooter = null; // 敵ビームの発射元 (constructorで即着弾するため直前にセットされる)
+function applyStrikeBonuses(byPlayer, attacker, target, hitAng) {
+    let mult = 1, preempt = false;
+    let diff = hitAng - target.angle;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    const rear = Math.abs(diff) > Math.PI * 0.55;
+    if (rear) {
+        mult *= 1.5;
+        if (!byPlayer && target === player) {
+            effects.push({ x: target.x, y: target.y - 28, text: '後方被弾 ×1.5', life: 1.0, type: 'floatText', c: '#ff6666' });
+        }
+    }
+    if (byPlayer && target !== player) {
+        if (target.detectionState === 'unaware') {
+            // 奇襲成功: 大ダメージ + 混乱 (火器管制ダウン・追撃ボーナス窓)
+            mult *= AMBUSH_PREEMPT_MULT;
+            preempt = true;
+            target.detectionState = 'alerted';
+            target.isAggro = true; target.aggroTimer = 600;
+            target._staggerTimer = AMBUSH_STAGGER_DUR;
+            target._weaponJamTimer = Math.max(target._weaponJamTimer || 0, AMBUSH_WEAPON_JAM);
+            logMessage('TAC: 奇襲成功！ 敵艦混乱 — 火器管制ダウン中は追撃ダメージ増', 'warning-msg');
+            playSound('alert');
+        } else if (target._staggerTimer > 0) {
+            mult *= AMBUSH_FOLLOW_MULT; // 混乱中の追撃
+        }
+    }
+    if (!byPlayer && target === player) {
+        target.detectionState = 'alerted';
+        // 自機が攻撃元を全く掴めていなかった → 奇襲被弾 (対称ルール)
+        const unseen = attacker && !attacker.visible && !attacker.inVision && (attacker.contactAccuracy || 0) < 0.25;
+        if (unseen && target._staggerTimer <= 0) {
+            mult *= PLAYER_SURPRISE_MULT;
+            target._staggerTimer = AMBUSH_STAGGER_DUR;
+            target._weaponJamTimer = Math.max(target._weaponJamTimer || 0, PLAYER_SURPRISE_JAM);
+            logMessage('CRITICAL: 未探知の敵からの奇襲被弾 — 火器管制リセット中！', 'warning-msg');
+            effects.push({ x: target.x, y: target.y - 44, text: '奇襲被弾!', life: 1.2, type: 'floatText', c: '#ff3333' });
+            playSound('alert');
+        } else if (target._staggerTimer > 0) {
+            mult *= AMBUSH_FOLLOW_MULT;
+        }
+    }
+    // サブシステム損傷: 奇襲初弾=確定 / 後方被弾=確率 (機関40% / センサー30% / 武器30%)
+    if (preempt || (rear && Math.random() < SYS_CRIT_REAR_CHANCE)) {
+        const roll = Math.random();
+        let label;
+        if (roll < 0.40)      { target._sysEngineTimer = SYS_ENGINE_DUR; label = '機関損傷'; }
+        else if (roll < 0.70) { target._sysSensorTimer = SYS_SENSOR_DUR; label = 'センサー損傷'; }
+        else                  { target._weaponJamTimer = Math.max(target._weaponJamTimer || 0, SYS_WEAPON_DUR); label = '武器系統損傷'; }
+        effects.push({ x: target.x, y: target.y - 58, text: label + '!', life: 1.3, type: 'floatText', c: '#ff9500' });
+        logMessage(target === player ? `WARN: サブシステム被害 — ${label}` : `TAC: 敵艦に${label} — 好機`, 'warning-msg');
+    }
+    return { mult, preempt };
+}
+
 class Projectile {
     constructor(x, y, target, isPlayer, type, dmgScale = 1) {
         this.x = x; this.y = y; this.isPlayer = isPlayer; this.type = type;
@@ -1502,10 +1621,12 @@ class Projectile {
                 const higgsBeamPenalty = 1 - higgsBetween * 0.8; // 最大80%ダメージ減衰
                 // §3-1 装甲: beam耐性 (敵ビームが自機に当たる時)
                 const beamArmorRes = (!isPlayer && target === player) ? ARMOR_RES_BEAM[gameState.upgrades.armor] : 0;
-                const _beamDmg = Math.floor(150 * higgsBeamPenalty * dmgScale * (1 - beamArmorRes));
+                // 奇襲・後方・混乱・サブシステム損傷 (ビームこそ潜航狙撃の主役 — 旧実装は先制ボーナスが乗らなかった)
+                const _bStrike = applyStrikeBonuses(isPlayer, isPlayer ? null : _beamShooter, target, Math.atan2(y - target.y, x - target.x));
+                const _beamDmg = Math.floor(150 * higgsBeamPenalty * dmgScale * (1 - beamArmorRes) * _bStrike.mult);
                 target.hp -= _beamDmg;
                 createHitEffect(target.x, target.y, isPlayer ? '#00ffaa' : '#ff4d4d');
-                effects.push({ x: target.x, y: target.y - 30, text: `-${_beamDmg}`, life: 1.0, type: 'floatText', c: isPlayer ? '#00ffdd' : '#ff5555' });
+                effects.push({ x: target.x, y: target.y - 30, text: _bStrike.preempt ? `奇襲! -${_beamDmg}` : `-${_beamDmg}`, life: 1.0, type: 'floatText', c: _bStrike.preempt ? '#ffff00' : (isPlayer ? '#00ffdd' : '#ff5555') });
                 if (isPlayer) logMessage(`HIT [BEAM] → ${_beamDmg} ダメージ`, 'warning-msg');
                 // ビーム着弾スプライトエフェクト
                 const _bfxImg = SPRITES['fx_beam_impact'];
@@ -1619,27 +1740,11 @@ class Projectile {
                     return;
                 }
             }
-            let dmgMult = 1;
-            let preemptive = false;
-            // 後部取得ボーナス: 背後±99°から被弾=+50%ダメージ
+            // 奇襲(×3.5+混乱)・後方被弾(×1.5)・混乱中追撃(×1.75)・サブシステム損傷を一括判定
             const _hitAng = Math.atan2(this.y - hitTarget.y, this.x - hitTarget.x);
-            let _hitAngDiff = _hitAng - hitTarget.angle;
-            while (_hitAngDiff < -Math.PI) _hitAngDiff += Math.PI * 2;
-            while (_hitAngDiff > Math.PI) _hitAngDiff -= Math.PI * 2;
-            if (Math.abs(_hitAngDiff) > Math.PI * 0.55) {
-                dmgMult *= 1.5;
-                if (!this.isPlayer && hitTarget === player) {
-                    effects.push({ x: hitTarget.x, y: hitTarget.y - 28, text: '後方被弾 ×1.5', life: 1.0, type: 'floatText', c: '#ff6666' });
-                }
-            }
-            // 先制攻撃ボーナス: 2x damage on unaware enemies
-            if (this.isPlayer && hitTarget.detectionState === 'unaware') {
-                dmgMult *= 2.0;
-                preemptive = true;
-                hitTarget.detectionState = 'alerted'; // Now they know!
-                hitTarget.isAggro = true; hitTarget.aggroTimer = 600;
-            }
-            if (!this.isPlayer) hitTarget.detectionState = 'alerted'; // Being hit alerts player too (no-op but consistent)
+            const _strike = applyStrikeBonuses(this.isPlayer, this.owner || null, hitTarget, _hitAng);
+            let dmgMult = _strike.mult;
+            const preemptive = _strike.preempt;
             // §3-1 装甲: 武器種別耐性 (敵弾が自機に当たる時のみ)
             if (!this.isPlayer && hitTarget === player) {
                 const armorLv = gameState.upgrades.armor;
@@ -1673,7 +1778,7 @@ class Projectile {
                 }
             }
             if (preemptive) {
-                effects.push({ x: hitTarget.x, y: hitTarget.y - 30, text: `先制! x2 (${_hitDmg})`, life: 1.0, type: 'floatText', c: '#ffff00' });
+                effects.push({ x: hitTarget.x, y: hitTarget.y - 30, text: `奇襲! ×3.5 (${_hitDmg})`, life: 1.2, type: 'floatText', c: '#ffff00' });
             }
         }
         // §3-6残: 敵弾がプレイヤードローンに被弾 (自機を外れた弾のみ判定)
@@ -1834,24 +1939,36 @@ class Ship {
         this.contactLife = 0;
         this.displayX = x;
         this.displayY = y;
+        // 奇襲・サブシステム損傷 (自機/敵 対称)
+        this._staggerTimer = 0;   // 奇襲被弾後の混乱 (被ダメ増)
+        this._weaponJamTimer = 0; // 火器管制ダウン (発砲不能)
+        this._sysEngineTimer = 0; // 機関損傷 (減速+熱漏洩)
+        this._sysSensorTimer = 0; // センサー損傷 (探知ほぼ不能)
     }
 
     setTarget(tx, ty) { this.targetX = tx; this.targetY = ty; this.state = 'moving'; }
 
     // デブリ帯(岩礁帯)による移動減速 (§3-13 D)。AI配分で姿勢制御補助=軽減 (プレイヤーのみ)。
     terrainSpeedMult() {
+        // 機関損傷: 速度大幅低下 (奇襲/後方被弾のサブシステム・クリット)
+        const _sysEng = (this._sysEngineTimer > 0) ? SYS_ENGINE_SLOW : 1;
         const deb = getDebrisIntensity(this.x, this.y);
-        if (deb <= 0) return 1;
+        if (deb <= 0) return _sysEng;
         // AI配分で姿勢制御補助=軽減。自機はGEN AI配分、敵は固定の軽減(全く動けなくなるのを防ぐ)。
         const aiMit = this.isPlayer ? (genAlloc.ai / 100) * DEBRIS_AI_MITIGATE : DEBRIS_ENEMY_MITIGATE;
         // §3-1 エンジンアップグレード: デブリ減速もヒッグスの50%相当で軽減
         const engMit = this.isPlayer ? ENGINE_UPG_HIGGS_RESIST[gameState.upgrades.engine] * 0.5 : 0;
-        return 1 - deb * DEBRIS_SLOW * (1 - aiMit) * (1 - engMit);
+        return _sysEng * (1 - deb * DEBRIS_SLOW * (1 - aiMit) * (1 - engMit));
     }
 
     update() {
         if (this.hp <= 0) return;
         if (this.fireCooldown > 0) this.fireCooldown -= gameSpeedFactor;
+        // 奇襲・サブシステム損傷タイマー減衰
+        if (this._staggerTimer > 0)   this._staggerTimer   -= gameSpeedFactor;
+        if (this._weaponJamTimer > 0) this._weaponJamTimer -= gameSpeedFactor;
+        if (this._sysEngineTimer > 0) this._sysEngineTimer -= gameSpeedFactor;
+        if (this._sysSensorTimer > 0) this._sysSensorTimer -= gameSpeedFactor;
 
         if (this.isPlayer) {
             // ── 自機シグネチャ再設計 (速度+エンジン配分+ゲイン を統一指標化) ──
@@ -1867,6 +1984,8 @@ class Ship {
             // §3-1 エンジンアップグレード: 熱効率改善でheatSig低下
             // 電力(genAlloc.ai)↑ → 処理熱放射も増大
             this.heatSig    = Math.min(1, _thrust * _engType.heatMult * 0.55 * (1 - ENGINE_UPG_HEAT_REDUCE[gameState.upgrades.engine]) + genAlloc.ai / 100 * 0.10);
+            // 機関損傷: 冷却系破損で熱漏洩 (自機も対称に狩られやすくなる)
+            if (this._sysEngineTimer > 0) this.heatSig = Math.min(1, this.heatSig + 0.35);
             this.opticalSig = Math.min(1, _thrust * _engType.optMult * 0.45 + (this.weaponType === 'beam' ? 0.5 : 0));
             // EM: 推進＋(センサー/AI処理放射)。ゲインで増幅。AI↑でEM↑(逆探知の法則)。
             this.emSig      = Math.min(1, (_thrust * 0.35 + genAlloc.sensors / 100 * 0.18 + genAlloc.ai / 100 * 0.40) * (0.6 + _gain * 0.4) * _engType.emMult);
@@ -1988,7 +2107,7 @@ class Ship {
 
                 // 射撃弧チェック: kinetic±150°/missile±45°/beam±10° (武器別射角)
                 const _fireArc = WEAPON_FIRE_ARC[wType] || (Math.PI * 5/6);
-                if (dist < wRange && this.fireCooldown <= 0 && Math.abs(diff) < _fireArc) {
+                if (dist < wRange && this.fireCooldown <= 0 && Math.abs(diff) < _fireArc && this._weaponJamTimer <= 0) {
                     // 想定ロックオン: 完全ロック=フルダメージ / 想定ロック=精度依存のダメージデバフ。
                     const _acc = _fullLock ? 1 : Math.max(0, Math.min(1, this.targetEntity.contactAccuracy || 0));
                     const _lockDmg = _fullLock ? 1 : (0.3 + 0.5 * _acc); // 想定=30〜80%
@@ -2253,7 +2372,12 @@ class Ship {
                     if (jamCont && distToPlayer < JAM_CONT_RADIUS) jamDegrade = Math.max(jamDegrade, JAM_CONT_DEGRADE);
                 }
             }
-            const myDetectRange = ENEMY_DETECT_BASE * (1 - higgsHereDetect * 0.55) * (1 + gameState.sector * 0.05) * playerEmBoost * (1 - jamDegrade) * (this.upgDetect || 1);
+            let myDetectRange = ENEMY_DETECT_BASE * (1 - higgsHereDetect * 0.55) * (1 + gameState.sector * 0.05) * playerEmBoost * (1 - jamDegrade) * (this.upgDetect || 1);
+            // ヒッグスサージ: 敵の探知も対称に縮退/ブースト (プレイヤーと同じ物理法則)
+            if (surgePhase === 'active') myDetectRange *= SURGE_DETECT_MULT;
+            else if (surgePhase === 'after') myDetectRange *= SURGE_CLARITY_MULT;
+            // センサー損傷: ほぼ盲目 (奇襲でセンサーを潰せば追跡を振り切れる)
+            if (this._sysSensorTimer > 0) myDetectRange *= 0.1;
 
             let playerSigDetected = false;
             let detectedSigStrength = 0;
@@ -2436,7 +2560,7 @@ class Ship {
                 } else { this._desperateLogged = false; }
 
                 // 撤退中は射撃より離脱を優先。たまに振り向きざまに撃つ(fighting retreat)。
-                const _wantFire = distToBelief < fireRange && this.fireCooldown <= 0 && player && player.hp > 0 && (!desperate || Math.random() < 0.25);
+                const _wantFire = distToBelief < fireRange && this.fireCooldown <= 0 && this._weaponJamTimer <= 0 && player && player.hp > 0 && (!desperate || Math.random() < 0.25);
                 if (_wantFire) {
                     const ta = Math.atan2(aimY - this.y, aimX - this.x);
                     let diff = ta - this.angle;
@@ -2466,7 +2590,11 @@ class Ship {
                             const missDist = Math.hypot(player.x - tgX, player.y - tgY);
                             projTarget = (missDist < player.radius * 2.2) ? player : aimTarget;
                         }
-                        projectiles.push(new Projectile(this.x, this.y, projTarget, false, wType, this.upgDmg || 1));
+                        _beamShooter = this; // beam即着弾用: 発射元を渡す (奇襲被弾の対称判定)
+                        const _eproj = new Projectile(this.x, this.y, projTarget, false, wType, this.upgDmg || 1);
+                        _eproj.owner = this; // kinetic/missile着弾時の奇襲被弾判定用
+                        _beamShooter = null;
+                        projectiles.push(_eproj);
                     }
                     playSound('shoot');
                     this.fireCooldown = prof.fireCD * (this.upgFireCD || 1);
@@ -2659,6 +2787,8 @@ class Ship {
             } else {
                 this.heatSig = Math.min(1.0, spd / 1.0); // 速度に比例
             }
+            // 機関損傷: 冷却系破損で熱漏洩 — 損傷した獲物は熱で追える
+            if (this._sysEngineTimer > 0) this.heatSig = Math.min(1.0, this.heatSig + 0.35);
 
             // 光学シグネチャ: 武器種で異なる
             // - kinetic: 銃口炎 (短く強烈な光学スパイク)
@@ -2685,9 +2815,10 @@ class Ship {
                 // 再配置中: 高速移動でヒッグスウェイクが強まる
                 // spd は prevX/prevY更新前 (line 863) に計算済み — ここで再宣言しない
                 this.higgsSig = Math.min(1.0, higgsAtThisShip * spd * 1.5);
-                // ウェイクを残す
+                // ウェイクを残す (サージ中は増幅 — 動けば痕跡がくっきり残る)
                 if (higgsAtThisShip > 0.15 && spd > 0.2) {
-                    higgsWakes.push({ x: this.x, y: this.y, intensity: higgsAtThisShip * 0.8, life: 1.0 });
+                    const _wAmp = surgePhase === 'active' ? SURGE_WAKE_MULT : 1;
+                    higgsWakes.push({ x: this.x, y: this.y, intensity: Math.min(1, higgsAtThisShip * 0.8 * _wAmp), life: 1.0 });
                 }
                 // §3-12 敵 HEAT trail (高速移動時の熱排気跡)
                 if (this.heatSig > 0.08 && spd > 0.3 && Math.random() < 0.18) {
@@ -3567,9 +3698,16 @@ function updateDrawEffects(ctx) {
     }
 }
 
+let _logDedup = {};
 function logMessage(text, className) {
     const log = document.getElementById('message-log');
     if (!log) return;
+    // 重複抑制: 同一メッセージは4秒間再表示しない (PASSIVEスパムで重要イベントが流れるのを防ぐ)
+    const _now = Date.now();
+    if (_logDedup[text] && _now - _logDedup[text] < 4000) return;
+    let _ldKeys = 0;
+    for (const _k in _logDedup) { if (++_ldKeys > 60) { _logDedup = {}; break; } }
+    _logDedup[text] = _now;
     const msg = document.createElement('div');
     msg.className = `message ${className}`;
     const now = new Date();
@@ -3804,9 +3942,11 @@ function generateSector() {
         thermalCanvas = tc;
     }, 50);
 
-    // 敵を円形マップ内のヒッグス濃度の高い場所に配置
+    // 敵を円形マップ内のヒッグス濃度の高い場所に配置。
+    // 距離はパッシブ探知圏(11000)のすぐ外側 13000〜17000: 数分航行して微弱信号を拾い始める
+    // 「狩りの立ち上がり」を1〜2分に圧縮する (旧: 10000〜33000で接敵まで最大8分の空白があった)
     const spawnAngle = Math.random() * Math.PI * 2;
-    const spawnDist  = 10000 + Math.random() * (MAP_RADIUS - 12000);
+    const spawnDist  = ENEMY_SPAWN_MIN + Math.random() * ENEMY_SPAWN_VAR;
     const spawnCenterX = MAP_CX + Math.cos(spawnAngle) * spawnDist;
     const spawnCenterY = MAP_CY + Math.sin(spawnAngle) * spawnDist;
     const bossSpawn = findHidingSpot(spawnCenterX, spawnCenterY, 2000);
@@ -3840,13 +3980,31 @@ function generateSector() {
         stations.push(new Station(MAP_CX + Math.cos(a2) * r2, MAP_CY + Math.sin(a2) * r2));
     }
 
-    // リソースノード: 5〜8個をマップ上にランダム配置 (ヒッグス雲内を優先)
+    // リソースノード: 5〜8個 (ヒッグス雲内を優先)。
+    // 6割は自機と敵スポーンを結ぶ「争奪帯」に置く — 双方の経済動線が同じ海域で交差し、
+    // ノードの奪い合い(敵はノードで自己強化する)が自然に接敵と情報戦を生む。
     const nodeCount = 5 + Math.floor(Math.random() * 4);
     for (let i = 0; i < nodeCount; i++) {
-        const na = Math.random() * Math.PI * 2, nr = Math.random() * (MAP_RADIUS - 3000);
-        const spot = findHidingSpot(MAP_CX + Math.cos(na) * nr, MAP_CY + Math.sin(na) * nr, 2000);
+        let ncx, ncy;
+        if (i < Math.ceil(nodeCount * 0.6)) {
+            const t2 = 0.30 + Math.random() * 0.45; // 回廊の中間帯
+            const ja = Math.random() * Math.PI * 2, jr = Math.random() * 3500;
+            ncx = MAP_CX + (bossSpawn.x - MAP_CX) * t2 + Math.cos(ja) * jr;
+            ncy = MAP_CY + (bossSpawn.y - MAP_CY) * t2 + Math.sin(ja) * jr;
+        } else {
+            const na = Math.random() * Math.PI * 2, nr = Math.random() * (MAP_RADIUS - 3000);
+            ncx = MAP_CX + Math.cos(na) * nr;
+            ncy = MAP_CY + Math.sin(na) * nr;
+        }
+        const spot = findHidingSpot(ncx, ncy, 2000);
         resourceNodes.push({ x: spot.x, y: spot.y, active: true, emFlashTimer: 0, identified: false });
     }
+
+    // 新システムのリセット (露出度・ヒッグスサージ)
+    playerExposureLevel = 0; _exposureHeartbeatTimer = 0;
+    surgePhase = 'none'; surgePhaseTimer = 0;
+    surgeNextTimer = SURGE_INTERVAL_MIN + Math.floor(Math.random() * SURGE_INTERVAL_VAR);
+    _logDedup = {};
 
     // S&D進捗バーをリセット
     const sdFill = document.getElementById('sd-progress-fill');
@@ -4376,7 +4534,12 @@ function checkPassiveDetection() {
 
     const sc = sensorConfig[currentSensor];
     const thr = sc.threshold;
-    const range = Math.max(effectiveRadarRange * 10, 11000); // パッシブ探知の下限を拡張(8000→11000): 接近フェーズで早めに微弱方位を拾い「空白の航行」を緊張に変える
+    let range = Math.max(effectiveRadarRange * 10, 11000); // パッシブ探知の下限を拡張(8000→11000): 接近フェーズで早めに微弱方位を拾い「空白の航行」を緊張に変える
+    // ヒッグスサージ: パッシブ探知も対称に縮退/ブースト
+    if (surgePhase === 'active') range *= SURGE_DETECT_MULT;
+    else if (surgePhase === 'after') range *= SURGE_CLARITY_MULT;
+    // センサー損傷: 探知レンジ激減
+    if (player._sysSensorTimer > 0) range *= 0.35;
     const sensorPrec = 0.45 + (genAlloc.sensors / 100) * 0.55;
     const colorRgb = sc.r;
     const terrRange = range * 1.4; // 地形は広範囲から放射
@@ -4912,6 +5075,7 @@ function lpmSelectMove() {
 function lpmSelectFire() {
     hideLongPressMenu();
     if (!_lpmWorld || !player || player.hp <= 0) return;
+    if (player._weaponJamTimer > 0) { logMessage('WEP: 火器管制ダウン — 復旧まで発砲不能', 'warning-msg'); return; }
     const wx = _lpmWorld.x, wy = _lpmWorld.y;
     const wType = document.getElementById('weapon-select')?.value;
     if (wType !== 'missile' && wType !== 'beam') {
@@ -4969,6 +5133,7 @@ function coordFireAtTriangulation() {
         logMessage('COORD: 三角測量データなし — まず解析を実行してください', 'warning-msg');
         return;
     }
+    if (player._weaponJamTimer > 0) { logMessage('WEP: 火器管制ダウン — 復旧まで発砲不能', 'warning-msg'); return; }
     const wType = document.getElementById('weapon-select')?.value;
     if (wType !== 'missile' && wType !== 'beam') {
         logMessage('COORD: ミサイル / ビームのみ座標射撃可能', 'warning-msg');
@@ -6529,6 +6694,73 @@ function drawHUDOverlay(ctx) {
     const { sx: psx, sy: psy } = worldToScreen(player.x, player.y);
     const t = Date.now();
 
+    // ── 露出度メーター (被探知状態) — フィールド上部中央の常時チップ ──
+    // 「今、隠れられているのか?」を1目で分かるように。潜水艦ゲームの緊張の芯。
+    {
+        const exL = playerExposureLevel;
+        const exCol = exL === 0 ? '#00ff88' : exL === 1 ? '#ffdd00' : exL === 2 ? '#ff9500' : '#ff3344';
+        const exTxt = exL === 0 ? '隠密' : exL === 1 ? '痕跡を掴まれた' : exL === 2 ? '追跡されている' : '捕捉されている';
+        // ミニマップ(左上)とシステムログ(右上)のDOMに隠れない高さに配置
+        const chipW = 168, chipH = 22, chipX = (cssW - chipW) / 2, chipY = 170;
+        ctx.save();
+        const _pl = exL >= 2 ? (0.55 + Math.sin(t * (exL === 3 ? 0.02 : 0.01)) * 0.35) : 0.85;
+        ctx.globalAlpha = 0.55;
+        ctx.fillStyle = '#000d08';
+        ctx.fillRect(chipX, chipY, chipW, chipH);
+        ctx.globalAlpha = _pl;
+        ctx.strokeStyle = exCol; ctx.lineWidth = 1.5;
+        ctx.strokeRect(chipX, chipY, chipW, chipH);
+        ctx.fillStyle = exCol;
+        ctx.font = 'bold 12px Orbitron, monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(exTxt, chipX + chipW / 2 + 8, chipY + chipH / 2 + 1);
+        ctx.beginPath(); ctx.arc(chipX + 13, chipY + chipH / 2, 4, 0, Math.PI * 2); ctx.fill();
+        // 捕捉中: 画面縁を赤くパルス (狩られている感)
+        if (exL === 3) {
+            ctx.globalAlpha = 0.10 + Math.sin(t * 0.02) * 0.07;
+            ctx.strokeStyle = '#ff2233'; ctx.lineWidth = 10;
+            ctx.strokeRect(5, 5, cssW - 10, cssH - 10);
+        }
+        // ── ヒッグスサージ表示 ──
+        let _infoY = chipY + chipH + 14;
+        if (surgePhase !== 'none') {
+            const sTxt = surgePhase === 'warn' ? '⚠ ヒッグスサージ接近' : surgePhase === 'active' ? 'サージ通過中 — 全センサー縮退' : 'クリアリング — 高感度ウィンドウ';
+            const sCol = surgePhase === 'active' ? '#66aaff' : surgePhase === 'warn' ? '#ffdd00' : '#00ffcc';
+            ctx.globalAlpha = 0.9;
+            ctx.fillStyle = sCol;
+            ctx.font = 'bold 11px Orbitron, monospace';
+            ctx.fillText(sTxt, cssW / 2, _infoY);
+            _infoY += 15;
+            if (surgePhase === 'active') {
+                // サージ中の白靄オーバーレイ (センサーが利かない体感)
+                ctx.globalAlpha = 0.06 + Math.sin(t * 0.004) * 0.03;
+                ctx.fillStyle = '#bfd9ff';
+                ctx.fillRect(0, 0, cssW, cssH);
+            }
+        }
+        // ── 自機サブシステム損傷表示 ──
+        if (player._weaponJamTimer > 0 || player._sysEngineTimer > 0 || player._sysSensorTimer > 0) {
+            ctx.globalAlpha = 0.6 + Math.sin(t * 0.015) * 0.3;
+            ctx.fillStyle = '#ff9500';
+            ctx.font = 'bold 11px Orbitron, monospace';
+            let dmgTxt = '';
+            if (player._weaponJamTimer > 0) dmgTxt += '火器管制ダウン ';
+            if (player._sysEngineTimer > 0) dmgTxt += '機関損傷 ';
+            if (player._sysSensorTimer > 0) dmgTxt += 'センサー損傷';
+            ctx.fillText(dmgTxt, cssW / 2, _infoY);
+        }
+        // ── 奇襲可能インジケータ: 完全ロック中 & 敵が自分に気付いていない ──
+        const te = player.targetEntity;
+        if (te && te.hp > 0 && te.inVision && te.detectionState === 'unaware') {
+            const _tp = worldToScreen(te.x, te.y);
+            ctx.globalAlpha = 0.75 + Math.sin(t * 0.012) * 0.25;
+            ctx.fillStyle = '#ffd24a';
+            ctx.font = 'bold 12px Orbitron, monospace';
+            ctx.fillText('奇襲可能 ×3.5', _tp.sx, _tp.sy - 36);
+        }
+        ctx.restore();
+    }
+
     // ── 長押し進捗リング (ウェイポイント設定のフィードバック) ──
     // 指を止めて押している間だけ充填。スワイプ(パン)では即消える=取り違え防止の視覚手がかり。
     if (touch.holding) {
@@ -7003,6 +7235,61 @@ function updatePlayerDrones() {
 function drawPlayerDrones(ctx) { for (const d of playerDrones) d.draw(ctx); }
 
 // FPS計測用
+// ═══ 露出度メーター + ヒッグスサージ進行 (毎フレーム・軽量) ═══
+// 露出度 = 敵が自機をどれだけ掴んでいるか。潜水艦ゲームの核心「今、隠れられているのか?」に
+// 常時フィードバックを与える。エスカレーション時は警告音、追跡中は心音が鳴る。
+function updateHuntTension() {
+    if (!player || player.hp <= 0) return;
+    let lvl = 0;
+    for (const e of enemies) {
+        if (e.hp <= 0) continue;
+        if (e.aiState === 'combat') { lvl = 3; break; }
+        const f = e.contactFreshness || 0;
+        if (e.aiState === 'hunting' || f > 0.4) { if (lvl < 2) lvl = 2; }
+        else if (f > 0.05) { if (lvl < 1) lvl = 1; }
+    }
+    if (lvl > playerExposureLevel) {
+        playSound('alert');
+        if (lvl === 1)      logMessage('WARN: 敵が痕跡を掴んだ — シグネチャ管理を', 'warning-msg');
+        else if (lvl === 2) logMessage('WARN: 敵艦が追跡行動 — 進路と出力を変えろ', 'warning-msg');
+        else                logMessage('CRITICAL: 捕捉された — 交戦か離脱か', 'warning-msg');
+    } else if (lvl === 0 && playerExposureLevel > 0) {
+        logMessage('TAC: 追跡を振り切った — 隠密状態に復帰', 'system-msg');
+    }
+    playerExposureLevel = lvl;
+    // 被追跡中の心音 (追跡=遅い鼓動 / 捕捉=速い鼓動)
+    if (lvl >= 2) {
+        _exposureHeartbeatTimer -= gameSpeedFactor;
+        if (_exposureHeartbeatTimer <= 0) {
+            playSound('heartbeat');
+            _exposureHeartbeatTimer = lvl === 3 ? 42 : 78;
+        }
+    }
+    // ── ヒッグスサージ: 予兆8s → 本体12s(全探知縮退・ウェイク増幅) → クリアリング6s(高感度) ──
+    if (surgePhase === 'none') {
+        surgeNextTimer -= gameSpeedFactor;
+        if (surgeNextTimer <= 0) {
+            surgePhase = 'warn'; surgePhaseTimer = SURGE_WARN_DUR;
+            logMessage('SENSOR: ヒッグス濃度急変を検知 — 広域センサーサージ接近 (全探知系に干渉)', 'warning-msg');
+            playSound('alert');
+        }
+    } else {
+        surgePhaseTimer -= gameSpeedFactor;
+        if (surgePhaseTimer <= 0) {
+            if (surgePhase === 'warn') {
+                surgePhase = 'active'; surgePhaseTimer = SURGE_ACTIVE_DUR;
+                logMessage('SENSOR: サージ到達 — 全センサー縮退。動けばウェイクが濃く残る', 'warning-msg');
+            } else if (surgePhase === 'active') {
+                surgePhase = 'after'; surgePhaseTimer = SURGE_AFTER_DUR;
+                logMessage('SENSOR: サージ通過 — 短時間の高感度ウィンドウ。今なら遠くまで見える', 'system-msg');
+            } else {
+                surgePhase = 'none';
+                surgeNextTimer = SURGE_INTERVAL_MIN + Math.floor(Math.random() * SURGE_INTERVAL_VAR);
+            }
+        }
+    }
+}
+
 let _fpsLastTime = 0, _fpsFrameCount = 0, _fpsDisplay = 0;
 
 function gameLoop() {
@@ -7156,6 +7443,7 @@ function gameLoop() {
         enemies.forEach(e => e.update());
         updateDecoys();
         updatePlayerDrones();
+        updateHuntTension();
 
         // Scrap Collection
         for (let i = scrapDrops.length - 1; i >= 0; i--) {
@@ -7193,8 +7481,9 @@ function gameLoop() {
         // プレイヤーの移動でウェイク・trail を生成
         if (player && player.hp > 0 && player.state === 'moving') {
             const playerHiggs = getHiggsIntensity(player.x, player.y);
-            if (playerHiggs > 0.2 && Math.random() < 0.3) {
-                higgsWakes.push({ x: player.x, y: player.y, intensity: playerHiggs * 0.6, life: 0.8 });
+            const _pwAmp = surgePhase === 'active' ? SURGE_WAKE_MULT : 1; // サージ中: 移動の痕跡が濃く残る
+            if (playerHiggs > 0.2 && Math.random() < 0.3 * _pwAmp) {
+                higgsWakes.push({ x: player.x, y: player.y, intensity: Math.min(1, playerHiggs * 0.6 * _pwAmp), life: 0.8 });
             }
             // §3-12 HEAT trail: エンジン熱排気 (移動時)
             if (!repairActive && player.heatSig > 0.07 && Math.random() < 0.22) {
