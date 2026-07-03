@@ -207,7 +207,7 @@ let dockingOpen = false;
 const AudioContext = window.AudioContext || window.webkitAudioContext;
 const audioCtx = new AudioContext();
 
-function playSound(type) {
+function playSound(type, vol = 1) {
     if (!audioCtx) return;
     if (audioCtx.state === 'suspended') audioCtx.resume();
 
@@ -255,6 +255,14 @@ function playSound(type) {
         gain.gain.setValueAtTime(0.09, now);
         gain.gain.linearRampToValueAtTime(0.0, now + 0.18);
         osc.start(now); osc.stop(now + 0.18);
+    } else if (type === 'enemyPing') {
+        // 敵アクティブソナーの探信音 — 距離で音量が変わる (volで指定)
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(1250, now);
+        osc.frequency.exponentialRampToValueAtTime(880, now + 0.5);
+        gain.gain.setValueAtTime(0.10 * vol, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
+        osc.start(now); osc.stop(now + 0.55);
     }
 }
 
@@ -552,6 +560,31 @@ const SURGE_WAKE_MULT    = 2.2;    // サージ中の移動ウェイク増幅 (�
 // 敵スポーン距離: パッシブ探知圏(11000)のすぐ外 → 接敵まで数分の空白を1〜2分に短縮
 const ENEMY_SPAWN_MIN = 13000;
 const ENEMY_SPAWN_VAR = 4000;
+
+// ═══════════════════════════════════════════════════════════════
+// ゲーム性進化 第2弾「音と決断」(2026-07-03):
+//   5. 敵アクティブソナーピン: 敵が探信音を放つ (恐怖 + 正確な方位の対称的な情報交換)
+//   6. 魚雷警報: 接近ミサイルの航走音警告 → デコイ/ジャミングが「反応する道具」になる
+//   7. 静粛航行: ワンボタンで速度と全シグネチャを絞る (潜水艦の象徴的動作)
+//   8. 遭難信号: 両ハンターを同じ海域へ引き寄せる収束イベント (待ち伏せの舞台)
+//   9. 手負いの獲物: HP20%未満で冷却材漏洩 = 熱痕跡を引きずる (追撃戦)
+// 全数値は実機調整前提の tunable
+// ═══════════════════════════════════════════════════════════════
+const ENEMY_PING_CD_MIN = 720;       // 敵アクティブソナーの最短間隔 12s
+const ENEMY_PING_CD_VAR = 480;       // +0〜8s (隠密気質の個体はさらに探信を控える)
+const ENEMY_PING_RANGE = 4200;       // 探信の有効距離
+const ENEMY_PING_HIGGS_BLOCK = 0.5;  // 自機地点のヒッグス濃度がこれ以上なら反射が埋もれる
+let silentRunning = false;           // 静粛航行モード
+const SILENT_SPEED_MULT = 0.5;       // 静粛航行中の速度倍率
+const SILENT_SIG_MULT = 0.55;        // 静粛航行中の全シグネチャ倍率
+const TORPEDO_ALERT_RANGE = 2600;    // 魚雷警報の探知距離 (航走音)
+let distressBeacon = null;           // {x, y, life, claimed} 遭難信号イベント
+let distressNextTimer = 4200;        // 初回発生 ~70s
+const DISTRESS_INTERVAL_MIN = 7200;  // 以降の発生間隔 120s〜
+const DISTRESS_INTERVAL_VAR = 3600;  // +0〜60s
+const DISTRESS_LIFE = 3600;          // ビーコン持続 60s
+const WOUNDED_HP_FRAC = 0.20;        // 手負い判定: HP20%未満
+const WOUNDED_HEAT_FLOOR = 0.45;     // 手負いの熱シグネチャ下限 (冷却材漏洩)
 const BUILD_STOP_DUR  = 180; // 建設中停止フレーム数 (3秒)
 const BUILD_SIG_MULT  = 2.0; // 建設中シグネチャ増大倍率
 function computeVisionRadius() {
@@ -1137,6 +1170,7 @@ canvas.addEventListener('contextmenu', e => {
         const _ffTarget = { x: _ffWx, y: _ffWy, hp: 999, radius: 1 };
         projectiles.push(new Projectile(player.x, player.y, _ffTarget, true, 'missile', 1.0));
         playSound('shoot');
+        cancelSilentRunning('発砲');
         player.fireCooldown = WEAPON_COOLDOWNS.missile * _ffGenFactor;
         player.missileReloading = true;
         player.missileReloadTimer = Math.round(MISSILE_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0));
@@ -1159,10 +1193,13 @@ canvas.addEventListener('contextmenu', e => {
             const _bcx = player.x + _bt * _bdx, _bcy = player.y + _bt * _bdy2;
             if (Math.hypot(en.x - _bcx, en.y - _bcy) < en.radius * 1.5) {
                 const _hb = getHiggsIntensity((_bcx + en.x) / 2, (_bcy + en.y) / 2);
-                en.hp -= 150 * (1 - _hb * 0.8);
+                // 勘打ちビームでも奇襲・後方・混乱ボーナス適用 (盲撃ちが刺さる爽快感)
+                const _ffSt = applyStrikeBonuses(true, null, en, Math.atan2(player.y - en.y, player.x - en.x));
+                const _ffD = Math.floor(150 * (1 - _hb * 0.8) * _ffSt.mult);
+                en.hp -= _ffD;
                 createHitEffect(en.x, en.y, '#00ffaa');
                 addShake(15);
-                logMessage('WEP: BEAM 命中！', 'system-msg');
+                logMessage(`WEP: BEAM 命中！ → ${_ffD} ダメージ`, 'system-msg');
             }
         });
         const _bSteps = Math.max(5, Math.floor(_bLen / 60));
@@ -1175,6 +1212,7 @@ canvas.addEventListener('contextmenu', e => {
             if (_bs % 3 === 0 && opticTrails.length < 600) opticTrails.push({ x: _bwx, y: _bwy, intensity: 0.9, life: 1.0 });
         }
         playSound('shoot');
+        cancelSilentRunning('発砲');
         player.fireCooldown = WEAPON_COOLDOWNS.beam * _ffGenFactor;
         player.beamReloading = true;
         player.beamReloadTimer = BEAM_RELOAD_TIME;
@@ -1696,6 +1734,14 @@ class Projectile {
             }
             const _missileTurn = 0.05 * (1 - getStormIntensity(this.x, this.y) * STORM_MISSILE_DEGRADE) * _jamMissileFactor;
             this.angle += diff * _missileTurn;
+            // 魚雷警報: 敵ミサイルの航走音を探知 (「魚雷、来ます！」)。
+            // 警告が出ることでデコイ射出/ジャミング/回避機動が「反応する道具」になる。
+            if (!this.isPlayer && !this._torpAlerted && player && player.hp > 0 &&
+                Math.hypot(player.x - this.x, player.y - this.y) < TORPEDO_ALERT_RANGE) {
+                this._torpAlerted = true;
+                playSound('alert');
+                logMessage('WARNING: 魚雷航走音探知 — ミサイル接近中！ (デコイ/ジャミング/回避)', 'warning-msg');
+            }
             // デコイに到達したらミサイルは消費される(無害化)
             if (this._luredBy && Math.hypot(this._luredBy.x - this.x, this._luredBy.y - this.y) < 40) {
                 createHitEffect(this.x, this.y, '#cc99ff');
@@ -1995,6 +2041,18 @@ class Ship {
             this.heatSig   *= (1 - getThermalIntensity(this.x, this.y) * THERMAL_HEAT_MASK);
             // ヒッグス: ヒッグス雲内を動くほどウェイク乱流。ヒッグスエンジンは特に顕著。
             this.higgsSig   = Math.min(1, _thrust * _hHere * 1.6 + (_engType.higgsSpeedBonus > 0 ? _thrust * _engType.higgsSpeedBonus * 0.7 : _thrust * 0.08));
+            // 静粛航行: 全シグネチャ抑制 (速度も落ちる。発砲/ソナーで自動解除)
+            if (silentRunning) {
+                this.heatSig    *= SILENT_SIG_MULT;
+                this.opticalSig *= SILENT_SIG_MULT;
+                this.emSig      *= SILENT_SIG_MULT;
+                this.higgsSig   *= SILENT_SIG_MULT;
+            }
+            // 手負い: HP20%未満で冷却材漏洩 — 熱は隠しきれない (静粛航行でも下限あり)
+            if (this.hp / this.maxHp < WOUNDED_HP_FRAC) {
+                this.heatSig = Math.max(this.heatSig, WOUNDED_HEAT_FLOOR * (silentRunning ? 0.7 : 1));
+                if (!this._woundedLogged) { this._woundedLogged = true; logMessage('WARN: 冷却材漏出 — 熱シグネチャを抑えられない。敵に追われやすい', 'warning-msg'); }
+            } else this._woundedLogged = false;
 
             // 潜航型ジャミング: 発動中はEM放射が増し逆探知されやすい(情報↔露出のトレードオフ)。タイマー減衰もここで。
             if (gameState.shipType === 'stealth') {
@@ -2011,7 +2069,7 @@ class Ship {
             const _higgsHereEng = getHiggsIntensity(this.x, this.y);
             const _higgsSlowdown = 1 - _higgsHereEng * 0.45 * (1 - ENGINE_UPG_HIGGS_RESIST[gameState.upgrades.engine]);
             const _higgsBonusSpeed = _higgsHereEng * _engTypeP.higgsSpeedBonus;
-            const _baseTargetSpeed = ((genAlloc.engine / 100) * genGain * 1.4 * (SHIP_MAX_SPEED_MULT[gameState.shipType] || 1.0) * _higgsSlowdown * _engTypeP.speedMult + _higgsBonusSpeed) * this.terrainSpeedMult() * gameSpeedFactor;
+            const _baseTargetSpeed = ((genAlloc.engine / 100) * genGain * 1.4 * (SHIP_MAX_SPEED_MULT[gameState.shipType] || 1.0) * _higgsSlowdown * _engTypeP.speedMult + _higgsBonusSpeed) * this.terrainSpeedMult() * gameSpeedFactor * (silentRunning ? SILENT_SPEED_MULT : 1);
             if (this.currentSpeed === undefined) this.currentSpeed = 0;
             this.speed = this.currentSpeed; // 移動ブロックで更新される
 
@@ -2147,6 +2205,7 @@ class Ship {
                             }
                             if (_assumedLock && Math.abs(_kJit) > 0.1) logMessage('WEP: KINETIC 想定射撃 — 推定位置ブレで射角散弾', 'warning-msg');
                             playSound('shoot');
+                            cancelSilentRunning('発砲');
                             const weaponGenFactor = Math.max(0.3, 1.5 - (genAlloc.weapons / 100));
                             this.fireCooldown = WEAPON_COOLDOWNS[wType] * weaponGenFactor;
                             this.kineticAmmo--;
@@ -2180,6 +2239,7 @@ class Ship {
                             if (_assumedLock) logMessage('WEP: MISSILE 想定射撃 — 推定座標へ誘導 (外れる可能性あり)', 'warning-msg');
                             else if (missileMode === 'smart') logMessage('WEP: MISSILE [AI追跡] 発射 — EM強・ジャミング耐性・大閃光', 'system-msg');
                             playSound('shoot');
+                            cancelSilentRunning('発砲');
                             const weaponGenFactor = Math.max(0.3, 1.5 - (genAlloc.weapons / 100));
                             this.fireCooldown = WEAPON_COOLDOWNS[wType] * weaponGenFactor;
                             this.missileReloading = true;
@@ -2211,6 +2271,7 @@ class Ship {
                                 projectiles.push(proj);
                             }
                             playSound('shoot');
+                            cancelSilentRunning('発砲');
                             const weaponGenFactor = Math.max(0.3, 1.5 - (genAlloc.weapons / 100));
                             this.fireCooldown = WEAPON_COOLDOWNS[wType] * weaponGenFactor;
                             this.beamReloading = true;
@@ -2660,6 +2721,15 @@ class Ship {
             } else if (this.aiState === 'hunting') {
                 this.lurking = false;
                 const _huntProf = ENEMY_COMBAT[this.type] || ENEMY_COMBAT.destroyer;
+                // アクティブソナー探信: 接触が薄い時、探信音を放って正確な位置を得ようとする。
+                // 隠密気質の個体ほど探信を控える (自分の方位を晒すため)。fighterは探信装置なし。
+                if (this._pingCD === undefined) this._pingCD = ENEMY_PING_CD_MIN * 0.5;
+                this._pingCD -= gameSpeedFactor;
+                if (this._pingCD <= 0 && this.contactFreshness < 0.45 && this.type !== 'fighter') {
+                    this._pingCD = ENEMY_PING_CD_MIN + Math.random() * ENEMY_PING_CD_VAR
+                                 + ((this.personality && this.personality.stealth) || 0.3) * 900;
+                    firePingFromEnemy(this);
+                }
                 this.speed = Math.min(1.6, 0.8 + gameState.sector * 0.06) * _huntProf.speedMult * (this.upgSpeed || 1) * this.terrainSpeedMult() * gameSpeedFactor;
                 if (this.huntTimer > 0) this.huntTimer--;
                 if (this.huntTarget) {
@@ -2731,6 +2801,9 @@ class Ship {
                         const _leadY = _lkp.y + (_lkp.vy || 0) * 40;
                         const searchSpot = findHidingSpot(_leadX, _leadY, 3000);
                         this.setTarget(searchSpot.x, searchSpot.y);
+                    } else if (distressBeacon && this.type !== 'fighter' && Math.random() < (0.010 + _pers.greed * 0.020)) {
+                        // 遭難信号へ向かう (貪欲な個体ほど食いつく) — プレイヤーと同じ海域へ収束
+                        this.setTarget(distressBeacon.x, distressBeacon.y);
                     } else if (activeNodes.length > 0 && Math.random() < (0.0012 + _pers.greed * 0.012)) {
                         // 貪欲な個体ほど積極的にノードを奪取しに行く (性格による行動分岐)
                         this.aiState = 'gathering';
@@ -2789,6 +2862,12 @@ class Ship {
             }
             // 機関損傷: 冷却系破損で熱漏洩 — 損傷した獲物は熱で追える
             if (this._sysEngineTimer > 0) this.heatSig = Math.min(1.0, this.heatSig + 0.35);
+            // 手負いの獲物: HP20%未満で冷却材漏洩 — 熱痕跡を引きずる (追撃戦の演出)
+            if (this.hp / this.maxHp < WOUNDED_HP_FRAC) {
+                this.heatSig = Math.max(this.heatSig, WOUNDED_HEAT_FLOOR);
+                if (!this._woundedLogged) { this._woundedLogged = true; logMessage('SENSOR: 敵艦から冷却材漏出を検知 — 熱痕跡で追い詰めろ', 'system-msg'); }
+                if (Math.random() < 0.10 && heatTrails.length < 600) heatTrails.push({ x: this.x, y: this.y, intensity: 0.7, life: 1.0 });
+            }
 
             // 光学シグネチャ: 武器種で異なる
             // - kinetic: 銃口炎 (短く強烈な光学スパイク)
@@ -4000,11 +4079,14 @@ function generateSector() {
         resourceNodes.push({ x: spot.x, y: spot.y, active: true, emFlashTimer: 0, identified: false });
     }
 
-    // 新システムのリセット (露出度・ヒッグスサージ)
+    // 新システムのリセット (露出度・ヒッグスサージ・静粛航行・遭難信号)
     playerExposureLevel = 0; _exposureHeartbeatTimer = 0;
     surgePhase = 'none'; surgePhaseTimer = 0;
     surgeNextTimer = SURGE_INTERVAL_MIN + Math.floor(Math.random() * SURGE_INTERVAL_VAR);
     _logDedup = {};
+    silentRunning = false; _updateSilentBtn();
+    distressBeacon = null;
+    distressNextTimer = 4200 + Math.floor(Math.random() * 1800);
 
     // S&D進捗バーをリセット
     const sdFill = document.getElementById('sd-progress-fill');
@@ -5095,6 +5177,7 @@ function lpmSelectFire() {
         if (player.missileReloading) { logMessage('WEP: MISSILEリロード中', 'warning-msg'); return; }
         projectiles.push(new Projectile(player.x, player.y, { x: wx, y: wy, hp: 999, radius: 1 }, true, 'missile', 1.0));
         playSound('shoot');
+        cancelSilentRunning('発砲');
         player.fireCooldown = WEAPON_COOLDOWNS.missile * _ffGen;
         player.missileReloading = true;
         player.missileReloadTimer = Math.round(MISSILE_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0));
@@ -5112,9 +5195,11 @@ function lpmSelectFire() {
             const _bt = _bSq > 0 ? Math.max(0, Math.min(1, ((en.x - player.x)*_bdx + (en.y - player.y)*_bdy) / _bSq)) : 0;
             if (Math.hypot(en.x - (player.x + _bt*_bdx), en.y - (player.y + _bt*_bdy)) < en.radius * 1.5) {
                 const _hb = getHiggsIntensity((player.x + _bt*_bdx + en.x)/2, (player.y + _bt*_bdy + en.y)/2);
-                en.hp -= 150 * (1 - _hb * 0.8);
+                const _lpSt = applyStrikeBonuses(true, null, en, Math.atan2(player.y - en.y, player.x - en.x));
+                const _lpD = Math.floor(150 * (1 - _hb * 0.8) * _lpSt.mult);
+                en.hp -= _lpD;
                 createHitEffect(en.x, en.y, '#00ffaa'); addShake(15);
-                logMessage('WEP: BEAM 命中！', 'system-msg');
+                logMessage(`WEP: BEAM 命中！ → ${_lpD} ダメージ`, 'system-msg');
             }
         });
         player.emSig = Math.min(1, player.emSig + 0.3);
@@ -5123,6 +5208,7 @@ function lpmSelectFire() {
         player.beamReloadTimer = Math.round(BEAM_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0));
         player.fireCooldown = WEAPON_COOLDOWNS.beam * _ffGen;
         addHiggsWake(player.x, player.y, 0.5);
+        cancelSilentRunning('発砲');
         logMessage('WEP: 座標射撃(BEAM) — 自位置シグネチャ露出', 'warning-msg');
     }
 }
@@ -5172,6 +5258,7 @@ function coordFireAtTriangulation() {
         const _ft = { x: _tgtX, y: _tgtY, hp: 999, radius: 1 };
         projectiles.push(new Projectile(player.x, player.y, _ft, true, 'missile', 1.0));
         playSound('shoot');
+        cancelSilentRunning('発砲');
         player.fireCooldown = WEAPON_COOLDOWNS.missile * _gf;
         player.missileReloading = true;
         player.missileReloadTimer = Math.round(MISSILE_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0));
@@ -5198,7 +5285,9 @@ function coordFireAtTriangulation() {
             const _bcx = player.x + _bt * _bdx, _bcy = player.y + _bt * _bdy;
             if (Math.hypot(en.x - _bcx, en.y - _bcy) < en.radius * 1.5) {
                 const _hb = getHiggsIntensity((_bcx + en.x) / 2, (_bcy + en.y) / 2);
-                en.hp -= 150 * (1 - _hb * 0.8);
+                const _cfSt = applyStrikeBonuses(true, null, en, Math.atan2(player.y - en.y, player.x - en.x));
+                const _cfD = Math.floor(150 * (1 - _hb * 0.8) * _cfSt.mult);
+                en.hp -= _cfD;
                 createHitEffect(en.x, en.y, '#00ffaa');
                 addShake(15);
             }
@@ -5212,6 +5301,7 @@ function coordFireAtTriangulation() {
         player.beamReloading = true;
         player.beamReloadTimer = 300;
         player.fireCooldown = WEAPON_COOLDOWNS.beam * _gf;
+        cancelSilentRunning('発砲');
         logMessage(`COORD[BEAM] 精度 ${precPct}% → 推定命中率 ${hitChance}% — ダークチャネル暴露`, 'warning-msg');
     }
 }
@@ -5250,6 +5340,7 @@ function fireOmniSonar() {
     const sc = sensorConfig[currentSensor];
 
     playSound('ui');
+    cancelSilentRunning('アクティブソナー使用');
     let detected = 0;
     enemies.forEach(e => {
         if (e.hp <= 0) return;
@@ -5286,6 +5377,7 @@ function fireDirectionalSonar(targetAngle) {
     const maxRange  = DIR_SONAR_MAX_RANGE * (genAlloc.sensors / 100) * genGain * (1 - stormAtPlayer2 * STORM_SONAR_DEGRADE);
 
     playSound('ui');
+    cancelSilentRunning('アクティブソナー使用');
     let detected = 0;
     enemies.forEach(e => {
         if (e.hp <= 0) return;
@@ -5827,6 +5919,19 @@ function drawMinimap() {
         minimapCtx.shadowBlur = 0;
         minimapCtx.globalAlpha = 1;
     });
+
+    // 遭難信号ビーコン (SOS — 電波なので常時可視)
+    if (distressBeacon && !distressBeacon.claimed) {
+        const _bmx = distressBeacon.x * mmScale + offX, _bmy = distressBeacon.y * mmScale + offY;
+        minimapCtx.globalAlpha = 0.55 + Math.sin(Date.now() * 0.008) * 0.35;
+        minimapCtx.strokeStyle = '#00e5ff';
+        minimapCtx.lineWidth = 1.2;
+        minimapCtx.beginPath();
+        minimapCtx.moveTo(_bmx, _bmy - 4); minimapCtx.lineTo(_bmx + 4, _bmy);
+        minimapCtx.lineTo(_bmx, _bmy + 4); minimapCtx.lineTo(_bmx - 4, _bmy);
+        minimapCtx.closePath(); minimapCtx.stroke();
+        minimapCtx.globalAlpha = 1;
+    }
 
     // ソナーリング & 探知コンタクト (ミニマップ上)
     effects.forEach(ef => {
@@ -6758,6 +6863,42 @@ function drawHUDOverlay(ctx) {
             ctx.font = 'bold 12px Orbitron, monospace';
             ctx.fillText('奇襲可能 ×3.5', _tp.sx, _tp.sy - 36);
         }
+        // ── 静粛航行インジケータ ──
+        if (silentRunning) {
+            ctx.globalAlpha = 0.7 + Math.sin(t * 0.006) * 0.2;
+            ctx.fillStyle = '#66ccff';
+            ctx.font = 'bold 11px Orbitron, monospace';
+            ctx.fillText('静粛航行中 — 速度/シグネチャ抑制', cssW / 2, chipY - 10);
+        }
+        // ── 魚雷警報マーカー: 接近中の敵ミサイルの方位を自機周りに赤矢印表示 ──
+        for (const pr of projectiles) {
+            if (pr.isPlayer || pr.type !== 'missile' || !pr._torpAlerted || !pr.active) continue;
+            const bAng = Math.atan2(pr.y - player.y, pr.x - player.x);
+            ctx.save();
+            ctx.translate(psx + Math.cos(bAng) * 54, psy + Math.sin(bAng) * 54);
+            ctx.rotate(bAng);
+            ctx.globalAlpha = 0.55 + Math.sin(t * 0.03) * 0.45;
+            ctx.fillStyle = '#ff2233';
+            ctx.beginPath();
+            ctx.moveTo(9, 0); ctx.lineTo(-5, -6); ctx.lineTo(-5, 6);
+            ctx.closePath(); ctx.fill();
+            ctx.restore();
+        }
+        // ── 遭難信号マーカー: 画面内はその位置、画面外は縁にクランプして方向を示す ──
+        if (distressBeacon && !distressBeacon.claimed) {
+            const _bp = worldToScreen(distressBeacon.x, distressBeacon.y);
+            const bx = Math.max(24, Math.min(cssW - 24, _bp.sx));
+            const by = Math.max(90, Math.min(cssH - 30, _bp.sy));
+            const _bPulse = 0.55 + Math.sin(t * 0.008) * 0.35;
+            ctx.globalAlpha = _bPulse;
+            ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(bx, by - 10); ctx.lineTo(bx + 10, by); ctx.lineTo(bx, by + 10); ctx.lineTo(bx - 10, by);
+            ctx.closePath(); ctx.stroke();
+            ctx.fillStyle = '#00e5ff';
+            ctx.font = 'bold 10px Orbitron, monospace';
+            ctx.fillText('SOS', bx, by + 22);
+        }
         ctx.restore();
     }
 
@@ -7235,6 +7376,143 @@ function updatePlayerDrones() {
 function drawPlayerDrones(ctx) { for (const d of playerDrones) d.draw(ctx); }
 
 // FPS計測用
+// ═══ 静粛航行 (Silent Running) ═══
+// ワンボタンで機関出力とシグネチャを絞る潜水艦の象徴的動作。発砲・ソナー使用で自動解除。
+function toggleSilentRunning() {
+    silentRunning = !silentRunning;
+    _updateSilentBtn();
+    logMessage(silentRunning
+        ? 'SILENT: 静粛航行 — 機関出力を絞り全シグネチャ抑制。発砲/ソナーで解除される'
+        : 'SILENT: 静粛航行解除 — 通常出力に復帰', 'system-msg');
+    playSound('ui');
+}
+function _updateSilentBtn() {
+    const b = document.getElementById('btn-silent');
+    if (!b) return;
+    b.style.borderColor = silentRunning ? '#66ccff' : '#1a3a4a';
+    b.style.color = silentRunning ? '#aaddff' : '#6699bb';
+    const lbl = document.getElementById('silent-label');
+    if (lbl) lbl.textContent = silentRunning ? '静粛 ON' : '静粛 OFF';
+}
+function cancelSilentRunning(reason) {
+    if (!silentRunning) return;
+    silentRunning = false;
+    _updateSilentBtn();
+    logMessage('SILENT: 静粛航行解除 — ' + reason, 'warning-msg');
+}
+
+// ═══ 遭難信号イベント (収束装置) ═══
+// 周期的に遭難信号が発生し、報酬 (SCR+修復 / 敵は自己強化) を賭けて両ハンターを
+// 同じ海域へ引き寄せる。先に着くか、着く敵を待ち伏せるか — 「場所を知っている」こと自体が武器になる。
+function updateDistressBeacon() {
+    if (!player || player.hp <= 0) return;
+    if (!distressBeacon) {
+        distressNextTimer -= gameSpeedFactor;
+        if (distressNextTimer <= 0) {
+            let bx, by;
+            const ders = structures.filter(s => s.type === 'derelict');
+            if (ders.length > 0 && Math.random() < 0.6) {
+                const d = ders[Math.floor(Math.random() * ders.length)];
+                bx = d.x; by = d.y;
+            } else {
+                const a = Math.random() * Math.PI * 2, r = Math.random() * MAP_RADIUS * 0.5;
+                bx = MAP_CX + Math.cos(a) * r; by = MAP_CY + Math.sin(a) * r;
+            }
+            distressBeacon = { x: bx, y: by, life: DISTRESS_LIFE, claimed: false };
+            logMessage('SIGNAL: 遭難信号を受信 — 発信源に物資反応 (SOSマーカー)。敵も同じ信号を聞いている', 'warning-msg');
+            playSound('alert');
+        }
+        return;
+    }
+    distressBeacon.life -= gameSpeedFactor;
+    if (distressBeacon.life <= 0) {
+        logMessage('SIGNAL: 遭難信号が途絶えた — 回収機会喪失', 'system-msg');
+        distressBeacon = null;
+        distressNextTimer = DISTRESS_INTERVAL_MIN + Math.random() * DISTRESS_INTERVAL_VAR;
+        return;
+    }
+    // プレイヤー回収
+    if (Math.hypot(player.x - distressBeacon.x, player.y - distressBeacon.y) < 400) {
+        player.hp = Math.min(player.maxHp, player.hp + player.maxHp * 0.15);
+        gameState.credits += 300;
+        updateTopUI();
+        playSound('ui');
+        effects.push({ x: distressBeacon.x, y: distressBeacon.y, r: 0, maxR: 700, a: 1, c: '#00e5ff', type: 'circle' });
+        logMessage('SIGNAL: 遭難物資を回収 (+300 SCR / 船体+15%)。ここは敵も知っている — 長居は無用', 'system-msg');
+        distressBeacon = null;
+        distressNextTimer = DISTRESS_INTERVAL_MIN + Math.random() * DISTRESS_INTERVAL_VAR;
+        return;
+    }
+    // 敵回収 (fighterは回収装備なし)
+    for (const e of enemies) {
+        if (e.hp <= 0 || e.type === 'fighter') continue;
+        if (Math.hypot(e.x - distressBeacon.x, e.y - distressBeacon.y) < 400) {
+            e.hp = Math.min(e.maxHp, e.hp + e.maxHp * 0.15);
+            applyEnemyUpgrade(e);
+            effects.push({ x: distressBeacon.x, y: distressBeacon.y, r: 0, maxR: 700, a: 1, c: '#ff6644', type: 'circle' });
+            logMessage('SIGNAL: 敵艦が遭難物資を回収 — 敵性能が向上した', 'warning-msg');
+            distressBeacon = null;
+            distressNextTimer = DISTRESS_INTERVAL_MIN + Math.random() * DISTRESS_INTERVAL_VAR;
+            break;
+        }
+    }
+}
+
+// ═══ 敵アクティブソナー探信 (the ping) ═══
+// 接触を失った敵が探信音を放つ。敵は正確な情報を得るチャンスと引き換えに、
+// 自分の正確な方位をプレイヤーに晒す — 潜水艦戦の象徴的な情報交換。
+// カウンタープレイ: 濃いヒッグスに潜れば反射が埋もれる / デコイが偽エコーを返す。
+function firePingFromEnemy(e) {
+    if (!player || player.hp <= 0) return;
+    // 演出: 音波リング (フォグ無視 — 音はヒッグスの霧を越えて聞こえる)
+    effects.push({ x: e.x, y: e.y, r: 0, maxR: ENEMY_PING_RANGE, a: 0.7, c: '#ff8866', type: 'circle' });
+    effects.push({ x: e.x, y: e.y, r: 0, maxR: ENEMY_PING_RANGE * 0.55, a: 0.5, c: '#ffbb99', type: 'circle' });
+    const distP = Math.hypot(player.x - e.x, player.y - e.y);
+    playSound('enemyPing', Math.max(0.15, Math.min(1, 1 - distP / 16000)));
+    // プレイヤーへの情報: 探信音の正確な方位 (敵は自ら方位を晒した)
+    const compassDeg = Math.round((Math.atan2(e.x - player.x, -(e.y - player.y)) * 180 / Math.PI + 360) % 360);
+    const ang = Math.atan2(e.y - player.y, e.x - player.x);
+    const ei = enemies.indexOf(e);
+    if (!_contactLabels['e-' + ei]) _contactLabels['e-' + ei] = _contactLabelNext++;
+    passiveBearings.push({
+        ox: player.x, oy: player.y,
+        angle: ang, halfWidth: 0.06, range: 16000,
+        quality: 0.95, color: '255,120,80',
+        sensor: 'em', strength: 0.9, sensorLabel: '探信音',
+        bearingDeg: compassDeg, halfWidthDeg: 3,
+        sourceId: 'e-' + ei,
+        contactNo: _contactLabels['e-' + ei],
+        life: PASSIVE_BEARING_LIFE, maxLife: PASSIVE_BEARING_LIFE
+    });
+    while (passiveBearings.length > PASSIVE_BEARING_MAX) passiveBearings.shift();
+    logMessage(`SONAR: 敵アクティブソナー探信音！ — 方位 ${compassDeg}° (敵は接触を失っている。方位は正確だ)`, 'warning-msg');
+    // 敵への情報: 反射エコー。デコイが近くにあれば偽エコーで誤誘導。
+    let echo = null, echoDist = ENEMY_PING_RANGE;
+    for (const d of decoys) {
+        const dd = Math.hypot(d.x - e.x, d.y - e.y);
+        if (dd < echoDist) { echoDist = dd; echo = d; }
+    }
+    if (echo) {
+        e.playerLastKnownPos = { x: echo.x, y: echo.y, vx: 0, vy: 0 };
+        e.contactFreshness = Math.max(e.contactFreshness, 0.85);
+        logMessage('DECOY: デコイが偽エコー反射 — 敵ソナーを誤誘導', 'system-msg');
+    } else if (distP < ENEMY_PING_RANGE) {
+        // 濃いヒッグスに潜んでいれば反射が背景に埋もれる
+        const hHere = getHiggsIntensity(player.x, player.y);
+        if (hHere < ENEMY_PING_HIGGS_BLOCK) {
+            e.playerLastKnownPos = {
+                x: player.x, y: player.y,
+                vx: player.x - (player.prevX ?? player.x),
+                vy: player.y - (player.prevY ?? player.y)
+            };
+            e.contactFreshness = Math.max(e.contactFreshness, 0.85);
+            logMessage('WARN: 敵ソナーがこちらを捉えた — エコー反射', 'warning-msg');
+        } else {
+            logMessage('TAC: ヒッグス雲がエコーを散乱 — 反射をやり過ごした', 'system-msg');
+        }
+    }
+}
+
 // ═══ 露出度メーター + ヒッグスサージ進行 (毎フレーム・軽量) ═══
 // 露出度 = 敵が自機をどれだけ掴んでいるか。潜水艦ゲームの核心「今、隠れられているのか?」に
 // 常時フィードバックを与える。エスカレーション時は警告音、追跡中は心音が鳴る。
@@ -7444,6 +7722,7 @@ function gameLoop() {
         updateDecoys();
         updatePlayerDrones();
         updateHuntTension();
+        updateDistressBeacon();
 
         // Scrap Collection
         for (let i = scrapDrops.length - 1; i >= 0; i--) {
