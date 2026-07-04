@@ -1935,3 +1935,84 @@ input[type=range]::-webkit-slider-thumb {
     object-fit: contain;
     mix-blend-mode: screen;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   第6弾: メインゲーム画面レイアウト再設計
+   ①コンソール折りたたみ (フィールド優先) ②横向き=右サイドコンソール
+   操作性の原則: ステータスバーとアクションバーは常時1タップ圏内に残す
+   ═══════════════════════════════════════════════════════════════ */
+/* ── コンソール折りたたみトグル (ステータスバー左端・常時可視) ── */
+#btn-console-toggle {
+    flex-shrink: 0;
+    background: rgba(0,255,170,0.08);
+    border: 1px solid rgba(0,255,170,0.4);
+    color: #00ffaa;
+    font-family: 'Orbitron', monospace;
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    padding: 3px 8px;
+    margin-right: 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+/* ── 折りたたみ時: 中段パネル(スライダー/オシロ/波形)を隠し、ステータス+アクションバーだけ残す ── */
+body.console-min .left-panel,
+body.console-min .center-panel,
+body.console-min .right-panel,
+body.console-min #sig-info-bar { display: none !important; }
+
+/* ── 横向き (スマホランドスケープ): コンソールを右サイド化しフィールドを全高で使う ── */
+@media (orientation: landscape) and (max-height: 620px) {
+    #bottom-console {
+        position: fixed;
+        top: 38px; right: 0; bottom: 0; left: auto;
+        width: 320px; height: auto;
+        display: flex !important;
+        flex-direction: column;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        border-left: 1px solid rgba(0,255,170,0.25);
+        border-top: none;
+    }
+    #bottom-console > .console-panel { width: auto; min-width: 0; }
+    /* ステータスバーはフィールド上部の細い帯として常時可視 (コンソールから独立)。
+       横持ちは幅>768pxでモバイル用displayルールが外れるため display を強制 */
+    #mobile-status-bar {
+        display: flex !important;
+        align-items: center;
+        gap: 8px;
+        font-size: 9px;
+        padding: 3px 8px;
+        position: fixed;
+        top: 38px; left: 0; right: 320px;
+        z-index: 26;
+        border-bottom: 1px solid rgba(0,255,170,0.18);
+        background: rgba(1,6,10,0.72);
+    }
+    /* ミニマップ/ログはコンパクトに (フィールドを最大化) */
+    #minimap-container { width: 110px; height: 110px; top: 66px; left: 6px; }
+    #log-panel { top: 66px; left: 122px; right: 330px; width: auto; height: 94px; max-height: 94px; overflow: hidden; }
+    #message-log { max-height: 72px; overflow-y: auto; }
+    .action-panel .panel-header { display: none; }
+    /* アクションバーは右コンソール下端に固定感を出す */
+    #bottom-console .action-panel { margin-top: auto; }
+    /* ── 折りたたみ時: 64pxの縦レール (アクションバーのみ・アイコン縦積み) ── */
+    body.console-min #bottom-console { width: 64px; }
+    body.console-min #mobile-status-bar { right: 64px; }
+    body.console-min #log-panel { right: 74px; }
+    body.console-min #abar { flex-direction: column; gap: 4px; padding: 4px 3px; }
+    body.console-min .abar-group { flex: none; }
+    body.console-min .abar-btn { min-height: 44px; }
+    /* 幅>768pxでは #abar が非表示 (デスクトップ仕様) → 縦レールは action-grid を1列化 */
+    body.console-min .action-grid { grid-template-columns: 1fr !important; gap: 4px; }
+    body.console-min .act-icon-btn { min-height: 42px; padding: 3px 1px; }
+    body.console-min .act-icon-btn span { font-size: 6.5px; }
+    /* ポップオーバーはコンソールの左側 (フィールド側) に展開 */
+    #action-popover {
+        bottom: auto; top: 0;
+        left: auto; right: 100%;
+        width: 240px;
+        border: 1px solid rgba(0,255,170,0.22);
+    }
+}
