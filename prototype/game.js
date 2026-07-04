@@ -632,6 +632,7 @@ const AMBUSH_WEAPON_JAM   = 240;   // 奇襲された敵の火器管制ダウン
 const PLAYER_SURPRISE_MULT = 1.6;  // 未探知の敵から自機への奇襲被弾倍率
 const PLAYER_SURPRISE_JAM  = 150;  // 奇襲された自機の火器管制ダウン 2.5s
 const SYS_CRIT_REAR_CHANCE = 0.30; // 後方被弾時のサブシステム損傷確率 (奇襲初弾は確定)
+const SYS_CRIT_CD = 300;           // 同一艦への次のクリットまで5s (kinetic連射での連鎖マヒ防止・自機/敵対称)
 const SYS_ENGINE_SLOW = 0.45;      // 機関損傷: 速度倍率 (遅くなり、熱漏洩で見つかりやすい)
 const SYS_ENGINE_DUR  = 480;       // 機関損傷 8s
 const SYS_SENSOR_DUR  = 480;       // センサー損傷 8s (探知ほぼ不能)
@@ -1775,7 +1776,7 @@ function applyStrikeBonuses(byPlayer, attacker, target, hitAng) {
     if (!byPlayer && target === player) {
         target.detectionState = 'alerted';
         // 自機が攻撃元を全く掴めていなかった → 奇襲被弾 (対称ルール)
-        const unseen = attacker && !attacker.visible && !attacker.inVision && (attacker.contactAccuracy || 0) < 0.25;
+        const unseen = attacker && attacker.type !== 'fighter' && !attacker.visible && !attacker.inVision && (attacker.contactAccuracy || 0) < 0.25; // fighterドローンの体当たり射撃は奇襲扱いしない (雑魚に×1.6+火器管制ダウンが連発される問題)
         if (unseen && target._staggerTimer <= 0) {
             mult *= PLAYER_SURPRISE_MULT;
             target._staggerTimer = AMBUSH_STAGGER_DUR;
@@ -1787,8 +1788,10 @@ function applyStrikeBonuses(byPlayer, attacker, target, hitAng) {
             mult *= AMBUSH_FOLLOW_MULT;
         }
     }
-    // サブシステム損傷: 奇襲初弾=確定 / 後方被弾=確率 (機関40% / センサー30% / 武器30%)
-    if (preempt || (rear && Math.random() < SYS_CRIT_REAR_CHANCE)) {
+    // サブシステム損傷: 奇襲初弾=確定 / 後方被弾=確率 (機関40% / センサー30% / 武器30%)。
+    // クリットは対象毎に5sのCD — assault3連装の後方salvo(1発30%×3)で毎秒クリットが出る連鎖マヒを防ぐ
+    if ((preempt || (rear && Math.random() < SYS_CRIT_REAR_CHANCE)) && !(target._critCD > 0)) {
+        target._critCD = SYS_CRIT_CD;
         const roll = Math.random();
         let label;
         if (roll < 0.40)      { target._sysEngineTimer = SYS_ENGINE_DUR; label = '機関損傷'; }
@@ -1811,14 +1814,14 @@ class Projectile {
         // §3-1 武装アップグレード: 射程倍率 (自機弾のみ)
         const _wRange = isPlayer ? (WEAPONS_UPG_RANGE_MULT[gameState.upgrades.weapons] || 1.0) : 1.0;
         if (type === 'kinetic') {
-            this.speed = 12; this.maxDist = 800 * _wRange; this.dmg = 15 * dmgScale;
+            this.speed = 12; this.maxDist = 800 * _wRange; this.dmg = 18 * dmgScale; // バランス調整: 15→18 (近距離高リスクに見合うリターン。非assaultのkinetic DPS 22→26)
             this.angle = Math.atan2(target.y - y, target.x - x);
         } else if (type === 'missile') {
             // §3-10 ミサイル2タイプ: homing=熱源誘導 / smart=AI追跡(EM強・デコイ耐性・大閃光)
             this.missileMode = isPlayer ? missileMode : 'homing';
             this.speed = this.missileMode === 'smart' ? 7.5 : 6;
             this.maxDist = (this.missileMode === 'smart' ? 4400 : 3000) * _wRange;
-            this.dmg = (this.missileMode === 'smart' ? 65 : 50) * dmgScale;
+            this.dmg = (this.missileMode === 'smart' ? 70 : 55) * dmgScale; // バランス調整: 警報+デコイ対抗策の追加で実効命中率が下がった分を補填
             this.angle = Math.atan2(target.y - y, target.x - x);
         } else if (type === 'beam') {
             this.active = false;
@@ -2196,6 +2199,7 @@ class Ship {
         if (this._weaponJamTimer > 0) this._weaponJamTimer -= gameSpeedFactor;
         if (this._sysEngineTimer > 0) this._sysEngineTimer -= gameSpeedFactor;
         if (this._sysSensorTimer > 0) this._sysSensorTimer -= gameSpeedFactor;
+        if (this._critCD > 0)         this._critCD         -= gameSpeedFactor;
 
         if (this.isPlayer) {
             // ── 自機シグネチャ再設計 (速度+エンジン配分+ゲイン を統一指標化) ──
@@ -2701,7 +2705,9 @@ class Ship {
                 };
                 this.contactFreshness = 1.0;
             } else {
-                this.contactFreshness = Math.max(0, this.contactFreshness - 0.012); // 残り香の減衰(緩め): 静音化で振り切るには数秒の沈黙が要る
+                // 残り香の減衰: 通常0.012/f(83s)。静粛航行×1.5(55s)・デブリ擬態×2.2(38s)で加速=「隠れる」行動が振り切りに直結する
+                const _decayMult = isBottomed ? 2.2 : (silentRunning ? 1.5 : 1);
+                this.contactFreshness = Math.max(0, this.contactFreshness - 0.012 * _decayMult);
                 // §3-6残: 攻撃型ドローンの熱シグネチャ — コンタクト薄い時のみ誤誘引
                 if (playerDrones.length > 0 && this.contactFreshness < 0.3) {
                     for (const dr of playerDrones) {
