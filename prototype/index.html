@@ -11,7 +11,7 @@
     <title>Dark Echo: Tactical Space RTS</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23000' stroke='%2300ff88' stroke-width='2'/><circle cx='16' cy='16' r='6' fill='none' stroke='%2300ff88' stroke-width='1.5'/><line x1='16' y1='2' x2='16' y2='30' stroke='%2300ff88' stroke-width='1' opacity='0.4'/><line x1='2' y1='16' x2='30' y2='16' stroke='%2300ff88' stroke-width='1' opacity='0.4'/></svg>" type="image/svg+xml">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20260704a">
+    <link rel="stylesheet" href="style.css?v=20260704b">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -730,6 +730,7 @@
                 <!-- タイトルヒーロー: キーアート + ロゴ -->
                 <div class="lobby-hero">
                     <div class="lobby-hero-fade"></div>
+                    <button id="btn-ambient" onclick="toggleAmbient()">♪ SOUND ON</button>
                     <div class="lobby-hero-inner">
                         <div class="lobby-sonar-ring"></div>
                         <div class="lobby-logo-sub">HIGGS FOG &nbsp;//&nbsp; SILENT HUNT &nbsp;//&nbsp; DEEP SPACE</div>
@@ -740,17 +741,25 @@
                 <div class="lobby-container">
                     <div class="lobby-title lobby-title-compact">SORTIE SETUP <span class="lobby-title-jp">出撃準備</span></div>
 
+                    <!-- 戦歴 (第5弾: 出撃を跨いで積み重なる記録) -->
+                    <div id="career-panel">
+                        <div class="career-item"><span class="career-num" id="cr-sorties">0</span><span class="career-lbl">出撃</span></div>
+                        <div class="career-item"><span class="career-num" id="cr-kills">0</span><span class="career-lbl">撃破</span></div>
+                        <div class="career-item"><span class="career-num" id="cr-ambushes">0</span><span class="career-lbl">奇襲成功</span></div>
+                        <div class="career-item"><span class="career-num" id="cr-best">1</span><span class="career-lbl">最深セクター</span></div>
+                    </div>
+
                     <!-- ゲームモード選択 -->
                     <div class="mode-select">
                         <div class="mode-label">ゲームモード</div>
                         <div class="mode-cards">
                             <div class="mode-card active" id="mode-card-br" data-mode="br">
-                                <div class="mode-icon">⚔</div>
+                                <img src="assets/icon_atk.png" alt="" class="mode-icon-img">
                                 <div class="mode-name">バトルロワイアル</div>
                                 <div class="mode-desc">相手を先に殲滅した方の勝ち</div>
                             </div>
                             <div class="mode-card" id="mode-card-sd" data-mode="sd">
-                                <div class="mode-icon">◉</div>
+                                <img src="assets/icon_ew.png" alt="" class="mode-icon-img">
                                 <div class="mode-name">サーチ&amp;デストロイ</div>
                                 <div class="mode-desc">全ノードをハック、または相手を殲滅</div>
                             </div>
@@ -874,7 +883,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20260704a"></script>
+    <script src="game.js?v=20260704b"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {

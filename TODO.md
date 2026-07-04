@@ -478,6 +478,21 @@
 - **検証（Playwright）**: 新ロビーから実ボタンクリックで出撃成功 / スプライト透過表示 / 被弾方向インジケータ発火 / pageerrorゼロ
 - **残（任意）**: ゲームモードカードのアイコン画像化 / タイトルBGM
 
+### 3-19. ✅ 第5弾「霧の中の物語」: 環境音・戦歴・残骸の永続性（2026-07-04・第5PR）
+
+1. **環境音システム** — Web Audio常駐5ノード（デチューン二重ドローン55Hz+うなり / 露出度2+で浮かぶ短3度上の緊張音 / 呼吸LFO / ローパス）
+   - `startAmbient()/stopAmbient()/toggleAmbient()/updateAmbient()`。露出度・サージ遷移時のみパラメータ変更（毎フレーム処理なし・CPU負荷ほぼゼロ）
+   - サージ中はローパスが開き空気が変わる。25〜50s毎に遠くの空間の唸り（`ambientEcho`・情報価値ゼロのフレーバー）
+   - ロビー初タッチ or 出撃で開始（自動再生制限対応）。ロビー右上「♪ SOUND ON/OFF」トグル、`localStorage('darkEchoAmbient')` 永続化
+2. **戦歴** — `gameState.career {sorties, kills, ambushes, bestSector}`（セーブに相乗り・旧セーブはデフォルト補完）
+   - ロビーの SORTIE SETUP 直下に4項目パネル（#career-panel）。出撃/撃破/奇襲成功/最深セクターが積み上がる
+3. **前任艦の残骸** — 撃沈時 `wreckSalvage = max(100, credits×0.35)` を保存 → 次の出撃で争奪帯の途中に残骸が漂う（WRECKマーカー・ミニマップ灰ダイヤ）。350u接近で回収=+SCR。「死が次の出撃の物語になる」ローグライト動線
+4. **撃破残骸** — fighter以外の敵撃破の最終爆発地点に `Structure('derelict')` が残存（EWハック可）。戦場に戦闘の歴史が積もる
+5. **モードカードのアイコン画像化** — ⚔/◉ → `icon_atk.png`/`icon_ew.png`（mix-blend-mode: screen）
+
+- **検証（Playwright）**: 戦歴パネル表示 / 出撃で環境音ノード起動+sorties加算 / 撃破でkills+ディレリクト生成 / 死亡→wreckSalvage=350→再出撃で残骸スポーン→回収+350SCR のフルループ / pageerrorゼロ
+- **残（任意）**: ドローン音の実機音量調整（`master.gain 0.055`）/ 環境音の艦種別バリエーション
+
 ---
 
 ## 4. 🧊 構想段階（仕様未確定・将来）

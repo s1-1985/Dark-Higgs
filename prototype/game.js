@@ -263,7 +263,73 @@ function playSound(type, vol = 1) {
         gain.gain.setValueAtTime(0.10 * vol, now);
         gain.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
         osc.start(now); osc.stop(now + 0.55);
+    } else if (type === 'ambientEcho') {
+        // 遠くの空間の唸り — 情報価値ゼロの環境フレーバー (霧の閉塞感)
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(220, now);
+        osc.frequency.exponentialRampToValueAtTime(150, now + 1.3);
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.linearRampToValueAtTime(0.022 * vol, now + 0.4);
+        gain.gain.linearRampToValueAtTime(0.0, now + 1.4);
+        osc.start(now); osc.stop(now + 1.4);
     }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 環境音システム (第5弾): ヒッグスの霧の閉塞感を持続低音ドローンで表現。
+// 露出度が上がると不協和な緊張音が浮かび上がり、サージ中はフィルタが開いて空気が変わる。
+// 全て Web Audio ノード5個の常駐構成 (CPU負荷ほぼゼロ)。設定は localStorage に永続化。
+// ═══════════════════════════════════════════════════════════════
+let ambientOn = localStorage.getItem('darkEchoAmbient') !== '0';
+let _amb = null;
+function startAmbient() {
+    if (!ambientOn || _amb || !audioCtx) return;
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const now = audioCtx.currentTime;
+    const master = audioCtx.createGain();
+    master.gain.setValueAtTime(0.0001, now);
+    master.gain.exponentialRampToValueAtTime(0.055, now + 4); // ゆっくり立ち上がる
+    const lp = audioCtx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 220;
+    lp.connect(master); master.connect(audioCtx.destination);
+    // 二重ドローン (わずかにデチューンして「うなり」を作る)
+    const d1 = audioCtx.createOscillator(); d1.type = 'sine';     d1.frequency.value = 55;
+    const d2 = audioCtx.createOscillator(); d2.type = 'triangle'; d2.frequency.value = 55.35;
+    const g1 = audioCtx.createGain(); g1.gain.value = 0.55;
+    const g2 = audioCtx.createGain(); g2.gain.value = 0.20;
+    d1.connect(g1); g1.connect(lp);
+    d2.connect(g2); g2.connect(lp);
+    // 緊張音 (露出度2+で浮かび上がる短3度上)
+    const tn = audioCtx.createOscillator(); tn.type = 'sine'; tn.frequency.value = 65.4;
+    const tg = audioCtx.createGain(); tg.gain.value = 0.0;
+    tn.connect(tg); tg.connect(lp);
+    // ゆらぎLFO (呼吸)
+    const lfo = audioCtx.createOscillator(); lfo.frequency.value = 0.07;
+    const lg = audioCtx.createGain(); lg.gain.value = 0.016;
+    lfo.connect(lg); lg.connect(master.gain);
+    d1.start(); d2.start(); tn.start(); lfo.start();
+    _amb = { master, tensionGain: tg, lp, nodes: [d1, d2, tn, lfo], echoTimer: 900 + Math.random() * 1500 };
+}
+function stopAmbient() {
+    if (!_amb) return;
+    const old = _amb; _amb = null;
+    try { old.master.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.8); } catch (e) {}
+    setTimeout(() => { try { old.nodes.forEach(n => n.stop()); old.master.disconnect(); } catch (e) {} }, 1200);
+}
+function toggleAmbient() {
+    ambientOn = !ambientOn;
+    localStorage.setItem('darkEchoAmbient', ambientOn ? '1' : '0');
+    if (ambientOn) startAmbient(); else stopAmbient();
+    const b = document.getElementById('btn-ambient');
+    if (b) b.textContent = ambientOn ? '♪ SOUND ON' : '♪ SOUND OFF';
+}
+// 露出度/サージの遷移時に呼ぶ (毎フレームではない)
+function updateAmbient() {
+    if (!_amb) return;
+    const now = audioCtx.currentTime;
+    const t = playerExposureLevel >= 3 ? 0.34 : playerExposureLevel === 2 ? 0.16 : 0;
+    _amb.tensionGain.gain.linearRampToValueAtTime(t, now + 1.5);
+    _amb.lp.frequency.linearRampToValueAtTime(surgePhase === 'active' ? 520 : 220, now + 2.0);
 }
 
 // Game State Storage
@@ -279,7 +345,11 @@ let gameState = {
         weapons: 1,   // 武装      Lv1-3: 火力
         armor:   1,   // 装甲      Lv1-3: HP
         sensor:  1    // センサー  Lv1-3: ソナー範囲・精度
-    }
+    },
+    // 第5弾: 戦歴 (出撃を跨いで積み重なる記録 — localStorageに永続化)
+    career: { sorties: 0, kills: 0, ambushes: 0, bestSector: 1 },
+    // 第5弾: 前任艦の残骸 — 撃沈時に記録され、次の出撃でサルベージ可能
+    wreckSalvage: 0
 };
 
 function loadGame() {
@@ -293,6 +363,9 @@ function loadGame() {
             const defaultUpgrades = { engine: 1, weapons: 1, armor: 1, sensor: 1 };
             gameState.upgrades = Object.assign({}, defaultUpgrades, loaded.upgrades || {});
             gameState.engineType = gameState.engineType || 'thermonuclear';
+            // 戦歴: 旧セーブに無ければデフォルト補完
+            gameState.career = Object.assign({ sorties: 0, kills: 0, ambushes: 0, bestSector: 1 }, loaded.career || {});
+            if (typeof gameState.wreckSalvage !== 'number') gameState.wreckSalvage = 0;
             updateTopUI();
         } catch (e) {
             console.warn('SYSTEM: 保存データの読み込みに失敗しました。初期状態で起動します。', e);
@@ -305,6 +378,24 @@ function saveGame() {
     logMessage('SYSTEM: Game state saved to local storage.', 'system-msg');
 }
 loadGame();
+
+// ═══ 戦歴パネル (第5弾): ロビーに累計記録を表示 ═══
+function updateCareerPanel() {
+    const c = gameState.career || { sorties: 0, kills: 0, ambushes: 0, bestSector: 1 };
+    const _set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    _set('cr-sorties', c.sorties);
+    _set('cr-kills', c.kills);
+    _set('cr-ambushes', c.ambushes);
+    _set('cr-best', c.bestSector);
+}
+updateCareerPanel();
+// 環境音: 保存設定をトグルボタンへ反映 + ロビー初タッチで開始 (自動再生制限対応)
+(() => {
+    const _ab = document.getElementById('btn-ambient');
+    if (_ab) _ab.textContent = ambientOn ? '♪ SOUND ON' : '♪ SOUND OFF';
+    const _lb = document.getElementById('ship-select-lobby');
+    if (_lb) _lb.addEventListener('pointerdown', () => startAmbient(), { once: true });
+})();
 
 function updateTopUI() {
     const modeLabel = gameState.mode === 'sd' ? 'S&D' : 'BR';
@@ -611,6 +702,8 @@ let huntStats = null;                // 戦闘詳報 (セクター毎リセッ�
 // 第4弾: 被弾方向インジケータ — どちらから撃たれたかを自機周りの赤アークで即座に伝える
 let playerHitDirs = [];              // { ang, life } 被弾方位 (ワールド角)
 const HIT_DIR_LIFE = 75;             // 表示時間 1.25s
+// 第5弾: 前任艦の残骸 — 撃沈された自艦の残骸が次の出撃のマップに漂い、サルベージできる
+let playerWreckObj = null;           // { x, y, value } 回収で value SCR
 const BUILD_STOP_DUR  = 180; // 建設中停止フレーム数 (3秒)
 const BUILD_SIG_MULT  = 2.0; // 建設中シグネチャ増大倍率
 function computeVisionRadius() {
@@ -1628,6 +1721,7 @@ function applyStrikeBonuses(byPlayer, attacker, target, hitAng) {
             logMessage('TAC: 奇襲成功！ 敵艦混乱 — 火器管制ダウン中は追撃ダメージ増', 'warning-msg');
             playSound('alert');
             if (huntStats) huntStats.ambushes++;
+            if (gameState.career) gameState.career.ambushes++;
         } else if (target._staggerTimer > 0) {
             mult *= AMBUSH_FOLLOW_MULT; // 混乱中の追撃
         }
@@ -4157,6 +4251,17 @@ function generateSector() {
     isBottomed = false; nearMissActive = false; _commsInterceptCD = 0;
     huntStats = { startFrame: _frameCount, firstContact: -1, ambushes: 0, crits: 0, timesEngaged: 0, dmgDealt: 0, dmgTaken: 0, pings: 0 };
     playerHitDirs = [];
+    // 前任艦の残骸: 前回撃沈されていれば争奪帯の途中に漂う (回収でサルベージ)
+    playerWreckObj = null;
+    if (gameState.wreckSalvage > 0) {
+        const _wt = 0.35 + Math.random() * 0.30;
+        const _wja = Math.random() * Math.PI * 2, _wjr = Math.random() * 2500;
+        const _wSpot = findHidingSpot(
+            MAP_CX + (bossSpawn.x - MAP_CX) * _wt + Math.cos(_wja) * _wjr,
+            MAP_CY + (bossSpawn.y - MAP_CY) * _wt + Math.sin(_wja) * _wjr, 1500);
+        playerWreckObj = { x: _wSpot.x, y: _wSpot.y, value: gameState.wreckSalvage };
+        logMessage('SIGNAL: 前任艦の遭難ビーコンを検知 — 残骸から物資をサルベージ可能 (WRECKマーカー)', 'system-msg');
+    }
 
     // S&D進捗バーをリセット
     const sdFill = document.getElementById('sd-progress-fill');
@@ -4194,6 +4299,9 @@ function startGame(shipType) {
     // 敵艦種: ロビーで選択された値をセット
     const _selEt = document.querySelector('.enemy-select-btn.active')?.dataset?.type || 'assault';
     gameState.enemyType = _selEt;
+    // 第5弾: 戦歴 (出撃回数) + 環境音開始
+    if (gameState.career) gameState.career.sorties++;
+    startAmbient();
     document.getElementById('ship-select-lobby').classList.add('hidden');
     // 潜航型専用ジャミングボタンの表示制御
     document.querySelectorAll('.jam-btn').forEach(b => { b.style.display = shipType === 'stealth' ? '' : 'none'; });
@@ -5993,6 +6101,18 @@ function drawMinimap() {
         minimapCtx.globalAlpha = 1;
     });
 
+    // 前任艦の残骸 (灰色ダイヤ)
+    if (playerWreckObj) {
+        const _wmx = playerWreckObj.x * mmScale + offX, _wmy = playerWreckObj.y * mmScale + offY;
+        minimapCtx.globalAlpha = 0.7;
+        minimapCtx.strokeStyle = '#9ab0bb';
+        minimapCtx.lineWidth = 1;
+        minimapCtx.beginPath();
+        minimapCtx.moveTo(_wmx, _wmy - 3.5); minimapCtx.lineTo(_wmx + 3.5, _wmy);
+        minimapCtx.lineTo(_wmx, _wmy + 3.5); minimapCtx.lineTo(_wmx - 3.5, _wmy);
+        minimapCtx.closePath(); minimapCtx.stroke();
+        minimapCtx.globalAlpha = 1;
+    }
     // 遭難信号ビーコン (SOS — 電波なので常時可視)
     if (distressBeacon && !distressBeacon.claimed) {
         const _bmx = distressBeacon.x * mmScale + offX, _bmy = distressBeacon.y * mmScale + offY;
@@ -6835,6 +6955,9 @@ function showGameOver() {
     document.getElementById('go-kills').textContent = enemiesKilled;
     const _rep = document.getElementById('go-report');
     if (_rep) _rep.textContent = '戦闘詳報 — ' + formatHuntReport();
+    // 前任艦の残骸: 喪失クレジットの一部が次の出撃でサルベージ可能になる
+    gameState.wreckSalvage = Math.max(100, Math.floor(gameState.credits * 0.35));
+    saveGame();
     document.getElementById('game-over-overlay').classList.remove('hidden');
 }
 
@@ -7000,6 +7123,20 @@ function drawHUDOverlay(ctx) {
             ctx.moveTo(9, 0); ctx.lineTo(-5, -6); ctx.lineTo(-5, 6);
             ctx.closePath(); ctx.fill();
             ctx.restore();
+        }
+        // ── 前任艦の残骸マーカー (第5弾): 灰色ダイヤ + WRECK ──
+        if (playerWreckObj) {
+            const _wp2 = worldToScreen(playerWreckObj.x, playerWreckObj.y);
+            const wx2 = Math.max(24, Math.min(cssW - 24, _wp2.sx));
+            const wy2 = Math.max(90, Math.min(cssH - 30, _wp2.sy));
+            ctx.globalAlpha = 0.45 + Math.sin(t * 0.004) * 0.2;
+            ctx.strokeStyle = '#9ab0bb'; ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(wx2, wy2 - 9); ctx.lineTo(wx2 + 9, wy2); ctx.lineTo(wx2, wy2 + 9); ctx.lineTo(wx2 - 9, wy2);
+            ctx.closePath(); ctx.stroke();
+            ctx.fillStyle = '#9ab0bb';
+            ctx.font = 'bold 9px Orbitron, monospace';
+            ctx.fillText('WRECK', wx2, wy2 + 20);
         }
         // ── 遭難信号マーカー: 画面内はその位置、画面外は縁にクランプして方向を示す ──
         if (distressBeacon && !distressBeacon.claimed) {
@@ -7708,7 +7845,16 @@ function updateHuntTension() {
     } else if (lvl === 0 && playerExposureLevel > 0) {
         logMessage('TAC: 追跡を振り切った — 隠密状態に復帰', 'system-msg');
     }
+    if (lvl !== playerExposureLevel) { playerExposureLevel = lvl; updateAmbient(); }
     playerExposureLevel = lvl;
+    // 環境音: 遠くの空間の唸り (25〜50s毎のランダムな環境フレーバー)
+    if (_amb) {
+        _amb.echoTimer -= gameSpeedFactor;
+        if (_amb.echoTimer <= 0) {
+            playSound('ambientEcho', 0.7 + Math.random() * 0.5);
+            _amb.echoTimer = 1500 + Math.random() * 1500;
+        }
+    }
     // 被追跡中の心音 (追跡=遅い鼓動 / 捕捉=速い鼓動)
     if (lvl >= 2) {
         _exposureHeartbeatTimer -= gameSpeedFactor;
@@ -7752,6 +7898,7 @@ function updateHuntTension() {
                 surgePhase = 'none';
                 surgeNextTimer = SURGE_INTERVAL_MIN + Math.floor(Math.random() * SURGE_INTERVAL_VAR);
             }
+            updateAmbient(); // サージ位相で音像を変える
         }
     }
 }
@@ -7860,6 +8007,14 @@ function gameLoop() {
                         scrapDrops.push({ x: de.x + Math.cos(_sa) * _sr, y: de.y + Math.sin(_sa) * _sr, value: Math.ceil(reward / _scraps), life: 1.0 });
                     }
                     enemiesKilled++;
+                    if (gameState.career) gameState.career.kills++;
+                    // 撃破残骸: fighter以外は戦場にディレリクトとして残る (EWハック可能・戦場に歴史が積もる)
+                    if (de.type !== 'fighter') {
+                        const _wk = new Structure(de.x, de.y, 'derelict');
+                        _wk.discovered = true;
+                        structures.push(_wk);
+                        logMessage('TAC: 撃破残骸が漂流を開始 — ディレリクトとして残存 (EWハック可)', 'system-msg');
+                    }
                     enemies.splice(i, 1);
                 }
             }
@@ -7877,6 +8032,7 @@ function gameLoop() {
                 sectorCleared = true;
                 const bonus = 100 + gameState.sector * 75 + (sdWin && !allEnemiesDown ? 50 : 0);
                 gameState.credits += bonus;
+                if (gameState.career) gameState.career.bestSector = Math.max(gameState.career.bestSector || 1, gameState.sector);
                 updateTopUI();
                 saveGame();
                 showSectorClear(bonus);
@@ -7941,6 +8097,16 @@ function gameLoop() {
         updateHuntTension();
         updateDistressBeacon();
         interceptEnemyComms();
+        // 前任艦の残骸サルベージ (第5弾): 接近で回収
+        if (playerWreckObj && player && player.hp > 0 &&
+            Math.hypot(player.x - playerWreckObj.x, player.y - playerWreckObj.y) < 350) {
+            gameState.credits += playerWreckObj.value;
+            gameState.wreckSalvage = 0;
+            updateTopUI(); saveGame(); playSound('ui');
+            effects.push({ x: playerWreckObj.x, y: playerWreckObj.y, r: 0, maxR: 650, a: 1, c: '#9ab0bb', type: 'circle' });
+            logMessage(`SALVAGE: 前任艦の残骸から物資を回収 (+${playerWreckObj.value} SCR) — 帰らなかった艦に敬礼`, 'system-msg');
+            playerWreckObj = null;
+        }
 
         // Scrap Collection
         for (let i = scrapDrops.length - 1; i >= 0; i--) {
