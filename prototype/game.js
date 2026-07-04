@@ -8,6 +8,9 @@ let minimapDpr = 1; // ミニマップのバッキングストア倍率 (高DPI�
 // 高精細(Retina)対応: 描画はCSSピクセル基準、バッキングストアを devicePixelRatio 倍に。
 // レーダー/リング/文字のボケ防止。cssW/cssH=CSS px, _dpr=ピクセル比。
 let cssW = window.innerWidth, cssH = window.innerHeight, _dpr = 1;
+// 第6弾: UIインセット/コンソール折りたたみ状態 (宣言は最上部 — 初期化順序のTDZ回避)
+let _uiInsetCache = { right: 0, bottom: 0, t: 0 };
+let consoleMin = localStorage.getItem('darkEchoConsoleMin') !== '0'; // デフォルト=折りたたみ (視界優先)
 
 // ── パフォーマンスデバッグフラグ ──────────────────────────────
 const PERF_DISABLE_THREAT_RING = false;   // スレットリング描画をオフ
@@ -395,6 +398,7 @@ updateCareerPanel();
     if (_ab) _ab.textContent = ambientOn ? '♪ SOUND ON' : '♪ SOUND OFF';
     const _lb = document.getElementById('ship-select-lobby');
     if (_lb) _lb.addEventListener('pointerdown', () => startAmbient(), { once: true });
+    _applyConsoleMin(); // コンソール折りたたみ状態の復元 (第6弾)
 })();
 
 function updateTopUI() {
@@ -1061,6 +1065,7 @@ function resizeCanvas() {
     _dpr = Math.min(2, window.devicePixelRatio || 1);
     cssW = window.innerWidth;
     cssH = window.innerHeight;
+    _uiInsetCache.t = 0; // 回転/リサイズでUIインセット再計測 (第6弾)
     // バッキングストアは物理ピクセル、CSS表示はCSSピクセル → 描画は毎フレーム _dpr 倍に
     canvas.width = Math.round(cssW * _dpr);
     canvas.height = Math.round(cssH * _dpr);
@@ -1102,13 +1107,54 @@ function clampCamera() {
     camera.y = Math.max(minVisible - vh, Math.min(camera.y, FIELD_SIZE - minVisible));
 }
 
+// ═══ 第6弾: UIインセット — コンソールが覆う領域を除いた「実フィールド」の中心を求める ═══
+// 縦持ち=下部コンソール / 横持ち=右サイドコンソール。折りたたみ状態でも自動計測。
+function uiInsets() {
+    const now = Date.now();
+    if (now - _uiInsetCache.t > 600) {
+        let right = 0, bottom = 0;
+        const bc = document.getElementById('bottom-console');
+        if (bc) {
+            const r = bc.getBoundingClientRect();
+            if (r.width > 2 && r.height > 2) {
+                if (r.left > (cssW || 1) * 0.5) {
+                    right = Math.max(0, (cssW || window.innerWidth) - r.left);   // 右サイドコンソール (横持ち)
+                } else {
+                    bottom = Math.min((cssH || 1) * 0.7, Math.max(0, (cssH || window.innerHeight) - r.top)); // 下部コンソール (縦持ち)
+                }
+            }
+        }
+        _uiInsetCache = { right, bottom, t: now };
+    }
+    return _uiInsetCache;
+}
+
 function centerCameraOnPlayer() {
     if (!player) return;
     const cw = cssW || window.innerWidth;
     const ch = cssH || window.innerHeight;
-    camera.x = player.x - (cw / 2) / camera.zoom;
-    camera.y = player.y - (ch / 2) / camera.zoom;
+    // コンソールに隠れていない「実フィールド」の中心に自機を置く
+    const ins = uiInsets();
+    camera.x = player.x - ((cw - ins.right) / 2) / camera.zoom;
+    camera.y = player.y - ((ch - ins.bottom * 0.75) / 2) / camera.zoom; // 縦は75%補正 (完全に上げすぎない)
     clampCamera();
+}
+
+// ═══ 第6弾: コンソール折りたたみ — フィールドを広く使う (状態はlocalStorage永続化) ═══
+function toggleConsoleMin() {
+    consoleMin = !consoleMin;
+    localStorage.setItem('darkEchoConsoleMin', consoleMin ? '1' : '0');
+    _applyConsoleMin();
+    playSound('ui');
+}
+function _applyConsoleMin() {
+    document.body.classList.toggle('console-min', consoleMin);
+    const b = document.getElementById('btn-console-toggle');
+    if (b) b.textContent = consoleMin ? '▲ 操作' : '▼ 閉じる';
+    _uiInsetCache.t = 0; // インセット再計測
+    // 初期化IIFE(スクリプト冒頭)からも呼ばれる。後方宣言のlet(TDZ)はtypeofでも例外を投げるため
+    // try/catchで初期化前の呼び出しを無害化する (ゲーム中の呼び出しは正常に動く)
+    try { if (cameraFollowPlayer && player) centerCameraOnPlayer(); } catch (e) { /* 初期化前は無視 */ }
 }
 
 // ── マップモード (§ミニマップタップで全画面マップ) ──
@@ -7004,7 +7050,9 @@ function drawHUDOverlay(ctx) {
         const exCol = exL === 0 ? '#00ff88' : exL === 1 ? '#ffdd00' : exL === 2 ? '#ff9500' : '#ff3344';
         const exTxt = exL === 0 ? '隠密' : exL === 1 ? '痕跡を掴まれた' : exL === 2 ? '追跡されている' : '捕捉されている';
         // ミニマップ(左上)とシステムログ(右上)のDOMに隠れない高さに配置
-        const chipW = 168, chipH = 22, chipX = (cssW - chipW) / 2, chipY = 170;
+        const _fW = cssW - uiInsets().right; // 実フィールド幅 (横持ちは右コンソール分を除く)
+        const chipW = 168, chipH = 22, chipX = (_fW - chipW) / 2, chipY = 170;
+        const _fCX = _fW / 2;
         ctx.save();
         const _pl = exL >= 2 ? (0.55 + Math.sin(t * (exL === 3 ? 0.02 : 0.01)) * 0.35) : 0.85;
         ctx.globalAlpha = 0.55;
@@ -7032,7 +7080,7 @@ function drawHUDOverlay(ctx) {
             ctx.globalAlpha = 0.9;
             ctx.fillStyle = sCol;
             ctx.font = 'bold 11px Orbitron, monospace';
-            ctx.fillText(sTxt, cssW / 2, _infoY);
+            ctx.fillText(sTxt, _fCX, _infoY);
             _infoY += 15;
             if (surgePhase === 'active') {
                 // サージ中の白靄オーバーレイ (センサーが利かない体感)
@@ -7050,7 +7098,7 @@ function drawHUDOverlay(ctx) {
             if (player._weaponJamTimer > 0) dmgTxt += '火器管制ダウン ';
             if (player._sysEngineTimer > 0) dmgTxt += '機関損傷 ';
             if (player._sysSensorTimer > 0) dmgTxt += 'センサー損傷';
-            ctx.fillText(dmgTxt, cssW / 2, _infoY);
+            ctx.fillText(dmgTxt, _fCX, _infoY);
         }
         // ── 奇襲可能インジケータ: 完全ロック中 & 敵が自分に気付いていない ──
         const te = player.targetEntity;
@@ -7066,19 +7114,19 @@ function drawHUDOverlay(ctx) {
             ctx.globalAlpha = 0.75 + Math.sin(t * 0.004) * 0.2;
             ctx.fillStyle = '#99bbcc';
             ctx.font = 'bold 11px Orbitron, monospace';
-            ctx.fillText('デブリ擬態中 — 岩塊に艦影が紛れている', cssW / 2, chipY - 10);
+            ctx.fillText('デブリ擬態中 — 岩塊に艦影が紛れている', _fCX, chipY - 10);
         } else if (silentRunning) {
             ctx.globalAlpha = 0.7 + Math.sin(t * 0.006) * 0.2;
             ctx.fillStyle = '#66ccff';
             ctx.font = 'bold 11px Orbitron, monospace';
-            ctx.fillText('静粛航行中 — 速度/シグネチャ抑制', cssW / 2, chipY - 10);
+            ctx.fillText('静粛航行中 — 速度/シグネチャ抑制', _fCX, chipY - 10);
         }
         // ── ニアミス「息を殺せ」表示 ──
         if (nearMissActive) {
             ctx.globalAlpha = 0.6 + Math.sin(t * 0.02) * 0.35;
             ctx.fillStyle = '#ffcc66';
             ctx.font = 'bold 12px Orbitron, monospace';
-            ctx.fillText('敵艦至近 — 息を殺せ', cssW / 2, chipY + chipH + 28);
+            ctx.fillText('敵艦至近 — 息を殺せ', _fCX, chipY + chipH + 28);
         }
         // ── チャージビーム進捗リング (自機周り) ──
         if ((player._beamCharge || 0) > 0) {
