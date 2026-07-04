@@ -11,7 +11,7 @@
     <title>Dark Echo: Tactical Space RTS</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23000' stroke='%2300ff88' stroke-width='2'/><circle cx='16' cy='16' r='6' fill='none' stroke='%2300ff88' stroke-width='1.5'/><line x1='16' y1='2' x2='16' y2='30' stroke='%2300ff88' stroke-width='1' opacity='0.4'/><line x1='2' y1='16' x2='30' y2='16' stroke='%2300ff88' stroke-width='1' opacity='0.4'/></svg>" type="image/svg+xml">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20260703c">
+    <link rel="stylesheet" href="style.css?v=20260704a">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -727,9 +727,18 @@
 
             <!-- Ship Select Lobby -->
             <div id="ship-select-lobby">
+                <!-- タイトルヒーロー: キーアート + ロゴ -->
+                <div class="lobby-hero">
+                    <div class="lobby-hero-fade"></div>
+                    <div class="lobby-hero-inner">
+                        <div class="lobby-sonar-ring"></div>
+                        <div class="lobby-logo-sub">HIGGS FOG &nbsp;//&nbsp; SILENT HUNT &nbsp;//&nbsp; DEEP SPACE</div>
+                        <h1 class="lobby-logo">DARK <span>ECHO</span></h1>
+                        <div class="lobby-tagline">ヒッグスの霧の中 — 先に見つけた者が、生き残る</div>
+                    </div>
+                </div>
                 <div class="lobby-container">
-                    <div class="lobby-title">艦種選択</div>
-                    <div class="lobby-subtitle">出撃前に艦種とゲームモードを選択してください</div>
+                    <div class="lobby-title lobby-title-compact">SORTIE SETUP <span class="lobby-title-jp">出撃準備</span></div>
 
                     <!-- ゲームモード選択 -->
                     <div class="mode-select">
@@ -752,14 +761,14 @@
                     <div class="enemy-select" style="margin-bottom:18px;">
                         <div class="mode-label" style="margin-bottom:8px;">敵艦種</div>
                         <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
-                            <button class="btn btn-small enemy-select-btn active" data-type="assault" style="font-size:10px; padding:4px 10px; border-color:#00ffaa;">攻撃型<br><span style="font-size:9px; color:#aaa;">高耐久・重装甲</span></button>
-                            <button class="btn btn-small enemy-select-btn" data-type="stealth" style="font-size:10px; padding:4px 10px;">潜航型<br><span style="font-size:9px; color:#aaa;">高速・ステルス</span></button>
-                            <button class="btn btn-small enemy-select-btn" data-type="carrier" style="font-size:10px; padding:4px 10px;">空母型<br><span style="font-size:9px; color:#aaa;">大型・ドローン</span></button>
+                            <button class="btn btn-small enemy-select-btn active" data-type="assault" style="border-color:#00ffaa;"><img src="assets/enemy_destroyer.png" alt="" class="enemy-thumb">攻撃型<br><span class="enemy-sub">高耐久・重装甲</span></button>
+                            <button class="btn btn-small enemy-select-btn" data-type="stealth"><img src="assets/enemy_corvette.png" alt="" class="enemy-thumb">潜航型<br><span class="enemy-sub">高速・ステルス</span></button>
+                            <button class="btn btn-small enemy-select-btn" data-type="carrier"><img src="assets/enemy_carrier.png" alt="" class="enemy-thumb">空母型<br><span class="enemy-sub">大型・ドローン</span></button>
                         </div>
                     </div>
                     <div class="ship-cards">
                         <div class="ship-card" id="card-assault">
-                            <div class="ship-icon">⚔</div>
+                            <img class="ship-card-img" src="assets/ship_assault.png" alt="攻撃型">
                             <div class="ship-name">攻撃型</div>
                             <div class="ship-desc">高耐久・複数同時発射<br>正面突破の重装甲艦</div>
                             <div class="ship-stats">
@@ -772,7 +781,7 @@
                             <button class="btn btn-primary ship-select-btn" data-type="assault">選択して出撃</button>
                         </div>
                         <div class="ship-card" id="card-stealth">
-                            <div class="ship-icon">◈</div>
+                            <img class="ship-card-img" src="assets/ship_stealth.png" alt="潜航型">
                             <div class="ship-name">潜航型</div>
                             <div class="ship-desc">極低耐久・最高速度<br>ヒッグス雲への完全潜伏</div>
                             <div class="ship-stats">
@@ -785,7 +794,7 @@
                             <button class="btn btn-primary ship-select-btn" data-type="stealth">選択して出撃</button>
                         </div>
                         <div class="ship-card" id="card-carrier">
-                            <div class="ship-icon">⊕</div>
+                            <img class="ship-card-img" src="assets/ship_carrier.png" alt="空母型">
                             <div class="ship-name">空母型</div>
                             <div class="ship-desc">中耐久・ドローン展開<br>戦場支配型の建設艦</div>
                             <div class="ship-stats">
@@ -865,7 +874,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20260703c"></script>
+    <script src="game.js?v=20260704a"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {

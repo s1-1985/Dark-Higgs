@@ -564,7 +564,7 @@ const ENEMY_SPAWN_VAR = 4000;
 // ═══════════════════════════════════════════════════════════════
 // ゲーム性進化 第2弾「音と決断」(2026-07-03):
 //   5. 敵アクティブソナーピン: 敵が探信音を放つ (恐怖 + 正確な方位の対称的な情報交換)
-//   6. 魚雷警報: 接近ミサイルの航走音警告 → デコイ/ジャミングが「反応する道具」になる
+//   6. ミサイル接近警報: 接近ミサイルの推進波警告 → デコイ/ジャミングが「反応する道具」になる
 //   7. 静粛航行: ワンボタンで速度と全シグネチャを絞る (潜水艦の象徴的動作)
 //   8. 遭難信号: 両ハンターを同じ海域へ引き寄せる収束イベント (待ち伏せの舞台)
 //   9. 手負いの獲物: HP20%未満で冷却材漏洩 = 熱痕跡を引きずる (追撃戦)
@@ -577,7 +577,7 @@ const ENEMY_PING_HIGGS_BLOCK = 0.5;  // 自機地点のヒッグス濃度がこ�
 let silentRunning = false;           // 静粛航行モード
 const SILENT_SPEED_MULT = 0.5;       // 静粛航行中の速度倍率
 const SILENT_SIG_MULT = 0.55;        // 静粛航行中の全シグネチャ倍率
-const TORPEDO_ALERT_RANGE = 2600;    // 魚雷警報の探知距離 (航走音)
+const TORPEDO_ALERT_RANGE = 2600;    // ミサイル接近警報の探知距離 (推進波)
 let distressBeacon = null;           // {x, y, life, claimed} 遭難信号イベント
 let distressNextTimer = 4200;        // 初回発生 ~70s
 const DISTRESS_INTERVAL_MIN = 7200;  // 以降の発生間隔 120s〜
@@ -588,7 +588,7 @@ const WOUNDED_HEAT_FLOOR = 0.45;     // 手負いの熱シグネチャ下限 (�
 
 // ═══════════════════════════════════════════════════════════════
 // ゲーム性進化 第3弾「深淵の駆け引き」(2026-07-03):
-//   10. 着底: 岩礁帯で完全停止+静粛 → 岩に紛れて至近でも探知されない (潜水艦の古典戦術)
+//   10. デブリ擬態: 岩礁帯(デブリ帯)で完全停止+静粛 → 岩塊に紛れて至近でも探知されない
 //   11. ニアミス「息を殺せ」: 未発見のまま敵艦が至近を通過する恐怖演出
 //   12. チャージビーム: 2秒チャージで威力増。チャージ中は熱/EM激増=敵のcharging適応が本物になる
 //   13. 通信傍受: EMセンサーで敵の艦内通信 (状態・意図) を垣間見る
@@ -596,9 +596,9 @@ const WOUNDED_HEAT_FLOOR = 0.45;     // 手負いの熱シグネチャ下限 (�
 //   15. 戦闘詳報: クリア/撃沈時に狩りの統計を表示
 // 全数値は実機調整前提の tunable
 // ═══════════════════════════════════════════════════════════════
-let isBottomed = false;              // 着底状態 (岩礁+完全停止+静粛)
-const BOTTOM_DEBRIS_MIN = 0.30;      // 着底に必要な岩礁密度
-const BOTTOM_SIG_MULT = 0.30;        // 着底中の追加シグネチャ倍率 (静粛×0.55にさらに乗算)
+let isBottomed = false;              // デブリ擬態状態 (岩礁帯+完全停止+静粛)
+const BOTTOM_DEBRIS_MIN = 0.30;      // デブリ擬態に必要な岩礁帯密度
+const BOTTOM_SIG_MULT = 0.30;        // 擬態中の追加シグネチャ倍率 (静粛×0.55にさらに乗算)
 let nearMissActive = false;          // ニアミス状態 (息を殺せ)
 const NEAR_MISS_DIST = 1600;         // ニアミス発動距離
 const NEAR_MISS_CLEAR = 2100;        // ニアミス解除距離 (ヒステリシス)
@@ -608,6 +608,9 @@ const BEAM_CHARGE_MULT = 2.2;        // チャージビーム威力倍率
 let _commsInterceptCD = 0;           // 通信傍受クールダウン
 const COMMS_INTERCEPT_RANGE = 2600;  // 傍受可能距離
 let huntStats = null;                // 戦闘詳報 (セクター毎リセット)
+// 第4弾: 被弾方向インジケータ — どちらから撃たれたかを自機周りの赤アークで即座に伝える
+let playerHitDirs = [];              // { ang, life } 被弾方位 (ワールド角)
+const HIT_DIR_LIFE = 75;             // 表示時間 1.25s
 const BUILD_STOP_DUR  = 180; // 建設中停止フレーム数 (3秒)
 const BUILD_SIG_MULT  = 2.0; // 建設中シグネチャ増大倍率
 function computeVisionRadius() {
@@ -1690,6 +1693,11 @@ class Projectile {
                 const _beamDmg = Math.floor(150 * higgsBeamPenalty * dmgScale * (1 - beamArmorRes) * _bStrike.mult);
                 target.hp -= _beamDmg;
                 if (huntStats) { if (isPlayer && target !== player) huntStats.dmgDealt += _beamDmg; else if (!isPlayer && target === player) huntStats.dmgTaken += _beamDmg; }
+                // 被弾方向インジケータ (敵ビームが自機に命中)
+                if (!isPlayer && target === player) {
+                    playerHitDirs.push({ ang: Math.atan2(y - target.y, x - target.x), life: HIT_DIR_LIFE });
+                    if (playerHitDirs.length > 6) playerHitDirs.shift();
+                }
                 createHitEffect(target.x, target.y, isPlayer ? '#00ffaa' : '#ff4d4d');
                 effects.push({ x: target.x, y: target.y - 30, text: _bStrike.preempt ? `奇襲! -${_beamDmg}` : `-${_beamDmg}`, life: 1.0, type: 'floatText', c: _bStrike.preempt ? '#ffff00' : (isPlayer ? '#00ffdd' : '#ff5555') });
                 if (isPlayer) logMessage(`HIT [BEAM] → ${_beamDmg} ダメージ`, 'warning-msg');
@@ -1761,13 +1769,13 @@ class Projectile {
             }
             const _missileTurn = 0.05 * (1 - getStormIntensity(this.x, this.y) * STORM_MISSILE_DEGRADE) * _jamMissileFactor;
             this.angle += diff * _missileTurn;
-            // 魚雷警報: 敵ミサイルの航走音を探知 (「魚雷、来ます！」)。
+            // ミサイル接近警報: 敵ミサイルの推進波を探知。
             // 警告が出ることでデコイ射出/ジャミング/回避機動が「反応する道具」になる。
             if (!this.isPlayer && !this._torpAlerted && player && player.hp > 0 &&
                 Math.hypot(player.x - this.x, player.y - this.y) < TORPEDO_ALERT_RANGE) {
                 this._torpAlerted = true;
                 playSound('alert');
-                logMessage('WARNING: 魚雷航走音探知 — ミサイル接近中！ (デコイ/ジャミング/回避)', 'warning-msg');
+                logMessage('WARNING: 高速推進波を探知 — ミサイル接近中！ (デコイ/ジャミング/回避)', 'warning-msg');
             }
             // デコイに到達したらミサイルは消費される(無害化)
             if (this._luredBy && Math.hypot(this._luredBy.x - this.x, this._luredBy.y - this.y) < 40) {
@@ -1828,6 +1836,11 @@ class Projectile {
             const _hitDmg = Math.floor(this.dmg * dmgMult);
             hitTarget.hp -= _hitDmg;
             if (huntStats) { if (this.isPlayer) huntStats.dmgDealt += _hitDmg; else if (hitTarget === player) huntStats.dmgTaken += _hitDmg; }
+            // 被弾方向インジケータ: どの方位から撃たれたか (自機のみ)
+            if (!this.isPlayer && hitTarget === player) {
+                playerHitDirs.push({ ang: _hitAng, life: HIT_DIR_LIFE });
+                if (playerHitDirs.length > 6) playerHitDirs.shift();
+            }
             this.active = false;
             createHitEffect(this.x, this.y, this.isPlayer ? '#ffaa00' : '#ff4d4d');
             if (!preemptive) {
@@ -2076,7 +2089,7 @@ class Ship {
                 this.emSig      *= SILENT_SIG_MULT;
                 this.higgsSig   *= SILENT_SIG_MULT;
             }
-            // 着底: 岩礁に艦影が紛れ、さらに大幅低減 (敵の近接ハード探知も無効)
+            // デブリ擬態: 岩塊に艦影が紛れ、さらに大幅低減 (敵の近接ハード探知も無効)
             if (isBottomed) {
                 this.heatSig    *= BOTTOM_SIG_MULT;
                 this.opticalSig *= BOTTOM_SIG_MULT;
@@ -2516,7 +2529,7 @@ class Ship {
                     if (attenuated > sc2.threshold * 0.6) { playerSigDetected = true; detectedSigStrength = Math.max(detectedSigStrength, attenuated); }
                     if (attenuated > domVal) { domVal = attenuated; domSig = sName; }
                 });
-                // 接近探知 (着底中は岩礁に紛れて至近でも掴めない — 頭上を通過されてもやり過ごせる)
+                // 接近探知 (デブリ擬態中は岩塊に紛れて至近でも掴めない — 至近を通過されてもやり過ごせる)
                 if (!isBottomed && distToPlayer < myDetectRange) {
                     this.detectionTimer++;
                     if (this.detectionTimer > 60) playerSigDetected = true;
@@ -4143,6 +4156,7 @@ function generateSector() {
     distressNextTimer = 4200 + Math.floor(Math.random() * 1800);
     isBottomed = false; nearMissActive = false; _commsInterceptCD = 0;
     huntStats = { startFrame: _frameCount, firstContact: -1, ambushes: 0, crits: 0, timesEngaged: 0, dmgDealt: 0, dmgTaken: 0, pings: 0 };
+    playerHitDirs = [];
 
     // S&D進捗バーをリセット
     const sdFill = document.getElementById('sd-progress-fill');
@@ -6924,12 +6938,12 @@ function drawHUDOverlay(ctx) {
             ctx.font = 'bold 12px Orbitron, monospace';
             ctx.fillText('奇襲可能 ×3.5', _tp.sx, _tp.sy - 36);
         }
-        // ── 静粛航行 / 着底 インジケータ ──
+        // ── 静粛航行 / デブリ擬態 インジケータ ──
         if (isBottomed) {
             ctx.globalAlpha = 0.75 + Math.sin(t * 0.004) * 0.2;
             ctx.fillStyle = '#99bbcc';
             ctx.font = 'bold 11px Orbitron, monospace';
-            ctx.fillText('着底中 — 岩礁に艦影が紛れている', cssW / 2, chipY - 10);
+            ctx.fillText('デブリ擬態中 — 岩塊に艦影が紛れている', cssW / 2, chipY - 10);
         } else if (silentRunning) {
             ctx.globalAlpha = 0.7 + Math.sin(t * 0.006) * 0.2;
             ctx.fillStyle = '#66ccff';
@@ -6959,7 +6973,21 @@ function drawHUDOverlay(ctx) {
                 ctx.fillText('CHARGED', psx, psy - 48);
             }
         }
-        // ── 魚雷警報マーカー: 接近中の敵ミサイルの方位を自機周りに赤矢印表示 ──
+        // ── 被弾方向インジケータ: 撃たれた方位を自機周りの赤アークで表示 (第4弾) ──
+        for (let hd = playerHitDirs.length - 1; hd >= 0; hd--) {
+            const h = playerHitDirs[hd];
+            h.life -= gameSpeedFactor;
+            if (h.life <= 0) { playerHitDirs.splice(hd, 1); continue; }
+            ctx.globalAlpha = Math.min(0.85, h.life / HIT_DIR_LIFE);
+            ctx.strokeStyle = '#ff3344';
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.arc(psx, psy, 44, h.ang - 0.5, h.ang + 0.5);
+            ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+
+        // ── ミサイル接近警報マーカー: 接近中の敵ミサイルの方位を自機周りに赤矢印表示 ──
         for (const pr of projectiles) {
             if (pr.isPlayer || pr.type !== 'missile' || !pr._torpAlerted || !pr.active) continue;
             const bAng = Math.atan2(pr.y - player.y, pr.x - player.x);
@@ -7655,12 +7683,12 @@ function firePingFromEnemy(e) {
 // 常時フィードバックを与える。エスカレーション時は警告音、追跡中は心音が鳴る。
 function updateHuntTension() {
     if (!player || player.hp <= 0) return;
-    // ── 着底判定: 岩礁帯で完全停止+静粛 → 岩に艦影が紛れる (潜水艦の古典戦術) ──
+    // ── デブリ擬態判定: 岩礁帯(デブリ帯)で完全停止+静粛 → 漂う岩塊に艦影が紛れる ──
     const _wasBottomed = isBottomed;
     isBottomed = silentRunning && player.currentSpeed < 0.05 &&
                  getDebrisIntensity(player.x, player.y) > BOTTOM_DEBRIS_MIN;
-    if (isBottomed && !_wasBottomed) logMessage('TAC: 着底 — 機関完全停止。岩礁に艦影が紛れ、至近でも探知されにくい', 'system-msg');
-    else if (!isBottomed && _wasBottomed) logMessage('TAC: 着底解除 — 岩礁から離脱', 'system-msg');
+    if (isBottomed && !_wasBottomed) logMessage('TAC: デブリ擬態 — 機関完全停止。岩礁帯の岩塊に艦影が紛れる。至近でも探知されにくい', 'system-msg');
+    else if (!isBottomed && _wasBottomed) logMessage('TAC: 擬態解除 — 岩礁帯の擬装を解いた', 'system-msg');
     let lvl = 0;
     for (const e of enemies) {
         if (e.hp <= 0) continue;
@@ -7806,7 +7834,7 @@ function gameLoop() {
                 de._dyingVx = (de.x - (de.prevX ?? de.x)) * 0.7;
                 de._dyingVy = (de.y - (de.prevY ?? de.y)) * 0.7;
                 if (de.type !== 'fighter') {
-                    logMessage('TAC: 敵艦轟沈中 — 機関部誘爆を確認', 'system-msg');
+                    logMessage('TAC: 敵艦機関部誘爆 — 崩壊シーケンス進行中', 'system-msg');
                     playSound('explosion');
                 }
             }

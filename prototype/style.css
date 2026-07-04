@@ -1765,3 +1765,131 @@ input[type=range]::-webkit-slider-thumb {
 }
 #mode-card-sd .mode-icon { color: #ffaa00; }
 #mode-card-sd.active { border-color: #ffaa00; box-shadow: 0 0 16px rgba(255,170,0,0.2); background: rgba(255,170,0,0.05); }
+/* ═══════════════════════════════════════════════════════════════
+   タイトル画面リデザイン (2026-07-04 第4弾)
+   キーアートヒーロー + DARK ECHO ロゴ + ソナーリング演出 + スプライトカード
+   ═══════════════════════════════════════════════════════════════ */
+.lobby-hero {
+    position: relative;
+    width: 100%;
+    height: min(46vh, 420px);
+    min-height: 260px;
+    background: url('assets/title_keyart.jpg') center 28% / cover no-repeat #010409;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    overflow: hidden;
+}
+.lobby-hero-fade {
+    position: absolute; inset: 0;
+    background: linear-gradient(180deg,
+        rgba(1,4,9,0.55) 0%, rgba(1,4,9,0.05) 30%,
+        rgba(1,4,9,0.0) 55%, rgba(2,6,10,0.85) 85%, #020508 100%);
+    pointer-events: none;
+}
+.lobby-hero-inner {
+    position: relative;
+    text-align: center;
+    padding-bottom: 18px;
+    z-index: 1;
+}
+.lobby-logo {
+    margin: 2px 0 0;
+    font-family: 'Orbitron', monospace;
+    font-weight: 900;
+    font-size: clamp(36px, 11.5vw, 68px);
+    letter-spacing: 0.14em;
+    line-height: 1.05;
+    color: #eafff5;
+    text-shadow: 0 0 6px rgba(0,255,170,0.35), 0 0 28px rgba(0,255,170,0.25), 0 2px 18px rgba(0,0,0,0.9);
+    animation: logoBreath 5s ease-in-out infinite;
+}
+.lobby-logo span {
+    color: #00ffaa;
+    text-shadow: 0 0 8px rgba(0,255,170,0.7), 0 0 32px rgba(0,255,170,0.35);
+}
+@keyframes logoBreath {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.86; }
+}
+.lobby-logo-sub {
+    font-family: 'Orbitron', monospace;
+    font-size: 9px;
+    letter-spacing: 0.34em;
+    color: #5a8a7c;
+    text-shadow: 0 1px 8px rgba(0,0,0,0.9);
+}
+.lobby-tagline {
+    margin-top: 8px;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    color: #8fb8aa;
+    text-shadow: 0 1px 10px rgba(0,0,0,0.95);
+}
+/* ロゴ背後で広がるソナーリング */
+.lobby-sonar-ring {
+    position: absolute;
+    left: 50%; bottom: 30px;
+    width: 10px; height: 10px;
+    margin-left: -5px;
+    border: 1px solid rgba(0,255,170,0.5);
+    border-radius: 50%;
+    pointer-events: none;
+    animation: sonarPing 4.5s ease-out infinite;
+}
+@keyframes sonarPing {
+    0%   { transform: scale(1); opacity: 0.7; }
+    80%  { transform: scale(38); opacity: 0; }
+    100% { transform: scale(38); opacity: 0; }
+}
+/* セットアップ見出し */
+.lobby-title-compact {
+    font-family: 'Orbitron', monospace;
+    font-size: 13px !important;
+    letter-spacing: 0.28em;
+    color: #00ffaa;
+    border-bottom: 1px solid rgba(0,255,170,0.22);
+    padding-bottom: 8px;
+    margin-bottom: 14px !important;
+}
+.lobby-title-jp { font-size: 10px; color: #6a8f83; letter-spacing: 0.2em; margin-left: 8px; }
+.lobby-subtitle { display: none; }
+/* 艦スプライトカード */
+.ship-card-img {
+    display: block;
+    width: 100%;
+    max-width: 190px;
+    height: 84px;
+    margin: 0 auto 6px;
+    object-fit: contain;
+    filter: drop-shadow(0 0 14px rgba(0,255,170,0.30)) drop-shadow(0 4px 10px rgba(0,0,0,0.8));
+    transition: filter .25s, transform .25s;
+}
+#card-stealth .ship-card-img { filter: drop-shadow(0 0 14px rgba(150,100,255,0.35)) drop-shadow(0 4px 10px rgba(0,0,0,0.8)); }
+#card-carrier .ship-card-img { filter: drop-shadow(0 0 14px rgba(255,170,0,0.30)) drop-shadow(0 4px 10px rgba(0,0,0,0.8)); }
+.ship-card:hover .ship-card-img, .ship-card:active .ship-card-img { transform: scale(1.06); }
+/* 敵艦種サムネイル */
+.enemy-select-btn { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; font-size: 10px; padding: 6px 12px 5px; line-height: 1.35; }
+.enemy-thumb { width: 44px; height: 26px; object-fit: contain; filter: drop-shadow(0 0 6px rgba(255,80,80,0.35)); }
+.enemy-sub { font-size: 9px; color: #8a9aa8; }
+/* ボタン押下フィードバック (全UI共通) */
+.btn:active, .act-icon-btn:active, .abar-btn:active, .isel-btn:active, .jam-btn:active, .drone-btn:active {
+    transform: scale(0.94);
+    filter: brightness(1.35);
+}
+.btn, .act-icon-btn, .abar-btn, .isel-btn { transition: transform .08s ease, filter .08s ease, border-color .2s, box-shadow .2s; }
+/* パネル見出しの精密化 */
+.panel-title, .section-title { letter-spacing: 0.22em; }
+/* ヒーローを画面幅いっぱいに: ロビーコンテナのレイアウト上書き */
+#ship-select-lobby {
+    padding: 0;
+    align-items: stretch;
+    justify-content: flex-start;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.lobby-container { margin: 0 auto; }
+/* 黒背景スプライトをDOMで透過表示: ゲーム内の 'screen' 合成と同じ理屈 (黒=透明) */
+.ship-card-img, .enemy-thumb { mix-blend-mode: screen; }
+/* スプライト背後にティールのグロー (黒背景残渣を格納庫照明に見せる) */
+.ship-card-img { background: radial-gradient(ellipse at center, rgba(0,80,100,0.5) 0%, rgba(0,0,0,0) 70%); border-radius: 10px; }
