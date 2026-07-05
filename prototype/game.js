@@ -98,7 +98,7 @@ let enemiesKilled = 0;
 let genGain = 1.0;
 
 // センサーLv別性能定数
-const OMNI_SONAR_RANGE  = [0, MAP_RADIUS/6, MAP_RADIUS/3, MAP_RADIUS/2]; // Lv1,2,3 @100%SEN
+const OMNI_SONAR_RANGE  = [0, MAP_RADIUS/3, MAP_RADIUS*2/3, MAP_RADIUS]; // Lv1,2,3 @100%SEN (第9弾: 探知距離2倍)
 const DIR_SONAR_HALF_ANGLE = [0, Math.PI/36, Math.PI/12, Math.PI/9];     // 5°/15°/20° 半角
 const DIR_SONAR_MAX_RANGE  = MAP_RADIUS * 2;                               // マップ直径
 const UPGRADE_MULT = [0, 1.0, 1.5, 2.0]; // Lv別性能倍率 (sensor用)
@@ -4982,6 +4982,11 @@ function checkPassiveDetection() {
     // 強い順に最大3件だけ方位ウェッジ化
     allContacts.sort((a, b) => b.sig - a.sig);
     const picks = allContacts.slice(0, 3);
+    // 第9弾: ロック中(トラッキング)の対象が上位3件から漏れても、検知できていれば解析対象に含める
+    if (lockedSignalId && !picks.some(c => c.sourceId === lockedSignalId)) {
+        const _lc = allContacts.find(c => c.sourceId === lockedSignalId);
+        if (_lc) picks.push(_lc);
+    }
 
     let strongestDeg = 0, strongestWidthDeg = 0, strongest = -1;
     for (const c of picks) {
@@ -5011,57 +5016,60 @@ function checkPassiveDetection() {
     }
     while (passiveBearings.length > PASSIVE_BEARING_MAX) passiveBearings.shift();
 
-    // §4-4 H: dirAnalysis 積算 (検知できたコンタクト単位, 2秒サイクル)
+    // §4-4 H: dirAnalysis 積算 (検知できたコンタクト単位)。第9弾: 蓄積を大幅に高速化。
+    // 受信しているだけで緩く貯まり、ロック(トラッキング)中の対象は集中解析で速く貯まる=「1分で概位置」。
     for (const c of picks) {
         if (!_signalAnalysis[c.sourceId]) {
             _signalAnalysis[c.sourceId] = { dirAnalysis: 0.1, triParam: 0, displayCenterX: null, displayCenterY: null, lockOriginX: 0, lockOriginY: 0, lastPosX: 0, lastPosY: 0 };
         }
         const _pdSa = _signalAnalysis[c.sourceId];
-        const _pdStrPct = c.sig * 100;
-        const _pdAP = aiPrec('sensor') * 100; // 0-100
-        const _pdBase = 0.1 * (1 + _pdStrPct / 100); // %/sec: 0.1-0.2
-        const _pdBonus = _pdBase * (_pdAP / 100) * 0.4; // K=0.4
-        _pdSa.dirAnalysis = Math.min(100, _pdSa.dirAnalysis + (_pdBase + _pdBonus)); // ×1sec
+        const _pdAP = aiPrec('sensor'); // 0-1
+        const _pdFocus = (c.sourceId === lockedSignalId) ? 1.0 : 0.35; // ロック中は集中解析
+        // 検知サイクルは約2秒。ロック中は ~2.3/cycle → 60秒(30cycle)で ~70%。非ロックはその35%。
+        const _pdRate = (2.0 + c.sig * 0.8) * (1 + _pdAP * 0.5) * _pdFocus;
+        _pdSa.dirAnalysis = Math.min(100, _pdSa.dirAnalysis + _pdRate);
     }
 
-    // §4-4 I: triParam 積算 (ロック中シグネチャ, 1秒サイクル)
+    // §4-4 I: triParam 積算 (ロック中シグネチャ)。良い機動(方位線に垂直移動)でボーナス加算。
     if (lockedSignalId && _signalAnalysis[lockedSignalId] && player && player.hp > 0) {
         const _ptSa = _signalAnalysis[lockedSignalId];
         const _ptDx = player.x - _ptSa.lastPosX;
         const _ptDy = player.y - _ptSa.lastPosY;
         const _ptD = Math.hypot(_ptDx, _ptDy);
-        if (_ptD > 200) {
+        if (_ptD > 120) {
             const _ptBearings = passiveBearings.filter(b => b.sourceId === lockedSignalId && b.life > 0);
             if (_ptBearings.length > 0) {
                 _ptBearings.sort((a, b) => b.life - a.life);
                 const _ptBearing = _ptBearings[0];
                 const _ptMoveAngle = Math.atan2(_ptDy, _ptDx);
                 const _ptAlpha = _ptMoveAngle - _ptBearing.angle;
-                const _ptQuality = Math.abs(Math.sin(_ptAlpha)) * Math.min(_ptD / 2000, 1.0);
-                const _ptAP = aiPrec('sensor') * 100;
-                const _ptGain = 10 * (1 + _ptAP / 100);
+                const _ptQuality = Math.abs(Math.sin(_ptAlpha)) * Math.min(_ptD / 1500, 1.0);
+                const _ptAP = aiPrec('sensor');
+                const _ptGain = 12 * (1 + _ptAP * 0.6);
                 _ptSa.triParam = Math.min(100, _ptSa.triParam + _ptQuality * _ptGain);
             }
         }
         _ptSa.lastPosX = player.x;
         _ptSa.lastPosY = player.y;
-        // ジッタ中心を更新 (triangulationResult が有効な場合のみ)
-        if (triangulationResult) {
+        // 推定位置の表示中心を自動更新 (第9弾: computeTriangulation非依存。真の発信源+精度連動ジッタ)。
+        // これまでは triangulationResult がある時しか displayCenter が設定されず=サークルが永久に出なかった鶏卵問題を解消。
+        const _srcP = _sourcePos(lockedSignalId);
+        if (_srcP) {
             const _ptAvg = (_ptSa.dirAnalysis + _ptSa.triParam) / 2;
-            const _ptR = Math.max(200, MAP_RADIUS * (1 - _ptAvg / 100));
-            const _ptJr = _ptR / 2;
+            const _ptR = Math.max(1200, MAP_RADIUS * Math.pow(1 - _ptAvg / 100, 1.5));
+            const _ptJr = _ptR / 2; // オフセット最大=半径/2 → 真の発信源は常にサークル内
             const _ptJA = Math.random() * Math.PI * 2;
             const _ptJD = _ptJr * Math.sqrt(Math.random());
-            _ptSa.displayCenterX = triangulationResult.x + _ptJD * Math.cos(_ptJA);
-            _ptSa.displayCenterY = triangulationResult.y + _ptJD * Math.sin(_ptJA);
+            _ptSa.displayCenterX = _srcP.x + _ptJD * Math.cos(_ptJA);
+            _ptSa.displayCenterY = _srcP.y + _ptJD * Math.sin(_ptJA);
         }
     }
 
-    // ランドマーク特定チェック: locked signal の (dirAnalysis+triParam)/2 > 30% → identified
+    // ランドマーク特定チェック: locked signal の (dirAnalysis+triParam)/2 > 35% → identified (第9弾: 到達可能に)
     if (lockedSignalId && _signalAnalysis[lockedSignalId]) {
         const _idSa = _signalAnalysis[lockedSignalId];
         const _idAvg = (_idSa.dirAnalysis + _idSa.triParam) / 2;
-        if (_idAvg > 30) {
+        if (_idAvg > 35) {
             structures.forEach((s, si) => {
                 if (lockedSignalId === 'colony-' + si || lockedSignalId === 'derelict-' + si) {
                     if (!s.identified) {
@@ -5147,6 +5155,19 @@ function drawPassiveBearings(ctx) {
 }
 
 // ============================================================
+// sourceId → 実座標を解決 (推定位置サークルの中心/ランドマーク特定用・第9弾)
+function _sourcePos(sid) {
+    if (!sid) return null;
+    let m;
+    if ((m = sid.match(/^e-(\d+)$/)))         { const e = enemies[+m[1]];       return e && e.hp > 0 ? { x: e.x, y: e.y } : null; }
+    if ((m = sid.match(/^thermal-(\d+)$/)))   { const f = thermalField[+m[1]];  return f ? { x: f.x, y: f.y } : null; }
+    if ((m = sid.match(/^storm-(\d+)$/)))     { const f = stormField[+m[1]];    return f ? { x: f.x, y: f.y } : null; }
+    if ((m = sid.match(/^higgs-hot-(\d+)$/))) { const f = bgMist[+m[1]];        return f ? { x: f.x, y: f.y } : null; }
+    if ((m = sid.match(/^(?:colony|derelict)-(\d+)$/))) { const s = structures[+m[1]]; return s ? { x: s.x, y: s.y } : null; }
+    if ((m = sid.match(/^node-(\d+)$/)))      { const n = resourceNodes[+m[1]]; return n ? { x: n.x, y: n.y } : null; }
+    return null;
+}
+
 // §4-4: 三角測量エンジン
 // ============================================================
 // 複数のパッシブ方位線の交点から推定位置と精度を算出する。手動TRIボタンで呼び出す。
@@ -5202,15 +5223,56 @@ function computeTriangulation() {
 
 // §4-4: 三角測量精度円描画 (ワールド空間)
 // 低精度=赤大円 / 中=橙 / 高=緑 / 超高=シアン
+// 三角測量の移動方向ガイド (第9弾): ロック中、方位線に垂直な進路を自機周りに提示。
+// 垂直に動くほどベースラインが伸び triParam が速く貯まる=「どっちに進めばいいか」を可視化。
+function drawTriangulationGuide(ctx) {
+    if (!lockedSignalId || !player || player.hp <= 0) return;
+    const sa = _signalAnalysis[lockedSignalId];
+    if (!sa || (sa.triParam || 0) > 88) return; // 十分に測量できたら消す
+    const bl = passiveBearings.filter(b => b.sourceId === lockedSignalId && b.life > 0).sort((a, b) => b.life - a.life)[0];
+    if (!bl) return;
+    const perp = bl.angle + Math.PI / 2; // 方位線に垂直=最良の測量方向
+    const zc = 1 / camera.zoom;
+    const L = 120 * zc, gap = 34 * zc;
+    const t = Date.now() * 0.004;
+    const pulse = 0.45 + Math.sin(t) * 0.25;
+    ctx.save();
+    ctx.translate(player.x, player.y);
+    ctx.strokeStyle = '#00ffd0'; ctx.fillStyle = '#00ffd0';
+    ctx.globalAlpha = pulse;
+    ctx.lineWidth = 2 * zc;
+    ctx.setLineDash([9 * zc, 7 * zc]);
+    for (const dir of [perp, perp + Math.PI]) {
+        const dx = Math.cos(dir), dy = Math.sin(dir);
+        ctx.beginPath(); ctx.moveTo(dx * gap, dy * gap); ctx.lineTo(dx * L, dy * L); ctx.stroke();
+        // 矢じり
+        ctx.setLineDash([]);
+        const ax = dx * L, ay = dy * L, aa = 0.4;
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(ax - Math.cos(dir - aa) * 16 * zc, ay - Math.sin(dir - aa) * 16 * zc);
+        ctx.lineTo(ax - Math.cos(dir + aa) * 16 * zc, ay - Math.sin(dir + aa) * 16 * zc);
+        ctx.closePath(); ctx.fill();
+        ctx.setLineDash([9 * zc, 7 * zc]);
+    }
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 0.85;
+    ctx.font = `bold ${Math.round(9 * zc)}px Orbitron, monospace`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('測量に有効な進路 →', Math.cos(perp) * (L + 22 * zc), Math.sin(perp) * (L + 22 * zc));
+    ctx.restore();
+}
+
 function drawTriangulationCircle(ctx) {
+    drawTriangulationGuide(ctx);
     // §4-4 I: sig-analysis ベースの推定位置円 (lockedSignalId がある場合に優先)
     if (lockedSignalId && _signalAnalysis[lockedSignalId]) {
         const _siSa = _signalAnalysis[lockedSignalId];
         const _siDa = _siSa.dirAnalysis || 0;
         const _siTp = _siSa.triParam || 0;
-        if (_siDa > 5 && _siSa.displayCenterX != null) {
+        if (_siDa > 6 && _siSa.displayCenterX != null) {
             const _siAvg = (_siDa + _siTp) / 2;
-            const _siR = Math.max(200, MAP_RADIUS * (1 - _siAvg / 100));
+            const _siR = Math.max(1200, MAP_RADIUS * Math.pow(1 - _siAvg / 100, 1.5)); // 第9弾: 収束を体感できる曲線
             const _siCx = _siSa.displayCenterX, _siCy = _siSa.displayCenterY;
             const _siCol = _siAvg < 30 ? '255,80,0' : _siAvg < 60 ? '255,160,0' : _siAvg < 85 ? '80,255,120' : '100,200,255';
             const _siInv = 1 / camera.zoom;
@@ -5784,80 +5846,111 @@ function drawPassiveAntenna(ctx) {
         }
         ctx.globalAlpha = 1;
 
-        // ── (2) 脅威リング (中間・"どの方角に何が居るか") ──
-        // 検知したシグネチャを実方位へ配置。近い/強い/派手なほど張り出す。色=そのコンタクトの優勢センサー。
-        // 沈黙した敵は張り出しが小=居場所が読めない(センサー制約型と整合・対称)。
+        // ── (2) 気配リング (MGS4式) — "自機がどれだけ敵に見られているか" を六感的に表現 ──
+        // 敵がプレイヤーを捉えている強さ(contactFreshness×状態)を、その敵の方角に「波」として出す。
+        // 背後から強く見られていれば背後側が大きく波打つ。かすかなら小さく波打つ。沈黙で見られてなければ静か。
         const baseR = 86 * zi;
-        const breath = Math.sin(tSec * 0.7) * 2.5 * zi;
-        const THREAT_RANGE = 16000;
-        const contacts = [];
+        const breath = Math.sin(tSec * 0.7) * 2.0 * zi;
+        const GAZE_RANGE = 18000;
+        const gazes = [];
         for (const e of enemies) {
-            if (e.hp <= 0) continue;
+            if (e.hp <= 0 || e._dying) continue;
             const dx = e.x - player.x, dy = e.y - player.y;
             const dist = Math.hypot(dx, dy);
-            if (dist > THREAT_RANGE) continue;
-            const hBlk = getHiggsIntensity((e.x + player.x)/2, (e.y + player.y)/2);
-            let best = 0, bestS = 'heat';
-            for (const s2 of ['heat','optic','em','higgs']) {
-                const sc2 = sensorConfig[s2];
-                const v = sc2.sig(e) * (1 - hBlk * sc2.higgsMod);
-                if (v > best) { best = v; bestS = s2; }
-            }
-            const prox = Math.max(0, 1 - dist / THREAT_RANGE);
-            const strength = Math.min(1, best * (0.4 + prox * 0.9));
-            if (strength < 0.05) continue;
-            contacts.push({ ang: Math.atan2(dy, dx), strength, sensor: bestS });
+            if (dist > GAZE_RANGE) continue;
+            // 視認強度: 接触鮮度 × 状態重み (交戦=はっきり見られている / 追跡=気配 / それ以外=残り香)
+            const stateW = e.aiState === 'combat' ? 1.0 : e.aiState === 'hunting' ? 0.85 : 0.5;
+            const gaze = Math.min(1, (e.contactFreshness || 0) * stateW);
+            if (gaze < 0.06) continue; // 見られていない敵は波を出さない(=居場所も分からない・対称)
+            gazes.push({ ang: Math.atan2(dy, dx), gaze });
         }
-        contacts.sort((a, b) => b.strength - a.strength);
-        const shown = contacts.slice(0, 4); // 上位4件のみ=非煩雑
-        let maxThreat = 0;
-        for (const c of shown) if (c.strength > maxThreat) maxThreat = c.strength;
+        let maxGaze = 0;
+        for (const g of gazes) if (g.gaze > maxGaze) maxGaze = g.gaze;
 
         const ringLw = zi;
-        const N = 30, step = (Math.PI * 2) / N;
-        const radAt = (ang) => {
+        const N = 40, step = (Math.PI * 2) / N;
+        const gazeAt = (ang) => {
             let r = baseR + breath;
-            for (const c of shown) {
-                let d = ang - c.ang;
+            for (const g of gazes) {
+                let d = ang - g.ang;
                 if (d < -Math.PI) d += Math.PI * 2; else if (d > Math.PI) d -= Math.PI * 2;
-                r += Math.exp(-d * d * 2.2) * c.strength * 42 * zi; // 実方位へローブ
+                const env = Math.exp(-d * d * 2.0);            // その敵の方角に局在(やや広め)
+                const bulge = g.gaze * 22 * zi;                 // 見られている側が張り出す
+                const wave  = Math.sin(ang * 8 - tSec * 6.0) * g.gaze * 20 * zi
+                            + Math.sin(ang * 15 + tSec * 3.5) * g.gaze * 9 * zi; // 波打ち(強いほど大)
+                r += env * (bulge + wave);
             }
             return r;
         };
-        // ベースリング (穏やかな環。脅威があるほど僅かに明るく)
-        ctx.globalAlpha = 0.26 + maxThreat * 0.4;
-        ctx.strokeStyle = '#cfe8e0';
-        ctx.lineWidth = 1.4 * ringLw;
+        // 気配の強さで色を穏やかな青緑→警戒の赤へ
+        const gr = Math.round(120 + maxGaze * 135), gg = Math.round(220 - maxGaze * 150), gb = Math.round(210 - maxGaze * 140);
+        ctx.globalAlpha = 0.24 + maxGaze * 0.5;
+        ctx.strokeStyle = `rgb(${gr},${gg},${gb})`;
+        ctx.lineWidth = (1.3 + maxGaze * 1.6) * ringLw;
         ctx.beginPath();
         for (let i = 0; i <= N; i++) {
-            const a = i * step, rr = radAt(a);
+            const a = i * step, rr = gazeAt(a);
             const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
             if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
         }
         ctx.closePath();
         ctx.stroke();
-        // 脅威方位の色付きローブ + 種別ティック
-        for (const c of shown) {
-            const hex = S_HEX[c.sensor];
-            const span = 0.28 + c.strength * 0.30;
-            ctx.globalAlpha = c.strength * 0.9;
-            ctx.strokeStyle = hex;
-            ctx.lineWidth = (1.4 + c.strength * 2.4) * ringLw;
+        // 強く見られている方角に薄いグロー弧 (危険方向の強調)
+        for (const g of gazes) {
+            if (g.gaze < 0.35) continue;
+            ctx.globalAlpha = (g.gaze - 0.2) * 0.5;
+            ctx.strokeStyle = `rgb(${gr},${gg},${gb})`;
+            ctx.lineWidth = (2 + g.gaze * 3) * ringLw;
             ctx.beginPath();
-            const segN = 10;
+            const span = 0.5, segN = 12;
             for (let i = 0; i <= segN; i++) {
-                const a = c.ang - span + (i / segN) * span * 2, rr = radAt(a);
+                const a = g.ang - span + (i / segN) * span * 2, rr = gazeAt(a);
                 const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
                 if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
             }
             ctx.stroke();
-            const tr = radAt(c.ang);
-            ctx.globalAlpha = 0.4 + c.strength * 0.5;
-            ctx.lineWidth = 2 * ringLw;
+        }
+        ctx.globalAlpha = 1;
+
+        // ── (3) 受信シグネチャのブリップ (リング外周) — トラッキング中は識別 ──
+        // 「今どんなシグネチャを受信しているか」をリング外周のマーカーで。ロック中の対象は強調表示。
+        const _sigBlips = {}; // sourceId → { ang, sensor, life }
+        for (const b of passiveBearings) {
+            if (b.life <= 0) continue;
+            const prev = _sigBlips[b.sourceId];
+            if (!prev || b.life > prev.life) _sigBlips[b.sourceId] = { ang: b.angle, sensor: b.sensor, life: b.life, maxLife: b.maxLife };
+        }
+        for (const sid in _sigBlips) {
+            const bl = _sigBlips[sid];
+            const hex = S_HEX[bl.sensor] || '#cfe8e0';
+            const rr = gazeAt(bl.ang);
+            const isLocked = (sid === lockedSignalId);
+            const fade = Math.max(0.25, bl.life / (bl.maxLife || 480));
+            const bx = Math.cos(bl.ang), by = Math.sin(bl.ang);
+            // 外向きの短いティック + ドット
+            ctx.globalAlpha = fade * (isLocked ? 1 : 0.7);
+            ctx.strokeStyle = hex;
+            ctx.lineWidth = (isLocked ? 2.4 : 1.4) * ringLw;
             ctx.beginPath();
-            ctx.moveTo(Math.cos(c.ang) * (tr + 3 * zi), Math.sin(c.ang) * (tr + 3 * zi));
-            ctx.lineTo(Math.cos(c.ang) * (tr + 13 * zi), Math.sin(c.ang) * (tr + 13 * zi));
+            ctx.moveTo(bx * (rr + 5 * zi), by * (rr + 5 * zi));
+            ctx.lineTo(bx * (rr + (isLocked ? 20 : 13) * zi), by * (rr + (isLocked ? 20 : 13) * zi));
             ctx.stroke();
+            ctx.fillStyle = hex;
+            ctx.beginPath();
+            ctx.arc(bx * (rr + (isLocked ? 20 : 13) * zi), by * (rr + (isLocked ? 20 : 13) * zi), (isLocked ? 3.2 : 2) * zi, 0, Math.PI * 2);
+            ctx.fill();
+            // トラッキング中: 二重リング(ロックブラケット)で識別
+            if (isLocked) {
+                ctx.globalAlpha = fade;
+                ctx.lineWidth = 1.4 * ringLw;
+                ctx.beginPath();
+                ctx.arc(bx * (rr + 20 * zi), by * (rr + 20 * zi), 6 * zi, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.fillStyle = hex;
+                ctx.font = `bold ${Math.round(8 * zi)}px Orbitron, monospace`;
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText('LCK', bx * (rr + 34 * zi), by * (rr + 34 * zi));
+            }
         }
         ctx.globalAlpha = 1;
         ctx.restore();
@@ -6907,7 +7000,7 @@ function updateEnvInfo() {
     if (player && player.hp > 0) {
         const hpPct = Math.max(0, Math.round((player.hp / player.maxHp) * 100));
         if (msbHpFill) msbHpFill.style.width = hpPct + '%';
-        if (msbHpText) msbHpText.textContent = hpPct + '%';
+        if (msbHpText) { msbHpText.textContent = hpPct + '%'; msbHpText.style.color = hpPct < 25 ? '#ff4d4d' : hpPct < 55 ? '#ffaa44' : '#00ffaa'; }
         if (msbHiggs) msbHiggs.textContent = Math.round(getHiggsIntensity(player.x, player.y) * 100) + '%';
         if (msbDebris) msbDebris.textContent = Math.round(getDebrisIntensity(player.x, player.y) * 100) + '%';
         if (msbStorm) msbStorm.textContent = Math.round(getStormIntensity(player.x, player.y) * 100) + '%';
@@ -6998,6 +7091,15 @@ function drawTargetLine(ctx) {
 // ============================================================
 // HUDオーバーレイ描画 (スクリーン空間 — ズームに関わらず固定サイズ)
 // ============================================================
+function _roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+}
 function drawHUDOverlay(ctx) {
     if (!player || player.hp <= 0) return;
     const { sx: psx, sy: psy } = worldToScreen(player.x, player.y);
@@ -7008,32 +7110,60 @@ function drawHUDOverlay(ctx) {
     {
         const exL = playerExposureLevel;
         const exCol = exL === 0 ? '#00ff88' : exL === 1 ? '#ffdd00' : exL === 2 ? '#ff9500' : '#ff3344';
-        const exTxt = exL === 0 ? '隠密' : exL === 1 ? '痕跡を掴まれた' : exL === 2 ? '追跡されている' : '捕捉されている';
-        // ミニマップ(左上)とシステムログ(右上)のDOMに隠れない高さに配置
+        const exTxt = exL === 0 ? '隠密' : exL === 1 ? '痕跡' : exL === 2 ? '追跡' : '捕捉';
         const _fW = cssW - uiInsets().right; // 実フィールド幅 (横持ちは右コンソール分を除く)
-        const chipW = 168, chipH = 22, chipX = (_fW - chipW) / 2, chipY = 170;
         const _fCX = _fW / 2;
+        const chipY = 158;
         ctx.save();
-        const _pl = exL >= 2 ? (0.55 + Math.sin(t * (exL === 3 ? 0.02 : 0.01)) * 0.35) : 0.85;
-        ctx.globalAlpha = 0.55;
+        // ── 露出度ピル (小型化): ドット + 短い状態名。隠れている時は控えめ、見られるほど強調 ──
+        const _pl = exL >= 2 ? (0.6 + Math.sin(t * (exL === 3 ? 0.02 : 0.01)) * 0.35) : 0.7;
+        ctx.font = 'bold 10px Orbitron, monospace';
+        const _pillTextW = ctx.measureText(exTxt).width;
+        const _pillW = _pillTextW + 26, _pillH = 15, _pillX = _fCX - _pillW / 2;
+        ctx.globalAlpha = 0.45;
         ctx.fillStyle = '#000d08';
-        ctx.fillRect(chipX, chipY, chipW, chipH);
+        _roundRect(ctx, _pillX, chipY, _pillW, _pillH, 7); ctx.fill();
         ctx.globalAlpha = _pl;
-        ctx.strokeStyle = exCol; ctx.lineWidth = 1.5;
-        ctx.strokeRect(chipX, chipY, chipW, chipH);
+        ctx.strokeStyle = exCol; ctx.lineWidth = 1;
+        _roundRect(ctx, _pillX, chipY, _pillW, _pillH, 7); ctx.stroke();
         ctx.fillStyle = exCol;
-        ctx.font = 'bold 12px Orbitron, monospace';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(exTxt, chipX + chipW / 2 + 8, chipY + chipH / 2 + 1);
-        ctx.beginPath(); ctx.arc(chipX + 13, chipY + chipH / 2, 4, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(_pillX + 9, chipY + _pillH / 2, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillText(exTxt, _pillX + 16, chipY + _pillH / 2 + 0.5);
+        const chipH = _pillH; // 後続のサージ/損傷表示の基準に流用
         // 捕捉中: 画面縁を赤くパルス (狩られている感)
         if (exL === 3) {
             ctx.globalAlpha = 0.10 + Math.sin(t * 0.02) * 0.07;
             ctx.strokeStyle = '#ff2233'; ctx.lineWidth = 10;
             ctx.strokeRect(5, 5, cssW - 10, cssH - 10);
         }
+        // ── コンパス (磁気方位・360°) — 艦首の向きを水平テープで表示 ──
+        {
+            const headingDeg = (Math.atan2(Math.cos(player.angle), -Math.sin(player.angle)) * 180 / Math.PI + 360) % 360;
+            const tapeY = chipY + _pillH + 26, halfW = 78, spanDeg = 90; // ピルと重ならないよう十分下げる
+            ctx.globalAlpha = 0.5;
+            ctx.strokeStyle = '#00e0c0'; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(_fCX - halfW, tapeY); ctx.lineTo(_fCX + halfW, tapeY); ctx.stroke();
+            ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+            const CARD = { 0:'N', 90:'E', 180:'S', 270:'W' };
+            for (let off = -spanDeg; off <= spanDeg; off += 15) {
+                let deg = Math.round(headingDeg + off); deg = ((deg % 360) + 360) % 360;
+                const x = _fCX + (off / spanDeg) * halfW;
+                const isCard = deg % 90 === 0;
+                ctx.globalAlpha = 0.35 + (1 - Math.abs(off) / spanDeg) * 0.4;
+                ctx.strokeStyle = isCard ? '#5affd0' : '#2a8c7c'; ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(x, tapeY - (isCard ? 5 : 3)); ctx.lineTo(x, tapeY); ctx.stroke();
+                if (isCard) { ctx.fillStyle = '#5affd0'; ctx.font = 'bold 8px Orbitron, monospace'; ctx.fillText(CARD[deg] || '', x, tapeY + 2); }
+            }
+            // 中央キャレット + 数値
+            ctx.globalAlpha = 0.95;
+            ctx.fillStyle = '#eafff8';
+            ctx.beginPath(); ctx.moveTo(_fCX, tapeY - 7); ctx.lineTo(_fCX - 4, tapeY - 12); ctx.lineTo(_fCX + 4, tapeY - 12); ctx.closePath(); ctx.fill();
+            ctx.font = 'bold 10px Orbitron, monospace'; ctx.textBaseline = 'bottom';
+            ctx.fillText(('' + Math.round(headingDeg)).padStart(3, '0') + '°', _fCX, tapeY - 13);
+        }
         // ── ヒッグスサージ表示 ──
-        let _infoY = chipY + chipH + 14;
+        let _infoY = chipY + chipH + 46; // コンパステープの下から
         if (surgePhase !== 'none') {
             const sTxt = surgePhase === 'warn' ? '⚠ ヒッグスサージ接近' : surgePhase === 'active' ? 'サージ通過中 — 全センサー縮退' : 'クリアリング — 高感度ウィンドウ';
             const sCol = surgePhase === 'active' ? '#66aaff' : surgePhase === 'warn' ? '#ffdd00' : '#00ffcc';
