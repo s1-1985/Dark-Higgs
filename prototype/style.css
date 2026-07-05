@@ -1251,16 +1251,18 @@ input[type=range]::-webkit-slider-thumb {
         align-items: center;
         grid-column: 1 / -1;
         grid-row: 1;
-        padding: 2px 8px;
-        gap: 6px;
+        padding: 2px 10px 2px 6px; /* 右端の見切れ防止に右padding */
+        gap: 5px;
         background: rgba(0,255,170,0.05);
         border-bottom: 1px solid rgba(0,255,170,0.15);
         font-family: 'Orbitron', monospace;
-        font-size: 9px;
+        font-size: 8.5px;
         color: #999;
         overflow: hidden;
         white-space: nowrap;
     }
+    /* 端末が狭くて収まらない時は末尾から自然に切れるが、主要値(HP/敵/弾)は左寄せで死守 */
+    #btn-console-toggle { font-size: 8px; padding: 3px 6px; margin-right: 4px; }
     .msb-hp-wrap { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
     .msb-hp-bar {
         width: 36px; height: 5px;
@@ -1487,8 +1489,10 @@ input[type=range]::-webkit-slider-thumb {
         gap: 5px;
     }
     #action-popover.open { display: grid; }
+    /* ドローン/建設は最大8ボタン → 縦にはみ出さないよう上限高+スクロール (見切れ防止) */
+    #action-popover { max-height: 46vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
     #action-popover .act-icon-btn {
-        min-height: 50px;
+        min-height: 48px;
         padding: 4px 2px;
     }
     #action-popover .act-icon-btn svg { width: 22px; height: 22px; }
