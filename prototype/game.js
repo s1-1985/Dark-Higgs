@@ -89,7 +89,7 @@ window.fireTriangulate = function() {
 };
 let _lpmWorld = null;            // 長押しラジアルメニューのワールド座標
 const PASSIVE_BEARING_LIFE = 480;  // 8秒フェード (@60fps)
-const PASSIVE_BEARING_MAX  = 24;   // 同時表示上限 (地形+敵で増加)
+const PASSIVE_BEARING_MAX  = 14;   // 同時表示上限 (第10弾: 24→14 でウェッジの過密・点滅を抑制)
 let mouseWorldX = MAP_CX;
 let mouseWorldY = MAP_CY;
 let dirSonarVisual = null; // { angle, halfAngle, range, life }
@@ -5051,17 +5051,17 @@ function checkPassiveDetection() {
         }
         _ptSa.lastPosX = player.x;
         _ptSa.lastPosY = player.y;
-        // 推定位置の表示中心を自動更新 (第9弾: computeTriangulation非依存。真の発信源+精度連動ジッタ)。
-        // これまでは triangulationResult がある時しか displayCenter が設定されず=サークルが永久に出なかった鶏卵問題を解消。
+        // 推定位置の表示"目標"を更新 (第10弾: ジッタ方向を固定し精度で収束。毎サイクルの乱数テレポートを廃止)。
+        // 描画側(drawTriangulationCircle)が毎フレーム目標へ補間するので、サークルは滑らかにドリフト・収束する。
         const _srcP = _sourcePos(lockedSignalId);
         if (_srcP) {
+            if (_ptSa.jitAngle === undefined) { _ptSa.jitAngle = Math.random() * Math.PI * 2; _ptSa.jitFrac = Math.sqrt(Math.random()); }
             const _ptAvg = (_ptSa.dirAnalysis + _ptSa.triParam) / 2;
             const _ptR = Math.max(1200, MAP_RADIUS * Math.pow(1 - _ptAvg / 100, 1.5));
-            const _ptJr = _ptR / 2; // オフセット最大=半径/2 → 真の発信源は常にサークル内
-            const _ptJA = Math.random() * Math.PI * 2;
-            const _ptJD = _ptJr * Math.sqrt(Math.random());
-            _ptSa.displayCenterX = _srcP.x + _ptJD * Math.cos(_ptJA);
-            _ptSa.displayCenterY = _srcP.y + _ptJD * Math.sin(_ptJA);
+            const _ptOff = _ptSa.jitFrac * (_ptR / 2); // 固定方向・精度連動で縮む → 真値へ収束
+            _ptSa.targetCenterX = _srcP.x + _ptOff * Math.cos(_ptSa.jitAngle);
+            _ptSa.targetCenterY = _srcP.y + _ptOff * Math.sin(_ptSa.jitAngle);
+            _ptSa.targetR = _ptR;
         }
     }
 
@@ -5102,7 +5102,9 @@ function drawPassiveBearings(ctx) {
         const b = passiveBearings[i];
         b.life--;
         if (b.life <= 0) { passiveBearings.splice(i, 1); continue; }
-        const lifeT = b.life / b.maxLife;        // 1→0
+        const lifeT = b.life / b.maxLife;        // 1→0 (フェードアウト)
+        const appear = Math.min(1, (b.maxLife - b.life) / 45); // 0→1 出現から0.75秒でフェードイン(突然のポップを解消・第10弾)
+        const vis = lifeT * appear;
         const R = b.range;
         const col = b.color;
         ctx.save();
@@ -5111,7 +5113,7 @@ function drawPassiveBearings(ctx) {
         const _bDa = _bSa ? (_bSa.dirAnalysis || 0) : 0;
         if (_bDa > 0 && _bDa < 20) { ctx.restore(); continue; }
         if (_bDa >= 20 && _bDa < 40) {
-            ctx.globalAlpha = 0.5 * lifeT; ctx.strokeStyle = `rgb(${col})`; ctx.lineWidth = 1.2 * invZoom;
+            ctx.globalAlpha = 0.5 * vis; ctx.strokeStyle = `rgb(${col})`; ctx.lineWidth = 1.2 * invZoom;
             ctx.beginPath(); ctx.arc(b.ox, b.oy, 6 * invZoom, 0, Math.PI * 2); ctx.stroke();
             ctx.restore(); continue;
         }
@@ -5122,7 +5124,7 @@ function drawPassiveBearings(ctx) {
         const a0 = b.angle - _bHW;
         const a1 = b.angle + _bHW;
         // 扇形フィル (弱信号ほど広い半透明のボケ) — shadowBlur不使用(モバイル配慮)
-        ctx.globalAlpha = 0.10 * lifeT * (0.4 + b.quality * 0.6);
+        ctx.globalAlpha = 0.10 * vis * (0.4 + b.quality * 0.6);
         ctx.beginPath();
         ctx.moveTo(b.ox, b.oy);
         ctx.arc(b.ox, b.oy, R, a0, a1);
@@ -5130,7 +5132,7 @@ function drawPassiveBearings(ctx) {
         ctx.fillStyle = `rgb(${col})`;
         ctx.fill();
         // 扇の両エッジ
-        ctx.globalAlpha = 0.45 * lifeT;
+        ctx.globalAlpha = 0.45 * vis;
         ctx.strokeStyle = `rgb(${col})`;
         ctx.lineWidth = 1.2 * invZoom;
         ctx.beginPath();
@@ -5138,7 +5140,7 @@ function drawPassiveBearings(ctx) {
         ctx.moveTo(b.ox, b.oy); ctx.lineTo(b.ox + Math.cos(a1) * R, b.oy + Math.sin(a1) * R);
         ctx.stroke();
         // 中心方位線 (破線)
-        ctx.globalAlpha = 0.6 * lifeT;
+        ctx.globalAlpha = 0.6 * vis;
         ctx.setLineDash([14 * invZoom, 10 * invZoom]);
         ctx.beginPath();
         ctx.moveTo(b.ox, b.oy);
@@ -5146,7 +5148,7 @@ function drawPassiveBearings(ctx) {
         ctx.stroke();
         ctx.setLineDash([]);
         // 計測位置マーカー (小円) — 移動による三角測量の起点を可視化
-        ctx.globalAlpha = 0.5 * lifeT;
+        ctx.globalAlpha = 0.5 * vis;
         ctx.beginPath();
         ctx.arc(b.ox, b.oy, 6 * invZoom, 0, Math.PI * 2);
         ctx.stroke();
@@ -5229,13 +5231,23 @@ function drawTriangulationGuide(ctx) {
     if (!lockedSignalId || !player || player.hp <= 0) return;
     const sa = _signalAnalysis[lockedSignalId];
     if (!sa || (sa.triParam || 0) > 88) return; // 十分に測量できたら消す
+    // 最新の方位から目標角を求め、毎フレーム角度補間 → 方位が更新されても矢印が滑らかに向き直る(第10弾: パッと反転する点滅を解消)
     const bl = passiveBearings.filter(b => b.sourceId === lockedSignalId && b.life > 0).sort((a, b) => b.life - a.life)[0];
-    if (!bl) return;
-    const perp = bl.angle + Math.PI / 2; // 方位線に垂直=最良の測量方向
+    if (bl) {
+        let target = bl.angle + Math.PI / 2;
+        if (sa.guideAngle === undefined) sa.guideAngle = target;
+        let d = target - sa.guideAngle;
+        while (d < -Math.PI) d += Math.PI * 2; while (d > Math.PI) d -= Math.PI * 2;
+        // 垂直軸は180°対称なので、反対向き(±π)の方が近ければそちらへ寄せる(急な180°反転を防ぐ)
+        if (d > Math.PI / 2) d -= Math.PI; else if (d < -Math.PI / 2) d += Math.PI;
+        sa.guideAngle += d * 0.08;
+    }
+    if (sa.guideAngle === undefined) return;
+    const perp = sa.guideAngle;
     const zc = 1 / camera.zoom;
     const L = 120 * zc, gap = 34 * zc;
-    const t = Date.now() * 0.004;
-    const pulse = 0.45 + Math.sin(t) * 0.25;
+    const t = Date.now() * 0.003;
+    const pulse = 0.55 + Math.sin(t) * 0.12; // 穏やかな明滅に
     ctx.save();
     ctx.translate(player.x, player.y);
     ctx.strokeStyle = '#00ffd0'; ctx.fillStyle = '#00ffd0';
@@ -5270,9 +5282,14 @@ function drawTriangulationCircle(ctx) {
         const _siSa = _signalAnalysis[lockedSignalId];
         const _siDa = _siSa.dirAnalysis || 0;
         const _siTp = _siSa.triParam || 0;
-        if (_siDa > 6 && _siSa.displayCenterX != null) {
+        if (_siDa > 6 && _siSa.targetCenterX != null) {
             const _siAvg = (_siDa + _siTp) / 2;
-            const _siR = Math.max(1200, MAP_RADIUS * Math.pow(1 - _siAvg / 100, 1.5)); // 第9弾: 収束を体感できる曲線
+            // 毎フレーム目標へ補間 → サークルが滑らかにドリフト・収束 (毎秒テレポートを解消・第10弾)
+            if (_siSa.displayCenterX == null) { _siSa.displayCenterX = _siSa.targetCenterX; _siSa.displayCenterY = _siSa.targetCenterY; _siSa.displayR = _siSa.targetR; }
+            _siSa.displayCenterX += (_siSa.targetCenterX - _siSa.displayCenterX) * 0.06;
+            _siSa.displayCenterY += (_siSa.targetCenterY - _siSa.displayCenterY) * 0.06;
+            _siSa.displayR += ((_siSa.targetR || 1200) - (_siSa.displayR || _siSa.targetR)) * 0.04;
+            const _siR = _siSa.displayR;
             const _siCx = _siSa.displayCenterX, _siCy = _siSa.displayCenterY;
             const _siCol = _siAvg < 30 ? '255,80,0' : _siAvg < 60 ? '255,160,0' : _siAvg < 85 ? '80,255,120' : '100,200,255';
             const _siInv = 1 / camera.zoom;
@@ -5895,10 +5912,10 @@ function drawPassiveAntenna(ctx) {
         }
         ctx.closePath();
         ctx.stroke();
-        // 強く見られている方角に薄いグロー弧 (危険方向の強調)
+        // 強く見られている方角に薄いグロー弧 (危険方向の強調)。閾値付近の点滅を避けフェードで
         for (const g of gazes) {
-            if (g.gaze < 0.35) continue;
-            ctx.globalAlpha = (g.gaze - 0.2) * 0.5;
+            if (g.gaze < 0.25) continue;
+            ctx.globalAlpha = Math.min(1, (g.gaze - 0.25) / 0.25) * (g.gaze - 0.2) * 0.5;
             ctx.strokeStyle = `rgb(${gr},${gg},${gb})`;
             ctx.lineWidth = (2 + g.gaze * 3) * ringLw;
             ctx.beginPath();
@@ -5925,7 +5942,8 @@ function drawPassiveAntenna(ctx) {
             const hex = S_HEX[bl.sensor] || '#cfe8e0';
             const rr = gazeAt(bl.ang);
             const isLocked = (sid === lockedSignalId);
-            const fade = Math.max(0.25, bl.life / (bl.maxLife || 480));
+            const _blAppear = Math.min(1, ((bl.maxLife || 480) - bl.life) / 45); // 出現をなじませる(第10弾)
+            const fade = Math.max(0.25, bl.life / (bl.maxLife || 480)) * _blAppear;
             const bx = Math.cos(bl.ang), by = Math.sin(bl.ang);
             // 外向きの短いティック + ドット
             ctx.globalAlpha = fade * (isLocked ? 1 : 0.7);
