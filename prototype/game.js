@@ -5755,157 +5755,111 @@ function drawPassiveAntenna(ctx) {
         ctx.restore(); ctx.globalAlpha = 1;
     }
 
-    // パッシブアンテナビジュアル: 不要 (スレットリングで代替)
-
-    // スレットリング: 自機周囲に常に浮かぶ形状変化リング
-    // 普段は穏やかな多角形。環境シグネチャ受信により各センサー方向に変形する。
+    // ═══ 自機周りの多層リングHUD (第8弾リデザイン) ═══
+    // 折りたたみモードでオシロ波形が見えない代替。リング形状で自シグネチャと脅威方位を伝える。
+    // 原則: 各リングに役割ひとつ / 非アクティブ要素はアルファで沈めて非煩雑に保つ。
     if (player && player.hp > 0) {
-        const tRing = Date.now();
-        const tSec  = tRing * 0.001;
-
-        // 各センサーの受信シグネチャ集計
-        // ベースリングは常に白。各センサーセグメントのみ色付き。
-        const RING_SENSOR_COLORS = {
-            heat: '255,160,60', optic: '60,255,180', em: '230,100,255', higgs: '60,240,255'
-        };
-        const RING_SENSOR_DIRS = {
-            heat: -Math.PI * 0.5,    // 上 (北)
-            optic: 0,                // 右 (東)
-            em: Math.PI * 0.5,       // 下 (南)
-            higgs: Math.PI           // 左 (西)
-        };
-        const ringSigVals = {};
-        const ringDetectRange = FIELD_SIZE;
-        // enemy毎のhiggsBlk・distを事前計算 (4センサーループで再利用)
-        const _eCache = enemies.map(e => {
-            if (e.hp <= 0) return null;
-            return {
-                e,
-                dist: Math.hypot(e.x - player.x, e.y - player.y),
-                hBlk: getHiggsIntensity((e.x + player.x)/2, (e.y + player.y)/2)
-            };
-        }).filter(Boolean);
-        ['heat','optic','em','higgs'].forEach(sName => {
-            const sc2 = sensorConfig[sName];
-            let tot = 0;
-            for (const c of _eCache) {
-                const att = Math.max(0, 1 - c.dist / ringDetectRange);
-                tot += sc2.sig(c.e) * att * (1 - c.hBlk * sc2.higgsMod);
-            }
-            ringSigVals[sName] = tot > 1.0 ? 1.0 : tot;
-        });
-
-        // 優勢センサーの色を決定
-        let maxRingSig = 0, maxRingName = 'heat';
-        ['heat','optic','em','higgs'].forEach(n => {
-            if (ringSigVals[n] > maxRingSig) { maxRingSig = ringSigVals[n]; maxRingName = n; }
-        });
-
-        // リングの各点の半径を計算
-        // 画面上で約90px半径に固定 (ズームアウト時に肥大化しないようクランプ)
-        const _ringScreenR = Math.min(110, Math.max(55, 90));
-        const BASE_R    = _ringScreenR / camera.zoom;
-        const MAX_BULGE = (50 / camera.zoom);
-        const N_POINTS  = 28;  // 18は角ばりが目立った。28で滑らか・コスト微増のみ
-        const idleBreath = Math.sin(tSec * 0.7) * (3 / camera.zoom);
-        const _rot = tSec * 0.08; // ループ外で事前計算
-
-        const getRingRadius = (angle) => {
-            let r = BASE_R + idleBreath;
-            // センサー毎のローブ加算 (whileループ→if文に変更)
-            const _sensorKeys = ['heat','optic','em','higgs'];
-            for (let _si = 0; _si < 4; _si++) {
-                const sName = _sensorKeys[_si];
-                const sig = ringSigVals[sName];
-                if (sig < 0.01) continue;
-                let diff = angle - (RING_SENSOR_DIRS[sName] + _rot);
-                if (diff < -Math.PI) diff += Math.PI * 2;
-                else if (diff > Math.PI) diff -= Math.PI * 2;
-                const lobe   = Math.exp(-diff * diff * 1.6) * sig * sig * MAX_BULGE;
-                const ripple = Math.cos(diff * 5 + tSec * 2.5) * sig * 3.0 * Math.exp(-diff * diff * 4);
-                r += lobe + ripple;
-            }
-            r += Math.sin(angle * 4 + tSec * 1.2) * 1.5;
-            return r;
-        };
+        const tSec = Date.now() * 0.001;
+        const zi = 1 / camera.zoom;
+        const S_HEX = { heat:'#ffa03c', optic:'#3cffb4', em:'#e664ff', higgs:'#3cf0ff' };
+        const S_DIR = { heat:-Math.PI*0.5, optic:0, em:Math.PI*0.5, higgs:Math.PI }; // 上/右/下/左
 
         ctx.save();
         ctx.translate(player.x, player.y);
 
-        // ── "THREAT SENSORS" ラベル (リング上部) ──────────────
-        {
-            const labelAngle = -Math.PI / 2; // 真上
-            const labelR = BASE_R + idleBreath + 20 / camera.zoom;
-            ctx.globalAlpha = 0.3 + maxRingSig * 0.4;
-            ctx.fillStyle = '#ffffff';
-            ctx.font = `bold ${Math.round(8 / camera.zoom)}px Orbitron, monospace`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('THREAT SENSORS', Math.cos(labelAngle) * labelR, Math.sin(labelAngle) * labelR);
-            ctx.globalAlpha = 1;
+        // ── (1) 自シグネチャ・ハロー (内側・"自分の声の大きさ") ──
+        // 静粛航行/デブリ擬態で沈黙すると弧が縮む=即座に「静かになった」と分かる。発砲で閃く。
+        const selfSig = { heat: player.heatSig||0, optic: player.opticalSig||0, em: player.emSig||0, higgs: player.higgsSig||0 };
+        const haloR = 24 * zi;
+        for (const s2 of ['heat','optic','em','higgs']) {
+            const v = selfSig[s2];
+            if (v < 0.02) continue;
+            const half = (0.12 + v * 0.32) * Math.PI;      // sig量で弧が伸びる
+            ctx.globalAlpha = 0.28 + v * 0.55;
+            ctx.strokeStyle = S_HEX[s2];
+            ctx.lineWidth = (1 + v * 3.5) * zi;
+            ctx.beginPath();
+            ctx.arc(0, 0, haloR, S_DIR[s2] - half, S_DIR[s2] + half);
+            ctx.stroke();
         }
+        ctx.globalAlpha = 1;
 
-        // ── ベースリング (常に白で表示) ────────────────────────
-        const idleAlpha = 0.7 + maxRingSig * 0.3;
-        const ringLw = 1.0 / camera.zoom;
+        // ── (2) 脅威リング (中間・"どの方角に何が居るか") ──
+        // 検知したシグネチャを実方位へ配置。近い/強い/派手なほど張り出す。色=そのコンタクトの優勢センサー。
+        // 沈黙した敵は張り出しが小=居場所が読めない(センサー制約型と整合・対称)。
+        const baseR = 86 * zi;
+        const breath = Math.sin(tSec * 0.7) * 2.5 * zi;
+        const THREAT_RANGE = 16000;
+        const contacts = [];
+        for (const e of enemies) {
+            if (e.hp <= 0) continue;
+            const dx = e.x - player.x, dy = e.y - player.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist > THREAT_RANGE) continue;
+            const hBlk = getHiggsIntensity((e.x + player.x)/2, (e.y + player.y)/2);
+            let best = 0, bestS = 'heat';
+            for (const s2 of ['heat','optic','em','higgs']) {
+                const sc2 = sensorConfig[s2];
+                const v = sc2.sig(e) * (1 - hBlk * sc2.higgsMod);
+                if (v > best) { best = v; bestS = s2; }
+            }
+            const prox = Math.max(0, 1 - dist / THREAT_RANGE);
+            const strength = Math.min(1, best * (0.4 + prox * 0.9));
+            if (strength < 0.05) continue;
+            contacts.push({ ang: Math.atan2(dy, dx), strength, sensor: bestS });
+        }
+        contacts.sort((a, b) => b.strength - a.strength);
+        const shown = contacts.slice(0, 4); // 上位4件のみ=非煩雑
+        let maxThreat = 0;
+        for (const c of shown) if (c.strength > maxThreat) maxThreat = c.strength;
 
-        ctx.globalAlpha = idleAlpha;
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2.0 * ringLw;
+        const ringLw = zi;
+        const N = 30, step = (Math.PI * 2) / N;
+        const radAt = (ang) => {
+            let r = baseR + breath;
+            for (const c of shown) {
+                let d = ang - c.ang;
+                if (d < -Math.PI) d += Math.PI * 2; else if (d > Math.PI) d -= Math.PI * 2;
+                r += Math.exp(-d * d * 2.2) * c.strength * 42 * zi; // 実方位へローブ
+            }
+            return r;
+        };
+        // ベースリング (穏やかな環。脅威があるほど僅かに明るく)
+        ctx.globalAlpha = 0.26 + maxThreat * 0.4;
+        ctx.strokeStyle = '#cfe8e0';
+        ctx.lineWidth = 1.4 * ringLw;
         ctx.beginPath();
-        const _angStep = (Math.PI * 2) / N_POINTS;
-        for (let i = 0; i <= N_POINTS; i++) {
-            const ang = i * _angStep;
-            const rr  = getRingRadius(ang);
-            if (i === 0) ctx.moveTo(Math.cos(ang) * rr, Math.sin(ang) * rr);
-            else ctx.lineTo(Math.cos(ang) * rr, Math.sin(ang) * rr);
+        for (let i = 0; i <= N; i++) {
+            const a = i * step, rr = radAt(a);
+            const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
         }
         ctx.closePath();
         ctx.stroke();
-        ctx.globalAlpha = 1;
-
-        // ── 各センサーの活性セグメントを色付きで強調 ──────────
-        const SENSOR_NAMES = { heat: 'HEAT', optic: 'OPT', em: 'EM', higgs: 'HGS' };
-        const RING_SENSOR_HEX = { heat: '#ffa03c', optic: '#3cffb4', em: '#e664ff', higgs: '#3cf0ff' };
-        ['heat','optic','em','higgs'].forEach(sName => {
-            const sig = ringSigVals[sName];
-            if (sig < 0.04) return;
-            const hex      = RING_SENSOR_HEX[sName];
-            const dir      = RING_SENSOR_DIRS[sName];
-            const halfSpan = Math.PI * (0.35 + sig * 0.4);
-            const segN = 12;  // 24→12: 視覚差なし、計算半減
-            ctx.globalAlpha = sig * 0.85;
+        // 脅威方位の色付きローブ + 種別ティック
+        for (const c of shown) {
+            const hex = S_HEX[c.sensor];
+            const span = 0.28 + c.strength * 0.30;
+            ctx.globalAlpha = c.strength * 0.9;
             ctx.strokeStyle = hex;
-            ctx.lineWidth   = (1.5 + sig * 2.5) * ringLw;
+            ctx.lineWidth = (1.4 + c.strength * 2.4) * ringLw;
             ctx.beginPath();
+            const segN = 10;
             for (let i = 0; i <= segN; i++) {
-                const ang = (dir - halfSpan) + (i / segN) * halfSpan * 2;
-                const rr  = getRingRadius(ang);
-                if (i === 0) ctx.moveTo(Math.cos(ang) * rr, Math.sin(ang) * rr);
-                else ctx.lineTo(Math.cos(ang) * rr, Math.sin(ang) * rr);
+                const a = c.ang - span + (i / segN) * span * 2, rr = radAt(a);
+                const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
             }
             ctx.stroke();
-
-            // センサー方向のティックマーカー + ラベル
-            const tickDir = dir + _rot;
-            const tickR = getRingRadius(tickDir);
-            ctx.globalAlpha = 0.4 + sig * 0.55;
-            ctx.strokeStyle = hex;
+            const tr = radAt(c.ang);
+            ctx.globalAlpha = 0.4 + c.strength * 0.5;
             ctx.lineWidth = 2 * ringLw;
             ctx.beginPath();
-            ctx.moveTo(Math.cos(tickDir) * (tickR + 3 / camera.zoom),  Math.sin(tickDir) * (tickR + 3 / camera.zoom));
-            ctx.lineTo(Math.cos(tickDir) * (tickR + 14 / camera.zoom), Math.sin(tickDir) * (tickR + 14 / camera.zoom));
+            ctx.moveTo(Math.cos(c.ang) * (tr + 3 * zi), Math.sin(c.ang) * (tr + 3 * zi));
+            ctx.lineTo(Math.cos(c.ang) * (tr + 13 * zi), Math.sin(c.ang) * (tr + 13 * zi));
             ctx.stroke();
-            const labelDist = tickR + 26 / camera.zoom;
-            ctx.globalAlpha = 0.3 + sig * 0.6;
-            ctx.fillStyle = hex;
-            ctx.font = `bold ${Math.round(9 / camera.zoom)}px Orbitron, monospace`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(SENSOR_NAMES[sName], Math.cos(tickDir) * labelDist, Math.sin(tickDir) * labelDist);
-        });
+        }
         ctx.globalAlpha = 1;
-
         ctx.restore();
     }
 
@@ -8420,58 +8374,86 @@ function gameLoop() {
         // ── シグネチャ・スレットリング (最前面・フォグの上) ──
         if (player && player.hp > 0) drawPassiveAntenna(ctx);
 
-        // ── レーダー範囲リング + ラベル ──
+        // ── レーダー範囲リング: 探知到達 + 現在地形の色 + サージ/センサー損傷への反応 ──
+        // 折りたたみモードで環境シグネチャパネルが見えない代替: リングの色で「今どの遮蔽に居るか」を伝える。
         if (player && player.hp > 0) {
-            const higgsHere = getHiggsIntensity(player.x, player.y);
-            const visionRingR = effectiveRadarRange;
             const t2 = Date.now();
+            const hHere   = getHiggsIntensity(player.x, player.y);
+            const debHere = getDebrisIntensity(player.x, player.y);
+            const stmHere = getStormIntensity(player.x, player.y);
+            const thmHere = getThermalIntensity(player.x, player.y);
+            // 表示半径: 探知reach × サージ反応 (active=縮小 / after=高感度で拡大)
+            let ringR = effectiveRadarRange;
+            if (surgePhase === 'active') ringR *= 0.5;
+            else if (surgePhase === 'after') ringR *= 1.4;
+            // 地形色: 今一番濃い遮蔽で決定 (ヒッグス=青→濃赤 / デブリ=灰 / 嵐=紫 / 熱雲=橙 / クリア=緑)
+            let col = '#00ffaa';
+            const terr = Math.max(hHere, debHere, stmHere, thmHere);
+            if (terr > 0.15) {
+                if (hHere >= debHere && hHere >= stmHere && hHere >= thmHere) col = hHere > 0.6 ? '#ff5a6e' : '#5a9cff';
+                else if (debHere >= stmHere && debHere >= thmHere) col = '#c8c4b0';
+                else if (stmHere >= thmHere) col = '#b47af0';
+                else col = '#ffaa44';
+            }
             const vpulse = 0.5 + Math.sin(t2 * 0.0015) * 0.5;
-            const vRingColor = higgsHere > 0.6 ? '#ff4444' : (higgsHere > 0.3 ? '#ffaa44' : '#00ffaa');
+            const damaged = player._sysSensorTimer > 0;
             ctx.save();
-            ctx.setLineDash([30 / camera.zoom, 20 / camera.zoom]);
+            ctx.setLineDash([28 / camera.zoom, 18 / camera.zoom]);
+            ctx.lineDashOffset = (t2 * 0.03) / camera.zoom; // 微回転で走査している感
             ctx.beginPath();
-            ctx.arc(player.x, player.y, visionRingR, 0, Math.PI * 2);
-            ctx.strokeStyle = vRingColor;
+            ctx.arc(player.x, player.y, ringR, 0, Math.PI * 2);
+            ctx.strokeStyle = damaged ? '#ff4444' : col;
             ctx.lineWidth = 1.5 / camera.zoom;
-            ctx.globalAlpha = 0.3 + vpulse * 0.2;
+            ctx.globalAlpha = damaged ? (0.15 + Math.random() * 0.35) : (0.28 + vpulse * 0.22); // 損傷=明滅
             ctx.stroke();
             ctx.setLineDash([]);
-            // レーダー範囲ラベル (右側)
+            ctx.lineDashOffset = 0;
+            // ラベル: サージ縮退▼/高感度▲/損傷を明示
             ctx.font = `bold ${Math.round(8 / camera.zoom)}px Orbitron, monospace`;
-            ctx.fillStyle = vRingColor;
-            ctx.globalAlpha = 0.35 + vpulse * 0.1;
+            ctx.fillStyle = damaged ? '#ff4444' : col;
+            ctx.globalAlpha = 0.42;
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
-            ctx.fillText('RADAR', player.x + visionRingR + 6 / camera.zoom, player.y);
+            const rlabel = damaged ? 'SENSOR HIT' : (surgePhase === 'active' ? 'RADAR ▼' : (surgePhase === 'after' ? 'RADAR ▲' : 'RADAR'));
+            ctx.fillText(rlabel, player.x + ringR + 6 / camera.zoom, player.y);
             ctx.globalAlpha = 1;
             ctx.restore();
         }
 
-        // ── 武器射程サークルインジケータ + ラベル (ワールド空間) ──
+        // ── 武器射程 + 射角アーク: "実際にどこを撃てるか" (射角 kinetic±150/missile±45/beam±10) ──
         if (player && player.hp > 0) {
-            const wTypeCircle = document.getElementById('weapon-select') ? document.getElementById('weapon-select').value : 'kinetic';
-            const wRangeCircle = wTypeCircle === 'missile' ? 4400 : (wTypeCircle === 'beam' ? 16000 : 1600);
-            const wRangeColor = wTypeCircle === 'missile' ? '#ffaa00' : (wTypeCircle === 'beam' ? '#00aaff' : '#88ff44');
-            const wLabel = wTypeCircle === 'missile' ? 'MISSILE' : (wTypeCircle === 'beam' ? 'BEAM' : 'KINETIC');
+            const wType  = document.getElementById('weapon-select') ? document.getElementById('weapon-select').value : 'kinetic';
+            const wRange = wType === 'missile' ? 4400 : (wType === 'beam' ? 16000 : 1600);
+            const wCol   = wType === 'missile' ? '#ffaa00' : (wType === 'beam' ? '#00aaff' : '#88ff44');
+            const wLabel = wType === 'missile' ? 'MISSILE' : (wType === 'beam' ? 'BEAM' : 'KINETIC');
+            const arc    = WEAPON_FIRE_ARC[wType] || Math.PI; // 射角(半角)
+            const a0 = player.angle - arc, a1 = player.angle + arc;
+            const zc = 1 / camera.zoom;
+            const wideArc = arc >= Math.PI * 0.66; // kinetic(±150°)はほぼ全周
             ctx.save();
+            // 射角の外縁アーク (破線) — 実際に撃てる範囲。塗りは使わず輪郭だけで非煩雑に。
+            ctx.globalAlpha = 0.45;
+            ctx.strokeStyle = wCol;
+            ctx.lineWidth = 1.6 * zc;
+            ctx.setLineDash([14 * zc, 12 * zc]);
             ctx.beginPath();
-            ctx.arc(player.x, player.y, wRangeCircle, 0, Math.PI * 2);
-            ctx.setLineDash([20 / camera.zoom, 20 / camera.zoom]);
-            ctx.strokeStyle = wRangeColor;
-            ctx.lineWidth = 2 / camera.zoom;
-            ctx.globalAlpha = 0.55;
-            ctx.shadowColor = wRangeColor;
-            ctx.shadowBlur = 2;
+            ctx.arc(player.x, player.y, wRange, a0, a1);
             ctx.stroke();
-            ctx.shadowBlur = 0;
             ctx.setLineDash([]);
-            // 武器射程ラベル (上部)
-            ctx.font = `bold ${Math.round(8 / camera.zoom)}px Orbitron, monospace`;
-            ctx.fillStyle = wRangeColor;
-            ctx.globalAlpha = 0.65;
+            // 射角の限界を示す2辺 (狭い射角=missile/beamでは強調、広い射角=kineticでは死角のみ示す薄線)
+            ctx.globalAlpha = wideArc ? 0.18 : 0.34;
+            ctx.lineWidth = 1.2 * zc;
+            ctx.beginPath();
+            ctx.moveTo(player.x, player.y); ctx.lineTo(player.x + Math.cos(a0) * wRange, player.y + Math.sin(a0) * wRange);
+            ctx.moveTo(player.x, player.y); ctx.lineTo(player.x + Math.cos(a1) * wRange, player.y + Math.sin(a1) * wRange);
+            ctx.stroke();
+            // ラベル (艦首方向の射程端)
+            ctx.globalAlpha = 0.6;
+            ctx.font = `bold ${Math.round(8 * zc)}px Orbitron, monospace`;
+            ctx.fillStyle = wCol;
             ctx.textAlign = 'center';
-            ctx.textBaseline = 'bottom';
-            ctx.fillText(`WEAPON RANGE — ${wLabel}`, player.x, player.y - wRangeCircle - 4 / camera.zoom);
+            ctx.textBaseline = 'middle';
+            ctx.fillText(wLabel, player.x + Math.cos(player.angle) * (wRange + 20 * zc), player.y + Math.sin(player.angle) * (wRange + 20 * zc));
             ctx.globalAlpha = 1;
             ctx.restore();
         }
