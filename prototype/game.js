@@ -6631,6 +6631,8 @@ const _SIG_HIST_LEN = 60;
 // 環境シグネチャ履歴 (周囲の敵シグネチャ合算)
 const _envSigHistory = { heat: [], optic: [], em: [], higgs: [] };
 const ENV_SIG_HIST_LEN = 60;
+// 折りたたみ時の受信シグネチャ(RX)メーター用の平滑化値 (env-sig-canvasの代替)
+const _rxSig = { heat: 0, optic: 0, em: 0, higgs: 0 };
 
 function updateSigCanvas() {
     if (!player || player.hp <= 0) return;
@@ -7179,6 +7181,63 @@ function drawHUDOverlay(ctx) {
             ctx.beginPath(); ctx.moveTo(_fCX, tapeY - 7); ctx.lineTo(_fCX - 4, tapeY - 12); ctx.lineTo(_fCX + 4, tapeY - 12); ctx.closePath(); ctx.fill();
             ctx.font = 'bold 10px Orbitron, monospace'; ctx.textBaseline = 'bottom';
             ctx.fillText(('' + Math.round(headingDeg)).padStart(3, '0') + '°', _fCX, tapeY - 13);
+        }
+        // ── 受信シグネチャ(RX)メーター — 折りたたみ時のみ。env-sig-canvas(環境SIGオシロ)の代替 ──
+        // 「今どのセンサーchをどれだけ受信しているか」を4本の小バーで。平滑化して穏やか・無受信時は静か。
+        if (consoleMin) {
+            const envDetectRange = FIELD_SIZE;
+            const _rxTarget = { heat: 0, optic: 0, em: 0, higgs: 0 };
+            for (const e of enemies) {
+                if (e.hp <= 0) continue;
+                const dist = Math.hypot(e.x - player.x, e.y - player.y);
+                const hPath = getHiggsIntensity((e.x + player.x) / 2, (e.y + player.y) / 2);
+                const dAtt = Math.max(0, 1 - dist / envDetectRange);
+                for (const k of ['heat', 'optic', 'em', 'higgs']) {
+                    const sc2 = sensorConfig[k];
+                    _rxTarget[k] = Math.min(1, _rxTarget[k] + sc2.sig(e) * dAtt * (1 - hPath * sc2.higgsMod));
+                }
+            }
+            const RX_HEX = { heat: '#ff8a3c', optic: '#ffee55', em: '#c86bff', higgs: '#4fe6ff' };
+            const RX_LABEL = { heat: 'H', optic: 'O', em: 'E', higgs: 'G' };
+            let _rxMax = 0;
+            for (const k of ['heat', 'optic', 'em', 'higgs']) {
+                _rxSig[k] += (_rxTarget[k] - _rxSig[k]) * 0.12; // 平滑化(パッパッしない)
+                if (_rxSig[k] > _rxMax) _rxMax = _rxSig[k];
+            }
+            // 左辺・ミニマップの下に小さく配置
+            const mx = 10, myTop = 176, barW = 52, rowH = 11, panelPad = 5;
+            const panelW = 20 + barW + panelPad * 2, panelH = 14 + rowH * 4 + panelPad;
+            ctx.save();
+            ctx.globalAlpha = 0.28 + _rxMax * 0.45;
+            ctx.fillStyle = 'rgba(0,10,16,0.72)';
+            _roundRect(ctx, mx, myTop, panelW, panelH, 4); ctx.fill();
+            ctx.globalAlpha = 0.5 + _rxMax * 0.4;
+            ctx.fillStyle = '#7fd8bb';
+            ctx.font = 'bold 7px Orbitron, monospace';
+            ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+            ctx.fillText('RX SIG', mx + panelPad, myTop + 7);
+            let ry = myTop + 14 + panelPad;
+            for (const k of ['heat', 'optic', 'em', 'higgs']) {
+                const v = _rxSig[k];
+                const bx = mx + panelPad + 12, by = ry + rowH / 2;
+                // ラベル
+                ctx.globalAlpha = 0.5 + v * 0.5;
+                ctx.fillStyle = RX_HEX[k];
+                ctx.font = 'bold 8px monospace';
+                ctx.fillText(RX_LABEL[k], mx + panelPad, by + 0.5);
+                // トラック
+                ctx.globalAlpha = 0.35;
+                ctx.fillStyle = 'rgba(255,255,255,0.10)';
+                ctx.fillRect(bx, by - 2.5, barW, 5);
+                // 受信量バー (sqrtで微弱でも視認)
+                const fillW = Math.sqrt(Math.max(0, v)) * barW;
+                ctx.globalAlpha = 0.35 + v * 0.6;
+                ctx.fillStyle = RX_HEX[k];
+                ctx.fillRect(bx, by - 2.5, fillW, 5);
+                ry += rowH;
+            }
+            ctx.restore();
+            ctx.globalAlpha = 1;
         }
         // ── ヒッグスサージ表示 ──
         let _infoY = chipY + chipH + 46; // コンパステープの下から
