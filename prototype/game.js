@@ -90,6 +90,8 @@ window.fireTriangulate = function() {
 let _lpmWorld = null;            // 長押しラジアルメニューのワールド座標
 const PASSIVE_BEARING_LIFE = 480;  // 8秒フェード (@60fps)
 const PASSIVE_BEARING_MAX  = 14;   // 同時表示上限 (第10弾: 24→14 でウェッジの過密・点滅を抑制)
+const ID_THRESHOLD_STATIC  = 18;   // 静止発信源(ランドマーク/地形)の特定閾値 — 早い段階で判別できる (旧35)
+const ID_THRESHOLD_MOBILE  = 55;   // 機動反応(艦船等)の分類通知閾値 — じっくり追跡して判別
 let mouseWorldX = MAP_CX;
 let mouseWorldY = MAP_CY;
 let dirSonarVisual = null; // { angle, halfAngle, range, life }
@@ -519,6 +521,7 @@ function applyEnemyUpgrade(ship) {
 }
 // 慣性ベース速度システム
 const SHIP_MAX_SPEED_MULT = { assault: 0.58, stealth: 1.05, carrier: 0.38 }; // 艦種別最高速度倍率(全体的に低速化)
+const MOVE_SPEED_MULT = 1.5; // 全艦共通の移動速度倍率 (自機/敵対称・2026-07-11 テンポ改善)
 const SHIP_ACCEL_RATE = { carrier: 0.00075, assault: 0.002, stealth: 0.004 }; // 最高速度到達まで加速率/frame (×0.25: 初速を遅く)
 const SHIP_TURN_SLOW  = { carrier: 0.78, assault: 0.52, stealth: 0.22 }; // 旋回時の速度低下率最大値 (空母最重・潜航身軽)
 // 武器別射角 (前方からの角度差の許容最大値)
@@ -2271,7 +2274,7 @@ class Ship {
             const _higgsHereEng = getHiggsIntensity(this.x, this.y);
             const _higgsSlowdown = 1 - _higgsHereEng * 0.45 * (1 - ENGINE_UPG_HIGGS_RESIST[gameState.upgrades.engine]);
             const _higgsBonusSpeed = _higgsHereEng * _engTypeP.higgsSpeedBonus;
-            const _baseTargetSpeed = ((genAlloc.engine / 100) * genGain * 1.4 * (SHIP_MAX_SPEED_MULT[gameState.shipType] || 1.0) * _higgsSlowdown * _engTypeP.speedMult + _higgsBonusSpeed) * this.terrainSpeedMult() * gameSpeedFactor * (silentRunning ? SILENT_SPEED_MULT : 1);
+            const _baseTargetSpeed = ((genAlloc.engine / 100) * genGain * 1.4 * (SHIP_MAX_SPEED_MULT[gameState.shipType] || 1.0) * _higgsSlowdown * _engTypeP.speedMult + _higgsBonusSpeed) * this.terrainSpeedMult() * gameSpeedFactor * MOVE_SPEED_MULT * (silentRunning ? SILENT_SPEED_MULT : 1);
             if (this.currentSpeed === undefined) this.currentSpeed = 0;
             this.speed = this.currentSpeed; // 移動ブロックで更新される
 
@@ -2579,7 +2582,7 @@ class Ship {
                     while (diff > Math.PI) diff -= Math.PI * 2;
                     const _eTR_dc = (ENEMY_TURN_RATES[this.type] || 0.035) * gameSpeedFactor;
                     this.angle += Math.sign(diff) * Math.min(Math.abs(diff), _eTR_dc);
-                    this.speed = 0.8;
+                    this.speed = 0.8 * MOVE_SPEED_MULT;
                     this.x += Math.cos(this.angle) * this.speed;
                     this.y += Math.sin(this.angle) * this.speed;
                 }
@@ -2591,7 +2594,7 @@ class Ship {
             // ──────────────────────────────────────
             if (this.postFireCooldown > 0) {
                 this.postFireCooldown--;
-                this.speed = 1.2; // 素早く移動して新しい潜伏場所へ
+                this.speed = 1.2 * MOVE_SPEED_MULT; // 素早く移動して新しい潜伏場所へ
                 if (this.state === 'moving') {
                     const dist = Math.hypot(this.targetX - this.x, this.targetY - this.y);
                     if (dist > this.speed) {
@@ -2800,7 +2803,7 @@ class Ship {
                 const prof = ENEMY_COMBAT[this.type] || ENEMY_COMBAT.destroyer;
                 const pers = this.personality || { aggression: 0.5, stealth: 0.3, greed: 0.4, caution: 0.4 };
                 const fireRange = (700 + gameState.sector * 25) * prof.rangeMult;
-                this.speed = Math.min(2.2, 0.9 + gameState.sector * 0.08) * prof.speedMult * (this.upgSpeed || 1) * this.terrainSpeedMult() * gameSpeedFactor;
+                this.speed = Math.min(2.2, 0.9 + gameState.sector * 0.08) * prof.speedMult * (this.upgSpeed || 1) * this.terrainSpeedMult() * gameSpeedFactor * MOVE_SPEED_MULT;
 
                 // センサー制約型照準: 実プレイヤーではなく「最終既知位置」へ撃つ。
                 // 接触が新しいほど速度ぶんリード外挿、喪失するほど古い点で凍結 → 移動/沈黙で外れる。
@@ -2943,7 +2946,7 @@ class Ship {
                                  + ((this.personality && this.personality.stealth) || 0.3) * 900;
                     firePingFromEnemy(this);
                 }
-                this.speed = Math.min(1.6, 0.8 + gameState.sector * 0.06) * _huntProf.speedMult * (this.upgSpeed || 1) * this.terrainSpeedMult() * gameSpeedFactor;
+                this.speed = Math.min(1.6, 0.8 + gameState.sector * 0.06) * _huntProf.speedMult * (this.upgSpeed || 1) * this.terrainSpeedMult() * gameSpeedFactor * MOVE_SPEED_MULT;
                 if (this.huntTimer > 0) this.huntTimer--;
                 if (this.huntTarget) {
                     const dist = Math.hypot(this.huntTarget.x - this.x, this.huntTarget.y - this.y);
@@ -2966,7 +2969,7 @@ class Ship {
 
             } else if (this.aiState === 'gathering') {
                 this.lurking = false;
-                this.speed = Math.min(1.2, 0.7 + gameState.sector * 0.05) * this.terrainSpeedMult() * gameSpeedFactor;
+                this.speed = Math.min(1.2, 0.7 + gameState.sector * 0.05) * this.terrainSpeedMult() * gameSpeedFactor * MOVE_SPEED_MULT;
                 // 最寄りノード探索
                 if (!this.gatherTarget || !this.gatherTarget.active) {
                     let closest = null, closestDist = Infinity;
@@ -3003,7 +3006,7 @@ class Ship {
                 const _pers = this.personality || { aggression: 0.5, stealth: 0.3, greed: 0.4, caution: 0.4 };
                 // 残り香(contactFreshness)がある間は獲物を追って徘徊。攻撃的=速い追跡 / 隠密=低速で忍び寄る(低シグネチャ)。
                 const _hasScent = this.playerLastKnownPos && this.contactFreshness > 0.04;
-                this.speed = _hasScent ? ENEMY_STALK_SPEED * (0.6 + _pers.aggression * 0.6) * (1 - _pers.stealth * 0.4) : 0.08;
+                this.speed = (_hasScent ? ENEMY_STALK_SPEED * (0.6 + _pers.aggression * 0.6) * (1 - _pers.stealth * 0.4) : 0.08) * MOVE_SPEED_MULT;
                 const activeNodes = resourceNodes.filter(n => n.active);
                 if (this.state === 'idle') {
                     if (_hasScent && Math.random() < 0.05) {
@@ -3079,7 +3082,7 @@ class Ship {
             if (this.hp / this.maxHp < WOUNDED_HP_FRAC) {
                 this.heatSig = Math.max(this.heatSig, WOUNDED_HEAT_FLOOR);
                 if (!this._woundedLogged) { this._woundedLogged = true; logMessage('SENSOR: 敵艦から冷却材漏出を検知 — 熱痕跡で追い詰めろ', 'system-msg'); }
-                if (Math.random() < 0.10 && heatTrails.length < 600) heatTrails.push({ x: this.x, y: this.y, intensity: 0.7, life: 1.0 });
+                if (Math.random() < 0.10 && heatTrails.length < 600) heatTrails.push({ x: this.x, y: this.y, intensity: 0.7, life: 1.0, decay: 0.0015 });
             }
 
             // 光学シグネチャ: 武器種で異なる
@@ -3110,18 +3113,35 @@ class Ship {
                 // ウェイクを残す (サージ中は増幅 — 動けば痕跡がくっきり残る)
                 if (higgsAtThisShip > 0.15 && spd > 0.2) {
                     const _wAmp = surgePhase === 'active' ? SURGE_WAKE_MULT : 1;
-                    higgsWakes.push({ x: this.x, y: this.y, intensity: Math.min(1, higgsAtThisShip * 0.8 * _wAmp), life: 1.0 });
+                    higgsWakes.push({ x: this.x, y: this.y, intensity: Math.min(1, higgsAtThisShip * 0.8 * _wAmp), life: 1.0, decay: 0.0022 });
                 }
                 // §3-12 敵 HEAT trail (高速移動時の熱排気跡)
                 if (this.heatSig > 0.08 && spd > 0.3 && Math.random() < 0.18) {
-                    if (heatTrails.length < 600) heatTrails.push({ x: this.x, y: this.y, intensity: this.heatSig * 0.85, life: 1.0 });
+                    if (heatTrails.length < 600) heatTrails.push({ x: this.x, y: this.y, intensity: this.heatSig * 0.85, life: 1.0, decay: 0.0015 });
                 }
                 // §3-12 敵 EM trail (AI処理/ミサイル誘導放射)
                 if (this.emSig > 0.12 && Math.random() < 0.12) {
-                    if (emTrails.length < 600) emTrails.push({ x: this.x, y: this.y, intensity: this.emSig * 0.9, life: 1.0 });
+                    if (emTrails.length < 600) emTrails.push({ x: this.x, y: this.y, intensity: this.emSig * 0.9, life: 1.0, decay: 0.0025 });
                 }
             } else {
-                this.higgsSig = Math.max(0, this.higgsSig - 0.02);
+                // 通常航行: 移動していればヒッグス濃度×速度でウェイクシグネチャが立つ (仕様: 高速移動→HIGGS◎)
+                this.higgsSig = Math.max(this.higgsSig - 0.02, Math.min(1.0, higgsAtThisShip * spd * 1.2));
+            }
+
+            // 痕跡 (2026-07-11): 通常航行でもエンジン痕跡を航路上に残す — 「解析で痕跡を辿り追い詰める」狩りの核。
+            // decay指定で武器エフェクト由来のtrailより長寿命 (熱≈11s / ウェイク≈7.5s / EM≈6.7s)。
+            // 可視化は従来どおり「対応センサー選択中 + 自機センサーレンジ内」のみ = どこからでも見える訳ではない。
+            if (this.postFireCooldown === 0 && spd > 0.25) {
+                if (higgsAtThisShip > 0.12 && Math.random() < 0.22) {
+                    const _wAmp2 = surgePhase === 'active' ? SURGE_WAKE_MULT : 1;
+                    if (higgsWakes.length < 800) higgsWakes.push({ x: this.x, y: this.y, intensity: Math.min(1, higgsAtThisShip * 0.7 * _wAmp2), life: 1.0, decay: 0.0022 });
+                }
+                if (this.heatSig > 0.10 && Math.random() < 0.15) {
+                    if (heatTrails.length < 600) heatTrails.push({ x: this.x, y: this.y, intensity: this.heatSig * 0.8, life: 1.0, decay: 0.0015 });
+                }
+                if (this.emSig > 0.15 && Math.random() < 0.08) {
+                    if (emTrails.length < 600) emTrails.push({ x: this.x, y: this.y, intensity: this.emSig * 0.85, life: 1.0, decay: 0.0025 });
+                }
             }
 
             // 電磁波シグネチャ: 武器種で異なる
@@ -3761,12 +3781,38 @@ class Ship {
     // センサー痕跡(不確実性サークル + AIロックオン候補) — フォグ/ヒッグスの「手前」に描く専用パス
     drawSensorTrace(ctx) {
         if (this.isPlayer || this.hp <= 0) return;
-        if (!(this.contactLife > 0 && this.contactAccuracy < 0.95)) return;
+        if (!(this.contactLife > 0)) return;
         const dispX = this.displayX, dispY = this.displayY;
         const uncertaintyR = Math.max(20, (1 - this.contactAccuracy) * 400);
         const acc = this.contactAccuracy;
         const col = acc > 0.7 ? '0,255,170' : (acc > 0.4 ? '255,170,0' : '255,77,77');
         const lifeA = Math.min(1, this.contactLife / 60) * 0.4;
+
+        // ソナーエコー・ゴースト: コンタクト中の反応点をヒッグス雲の手前に描く。
+        // 有視界(inVision)なら実スプライトが見えているので重ねない。雲越しの反応を「見える成果」にする。
+        if (!this.inVision) {
+            const _gz = 1 / camera.zoom;
+            const _ga = Math.min(1, this.contactLife / 90) * (0.35 + acc * 0.55);
+            ctx.save();
+            ctx.translate(dispX, dispY);
+            ctx.rotate(this.angle);
+            ctx.globalAlpha = _ga;
+            ctx.strokeStyle = `rgba(${col},0.95)`;
+            ctx.fillStyle = `rgba(${col},0.30)`;
+            ctx.lineWidth = 1.5 * _gz;
+            const _gr = Math.max(this.radius * 1.6, 10 * _gz);
+            ctx.beginPath();
+            ctx.moveTo(_gr, 0);
+            ctx.lineTo(-_gr * 0.7, -_gr * 0.6);
+            ctx.lineTo(-_gr * 0.4, 0);
+            ctx.lineTo(-_gr * 0.7, _gr * 0.6);
+            ctx.closePath();
+            ctx.fill(); ctx.stroke();
+            ctx.restore();
+            ctx.globalAlpha = 1;
+        }
+
+        if (!(acc < 0.95)) return; // 高精度コンタクトは不確実性サークル省略 (ゴーストのみ)
         ctx.save();
         ctx.globalAlpha = lifeA;
         ctx.beginPath();
@@ -3932,7 +3978,39 @@ function updateDrawEffects(ctx) {
                 ctx.fillStyle = '#ffffff'; ctx.globalAlpha = ef.a * 0.9; ctx.fill();
             }
             ctx.globalAlpha = 1;
-        } else if (ef.type === 'sonar') {
+        } else if (ef.type === 'sonar' || ef.type === 'sonar-fill' || ef.type === 'sonar-boundary') {
+            // ソナー系エフェクトはヒッグスフォグより手前に描く: updateDrawSonarEffects() で更新+描画
+            continue;
+        } else if (ef.type === 'fx-sprite') {
+            // Higgsfieldスプライトエフェクト: 黒背景画像を'lighter'加算合成で描画 (黒=透明)
+            if (!spriteReady(ef.img)) { effects.splice(i, 1); continue; }
+            ef.life -= ef.decay || 0.025;
+            if (ef.life <= 0) { effects.splice(i, 1); continue; }
+            const _fxR = ef.r * (1 + (1 - ef.life) * 0.45);
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.globalAlpha = Math.min(1, ef.life * 1.6);
+            ctx.drawImage(ef.img, ef.x - _fxR, ef.y - _fxR, _fxR * 2, _fxR * 2);
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = 1;
+            ctx.restore();
+        } else {
+            ef.r += ef.type === 'hit' ? 2 : 3; ef.a -= ef.type === 'hit' ? 0.1 : 0.05;
+            ctx.beginPath(); ctx.arc(ef.x, ef.y, ef.r, 0, Math.PI * 2);
+            if (ef.type === 'hit') { ctx.fillStyle = ef.c; ctx.globalAlpha = Math.max(0, ef.a); ctx.fill(); }
+            else { ctx.strokeStyle = ef.c; ctx.globalAlpha = Math.max(0, ef.a); ctx.lineWidth = 2; ctx.stroke(); }
+            ctx.globalAlpha = 1;
+            if (ef.a <= 0) effects.splice(i, 1);
+        }
+    }
+}
+
+// ソナー系エフェクト専用パス — フォグ/ヒッグス層の「手前」に描画する (updateDrawEffectsから分離)。
+// 探信音の波紋・充満・境界リングはプレイヤーの索敵成果なので、ヒッグス雲に隠されると視認できず意味を失う。
+function updateDrawSonarEffects(ctx) {
+    for (let i = effects.length - 1; i >= 0; i--) {
+        const ef = effects[i];
+        if (ef.type === 'sonar') {
             ef.r += ef.speed;
             if (ef.r >= ef.maxR) {
                 // 最大半径到達時: sonar-fillエフェクトを追加してフェードアウト
@@ -3966,26 +4044,6 @@ function updateDrawEffects(ctx) {
             ctx.lineWidth = 1; ctx.setLineDash([4,4]); ctx.stroke(); ctx.setLineDash([]);
             ctx.globalAlpha = 1;
             if (ef.life <= 0) effects.splice(i, 1);
-        } else if (ef.type === 'fx-sprite') {
-            // Higgsfieldスプライトエフェクト: 黒背景画像を'lighter'加算合成で描画 (黒=透明)
-            if (!spriteReady(ef.img)) { effects.splice(i, 1); continue; }
-            ef.life -= ef.decay || 0.025;
-            if (ef.life <= 0) { effects.splice(i, 1); continue; }
-            const _fxR = ef.r * (1 + (1 - ef.life) * 0.45);
-            ctx.save();
-            ctx.globalCompositeOperation = 'lighter';
-            ctx.globalAlpha = Math.min(1, ef.life * 1.6);
-            ctx.drawImage(ef.img, ef.x - _fxR, ef.y - _fxR, _fxR * 2, _fxR * 2);
-            ctx.globalCompositeOperation = 'source-over';
-            ctx.globalAlpha = 1;
-            ctx.restore();
-        } else {
-            ef.r += ef.type === 'hit' ? 2 : 3; ef.a -= ef.type === 'hit' ? 0.1 : 0.05;
-            ctx.beginPath(); ctx.arc(ef.x, ef.y, ef.r, 0, Math.PI * 2);
-            if (ef.type === 'hit') { ctx.fillStyle = ef.c; ctx.globalAlpha = Math.max(0, ef.a); ctx.fill(); }
-            else { ctx.strokeStyle = ef.c; ctx.globalAlpha = Math.max(0, ef.a); ctx.lineWidth = 2; ctx.stroke(); }
-            ctx.globalAlpha = 1;
-            if (ef.a <= 0) effects.splice(i, 1);
         }
     }
 }
@@ -4844,6 +4902,49 @@ function checkPassiveDetection() {
     passiveCheckTimer = 0;
     if (!player || player.hp <= 0) return;
 
+    // ソース特定チェック (2026-07-11 刷新)。コンタクト0件の早期returnより前に置く=蓄積済み解析値で常に評価:
+    // - ランドマーク/地形効果 = 静止発信源 → 「早い段階」(avg>18%) で特定。特定と同時にロック解除し
+    //   「次のシグネチャへ切替」をログでガイド (追跡ルーティンの判断タイミングを明確化)
+    // - 敵艦などの機動反応 = avg>55% で「機動反応=攻撃目標候補」と分類通知 (ロックは維持して追跡続行)
+    if (lockedSignalId && _signalAnalysis[lockedSignalId]) {
+        const _idSa = _signalAnalysis[lockedSignalId];
+        const _idAvg = (_idSa.dirAnalysis + _idSa.triParam) / 2;
+        // ─ 静止発信源 (ランドマーク・地形効果): 早期特定 ─
+        if (_idAvg > ID_THRESHOLD_STATIC && !_idSa.identified) {
+            let _idLabel = null;
+            let m;
+            if ((m = lockedSignalId.match(/^colony-(\d+)$/)) || (m = lockedSignalId.match(/^derelict-(\d+)$/))) {
+                const s = structures[+m[1]];
+                if (s) { s.identified = true; _idLabel = s.type === 'colony' ? 'コロニーノード (ランドマーク)' : 'ディレリクト (ランドマーク)'; }
+            } else if ((m = lockedSignalId.match(/^node-(\d+)$/))) {
+                const n = resourceNodes[+m[1]];
+                if (n) { n.identified = true; _idLabel = 'HIGGSクリスタルノード (ランドマーク)'; }
+            } else if ((m = lockedSignalId.match(/^thermal-(\d+)$/))) {
+                const f = thermalField[+m[1]];
+                if (f) { f.identified = true; _idLabel = '熱雲帯 (地形効果)'; }
+            } else if ((m = lockedSignalId.match(/^storm-(\d+)$/))) {
+                const f = stormField[+m[1]];
+                if (f) { f.identified = true; _idLabel = '磁気嵐帯 (地形効果)'; }
+            } else if ((m = lockedSignalId.match(/^higgs-hot-(\d+)$/))) {
+                const f = bgMist[+m[1]];
+                if (f) { f.identified = true; _idLabel = 'ヒッグス高濃度域 (地形効果)'; }
+            }
+            if (_idLabel) {
+                _idSa.identified = true;
+                logMessage(`ANALYSIS: 発信源特定 — ${_idLabel}。マップに恒久記録`, 'system-msg');
+                logMessage('TRACKING: 解析完了・ロック解除 — 次のシグネチャをロックオンせよ', 'warning-msg');
+                playSound('ui');
+                lockedSignalId = null;
+            }
+        }
+        // ─ 機動反応 (敵艦・ドローン・デコイ等 = ランドマーク以外): 分類通知のみ。追跡は続く ─
+        if (lockedSignalId && _idAvg > ID_THRESHOLD_MOBILE && !_idSa.classified && /^(e|decoy|drone)-/.test(lockedSignalId)) {
+            _idSa.classified = true;
+            logMessage('ANALYSIS: 発信源特定 — 機動反応。ランドマーク/地形ではない — 攻撃目標候補だ', 'warning-msg');
+            playSound('ui');
+        }
+    }
+
     const sc = sensorConfig[currentSensor];
     const thr = sc.threshold;
     let range = Math.max(effectiveRadarRange * 10, 11000); // パッシブ探知の下限を拡張(8000→11000): 接近フェーズで早めに微弱方位を拾い「空白の航行」を緊張に変える
@@ -5065,29 +5166,6 @@ function checkPassiveDetection() {
         }
     }
 
-    // ランドマーク特定チェック: locked signal の (dirAnalysis+triParam)/2 > 35% → identified (第9弾: 到達可能に)
-    if (lockedSignalId && _signalAnalysis[lockedSignalId]) {
-        const _idSa = _signalAnalysis[lockedSignalId];
-        const _idAvg = (_idSa.dirAnalysis + _idSa.triParam) / 2;
-        if (_idAvg > 35) {
-            structures.forEach((s, si) => {
-                if (lockedSignalId === 'colony-' + si || lockedSignalId === 'derelict-' + si) {
-                    if (!s.identified) {
-                        s.identified = true;
-                        const _idLabel = s.type === 'colony' ? 'コロニーノード' : 'ディレリクト';
-                        logMessage(`ANALYSIS: ランドマーク特定 — ${_idLabel}`, 'system-msg');
-                    }
-                }
-            });
-            resourceNodes.forEach((n, ni) => {
-                if (lockedSignalId === 'node-' + ni && !n.identified) {
-                    n.identified = true;
-                    logMessage('ANALYSIS: HIGGSクリスタルノード特定', 'system-msg');
-                }
-            });
-        }
-    }
-
     passiveAlertTimer = 180;
     logMessage(`PASSIVE: ${sc.label}放射源 ─ 方位 ${strongestDeg}° ±${strongestWidthDeg}°`, 'warning-msg');
     const ind = document.getElementById('passive-indicator');
@@ -5154,6 +5232,47 @@ function drawPassiveBearings(ctx) {
         ctx.stroke();
         ctx.restore();
     }
+}
+
+// 特定済み地形効果マーカー描画 (2026-07-11): 解析で特定した熱雲帯/磁気嵐帯/ヒッグス高濃度域を
+// ヒッグスフォグの手前に恒久表示する。「一度特定した地形は二度と疑わない」= 消去法の航海図が育つ。
+function drawIdentifiedTerrain(ctx, vpX, vpY, vpW, vpH) {
+    const zc = 1 / camera.zoom;
+    const _terrSets = [
+        { arr: (typeof thermalField !== 'undefined' ? thermalField : []), col: '#ffaa44', label: 'THERMAL' },
+        { arr: (typeof stormField   !== 'undefined' ? stormField   : []), col: '#b47af0', label: 'STORM' },
+        { arr: (typeof bgMist       !== 'undefined' ? bgMist       : []), col: '#5a9cff', label: 'HIGGS DENSE' }
+    ];
+    ctx.save();
+    for (const set of _terrSets) {
+        for (const f of set.arr) {
+            if (!f || !f.identified) continue;
+            const mg = f.r || 800;
+            if (f.x < vpX - mg || f.x > vpX + vpW + mg || f.y < vpY - mg || f.y > vpY + vpH + mg) continue;
+            // 範囲リング (地形効果の及ぶ範囲を破線で)
+            ctx.globalAlpha = 0.20;
+            ctx.strokeStyle = set.col;
+            ctx.lineWidth = 1.2 * zc;
+            ctx.setLineDash([20 * zc, 14 * zc]);
+            ctx.beginPath(); ctx.arc(f.x, f.y, mg * 0.75, 0, Math.PI * 2); ctx.stroke();
+            ctx.setLineDash([]);
+            // 中心の菱形マーカー
+            const ms = 9 * zc;
+            ctx.globalAlpha = 0.75;
+            ctx.beginPath();
+            ctx.moveTo(f.x, f.y - ms); ctx.lineTo(f.x + ms, f.y);
+            ctx.lineTo(f.x, f.y + ms); ctx.lineTo(f.x - ms, f.y);
+            ctx.closePath(); ctx.stroke();
+            // ラベル
+            ctx.globalAlpha = 0.65;
+            ctx.fillStyle = set.col;
+            ctx.font = `bold ${Math.round(9 * zc)}px Orbitron, monospace`;
+            ctx.textAlign = 'center';
+            ctx.fillText(set.label, f.x, f.y - ms - 6 * zc);
+        }
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
 }
 
 // ============================================================
@@ -6218,6 +6337,27 @@ function drawMinimap() {
         minimapCtx.globalAlpha = 1;
     });
 
+    // 特定済み地形効果 (熱雲帯=橙 / 磁気嵐帯=紫 / ヒッグス高濃度域=青) — 小リングで恒久表示
+    {
+        const _mmTerr = [
+            { arr: (typeof thermalField !== 'undefined' ? thermalField : []), col: '#ffaa44' },
+            { arr: (typeof stormField   !== 'undefined' ? stormField   : []), col: '#b47af0' },
+            { arr: (typeof bgMist       !== 'undefined' ? bgMist       : []), col: '#5a9cff' }
+        ];
+        minimapCtx.globalAlpha = 0.75;
+        minimapCtx.lineWidth = 1;
+        for (const set of _mmTerr) {
+            minimapCtx.strokeStyle = set.col;
+            for (const f of set.arr) {
+                if (!f || !f.identified) continue;
+                minimapCtx.beginPath();
+                minimapCtx.arc(f.x * mmScale + offX, f.y * mmScale + offY, Math.max(2, (f.r || 800) * mmScale * 0.6), 0, Math.PI * 2);
+                minimapCtx.stroke();
+            }
+        }
+        minimapCtx.globalAlpha = 1;
+    }
+
     // 前任艦の残骸 (灰色ダイヤ)
     if (playerWreckObj) {
         const _wmx = playerWreckObj.x * mmScale + offX, _wmy = playerWreckObj.y * mmScale + offY;
@@ -6794,7 +6934,15 @@ function updateSigInfoBar() {
 
     const fmtRate = r => Math.abs(r) < 0.005 ? '' : `(${r >= 0 ? '+' : ''}${r.toFixed(2)}%/s)`;
 
-    lockEl.textContent = `LCK:${lockedSignalId}`;
+    // 解析フェーズ表示 (2026-07-11): 「いつ次のシグネチャへ切替えるか」の判断材料。
+    // 静止源(ランドマーク/地形)なら閾値18%で自動特定→ロック解除されるため、
+    // 18%を超えてもロックが残っている = 機動反応 (=攻撃目標候補) と絞り込める。
+    const _sibAvg = (dir + tri) / 2;
+    let _sibPhase;
+    if (sa.classified) _sibPhase = '機動反応=目標';
+    else if (_sibAvg > ID_THRESHOLD_STATIC) _sibPhase = '非ランドマーク';
+    else _sibPhase = `解析${Math.round(_sibAvg)}%`;
+    lockEl.textContent = `LCK:${lockedSignalId} [${_sibPhase}]`;
     lockEl.className = 'locked';
     if (dirEl) dirEl.textContent = dir.toFixed(1) + '%';
     if (triEl) triEl.textContent = tri.toFixed(1) + '%';
@@ -8346,22 +8494,22 @@ function gameLoop() {
             }
         }
 
-        // ヒッグスウェイク更新 (時間経過でフェードアウト)
+        // ヒッグスウェイク更新 (時間経過でフェードアウト)。decay指定エントリは航路痕跡=長寿命
         for (let i = higgsWakes.length - 1; i >= 0; i--) {
-            higgsWakes[i].life -= 0.005;
+            higgsWakes[i].life -= (higgsWakes[i].decay || 0.005);
             if (higgsWakes[i].life <= 0) higgsWakes.splice(i, 1);
         }
-        // §3-12 センサーtrail decay (各センサー軸の足跡フェード)
-        for (let i = heatTrails.length  - 1; i >= 0; i--) { heatTrails[i].life  -= 0.004; if (heatTrails[i].life  <= 0) heatTrails.splice(i,  1); }
-        for (let i = opticTrails.length - 1; i >= 0; i--) { opticTrails[i].life -= 0.006; if (opticTrails[i].life <= 0) opticTrails.splice(i, 1); }
-        for (let i = emTrails.length    - 1; i >= 0; i--) { emTrails[i].life    -= 0.005; if (emTrails[i].life    <= 0) emTrails.splice(i,    1); }
+        // §3-12 センサーtrail decay (各センサー軸の足跡フェード)。decay指定エントリは航路痕跡=長寿命
+        for (let i = heatTrails.length  - 1; i >= 0; i--) { heatTrails[i].life  -= (heatTrails[i].decay  || 0.004); if (heatTrails[i].life  <= 0) heatTrails.splice(i,  1); }
+        for (let i = opticTrails.length - 1; i >= 0; i--) { opticTrails[i].life -= (opticTrails[i].decay || 0.006); if (opticTrails[i].life <= 0) opticTrails.splice(i, 1); }
+        for (let i = emTrails.length    - 1; i >= 0; i--) { emTrails[i].life    -= (emTrails[i].decay    || 0.005); if (emTrails[i].life    <= 0) emTrails.splice(i,    1); }
 
         // プレイヤーの移動でウェイク・trail を生成
         if (player && player.hp > 0 && player.state === 'moving') {
             const playerHiggs = getHiggsIntensity(player.x, player.y);
             const _pwAmp = surgePhase === 'active' ? SURGE_WAKE_MULT : 1; // サージ中: 移動の痕跡が濃く残る
             if (playerHiggs > 0.2 && Math.random() < 0.3 * _pwAmp) {
-                higgsWakes.push({ x: player.x, y: player.y, intensity: Math.min(1, playerHiggs * 0.6 * _pwAmp), life: 0.8 });
+                higgsWakes.push({ x: player.x, y: player.y, intensity: Math.min(1, playerHiggs * 0.6 * _pwAmp), life: 0.8, decay: 0.0022 });
             }
             // §3-12 HEAT trail: エンジン熱排気 (移動時)
             if (!repairActive && player.heatSig > 0.07 && Math.random() < 0.22) {
@@ -8488,6 +8636,9 @@ function gameLoop() {
         // マップモード中はフォグを抑制して全体を戦術マップとして表示(索敵済みの情報のみ可視)。
         if (player && player.hp > 0 && !mapMode) drawFogOfWar(ctx);
 
+        // ── ソナーエフェクト(波紋/充満/境界) — ヒッグスより手前に表示 ──
+        updateDrawSonarEffects(ctx);
+
         // ── ラジアル方位目盛り: ヒッグスフォグより手前に描画 ──
         {
             const _rlVw = cssW / camera.zoom, _rlVh = cssH / camera.zoom;
@@ -8574,6 +8725,9 @@ function gameLoop() {
                 ctx.globalAlpha = 1;
             });
         }
+
+        // ── 特定済み地形効果 (熱雲帯/磁気嵐帯/ヒッグス高濃度域) — ヒッグスより手前に恒久マーカー ──
+        drawIdentifiedTerrain(ctx, _vpX, _vpY, _vpW, _vpH);
 
         // ── センサー痕跡(ソナーの影/コンタクト) — ヒッグスより手前に表示 ──
         for (const e of enemies) e.drawSensorTrace(ctx);
