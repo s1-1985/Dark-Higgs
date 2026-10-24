@@ -2282,3 +2282,20 @@ body.in-game #dock-prompt { left: var(--field-cx); bottom: 40px; }
 body.in-game #dock-prompt.active { bottom: 44px; }
 body.in-game #sector-clear-banner { left: var(--field-cx); top: calc(var(--hud-top) + 34px); }
 body.in-game #map-mode-banner { left: var(--field-cx) !important; top: calc(var(--hud-top) + 6px) !important; }
+
+/* ── 第15弾: 出力スタンス / GEN重点 / 自艦ノイズ ── */
+.hud-act.flank { border-color: #ff8a3c; background: rgba(255,120,40,0.22); color: #ffd8b8; }
+.gd-focus { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+.gd-focus-btn {
+    padding: 7px 2px; font-size: 11px; color: #9fc9bb; cursor: pointer;
+    background: rgba(0,0,0,0.45); border: 1px solid #23423a; border-radius: 4px;
+}
+.gd-focus-btn.active { color: #031; background: #00ffaa; border-color: #00ffaa; font-weight: 700; }
+/* 自艦ノイズ: 受信バーの底から上がる斜線帯 = 自分の機関音に埋もれている量 */
+.bt-noise {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 0; z-index: 1; transition: height 0.3s;
+    background: repeating-linear-gradient(135deg, rgba(255,255,255,0.22) 0 2px, transparent 2px 5px);
+}
+#hud-left .bt-fill { z-index: 0; }
+#hud-left .bt-notch { z-index: 2; }
+#band-legend .bl-nz::before { width: 7px; height: 9px; background: repeating-linear-gradient(135deg, rgba(255,255,255,0.5) 0 2px, transparent 2px 4px); }
