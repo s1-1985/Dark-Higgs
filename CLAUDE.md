@@ -26,7 +26,7 @@ TODO.md         # 実装タスク台帳（壁打ち企画・実装状況・未�
 HANDOVER.md     # セッションログ・決定経緯・パフォーマンス教訓
 prototype/
 ├── index.html  # UI レイアウト（Homeworld2スタイル、日本語）
-├── game.js     # ゲームロジック全体（約5200行）
+├── game.js     # ゲームロジック全体（約9300行）
 ├── style.css   # SF緑パレット（Orbitronフォント）
 └── assets/     # 生成スプライト（透過PNG）: ship_*/enemy_*/structure_*/node_higgs/fx_beam_main
 ```
@@ -35,6 +35,16 @@ prototype/
 > 本書・`TODO.md`・`HANDOVER.md` に内容統合のうえ廃止（2026-06-14再編）。
 
 ## 確定仕様（コア）
+
+### コアループ「聴く→測る→撃つ→消える」（2026-10-24 第13弾 ✅ → `TODO.md` §3-27）
+> 原案（先に見つけて撃つ / ジ・エンド戦的1対1）に回帰するため、探知→射撃の導線を一本化した。**自機/敵は同じ受信モデル**。
+- **聴く**: 4バンド受信チューナー（`#tac-strip`、`rxLevels()`）。50%ノッチ=方位が取れる閾値。タップ/キー1〜4で同調（同調外バンドの方位解析は×0.3）
+- **測る**: `trackNextSignal()`（TRACK/キーT/ブリップタップ）で信号をロック → 方位線に**直交して動くほど**視差(`triParam`)が貯まり推定円が縮む（`R=300+34700*(1-q)^2`）→ `applyTrackContact()` で**推定位置を敵コンタクトに反映**
+- **撃つ**: `issueFireOrder()`（FIRE/キーF）= 完全ロック or 想定ロック(推定位置)へ現在武器で発射（`dmgScale=0.3+0.5*acc`、命中見込み`assumedHitChance()`）。**自動攻撃は完全ロック時のみ**。ミサイルは終末シーカー付き（敵ミサイルも対称）
+- **消える**: 発砲は位置を晒す（自機発砲フラッシュ／敵は被弾で射手方位を得てhuntingへ・逆も対称）。静粛(abar常設/キーS)・ヒッグス雲・直交回避で振り切る。奇襲×3.5は1回だけ（被弾した敵は45秒警戒）
+- **副長(XO)バー**: `xoEvaluate()` が優先度順に1件の状況判断+ワンタップ行動（キーX）を提示
+- **司令部情報**: 開始時、自機はボス方面の粗い方位（`intelBearing`、最大4分）、敵は「マップ中央付近」の粗い情報（`boss.intelPos`）。正確な位置は誰も知らない
+- **メタフロー**: 初回ブリーフィング（作戦要領4ステップ、`darkEchoBriefed`）→ 制圧後に戦闘詳報(`openDebrief`) →「次のセクターへ」or「ドックで改修」
 
 ### マップ
 - 円形マップ `MAP_RADIUS=35000`（`FIELD_SIZE`=直径70000）@`game.js:35`
@@ -70,7 +80,7 @@ prototype/
 ### GEN ゼロサム配分 + AI
 - **GEN**: エンジン/武器/センサー/AI の4スライダー（合計100%固定）`genAlloc`
   - エンジン→速度 / 武器→火力・連射 / センサー→探知レンジ / AI→AI基礎量
-- **物理法則**: AI配分↑ → EM放射↑（EMセンサーで検知されやすい）
+- **物理法則**: AI配分↑ → EM放射↑（EMセンサーで検知されやすい）。第13弾で**停止中でもAI分のEMが漏れる**よう是正（EM=スラスト×0.35×emMult+センサー×0.18+AI×0.40）
 - **AI精度制御**（独立配分✅ → `TODO.md` §3-2）: 命中率/回避/センサー解析精度
 
 ### 艦種3種
@@ -81,7 +91,7 @@ prototype/
 | 潜航型 Stealth | 700 | ×1.05 | ジャミング3種✅ + デコイ射出✅(ミサイル誘引) | HP極低・失敗即死 |
 | 空母型 Carrier | 2500 | ×0.38 | ドローン4種✅+建設物4種✅ | 加速/旋回最鈍・建設中は停止＝最大脆弱 |
 
-> 速度倍率は `SHIP_MAX_SPEED_MULT` による最高速倍率（慣性あり・旋回中はさらに低下）。加速レートは `SHIP_ACCEL_RATE`（carrier=0.003 / assault=0.008 / stealth=0.016）。
+> 巡航速度は `shipCruiseSpeed(cls, enginePct, gain)` = enginePct/100×gain×`SPEED_BASE`(2.4)×`SHIP_MAX_SPEED_MULT`×`MOVE_SPEED_MULT`（自機/敵共用）。速度倍率は `SHIP_MAX_SPEED_MULT` による最高速倍率（慣性あり・旋回中はさらに低下）。加速レートは `SHIP_ACCEL_RATE`（carrier=0.003 / assault=0.008 / stealth=0.016）。
 
 ### 武器3種
 
@@ -91,7 +101,9 @@ prototype/
 | ミサイル | 中長(2200) ±45° | 熱源（+AI型はEM）。リロード。HON/AI 2タイプ✅ |
 | ビーム | 長(8000) ±10° | チャージ=熱+EM強 / 発射=光学軌跡+ヒッグスダークチャネル。GEN大量消費 |
 
+- **射程は `WEAPON_RANGE` に一本化**（表示・AI判断・弾体飛距離で共通。`weaponRange()`=アップグレード倍率込み）
 - GEN武器配分↑ → 発射レート↑（`weaponGenFactor`）
+- ビーム発射後150fは機関出力×0.4（`BEAM_DRAIN_*`）
 - ヒッグス高濃度でビームダメージ大幅低下
 - **射角**: `WEAPON_FIRE_ARC = { kinetic: Math.PI*5/6, missile: Math.PI/4, beam: Math.PI/18 }`
 - **右クリック自由射撃**: ミサイル/ビームのみ。射角チェックあり。外れると自位置シグネチャが露出
@@ -129,6 +141,7 @@ prototype/
 - **コンパス**(上部): 艦首方位360°テープ。**露出度チップは小型ピル化**
 
 ### 探知・三角測量（2026-07-05 第9弾 ✅ → `TODO.md` §3-23）
+> ⚠️ 第13弾で三角測量は**視差測量**（方位線と自機進路の角度`|sin α|`×移動距離で蓄積）に置換し、推定位置を敵コンタクトへ反映する方式に変更（§3-27）。下記の蓄積レート記述は旧方式。
 - **ソナー2倍** `OMNI_SONAR_RANGE`。**三角測量ハードル低下**: 蓄積~1.3%/sec(60fps)・約1分で概位置サークル・`_sourcePos()`で真値から自動ジッタ配置・閾値dir>6
 - **移動方向ガイド**: ロック中、方位線に垂直な最良進路を破線矢印で提示
 - **ランドマーク特定**(第12弾でavg>18%に早期化): ノード/コロニー/難破船を永続記録(ヒッグス手前+ミニマップ)
@@ -143,7 +156,7 @@ prototype/
 
 ### バランス調整（2026-07-04 第7弾 ✅ → `TODO.md` §3-21）
 - 弾丸ダメージ: kinetic **18** / missile **55** / smart **70** / beam 150（自機/敵共通）
-- 追跡鮮度減衰: 通常0.012/f。**静粛×1.5 / デブリ擬態×2.2** で加速（隠れる=振り切れる）
+- 追跡鮮度減衰: `FRESHNESS_DECAY=0.0004/f`（第13弾で是正。旧0.012/fは約1.4秒で記憶喪失していた）。**静粛×1.5 / デブリ擬態×2.2** で加速（隠れる=振り切れる）
 - fighterドローンは奇襲被弾の対象外
 
 ### 深淵の駆け引き（2026-07-03 第3弾 ✅ → `TODO.md` §3-17）
@@ -158,7 +171,8 @@ prototype/
 ### 画面レイアウト（2026-07-04 第6弾 ✅ → `TODO.md` §3-20）
 - **コンソール折りたたみ**: `body.console-min`（デフォルトON・localStorage）。折りたたみ時はステータスバー+アクションバーのみ=フィールド約75%
 - **横向き対応**: コンソール右サイド320px / 折りたたみ64px縦レール。ステータスバーは上部細帯
-- **カメラ補正**: `uiInsets()` で実フィールド中心に自機・HUDチップを配置
+- **カメラ補正**: `uiInsets()` で実フィールド中心に自機・HUDチップを配置（`topHud`=ログパネル下端）
+- **第13弾**: アクションバー=`WEP`(5モード循環)/`SCAN`/`静粛`/`EW`(潜航)or`DRONE`(空母)/`NAV`/`FIRE`。追従カメラ既定ON（パンで解除・`#recenter-chip`で復帰）。DEMO/FPSはメニュー内。横向きは`#bottom-console{backdrop-filter:none}`（fixed子要素の包含ブロック化でステータスバーが潰れる対策）。デスクトップはステータスバー+展開トグル常時表示
 - ⚠️ 初期化IIFEから後方宣言letを参照するとtypeofガードでもTDZで全滅 → 状態変数は最上部宣言
 
 ### 霧の中の物語（2026-07-04 第5弾 ✅ → `TODO.md` §3-19）
@@ -175,6 +189,8 @@ prototype/
 
 ### 敵AI設計原則
 - **センサー制約型（全知禁止）**: プレイヤーと同じセンサールールで情報収集。直接位置は知らず、検知から行動を予測
+- **受信モデル（第13弾）**: `ENEMY_PASSIVE_RANGE=11000`×(1-ヒッグス×0.3)×(1+sector×0.03)×(1-ジャム)、閾値×0.5。推定位置に誤差 `(1-q)*dist*0.25+50` + EMA平滑。推定位置へのミサイル射撃は `ENEMY_MISSILE_ENGAGE=2100` 以内
+- 敵空母のファイターは有限（`droneStock=6+sector`、燃料3600f）
 - 4状態: lurking（潜伏）/ gathering（収集）/ hunting（追跡）/ combat（射程内発砲→再配置）✅
 - 予測照準モデル `playerLastKnownPos`+`contactFreshness`（最終既知位置へリード外挿）は**実装済**（PR#35）✅
 - `predictedBehavior` 適応戦略（収集→先回り/チャージ→回避/実弾→カイト&長射程）も**実装済** ✅（`TODO.md` §2-2）
@@ -190,7 +206,9 @@ prototype/
 | `currentSensor` | string | 'heat' \| 'optic' \| 'em' \| 'higgs' |
 | `genAlloc` | object | {engine, weapons, sensors, ai} ゼロサム100% |
 | `autoAttackEnabled` | bool | 自動攻撃ON/OFF |
-| `cameraFollowPlayer` | bool | 自艦追従フラグ |
+| `cameraFollowPlayer` | bool | 自艦追従フラグ（既定true、パンで解除） |
+| `lockedSignalId` | string | 追跡(TRACK)中のシグネチャsourceId（敵は`'e-'+uid`） |
+| `intelBearing` | object | 司令部情報の粗い方位 {ox,oy,angle,halfWidth,range,life} |
 | `demoMode` | bool | デモモード（霧解除・全敵可視・敵AI通常動作） |
 | `higgsWakes[]` | array | {x, y, intensity, life} 移動軌跡 |
 | `passiveBearings[]` | array | パッシブ方位ウェッジ（計測位置アンカー、三角測量用） |
@@ -204,25 +222,35 @@ prototype/
 | `SHIP_TURN_SLOW` | const | {carrier:0.78, assault:0.52, stealth:0.22} 旋回中速度低下率 |
 | `PLAYER_TURN_RATES` | const | {assault:0.010, stealth:0.015, carrier:0.004} 旋回レート(rad/frame) |
 | `WEAPON_FIRE_ARC` | const | {kinetic:π×5/6, missile:π/4, beam:π/18} 射角（半角ラジアン） |
+| `WEAPON_RANGE` | const | {kinetic:800, missile:2200, beam:8000} 射程の唯一の正 |
+| `SPEED_BASE` | const | 2.4（`shipCruiseSpeed()` の基準） |
+| `ENEMY_PASSIVE_RANGE` / `FRESHNESS_DECAY` | const | 11000 / 0.0004 敵受信レンジ・記憶減衰 |
 
 ## 主要関数（game.js）
 
 | 関数 | 説明 |
 |---|---|
-| `gameLoop()` | メインループ(rAF) |
+| `gameLoop()` | メインループ(rAF)。`stepWorld()`(ロジック) / `renderWorld()`(描画) に分離 |
+| `window.__simSteps(n)` | 描画なしでロジックをnフレーム進める（ヘッドレスsim用） |
+| `trackNextSignal()` | 未識別信号を順に追跡ロック（TRACK） |
+| `issueFireOrder()` / `playerFireWeapon()` | 射撃命令（完全/想定ロック）/ 発射本体 |
+| `assumedHitChance(te,w,lk)` | 想定ロック時の命中見込み |
+| `xoEvaluate()` / `updateTacStrip()` | 副長の状況判断 / 副長バー+バンドチューナー更新 |
+| `rxLevels()` / `passiveRange()` | 4バンド受信レベル / パッシブ受信レンジ |
+| `openDebrief()` / `showBriefing()` | 戦闘詳報 / 作戦要領 |
 | `worldToScreen(x,y)` | ワールド→スクリーン座標変換 |
 | `drawHUDOverlay(ctx)` | スクリーン空間HUD描画 |
 | `updateSigCanvas()` | オシロスコープ波形更新 |
-| `computeVisionRadius()` @254 | 有視界半径（ヒッグス濃度連動） |
-| `updateVisionLockOn()` @355 | 有視界ロックオン |
-| `checkPassiveDetection()` @3042 | パッシブ探知（2秒毎、方位ウェッジ生成） |
-| `fireOmniSonar()` @3177 | アクティブ/指向性ソナー（CD15秒） |
+| `computeVisionRadius()` @746 | 有視界半径（ヒッグス濃度連動） |
+| `updateVisionLockOn()` @871 | 有視界ロックオン |
+| `checkPassiveDetection()` @5112 | パッシブ探知（2秒毎、方位ウェッジ生成） |
+| `fireOmniSonar()` @5790 | アクティブ/指向性ソナー（CD15秒） |
 | `drawPassiveBearings()` | パッシブ方位ウェッジ描画（`passiveBearings[]`） |
 | `getHiggsIntensity(x,y)` | ヒッグス濃度（フレームキャッシュ付） |
-| `buyUpgrade(type)` @5013 | アップグレード購入（engine/weapons/armor/sensor Lv0-3） |
-| `generateSector()` @2534 | セクター生成 |
+| `buyUpgrade(type)` @9153 | アップグレード購入（engine/weapons/armor/sensor Lv0-3） |
+| `generateSector()` @4260 | セクター生成 |
 | `saveGame()` / `loadGame()` | localStorage 永続化 |
-| `toggleDemoMode()` | デモモードON/OFF切替（`btn-demo-mode`から呼出） |
+| `toggleDemoMode()` | デモモードON/OFF切替（メニュー内`btn-demo-mode`から呼出） |
 
 ## Ship クラスの主要フィールド
 

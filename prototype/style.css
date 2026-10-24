@@ -2020,3 +2020,185 @@ body.console-min #sig-info-bar { display: none !important; }
         border: 1px solid rgba(0,255,170,0.22);
     }
 }
+
+/* ============================================================
+   第13弾: 戦術ストリップ — 副長(XO)バー + 4バンド受信チューナー
+   フィールド下端 (コンソールの直上 / 横持ちはレールの左) に常時表示。
+   --ins-bottom / --ins-right は game.js がコンソールの実測から設定する。
+   ============================================================ */
+#tac-strip {
+    position: absolute;
+    left: 8px;
+    right: calc(var(--ins-right, 0px) + 8px);
+    bottom: calc(var(--ins-bottom, 0px) + 6px);
+    z-index: 19; /* コンソール(20)より下: アクションバーのポップオーバーが上に重なるように */
+    display: none;
+    flex-direction: column;
+    gap: 5px;
+    pointer-events: none;
+}
+body.in-game #tac-strip { display: flex; }
+#xo-bar {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 38px;
+    padding: 4px 6px 4px 9px;
+    background: rgba(0, 9, 13, 0.84);
+    border: 1px solid rgba(0, 255, 170, 0.28);
+    border-left-width: 3px;
+    border-radius: 6px;
+    backdrop-filter: blur(6px);
+    transition: border-color 0.25s;
+}
+#xo-dot { width: 7px; height: 7px; border-radius: 50%; background: #3a8a7a; flex-shrink: 0; }
+#xo-label { font-family: 'Orbitron', monospace; font-size: 9px; color: #5fb8a2; letter-spacing: 1px; flex-shrink: 0; }
+#xo-text { flex: 1; min-width: 0; font-size: 11.5px; line-height: 1.35; color: #d6efe8; }
+#xo-act {
+    flex-shrink: 0;
+    min-height: 30px;
+    padding: 0 12px;
+    font-family: 'Orbitron', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: #031;
+    background: #00ffaa;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(0, 255, 170, 0.35);
+}
+#xo-act:active { transform: scale(0.95); filter: brightness(1.3); }
+#recenter-chip {
+    flex-shrink: 0;
+    width: 30px; height: 30px;
+    font-size: 16px; line-height: 1;
+    color: #00ffaa;
+    background: rgba(0, 40, 30, 0.8);
+    border: 1px solid #00ffaa;
+    border-radius: 50%;
+    cursor: pointer;
+}
+/* XOの語調: info=通常 / go=好機 / bad=危険 / good=達成 / idle=静寂 */
+#xo-bar.xo-go   { border-color: rgba(255, 210, 74, 0.7); }
+#xo-bar.xo-go   #xo-dot { background: #ffd24a; box-shadow: 0 0 6px #ffd24a; }
+#xo-bar.xo-go   #xo-act { background: #ffd24a; box-shadow: 0 0 12px rgba(255, 210, 74, 0.5); }
+#xo-bar.xo-bad  { border-color: rgba(255, 60, 70, 0.8); animation: xoAlarm 0.9s infinite alternate; }
+#xo-bar.xo-bad  #xo-dot { background: #ff3344; box-shadow: 0 0 6px #ff3344; }
+#xo-bar.xo-bad  #xo-act { background: #ff4455; color: #fff; box-shadow: 0 0 12px rgba(255, 60, 70, 0.55); }
+#xo-bar.xo-good { border-color: rgba(0, 255, 170, 0.8); }
+#xo-bar.xo-good #xo-dot { background: #00ffaa; }
+#xo-bar.xo-info #xo-dot { background: #4fd8ff; }
+#xo-bar.xo-idle { opacity: 0.82; }
+@keyframes xoAlarm { from { background: rgba(30, 0, 4, 0.86); } to { background: rgba(70, 4, 10, 0.88); } }
+
+#band-tuner { pointer-events: auto; display: flex; gap: 4px; }
+.band-btn {
+    flex: 1;
+    min-width: 0;
+    height: 34px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    padding: 3px 6px;
+    background: rgba(0, 6, 10, 0.78);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 5px;
+    cursor: pointer;
+    --bc: #8aa;
+}
+.band-btn[data-band="heat"]  { --bc: #ff8a3c; }
+.band-btn[data-band="optic"] { --bc: #ffee55; }
+.band-btn[data-band="em"]    { --bc: #c86bff; }
+.band-btn[data-band="higgs"] { --bc: #4fe6ff; }
+.bt-label { font-family: 'Orbitron', monospace; font-size: 9px; letter-spacing: 1px; color: var(--bc); opacity: 0.55; text-align: left; }
+.bt-bar { position: relative; height: 5px; background: rgba(255, 255, 255, 0.08); border-radius: 3px; overflow: hidden; }
+.bt-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--bc); opacity: 0.45; transition: width 0.25s; }
+/* 50%の刻み = その帯域に同調すれば方位が取れるライン */
+.bt-notch { position: absolute; left: 50%; top: -1px; bottom: -1px; width: 1px; background: rgba(255, 255, 255, 0.45); }
+.band-btn.hot .bt-fill { opacity: 0.95; }
+.band-btn.hot:not(.tuned) { animation: bandHot 1.1s infinite alternate; }
+@keyframes bandHot { from { border-color: rgba(255, 255, 255, 0.10); } to { border-color: var(--bc); } }
+.band-btn.tuned { border-color: var(--bc); background: rgba(255, 255, 255, 0.07); box-shadow: inset 0 0 10px rgba(255, 255, 255, 0.05); }
+.band-btn.tuned .bt-label { opacity: 1; font-weight: 700; }
+.band-btn.tuned .bt-label::before { content: '▶ '; }
+.band-btn:active { transform: scale(0.96); }
+
+/* ログはコンパクトが既定 (最新2行)。タップで展開 */
+#log-panel { cursor: pointer; }
+#log-panel.compact { height: 50px !important; max-height: 50px !important; }
+#log-panel.compact #message-log { max-height: 32px !important; overflow: hidden; }
+#log-panel.compact #log-header { padding-top: 2px; padding-bottom: 2px; }
+
+/* 折りたたみ時はコンソールの余白を詰める (縦持ち: ステータスバー+アクションバーだけ) */
+@media (max-width: 768px) {
+    body.console-min #bottom-console { min-height: 0; }
+    #xo-text { font-size: 11px; }
+}
+/* 横持ち: 戦術ストリップは横幅が広いので、XOとチューナーを1段に並べる */
+@media (orientation: landscape) and (max-height: 620px) {
+    /* 既存不具合の修正: backdrop-filter が position:fixed の基準を右レール(64px)に変えてしまい、
+       ステータスバーがレール内で幅16pxに潰れていた (main でも再現)。横持ちではフィルタを外す */
+    #bottom-console { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(4, 9, 14, 0.97); top: 49px; }
+    #mobile-status-bar { top: 49px; }
+    #minimap-container { top: 76px; }
+    #log-panel { top: 76px; }
+    #tac-strip { flex-direction: row; align-items: stretch; }
+    #xo-bar { flex: 1.4; min-width: 0; }
+    #band-tuner { flex: 1; }
+    .band-btn { height: auto; }
+}
+
+/* ── 第13弾: 作戦要領 / 作戦報告 ── */
+#briefing-overlay, #debrief-overlay {
+    position: fixed; inset: 0; z-index: 650;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0, 4, 8, 0.78); backdrop-filter: blur(5px);
+    pointer-events: auto; padding: 14px;
+}
+#briefing-overlay.hidden, #debrief-overlay.hidden { display: none !important; }
+.brief-box {
+    width: min(460px, 100%); max-height: 92vh; overflow-y: auto;
+    background: rgba(3, 12, 18, 0.97);
+    border: 1px solid rgba(0, 255, 170, 0.45); border-radius: 8px;
+    padding: 18px 18px 16px; box-shadow: 0 0 30px rgba(0, 255, 170, 0.15);
+}
+.brief-title { font-family: 'Orbitron', monospace; font-size: 15px; font-weight: 700; color: #00ffaa; letter-spacing: 3px; margin-bottom: 8px; }
+.brief-title span { font-size: 10px; color: #5fb8a2; letter-spacing: 2px; margin-left: 8px; }
+.brief-lead { font-size: 13px; color: #d6efe8; line-height: 1.6; margin-bottom: 10px; }
+.brief-lead b { color: #ffd24a; }
+.brief-steps { list-style: none; counter-reset: bs; display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.brief-steps li { font-size: 12px; color: #b9d6cf; line-height: 1.55; padding: 8px 10px 8px 12px; background: rgba(0, 255, 170, 0.04); border-left: 3px solid #1d6b5a; border-radius: 3px; }
+.brief-steps li b { display: inline-block; min-width: 3.4em; font-family: 'Orbitron', monospace; font-size: 13px; margin-right: 6px; }
+.brief-steps li em { font-style: normal; color: #eafff8; font-weight: 600; }
+.bs-1 { color: #4fe6ff; } .bs-2 { color: #9dff7a; } .bs-3 { color: #ffd24a; } .bs-4 { color: #c88bff; }
+.brief-tip { font-size: 11.5px; color: #9fc; margin-bottom: 14px; line-height: 1.5; }
+.brief-box > .btn { width: 100%; padding: 12px; font-size: 13px; }
+.db-report { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; margin-bottom: 14px; }
+.db-report div { display: flex; justify-content: space-between; font-size: 12px; color: #9fbfb6; border-bottom: 1px solid rgba(255,255,255,0.06); padding: 3px 0; }
+.db-report div b { font-family: 'Orbitron', monospace; color: #eafff8; font-weight: 700; }
+.db-btns { display: flex; gap: 8px; }
+.db-btns .btn { flex: 1; padding: 12px 8px; font-size: 13px; }
+
+/* デスクトップ(広い画面)の折りたたみ時: アクションを下端の1段に並べ、フィールドを最大化する
+   (旧: 折りたたんでも2列×縦長のアクション欄が画面下半分を占めていた) */
+@media (min-width: 769px) and (min-height: 621px) {
+    /* 既存不具合の修正: デスクトップではステータスバー(=操作パネル展開トグル)が非表示で、
+       既定の折りたたみ状態からGEN配分スライダーへ到達できなかった → 1行目に常時表示 */
+    #bottom-console { flex-wrap: wrap; max-height: 48vh; overflow-y: auto; }
+    #mobile-status-bar {
+        display: flex; align-items: center; gap: 10px; width: 100%;
+        padding: 2px 10px 4px; font-family: 'Orbitron', monospace; font-size: 10px; color: #999;
+        border-bottom: 1px solid rgba(0,255,170,0.12);
+    }
+    #mobile-status-bar .msb-val { color: #00ffaa; }
+    #btn-console-toggle { font-size: 10px; padding: 3px 10px; cursor: pointer; background: rgba(0,40,30,0.6); border: 1px solid rgba(0,255,170,0.4); color: #7fd8bb; border-radius: 3px; }
+    body.console-min #bottom-console { min-height: 0; padding: 5px 8px; }
+    body.console-min .action-panel { width: 100%; min-width: 0; border-right: none; padding: 0; }
+    body.console-min .action-panel .panel-header { display: none; }
+    body.console-min .action-grid { display: flex !important; flex-wrap: wrap; gap: 4px; margin-top: 0; }
+    body.console-min .action-grid .act-icon-btn { width: 66px; min-height: 44px; padding: 3px 2px; }
+}

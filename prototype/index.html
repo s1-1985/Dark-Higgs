@@ -11,7 +11,7 @@
     <title>Dark Echo: Tactical Space RTS</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23000' stroke='%2300ff88' stroke-width='2'/><circle cx='16' cy='16' r='6' fill='none' stroke='%2300ff88' stroke-width='1.5'/><line x1='16' y1='2' x2='16' y2='30' stroke='%2300ff88' stroke-width='1' opacity='0.4'/><line x1='2' y1='16' x2='30' y2='16' stroke='%2300ff88' stroke-width='1' opacity='0.4'/></svg>" type="image/svg+xml">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20260705d">
+    <link rel="stylesheet" href="style.css?v=20261024a">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -39,9 +39,6 @@
                 <!-- btn-save/btn-reset はモーダル経由で操作 (JS参照用に非表示で保持) -->
                 <button id="btn-save" style="display:none">save</button>
                 <button id="btn-reset" style="display:none">reset</button>
-                <button class="tb-demo-btn" id="btn-demo-mode" onclick="toggleDemoMode()">
-                    <span class="demo-dot"></span>DEMO
-                </button>
                 <button class="tb-menu-btn btn" id="menu-btn">
                     <span class="menu-bar"></span>
                     <span class="menu-bar"></span>
@@ -411,29 +408,40 @@
                                 <span>SCAN</span>
                             </button>
                         </div>
-                        <div class="abar-group" data-group="ew">
+                        <!-- 第13弾: 静粛航行 (「隠れる」の象徴的動作) — 旧UIではモバイルから到達不能だった -->
+                        <div class="abar-group abar-solo">
+                            <button class="abar-btn" id="abar-silent" onclick="toggleSilentRunning()" title="静粛航行 — 速度と全シグネチャを抑制 (発砲/ソナーで解除)" style="border-color:#1a3a4a;color:#6699bb;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                                    <path d="M3,13 q4.5,-5 9,0 t9,0" stroke-opacity=".85"/>
+                                    <path d="M3,18 q4.5,-3 9,0 t9,0" stroke-opacity=".4"/>
+                                    <line x1="6" y1="4" x2="18" y2="9" stroke-opacity=".8"/>
+                                </svg>
+                                <span id="abar-silent-label">静粛</span>
+                            </button>
+                        </div>
+                        <div class="abar-group" data-group="ew" id="abar-grp-ew">
                             <button class="abar-btn btn-warning" title="電子戦 — EW / JAM / DECOY">
                                 <img src="assets/icon_ew.png" alt="" class="abar-icon">
                                 <span>EW</span>
                             </button>
                         </div>
-                        <div class="abar-group" data-group="nav">
-                            <button class="abar-btn" title="航法 — STOP / 追従 / SPD" style="border-color:#1a2a3a;color:#88aacc;">
-                                <img src="assets/icon_nav.png" alt="" class="abar-icon">
-                                <span>NAV</span>
-                            </button>
-                        </div>
-                        <div class="abar-group" data-group="drone">
+                        <div class="abar-group" data-group="drone" id="abar-grp-drone" style="display:none">
                             <button class="abar-btn" id="abar-btn-drone" title="ドローン展開 — 空母専用" style="border-color:#1a4a2a;color:#33cc88;">
                                 <img src="assets/icon_drone.png" alt="" class="abar-icon">
                                 <span>DRONE</span>
                             </button>
                         </div>
-                        <!-- 攻撃ON/OFF: standalone proxy (always visible) -->
+                        <div class="abar-group" data-group="nav">
+                            <button class="abar-btn" title="航法 — STOP / 追従 / 自動攻撃 / 修復 / SPD" style="border-color:#1a2a3a;color:#88aacc;">
+                                <img src="assets/icon_nav.png" alt="" class="abar-icon">
+                                <span>NAV</span>
+                            </button>
+                        </div>
+                        <!-- 第13弾: 射撃命令 (霧の中のセンサー推定目標へ自分の意思で撃つ)。命中予測を表示 -->
                         <div class="abar-group abar-solo">
-                            <button class="abar-btn" id="abar-atk-proxy" title="自動攻撃 ON/OFF" style="border-color:#00b43c;color:#00ff66;">
+                            <button class="abar-btn" id="abar-fire" onclick="issueFireOrder()" title="射撃命令 — 推定位置へ艦首を向けて1射 (撃てば自位置も露出)" style="border-color:#5a1a1a;color:#aa5555;">
                                 <img src="assets/icon_atk.png" alt="" class="abar-icon">
-                                <span id="abar-atk-label">攻撃 ON</span>
+                                <span id="abar-fire-label">射撃</span>
                             </button>
                         </div>
                     </div>
@@ -458,14 +466,28 @@
                             </svg>
                             <span>DIR</span>
                         </button>
-                        <button class="act-icon-btn btn-info" id="btn-triangulate" onclick="fireTriangulate()" title="三角測量 — シグネチャロックオン中に押すと測位実行">
+                        <button class="act-icon-btn btn-info" id="btn-triangulate" onclick="trackNextSignal()" title="追跡 — 受信中の信号を順にロック (T)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                                 <polygon points="12,3 21,19 3,19"/>
                                 <circle cx="12" cy="13" r="2" fill="currentColor" fill-opacity=".4"/>
                                 <line x1="6" y1="19" x2="12" y2="13" stroke-opacity=".5"/>
                                 <line x1="18" y1="19" x2="12" y2="13" stroke-opacity=".5"/>
                             </svg>
-                            <span>TRI</span>
+                            <span>TRACK</span>
+                        </button>
+                        <button class="act-icon-btn btn-info" id="btn-sig-panel" onclick="window.openSigPanel && window.openSigPanel()" title="受信シグネチャ一覧 — 選んで追跡">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                                <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/>
+                                <circle cx="18" cy="18" r="2" fill="currentColor" fill-opacity=".5"/>
+                            </svg>
+                            <span>SIG一覧</span>
+                        </button>
+                        <button class="act-icon-btn btn-danger" id="btn-fire" onclick="issueFireOrder()" title="射撃命令 — 推定位置へ1射 (F)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                                <circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2" fill="currentColor"/>
+                                <line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/>
+                            </svg>
+                            <span>FIRE</span>
                         </button>
                         <button class="act-icon-btn btn-warning" id="btn-hack" title="電子戦 EW">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -627,7 +649,24 @@
                 </div>
             </div>
 
-            <div id="log-panel">
+            <!-- 第13弾: 戦術ストリップ — 副長(XO)の状況判断 + 4バンド受信機 (常時表示・フィールド下端) -->
+            <div id="tac-strip">
+                <div id="xo-bar" class="xo-idle">
+                    <button id="recenter-chip" title="自艦へ戻る (追従ON)" style="display:none">◎</button>
+                    <span id="xo-dot"></span>
+                    <span id="xo-label">XO</span>
+                    <span id="xo-text">—</span>
+                    <button id="xo-act" style="display:none"></button>
+                </div>
+                <div id="band-tuner">
+                    <button class="band-btn tuned" data-band="heat" title="熱帯域に同調 (1)"><span class="bt-label">HEAT</span><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span></button>
+                    <button class="band-btn" data-band="optic" title="光学帯域に同調 (2)"><span class="bt-label">OPTIC</span><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span></button>
+                    <button class="band-btn" data-band="em" title="電磁波帯域に同調 (3)"><span class="bt-label">EM</span><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span></button>
+                    <button class="band-btn" data-band="higgs" title="ヒッグス帯域に同調 (4)"><span class="bt-label">HIGGS</span><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span></button>
+                </div>
+            </div>
+
+            <div id="log-panel" class="compact">
                 <div id="log-header">
                     <span>SYSTEM LOG</span>
                     <span id="passive-indicator">● PASSIVE</span>
@@ -817,6 +856,35 @@
                 </div>
             </div>
 
+            <!-- 第13弾: 作戦要領 (初回出撃時/メニューから) — 中核ループ4ステップ -->
+            <div id="briefing-overlay" class="hidden">
+                <div class="brief-box">
+                    <div class="brief-title">作戦要領 <span>HOW TO HUNT</span></div>
+                    <div class="brief-lead">霧の中に敵艦が1隻。互いに見えない。<b>先に見つけて撃った方が勝つ。</b></div>
+                    <ol class="brief-steps">
+                        <li><b class="bs-1">聴く</b>下の受信機は4つの帯域(熱/光学/電磁波/ヒッグス)。<em>光っている帯域に同調</em>すると、その方位が取れる。敵の行動で光る帯域が変わる。</li>
+                        <li><b class="bs-2">測る</b>信号を<em>追跡</em>し、方位線に<em>直交して動く</em>と推定円が縮む。ただし動けば自分の熱や航跡も残る。</li>
+                        <li><b class="bs-3">撃つ</b>射撃解が出たら<em>射撃</em>。敵が気付いていなければ<em>奇襲×3.5</em>。撃てば自分の位置も露出する。</li>
+                        <li><b class="bs-4">消える</b><em>静粛航行</em>・ヒッグス雲・岩礁帯で気配を消す。敵も同じルールであなたを狩りに来る。</li>
+                    </ol>
+                    <div class="brief-tip">迷ったら画面下の<b>副長(XO)バー</b>のボタンを押せ — 今やるべきことを1つ提案する。</div>
+                    <button class="btn btn-primary" id="btn-brief-ok">了解 — 出撃</button>
+                </div>
+            </div>
+
+            <!-- 第13弾: 作戦報告 (セクター制圧後) — 戦闘詳報 → 補給・改修 → 次の狩りへ -->
+            <div id="debrief-overlay" class="hidden">
+                <div class="brief-box">
+                    <div class="brief-title">作戦報告 <span id="db-sector">SECTOR 1</span></div>
+                    <div class="brief-lead" id="db-lead">敵艦撃沈 — セクター制圧</div>
+                    <div id="db-report" class="db-report"></div>
+                    <div class="db-btns">
+                        <button class="btn btn-info" id="btn-db-dock">補給・改修</button>
+                        <button class="btn btn-primary" id="btn-db-next">次の狩りへ ▶</button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Game Over Overlay -->
             <div id="game-over-overlay" class="hidden">
                 <div class="game-over-box">
@@ -844,6 +912,9 @@
                     <div id="mm-credits" class="mm-row">クレジット: 0 SCR</div>
                 </div>
                 <div class="mm-btns">
+                    <button class="btn btn-small" id="mm-briefing" onclick="showBriefing(true)">作戦要領 (遊び方)</button>
+                    <button class="btn btn-small" id="btn-demo-mode" onclick="toggleDemoMode()">DEMO: OFF</button>
+                    <button class="btn btn-small" id="mm-fps" onclick="toggleFpsDisplay()">FPS表示: OFF</button>
                     <button class="btn btn-primary btn-small" id="mm-save">データ保存</button>
                     <button class="btn btn-danger btn-small" id="mm-reset">リセット</button>
                     <button class="btn btn-small" id="mm-close">閉じる</button>
@@ -881,7 +952,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20260711a"></script>
+    <script src="game.js?v=20261024a"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -916,12 +987,13 @@
 
     // ── アクションバー ポップオーバーシステム (mobile) ───────────────────────────
     (function() {
+        // 第13弾: 全ボタンをどこかのグループに所属させる (旧: 静粛/修復/自動攻撃などがモバイルで到達不能だった)
         var ACTION_GROUPS = {
-            scan:  ['btn-scan', 'btn-dir-sonar', 'btn-triangulate'],
+            scan:  ['btn-scan', 'btn-dir-sonar', 'btn-triangulate', 'btn-sig-panel'],
             ew:    ['btn-hack', 'btn-jam-burst', 'btn-jam-cont', 'btn-jam-pulse', 'btn-decoy'],
-            nav:   ['btn-cancel', 'btn-camera-follow', 'btn-game-speed'],
+            nav:   ['btn-cancel', 'btn-camera-follow', 'btn-attack-toggle', 'btn-repair-drone', 'btn-game-speed'],
             drone: ['btn-drone-attack','btn-drone-decoy','btn-drone-scout','btn-drone-build',
-                    'btn-drone-barrier','btn-drone-buoy','btn-drone-higgs'],
+                    'btn-drone-barrier','btn-drone-buoy','btn-drone-higgs', 'btn-hack'],
         };
         var _apop  = document.getElementById('action-popover');
         var _agrid = document.querySelector('.action-grid');
@@ -969,60 +1041,53 @@
             popClose();
         });
 
-        // 攻撃 proxy — delegates to real hidden button
-        var _atkProxy = document.getElementById('abar-atk-proxy');
-        var _atkReal  = document.getElementById('btn-attack-toggle');
-        if (_atkProxy && _atkReal) {
-            _atkProxy.addEventListener('click', function(e) {
-                e.stopPropagation();
-                popClose();
-                _atkReal.click();
-                requestAnimationFrame(syncAtkLabel);
-            });
-        }
-        function syncAtkLabel() {
-            var src = document.getElementById('attack-label');
-            var dst = document.getElementById('abar-atk-label');
-            var proxy = document.getElementById('abar-atk-proxy');
-            var real  = document.getElementById('btn-attack-toggle');
-            if (src && dst && src.textContent !== dst.textContent) dst.textContent = src.textContent;
-            if (proxy && real) {
-                proxy.style.borderColor = real.style.borderColor || '#00b43c';
-                proxy.style.color       = real.style.color       || '#00ff66';
-            }
-        }
-        setInterval(syncAtkLabel, 400);
     })();
 
-    // ── abar 武器サイクルボタン ───────────────────────────────────────────────
+    // ── abar 兵装モードサイクル (第13弾: 5モード) ─────────────────────────────
+    // KIN → MSL(熱源誘導) → MSL·AI(AI追跡) → BEM → BEM·CHG(チャージ) → KIN
+    // モバイルで到達不能だったミサイルモード/チャージビームを1ボタンのサイクルに統合
     (function() {
-        var _wCycle   = ['kinetic', 'missile', 'beam'];
-        var _wLabels  = { kinetic: 'KIN', missile: 'MSL', beam: 'BEM' };
-        var _wColors  = { kinetic: '#ff6060', missile: '#ffcc44', beam: '#70c0ff' };
-        var _wBorders = { kinetic: '#ff4d4d', missile: '#ffaa00', beam: '#4da6ff' };
-        var _btn  = document.getElementById('abar-wep-cycle');
-        var _lbl  = document.getElementById('abar-wep-label');
-        var _sel  = document.getElementById('weapon-select');
-        var _grp  = document.getElementById('weapon-icon-group');
+        var MODES = [
+            { w: 'kinetic', label: 'KIN',     color: '#ff6060', border: '#ff4d4d' },
+            { w: 'missile', mm: 'homing', label: 'MSL',    color: '#ffcc44', border: '#ffaa00' },
+            { w: 'missile', mm: 'smart',  label: 'MSL·AI', color: '#ffe08a', border: '#ffcc33' },
+            { w: 'beam',    chg: false,   label: 'BEM',    color: '#70c0ff', border: '#4da6ff' },
+            { w: 'beam',    chg: true,    label: 'BEM·CHG',color: '#9fe8ff', border: '#00ddff' },
+        ];
+        var _btn = document.getElementById('abar-wep-cycle');
+        var _lbl = document.getElementById('abar-wep-label');
+        var _sel = document.getElementById('weapon-select');
+        var _grp = document.getElementById('weapon-icon-group');
         if (!_btn || !_sel) return;
-
-        function applyWeapon(val) {
-            if (_lbl) _lbl.textContent = _wLabels[val] || val;
-            if (_btn) { _btn.style.borderColor = _wBorders[val]; _btn.style.color = _wColors[val]; }
-            if (_grp) _grp.querySelectorAll('.isel-btn').forEach(function(b) {
-                b.classList.toggle('active', b.dataset.val === val);
-            });
-            if (_sel.value !== val) { _sel.value = val; _sel.dispatchEvent(new Event('change')); }
+        function curIdx() {
+            var w = _sel.value || 'kinetic';
+            for (var i = 0; i < MODES.length; i++) {
+                var m = MODES[i];
+                if (m.w !== w) continue;
+                if (m.mm && m.mm !== (window.missileMode || missileMode)) continue;
+                if (m.chg !== undefined && m.chg !== !!beamChargeMode) continue;
+                return i;
+            }
+            return 0;
         }
-
+        window.syncWeaponUI = function() {
+            var m = MODES[curIdx()];
+            if (_lbl) _lbl.textContent = m.label;
+            _btn.style.borderColor = m.border; _btn.style.color = m.color;
+            if (_grp) _grp.querySelectorAll('.isel-btn').forEach(function(b) { b.classList.toggle('active', b.dataset.val === m.w); });
+        };
+        function apply(m) {
+            if (m.mm && typeof setMissileMode === 'function') setMissileMode(m.mm, true);
+            if (m.chg !== undefined && typeof setBeamCharge === 'function') setBeamCharge(m.chg, true);
+            if (_sel.value !== m.w) { _sel.value = m.w; _sel.dispatchEvent(new Event('change')); }
+            window.syncWeaponUI();
+        }
         _btn.addEventListener('click', function(e) {
             e.stopPropagation();
-            var cur = _sel.value || 'kinetic';
-            var idx = _wCycle.indexOf(cur);
-            applyWeapon(_wCycle[(idx + 1) % _wCycle.length]);
+            apply(MODES[(curIdx() + 1) % MODES.length]);
+            if (typeof playSound === 'function') playSound('ui');
         });
-
-        applyWeapon(_sel.value || 'kinetic');
+        window.syncWeaponUI();
     })();
 
     // ── GCB (コンパクトボタン) タップでサイクル: エンジン & センサー ──────────────
@@ -1076,6 +1141,7 @@
             _injectSvg(_engIcon, _engFlyout, 'data-engine-val', val);
         }
 
+        window.applySensorGcb = function(val) { applySensorGcb(val); };
         function applySensorGcb(val) {
             var info = SENSOR_INFO[val];
             if (!info || !_snsGcb) return;
@@ -1152,6 +1218,14 @@
         }
         function closePanel() { if (panel) panel.style.display = 'none'; }
 
+        window.openSigPanel = openPanel;
+        window.syncSigLockedBar = function() {
+            var bar = document.getElementById('sig-locked-bar');
+            var lbl = document.getElementById('sig-locked-label');
+            var sid = (typeof lockedSignalId !== 'undefined') ? lockedSignalId : null;
+            if (bar) bar.style.display = sid ? 'block' : 'none';
+            if (lbl && sid) lbl.textContent = 'SIG-' + String((_contactLabels && _contactLabels[sid]) || '?').padStart(2, '0');
+        };
         if (sigCvs) { sigCvs.style.cursor = 'pointer'; sigCvs.title = 'タップで信号解析'; sigCvs.addEventListener('click', openPanel); }
         var envCvs = document.getElementById('env-sig-canvas');
         if (envCvs) { envCvs.style.cursor = 'pointer'; envCvs.title = 'タップで信号解析'; envCvs.addEventListener('click', openPanel); }
@@ -1223,27 +1297,21 @@
                     + '<span>センサー</span><span>ID</span><span>方位範囲</span><span>強度</span><span>計測</span><span></span></div>' + rows;
             }
 
-            // 三角測量結果
-            var tri = (typeof triangulationResult !== 'undefined') ? triangulationResult : null;
-            if (!locked) {
-                rEl.innerHTML = '<div style="color:#556655; font-size:8px;">シグネチャを選択すると追跡・三角測量を開始</div>';
-            } else if (!tri) {
-                rEl.innerHTML = '<div style="color:#667766;">追跡中: <span style="color:#00ff88;">' + locked + '</span><br>'
-                    + '<span style="font-size:8px;">移動して複数計測すると距離を特定</span></div>';
+            // 追跡中シグネチャの解析状況 (第13弾: 方位解析+視差測量 → 推定円 → 射撃解)
+            var sa = locked && (typeof _signalAnalysis !== 'undefined') ? _signalAnalysis[locked] : null;
+            if (!locked || !sa) {
+                rEl.innerHTML = '<div style="color:#556655; font-size:8px;">シグネチャを選ぶと追跡開始 — 方位線に直交して動くほど位置が絞れる</div>';
             } else {
-                var age = (typeof _frameCount !== 'undefined') ? Math.round((_frameCount - tri.frame) / 60) : '?';
-                var precPct = Math.round(tri.precision * 100);
-                var col2 = precPct < 30 ? '#ff5000' : (precPct < 60 ? '#ffaa00' : (precPct < 90 ? '#50ff80' : '#50c8ff'));
-                rEl.innerHTML = '<div style="color:' + col2 + '; font-size:10px; margin-bottom:3px;">推定精度: ' + precPct + '%</div>'
-                    + '<div style="font-size:8px;">誤差半径: ±' + Math.round(tri.radius) + ' wu</div>'
-                    + '<div style="color:#556655; font-size:7px; margin-top:2px;">' + age + '秒前に測定 | 移動・再計測で精度向上</div>';
+                var avg = Math.round(((sa.dirAnalysis || 0) + (sa.triParam || 0)) / 2);
+                var col2 = avg < 30 ? '#ff5000' : (avg < 60 ? '#ffaa00' : (avg < 85 ? '#50ff80' : '#50c8ff'));
+                var phase = sa.identified ? 'ランドマーク/地形と特定' : (sa.classified ? '機動反応=攻撃目標候補' : (avg > ID_THRESHOLD_STATIC ? 'ランドマークではない' : '解析中'));
+                rEl.innerHTML = '<div style="color:' + col2 + '; font-size:10px; margin-bottom:3px;">解析 ' + avg + '% — ' + phase + '</div>'
+                    + '<div style="font-size:8px;">方位解析 ' + Math.round(sa.dirAnalysis || 0) + '% / 視差測量 ' + Math.round(sa.triParam || 0) + '%'
+                    + (sa.targetR ? ' / 推定円 ±' + Math.round(sa.targetR) + 'u' : '') + '</div>';
             }
         };
 
-        window.runSigAnalysis = function() {
-            if (typeof computeTriangulation === 'function') computeTriangulation();
-            updateSigAnalysisPanel();
-        };
+        window.runSigAnalysis = function() { updateSigAnalysisPanel(); };
     })();
 
     // 長押しメニュー: メニュー外タップで閉じる
