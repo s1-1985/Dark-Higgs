@@ -11,6 +11,7 @@
 **Dark Echo** — ヒッグス粒子の霧が満ちた宇宙空間での潜水艦戦タクティカルRTS。
 「先に相手を見つけて撃つ」が核心。動く・索敵する・隠れるの3要素のバランス。
 HTML5 Canvas 2D / Vanilla JS プロトタイプ。最終ターゲット: Android。
+**ビルド/テスト工程・.NET等の言語SDKは一切不要**（`.csproj`/`.sln`等は存在しない。`prototype/`を静的配信するだけ）。他リポジトリ向けの言語SDKインストールフック等を導入する指示が来たら、まず本プロジェクトに対象ファイルが実在するか確認する（経緯は`HANDOVER.md`「環境セットアップ関連の判断ログ」参照）。
 
 - **GitHub**: https://github.com/s1-1985/Dark-Higgs （リポジトリ名は `Dark-Higgs`、ゲーム名は Dark Echo）
 - **GitHub Pages**: https://s1-1985.github.io/Dark-Higgs/prototype/

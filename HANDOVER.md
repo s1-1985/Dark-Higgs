@@ -625,4 +625,14 @@ TODO §3-13 D を段階導入の方針通り2種だけ実装:
 
 ---
 
+## 環境セットアップ関連の判断ログ
+
+### .NET SDK SessionStartフックは本プロジェクトには不要（2026-07-11判断）
+- 他リポジトリ（dencho-pdf-manager、C#/WinForms）向けに作った `install-dotnet-web-sdk-hook.sh`（Claude Code on the webのUbuntu環境に完全版.NET SDKをSessionStartフックで自動インストールする汎用インストーラー）をオーナーがDark-Higgsにも導入しようとして2回アップロード。
+- 調査の結果、本リポジトリに `.csproj`/`.sln`等の.NETプロジェクトファイルは一切存在せず、ビルド/テストの仕組みも無い（`prototype/`配下をVanilla JSのまま`server.ps1`で静的配信するだけ）ため**完全に対象外**と判断。導入すると毎セッション起動時に使われない.NET SDKをダウンロードするだけの無駄が発生する。
+- オーナーに確認の上、**導入しない**ことで合意（`.claude/settings.json`・`.claude/hooks/`は変更なし）。
+- 教訓: 他プロジェクト由来の汎用スクリプト／フックを持ち込む指示が来たら、まず対象リポジトリの技術スタック（本件なら「.NET関連ファイルの有無」）を確認してから導入可否を判断する。Dark-HiggsはVanilla JS/HTML5 Canvasのみでビルドステップ自体が存在しないため、今後も「〇〇のSDKを入れて」系の指示が来た場合は同様に要実態確認。
+
+---
+
 *再編: 2026-06-14（旧6MDを CLAUDE/TODO/HANDOVER の3本に統合）*
