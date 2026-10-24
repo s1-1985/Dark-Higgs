@@ -11,7 +11,7 @@
     <title>Dark Echo: Tactical Space RTS</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23000' stroke='%2300ff88' stroke-width='2'/><circle cx='16' cy='16' r='6' fill='none' stroke='%2300ff88' stroke-width='1.5'/><line x1='16' y1='2' x2='16' y2='30' stroke='%2300ff88' stroke-width='1' opacity='0.4'/><line x1='2' y1='16' x2='30' y2='16' stroke='%2300ff88' stroke-width='1' opacity='0.4'/></svg>" type="image/svg+xml">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261024b">
+    <link rel="stylesheet" href="style.css?v=20261024c">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -70,12 +70,12 @@
                     </div>
                 </div>
                 <div id="band-tuner" title="受信機: 太いバー=受信レベル (刻み=方位が取れるライン) / 細いバー=自艦の放射">
-                    <button class="band-btn tuned" data-band="heat" title="熱帯域に同調 (1)"><span class="bt-label">HEAT</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
-                    <button class="band-btn" data-band="optic" title="光学帯域に同調 (2)"><span class="bt-label">OPT</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
-                    <button class="band-btn" data-band="em" title="電磁波帯域に同調 (3)"><span class="bt-label">EM</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
-                    <button class="band-btn" data-band="higgs" title="ヒッグス帯域に同調 (4)"><span class="bt-label">HGS</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
+                    <button class="band-btn tuned" data-band="heat" title="熱帯域に同調 (1)"><span class="bt-label">HEAT</span><span class="bt-meter"><span class="bt-bar"><span class="bt-noise"></span><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
+                    <button class="band-btn" data-band="optic" title="光学帯域に同調 (2)"><span class="bt-label">OPT</span><span class="bt-meter"><span class="bt-bar"><span class="bt-noise"></span><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
+                    <button class="band-btn" data-band="em" title="電磁波帯域に同調 (3)"><span class="bt-label">EM</span><span class="bt-meter"><span class="bt-bar"><span class="bt-noise"></span><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
+                    <button class="band-btn" data-band="higgs" title="ヒッグス帯域に同調 (4)"><span class="bt-label">HGS</span><span class="bt-meter"><span class="bt-bar"><span class="bt-noise"></span><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
                 </div>
-                <div id="band-legend"><span class="bl-rx">受信</span><span class="bl-tx">自艦</span></div>
+                <div id="band-legend"><span class="bl-rx">受信</span><span class="bl-tx">自艦</span><span class="bl-nz">雑音</span></div>
             </div>
 
             <!-- 右列: 行動 (親指の届く下ほど重要: 射撃 > 追跡 > 兵装 > 静粛 > 索敵 > 電子戦/ドローン > 航法) -->
@@ -92,13 +92,13 @@
                 <button class="hud-act" data-group="scan" title="索敵 — ソナー / 指向ソナー / 信号一覧">
                     <img src="assets/icon_scan.png" alt="" class="abar-icon"><span>索敵</span>
                 </button>
-                <button class="hud-act" id="abar-silent" onclick="toggleSilentRunning()" title="静粛航行 — 速度と全シグネチャを抑制 (発砲/ソナーで解除) (S)">
+                <button class="hud-act" id="abar-silent" onclick="cycleStance()" title="出力 — 潜航(静か・耳が澄む) / 巡航 / 全速(速い・うるさい・耳が塞がる) (S)">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
                         <path d="M3,13 q4.5,-5 9,0 t9,0" stroke-opacity=".85"/>
                         <path d="M3,18 q4.5,-3 9,0 t9,0" stroke-opacity=".4"/>
                         <line x1="6" y1="4" x2="18" y2="9" stroke-opacity=".8"/>
                     </svg>
-                    <span id="abar-silent-label">静粛</span>
+                    <span id="abar-silent-label">巡航</span>
                 </button>
                 <button class="hud-act" id="abar-wep-cycle" title="兵装切替 KIN→MSL→MSL·AI→BEM→BEM·CHG">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -332,14 +332,15 @@
                         </button>
                     </div>
                 </div>
+                <div class="gd-focus">
+                    <button class="gd-focus-btn active" data-focus="balance">均等</button>
+                    <button class="gd-focus-btn" data-focus="engine">機関重視</button>
+                    <button class="gd-focus-btn" data-focus="sensor">探知重視</button>
+                    <button class="gd-focus-btn" data-focus="weapon">兵装重視</button>
+                </div>
                 <div class="gen-control">
-                    <div class="gd-sub"><span>艦体操作</span><span id="gen-total" class="gen-total">計100%</span></div>
+                    <div class="gd-sub"><span>艦体操作 <small>出力の大小は右列の 潜航/巡航/全速</small></span><span id="gen-total" class="gen-total">計100%</span></div>
                     <div class="gen-sliders">
-                        <div class="gen-row">
-                            <label class="gen-label" style="color:#ffaa00" title="艦体操作ゲイン — 上げるとエンジン・センサーシグネチャ増大">GAIN</label>
-                            <input type="range" class="gen-slider" id="gen-gain" min="0" max="100" value="100">
-                            <span class="gen-val" id="gen-gain-val">100%</span>
-                        </div>
                         <div class="gen-row">
                             <label class="gen-label eng-label" title="エンジン出力 → 移動速度">ENG</label>
                             <input type="range" class="gen-slider" id="gen-engine" min="0" max="100" value="40">
@@ -586,14 +587,14 @@
             <div id="briefing-overlay" class="hidden">
                 <div class="brief-box">
                     <div class="brief-title">作戦要領 <span>HOW TO HUNT</span></div>
-                    <div class="brief-lead">霧の中に敵艦が1隻。互いに見えない。<b>先に見つけて撃った方が勝つ。</b></div>
+                    <div class="brief-lead">霧の中に敵艦が1隻。互いに見えない。<b>先に見つけて撃った方が勝つ。</b>答えは誰も教えてくれない — 聴いた方位から自分で推理する。</div>
                     <ol class="brief-steps">
-                        <li><b class="bs-1">聴く</b>左の受信機は4つの帯域(熱/光学/電磁波/ヒッグス)。太いバーが<em>刻みを超えた帯域に同調</em>すると、その方位が取れる。細いバーは<em>自艦の放射</em> — 刻みを超えると敵にも聞こえている。</li>
-                        <li><b class="bs-2">測る</b>右の<em>追跡</em>で信号をロックし、方位線に<em>直交して動く</em>と推定円が縮む。ただし動けば自分の熱や航跡も残る。</li>
-                        <li><b class="bs-3">撃つ</b>右下の<em>射撃</em>に命中予測が出たら撃てる。敵が気付いていなければ<em>奇襲×3.5</em>。撃てば自分の位置も露出する。</li>
-                        <li><b class="bs-4">消える</b><em>静粛航行</em>・ヒッグス雲・岩礁帯で気配を消す。敵も同じルールであなたを狩りに来る。</li>
+                        <li><b class="bs-1">聴く</b>左の受信機: 太いバー=受信、刻みを超えた帯域に<em>同調</em>すると方位が取れる。細いバー=<em>自艦の放射</em>、斜線=<em>自艦の雑音</em>(速く動くほど耳が塞がる)。</li>
+                        <li><b class="bs-2">測る</b>右の<em>追跡</em>で方位を記録。<em>場所を変えて</em>聴くと方位線が交わり推定円が出る。交わらない=相手が動いている。止まって聴くと方位が鋭くなる。</li>
+                        <li><b class="bs-3">撃つ</b>推定円が小さいほど当たる (右下の<em>射撃</em>に見込み%)。外れれば「そこには居ない」と分かるが、<em>撃った位置を教える</em>。ソナーは正確だが遠くまで聞かれる。</li>
+                        <li><b class="bs-4">消える</b>出力を<em>潜航</em>へ。ヒッグスの霧は音を隠すが、動けば<em>航跡が90秒残り</em>、敵はそれを辿ってくる (HIGGS帯で相手の航跡も見える)。</li>
                     </ol>
-                    <div class="brief-tip">迷ったら画面上の<b>副長</b>の提案を見よ — 今やるべきことを1つ挙げる。移動はフィールドを長押し →「移動」。ドラッグで見回し、信号のブリップをタップで追跡。</div>
+                    <div class="brief-tip">副長は状況を読み上げるだけ — 決めるのはあなた。移動はフィールドを長押し →「移動」。ドラッグで見回し、信号のブリップをタップで追跡。</div>
                     <button class="btn btn-primary" id="btn-brief-ok">了解 — 出撃</button>
                 </div>
             </div>
@@ -679,7 +680,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261024b"></script>
+    <script src="game.js?v=20261024c"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -913,17 +914,16 @@
                     + '<span>センサー</span><span>ID</span><span>方位範囲</span><span>強度</span><span>計測</span><span></span></div>' + rows;
             }
 
-            // 追跡中シグネチャの解析状況 (第13弾: 方位解析+視差測量 → 推定円 → 射撃解)
+            // 追跡中シグネチャの状況 (第15弾: 記録した方位線の本数・基線・交点の幅)
             var sa = locked && (typeof _signalAnalysis !== 'undefined') ? _signalAnalysis[locked] : null;
             if (!locked || !sa) {
-                rEl.innerHTML = '<div style="color:#556655; font-size:8px;">シグネチャを選ぶと追跡開始 — 方位線に直交して動くほど位置が絞れる</div>';
+                rEl.innerHTML = '<div style="color:#556655; font-size:8px;">シグネチャを選ぶと方位の記録を開始 — 場所を変えて聴くほど交点が締まる</div>';
             } else {
-                var avg = Math.round(((sa.dirAnalysis || 0) + (sa.triParam || 0)) / 2);
-                var col2 = avg < 30 ? '#ff5000' : (avg < 60 ? '#ffaa00' : (avg < 85 ? '#50ff80' : '#50c8ff'));
-                var phase = sa.identified ? 'ランドマーク/地形と特定' : (sa.classified ? '機動反応=攻撃目標候補' : (avg > ID_THRESHOLD_STATIC ? 'ランドマークではない' : '解析中'));
-                rEl.innerHTML = '<div style="color:' + col2 + '; font-size:10px; margin-bottom:3px;">解析 ' + avg + '% — ' + phase + '</div>'
-                    + '<div style="font-size:8px;">方位解析 ' + Math.round(sa.dirAnalysis || 0) + '% / 視差測量 ' + Math.round(sa.triParam || 0) + '%'
-                    + (sa.targetR ? ' / 推定円 ±' + Math.round(sa.targetR) + 'u' : '') + '</div>';
+                var fx = sa.fix;
+                var col2 = !fx ? '#ff9a40' : (fx.r > 2400 ? '#ffaa00' : (fx.r > 900 ? '#ffe070' : '#50ff80'));
+                var head = fx ? ('推定位置 ±' + Math.round(fx.r) + 'u' + (fx.chi2 > 4 ? ' — 方位線が食い違う(移動中)' : '')) : '交点なし — 方位だけ';
+                rEl.innerHTML = '<div style="color:' + col2 + '; font-size:10px; margin-bottom:3px;">' + head + '</div>'
+                    + '<div style="font-size:8px;">方位の記録 ' + (sa.obs ? sa.obs.length : 0) + '本 / 観測点の横の広がり ' + Math.round(sa.base || 0) + 'u' + (sa.ping ? ' / ソナー反響あり' : '') + '</div>';
             }
         };
 
