@@ -8,9 +8,11 @@ let minimapDpr = 1; // ミニマップのバッキングストア倍率 (高DPI�
 // 高精細(Retina)対応: 描画はCSSピクセル基準、バッキングストアを devicePixelRatio 倍に。
 // レーダー/リング/文字のボケ防止。cssW/cssH=CSS px, _dpr=ピクセル比。
 let cssW = window.innerWidth, cssH = window.innerHeight, _dpr = 1;
-// 第6弾: UIインセット/コンソール折りたたみ状態 (宣言は最上部 — 初期化順序のTDZ回避)
-let _uiInsetCache = { right: 0, bottom: 0, topHud: 150, t: 0 };
-let consoleMin = localStorage.getItem('darkEchoConsoleMin') !== '0'; // デフォルト=折りたたみ (視界優先)
+// UIインセット (宣言は最上部 — 初期化順序のTDZ回避)。第14弾: 横画面HUD = 上帯/左列/右列がフィールドを囲む
+let _uiInsetCache = { left: 0, right: 0, top: 0, bottom: 0, topHud: 40, t: 0 };
+let _orientPaused = false; // 縦持ち中は進行を止める (横画面専用HUD)
+const _hudCache = { hp: -1, ammo: '', gen: '', expo: '' }; // HUD DOM更新の差分キャッシュ
+const _passiveLastSeen = {}; // sourceId → 最後に方位を取ったフレーム (新規信号の告知用)
 
 // ── パフォーマンスデバッグフラグ ──────────────────────────────
 const PERF_DISABLE_THREAT_RING = false;   // スレットリング描画をオフ
@@ -413,12 +415,12 @@ updateCareerPanel();
     if (_ab) _ab.textContent = ambientOn ? '♪ SOUND ON' : '♪ SOUND OFF';
     const _lb = document.getElementById('ship-select-lobby');
     if (_lb) _lb.addEventListener('pointerdown', () => startAmbient(), { once: true });
-    _applyConsoleMin(); // コンソール折りたたみ状態の復元 (第6弾)
 })();
 
 function updateTopUI() {
     const modeLabel = gameState.mode === 'sd' ? 'S&D' : 'BR';
-    document.getElementById('sector-display').textContent = `SECTOR ${gameState.sector} · ${modeLabel}`;
+    const _sd = document.getElementById('sector-display');
+    if (_sd) _sd.textContent = `S${gameState.sector} · ${modeLabel}`;
     const _cd = document.getElementById('currency-display');
     if (_cd) _cd.textContent = `${gameState.credits}`;
 }
@@ -1083,17 +1085,6 @@ function findHidingSpot(nearX, nearY, searchRadius) {
 }
 
 // Resize
-// SIGキャンバスの内部解像度を表示サイズ×DPRに合わせる (波形を鮮明に)
-function _fitSigCanvas(c) {
-    if (!c) return;
-    const r = c.getBoundingClientRect();
-    if (r.width > 4 && r.height > 4) {
-        const dpr = Math.min(2, window.devicePixelRatio || 1);
-        const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
-        if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
-    }
-}
-
 function resizeCanvas() {
     _dpr = Math.min(2, window.devicePixelRatio || 1);
     cssW = window.innerWidth;
@@ -1111,8 +1102,6 @@ function resizeCanvas() {
         minimapCanvas.width = Math.floor(mmr.width * minimapDpr);
         minimapCanvas.height = Math.floor(mmr.height * minimapDpr);
     }
-    _fitSigCanvas(document.getElementById('sig-canvas'));
-    _fitSigCanvas(document.getElementById('env-sig-canvas'));
 }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
@@ -1145,21 +1134,13 @@ function clampCamera() {
 function uiInsets() {
     const now = Date.now();
     if (now - _uiInsetCache.t > 600) {
-        let right = 0, bottom = 0, topHud = 150;
-        const _lp = document.getElementById('log-panel');
-        if (_lp) { const lr = _lp.getBoundingClientRect(); if (lr.height > 2) topHud = lr.bottom; }
-        const bc = document.getElementById('bottom-console');
-        if (bc) {
-            const r = bc.getBoundingClientRect();
-            if (r.width > 2 && r.height > 2) {
-                if (r.left > (cssW || 1) * 0.5) {
-                    right = Math.max(0, (cssW || window.innerWidth) - r.left);   // 右サイドコンソール (横持ち)
-                } else {
-                    bottom = Math.min((cssH || 1) * 0.7, Math.max(0, (cssH || window.innerHeight) - r.top)); // 下部コンソール (縦持ち)
-                }
-            }
-        }
-        _uiInsetCache = { right, bottom, topHud, t: now };
+        const W = cssW || window.innerWidth;
+        let left = 0, right = 0, top = 0;
+        const tp = document.getElementById('hud-top'), lf = document.getElementById('hud-left'), rt = document.getElementById('hud-right');
+        if (tp) { const r = tp.getBoundingClientRect(); if (r.height > 2) top = r.bottom; }
+        if (lf) { const r = lf.getBoundingClientRect(); if (r.width > 2) left = r.right; }
+        if (rt) { const r = rt.getBoundingClientRect(); if (r.width > 2) right = Math.max(0, W - r.left); }
+        _uiInsetCache = { left, right, top, bottom: 0, topHud: top, t: now };
     }
     return _uiInsetCache;
 }
@@ -1170,26 +1151,9 @@ function centerCameraOnPlayer() {
     const ch = cssH || window.innerHeight;
     // コンソールに隠れていない「実フィールド」の中心に自機を置く
     const ins = uiInsets();
-    camera.x = player.x - ((cw - ins.right) / 2) / camera.zoom;
-    camera.y = player.y - ((ch - ins.bottom * 0.75) / 2) / camera.zoom; // 縦は75%補正 (完全に上げすぎない)
+    camera.x = player.x - (ins.left + (cw - ins.left - ins.right) / 2) / camera.zoom;
+    camera.y = player.y - (ins.top + (ch - ins.top - ins.bottom) / 2) / camera.zoom;
     clampCamera();
-}
-
-// ═══ 第6弾: コンソール折りたたみ — フィールドを広く使う (状態はlocalStorage永続化) ═══
-function toggleConsoleMin() {
-    consoleMin = !consoleMin;
-    localStorage.setItem('darkEchoConsoleMin', consoleMin ? '1' : '0');
-    _applyConsoleMin();
-    playSound('ui');
-}
-function _applyConsoleMin() {
-    document.body.classList.toggle('console-min', consoleMin);
-    const b = document.getElementById('btn-console-toggle');
-    if (b) b.textContent = consoleMin ? '▲ 操作' : '▼ 閉じる';
-    _uiInsetCache.t = 0; // インセット再計測
-    // 初期化IIFE(スクリプト冒頭)からも呼ばれる。後方宣言のlet(TDZ)はtypeofでも例外を投げるため
-    // try/catchで初期化前の呼び出しを無害化する (ゲーム中の呼び出しは正常に動く)
-    try { if (cameraFollowPlayer && player) centerCameraOnPlayer(); } catch (e) { /* 初期化前は無視 */ }
 }
 
 // ── マップモード (§ミニマップタップで全画面マップ) ──
@@ -4268,6 +4232,7 @@ function generateSector() {
     dirSonarPendingFire = false;
     passiveBearings = [];
     lockedSignalId = null; _contactLabels = {}; _contactLabelNext = 1; _signalAnalysis = {};
+    for (const k in _passiveLastSeen) delete _passiveLastSeen[k];
     player = new Ship(MAP_CX, MAP_CY, true);
     player.generatorOutput = genAlloc.engine;
     enemies = []; structures = []; projectiles = []; effects = []; particles = []; debris = []; scrapDrops = [];
@@ -4615,6 +4580,9 @@ function startGame(shipType) {
       if (ew) ew.style.display = shipType === 'carrier' ? 'none' : '';
       if (dr) dr.style.display = shipType === 'carrier' ? '' : 'none'; }
     document.body.classList.add('in-game');
+    if (window.matchMedia('(pointer: coarse)').matches) requestLandscape(); // 出撃タップ(ユーザー操作)の中で要求する必要がある
+    _syncOrientPause();
+    resizeCanvas(); // HUD表示後にミニマップの実寸を測り直す
     cameraFollowPlayer = true; updateCameraFollowBtn();
     setSensor(currentSensor, true);
     _xoState = null;
@@ -5297,7 +5265,7 @@ function checkPassiveDetection() {
         if (_lc) picks.push(_lc);
     }
 
-    let strongestDeg = 0, strongestWidthDeg = 0, strongest = -1;
+    let _newSig = null; // 第14弾: このサイクルで新たに(または10秒ぶりに)受信した信号
     for (const c of picks) {
         const conf = Math.max(0, Math.min(1, (c.sig - thr * 0.25) / (1 - thr * 0.25)));
         const quality = Math.min(1, conf * sensorPrec * 1.35);
@@ -5317,11 +5285,10 @@ function checkPassiveDetection() {
             contactNo: _contactLabels[c.sourceId],
             life: PASSIVE_BEARING_LIFE, maxLife: PASSIVE_BEARING_LIFE
         });
-        if (c.sig > strongest) {
-            strongest = c.sig;
-            strongestDeg = compassDeg;
-            strongestWidthDeg = Math.round(halfWidth * 180 / Math.PI);
-        }
+        const _last = _passiveLastSeen[c.sourceId];
+        if ((_last === undefined || _frameCount - _last > 600) && (!_newSig || c.sig > _newSig.sig))
+            _newSig = { sig: c.sig, sid: c.sourceId, deg: compassDeg };
+        _passiveLastSeen[c.sourceId] = _frameCount;
     }
     while (passiveBearings.length > PASSIVE_BEARING_MAX) passiveBearings.shift();
 
@@ -5371,9 +5338,11 @@ function checkPassiveDetection() {
     }
 
     passiveAlertTimer = 180;
-    logMessage(`PASSIVE: ${sc.label}放射源 ─ 方位 ${strongestDeg}° ±${strongestWidthDeg}°`, 'warning-msg');
-    const ind = document.getElementById('passive-indicator');
-    if (ind) { ind.classList.add('alert'); setTimeout(() => ind.classList.remove('alert'), 3000); }
+    if (_newSig) {
+        logMessage(`RX: 新規信号 SIG-${String(_contactLabels[_newSig.sid]).padStart(2, '0')} [${sc.label}] 方位${_newSig.deg}°`, 'warning-msg');
+        const ind = document.getElementById('passive-indicator');
+        if (ind) { ind.classList.add('alert'); setTimeout(() => ind.classList.remove('alert'), 3000); }
+    }
 }
 
 // パッシブ方位ウェッジ描画 (ワールド空間)。計測位置にアンカーした扇形をフェード表示。
@@ -5575,10 +5544,6 @@ function drawTriangulationGuide(ctx) {
         ctx.setLineDash([9 * zc, 7 * zc]);
     }
     ctx.setLineDash([]);
-    ctx.globalAlpha = 0.85;
-    ctx.font = `bold ${Math.round(9 * zc)}px Orbitron, monospace`;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('測量に有効な進路 →', Math.cos(perp) * (L + 22 * zc), Math.sin(perp) * (L + 22 * zc));
     ctx.restore();
 }
 
@@ -5612,11 +5577,6 @@ function drawTriangulationCircle(ctx) {
             const _siMs = 20 * _siInv;
             ctx.beginPath(); ctx.moveTo(_siCx - _siMs, _siCy); ctx.lineTo(_siCx + _siMs, _siCy); ctx.stroke();
             ctx.beginPath(); ctx.moveTo(_siCx, _siCy - _siMs); ctx.lineTo(_siCx, _siCy + _siMs); ctx.stroke();
-            ctx.globalAlpha = 0.8;
-            ctx.fillStyle = `rgb(${_siCol})`;
-            ctx.font = `bold ${Math.round(9 * _siInv)}px Orbitron, monospace`;
-            ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
-            ctx.fillText(`DIR ${Math.round(_siDa)}%  TRI ${Math.round(_siTp)}%`, _siCx + _siR * 0.12 + 8 * _siInv, _siCy - 6 * _siInv);
             ctx.restore();
             return;
         }
@@ -6799,460 +6759,40 @@ function drawBackground(ctx) {
     // ラジアル方位目盛りはヒッグスフォグより手前に描画するためgameLoopへ移動
 }
 
-// オシロスコープ風シグネチャ表示
-const _sigHistory = { heat: [], optic: [], em: [], higgs: [] };
-const _SIG_HIST_LEN = 60;
-
-// 環境シグネチャ履歴 (周囲の敵シグネチャ合算)
-const _envSigHistory = { heat: [], optic: [], em: [], higgs: [] };
-const ENV_SIG_HIST_LEN = 60;
-
-function updateSigCanvas() {
-    if (!player || player.hp <= 0) return;
-    const sigCanvas = document.getElementById('sig-canvas');
-    if (!sigCanvas) return;
-    const sc = sigCanvas.getContext('2d');
-    const w = sigCanvas.width, h = sigCanvas.height;
-    sc.clearRect(0, 0, w, h);
-    sc.fillStyle = 'rgba(0,5,12,0.95)';
-    sc.fillRect(0, 0, w, h);
-
-    const spd = Math.hypot(player.x-(player.prevX||player.x), player.y-(player.prevY||player.y));
-    const engType = ENGINE_TYPES[gameState.engineType]||ENGINE_TYPES.thermonuclear;
-    const hHere = getHiggsIntensity(player.x, player.y);
-    // Ship.update()で計算済みの自機シグネチャをそのまま使用
-    const currentVals = {
-        heat:  player.heatSig  || 0,
-        optic: player.opticalSig || 0,
-        em:    player.emSig    || 0,
-        higgs: player.higgsSig || 0
-    };
-
-    const sigs = [
-        { key: 'heat',  color: '#ff6600', rgb: '255,102,0',   label: 'H', baseFreq: 1.8 },
-        { key: 'optic', color: '#00ffaa', rgb: '0,255,170',   label: 'O', baseFreq: 2.6 },
-        { key: 'em',    color: '#cc44ff', rgb: '204,68,255',  label: 'E', baseFreq: 1.3 },
-        { key: 'higgs', color: '#50c8ff', rgb: '80,200,255',  label: 'G', baseFreq: 4.0 }
-    ];
-
-    sigs.forEach(sig => {
-        _sigHistory[sig.key].push(currentVals[sig.key]);
-        if (_sigHistory[sig.key].length > _SIG_HIST_LEN) _sigHistory[sig.key].shift();
-    });
-
-    const nowSec = Date.now() * 0.001;
-    const rowH = h / 4;
-
-    sigs.forEach((sig, i) => {
-        const cy = (i + 0.5) * rowH;
-        const v = currentVals[sig.key];
-
-        // グリッド線
-        sc.strokeStyle = 'rgba(255,255,255,0.07)';
-        sc.lineWidth = 0.5;
-        sc.beginPath(); sc.moveTo(0, cy); sc.lineTo(w, cy); sc.stroke();
-
-        // ラベル
-        sc.fillStyle = sig.color;
-        sc.font = 'bold 7px monospace';
-        sc.fillText(sig.label, 2, cy + 3);
-
-        const xStart = 10;
-        const xEnd = w - 6;
-
-        // 波の高さ = v * rowH * 0.43 (値が大きいほど振幅大)
-        // 波の間隔 = baseFreq + v*9 (値が大きいほど密)
-        // スクロール速度も値に比例
-        // sqrt スケーリング: 微小シグネチャでも視覚的に明確な波形を表示
-        const amp   = Math.sqrt(v) * rowH * 0.38;
-        const freq  = sig.baseFreq + v * 9.0;
-        const scroll = nowSec * (1.5 + v * 4.0);
-
-        // 常時ベースライン波形 (値ゼロでも動く)
-        const idleAmp  = rowH * 0.06;
-        const idleFreq = 0.8;
-
-        sc.save();
-        sc.shadowColor = sig.color;
-        sc.shadowBlur  = v > 0.02 ? 2 : 1;
-        sc.strokeStyle = sig.color;
-        sc.lineWidth   = v > 0.02 ? 1.4 : 0.9;
-        sc.globalAlpha = 0.35 + v * 0.65;
-        sc.beginPath();
-        // ループを2pxステップに (Math.sin()コスト半減、視覚差なし)
-        const _tScale   = 1 / (xEnd - xStart);
-        const _piFreq   = 2 * Math.PI * freq;
-        const _piFreq21 = 2 * Math.PI * freq * 2.1;
-        const _piIdle   = 2 * Math.PI * idleFreq;
-        const _phOff    = scroll * 2 * Math.PI;
-        const _phOff2   = scroll * 1.05 * 2 * Math.PI;
-        const _idleOff  = nowSec * 0.6 * 2 * Math.PI;
-        for (let x = xStart; x <= xEnd; x += 2) {
-            const t = (x - xStart) * _tScale;
-            const wave = amp * Math.sin(t * _piFreq - _phOff)
-                       + amp * 0.28 * Math.sin(t * _piFreq21 - _phOff2)
-                       + idleAmp * Math.sin(t * _piIdle - _idleOff);
-            const y = cy - wave;
-            if (x === xStart) sc.moveTo(x, y); else sc.lineTo(x, y);
-        }
-        sc.stroke();
-
-        // 走査線先端を明るく (右端の輝点)
-        const tipX = xEnd;
-        const tipT = 1.0;
-        const tipWave = amp * Math.sin(2 * Math.PI * (tipT * freq - scroll))
-                      + amp * 0.28 * Math.sin(2 * Math.PI * (tipT * freq * 2.1 - scroll * 1.05))
-                      + idleAmp * Math.sin(2 * Math.PI * (tipT * idleFreq - nowSec * 0.6));
-        sc.shadowBlur = v > 0.05 ? 3 : 1;
-        sc.fillStyle = '#ffffff';
-        sc.globalAlpha = 0.5 + v * 0.5;
-        sc.beginPath();
-        sc.arc(tipX, cy - tipWave, v > 0.05 ? 1.8 : 1.0, 0, Math.PI * 2);
-        sc.fill();
-        sc.restore();
-    });
-
-    // 右端に現在値バー
-    sigs.forEach((sig, i) => {
-        const cy = (i + 0.5) * rowH;
-        const v = currentVals[sig.key];
-        const barH = Math.max(2, v * rowH * 0.85);
-        sc.fillStyle = sig.color;
-        sc.globalAlpha = 0.7;
-        sc.fillRect(w - 4, cy - barH/2, 3, barH);
-        sc.globalAlpha = 1;
-    });
-}
-
-// ============================================================
-// シグネチャ解析ステータスバー更新 (sig-info-bar)
-// 1秒前スナップショットとの差分でレートを計算
-// ============================================================
-let _sibSnap = { dir: 0, tri: 0, snapTime: 0 };  // 1秒前のスナップショット
-let _sibLastDir = 0, _sibLastTri = 0;             // 直前値 (レート保持用)
-let _sibDirRate = 0, _sibTriRate = 0;             // 最新レート (%/sec)
-function updateSigInfoBar() {
-    const lockEl  = document.getElementById('sib-lock-status');
-    const dirEl   = document.getElementById('sib-dir');
-    const dirRate = document.getElementById('sib-dir-rate');
-    const triEl   = document.getElementById('sib-tri');
-    const triRate = document.getElementById('sib-tri-rate');
-    if (!lockEl) return;
-
-    if (!lockedSignalId || !_signalAnalysis[lockedSignalId]) {
-        lockEl.textContent = 'UNLOCKED';
-        lockEl.className = '';
-        if (dirEl) dirEl.textContent = '--.--%';
-        if (triEl) triEl.textContent = '--.--%';
-        if (dirRate) dirRate.textContent = '';
-        if (triRate) triRate.textContent = '';
-        _sibSnap.snapTime = 0;
-        return;
-    }
-
-    const sa  = _signalAnalysis[lockedSignalId];
-    const dir = sa.dirAnalysis || 0;
-    const tri = sa.triParam   || 0;
-    const now = Date.now();
-
-    // 1秒ごとにスナップを更新し、その差分をレートとして確定
-    if (_sibSnap.snapTime === 0) {
-        _sibSnap = { dir, tri, snapTime: now };
-    } else if (now - _sibSnap.snapTime >= 1000) {
-        const elapsed = (now - _sibSnap.snapTime) / 1000;
-        _sibDirRate = (dir - _sibSnap.dir) / elapsed;
-        _sibTriRate = (tri - _sibSnap.tri) / elapsed;
-        _sibSnap = { dir, tri, snapTime: now };
-    }
-
-    const fmtRate = r => Math.abs(r) < 0.005 ? '' : `(${r >= 0 ? '+' : ''}${r.toFixed(2)}%/s)`;
-
-    // 解析フェーズ表示 (2026-07-11): 「いつ次のシグネチャへ切替えるか」の判断材料。
-    // 静止源(ランドマーク/地形)なら閾値18%で自動特定→ロック解除されるため、
-    // 18%を超えてもロックが残っている = 機動反応 (=攻撃目標候補) と絞り込める。
-    const _sibAvg = (dir + tri) / 2;
-    let _sibPhase;
-    if (sa.classified) _sibPhase = '機動反応=目標';
-    else if (_sibAvg > ID_THRESHOLD_STATIC) _sibPhase = '非ランドマーク';
-    else _sibPhase = `解析${Math.round(_sibAvg)}%`;
-    lockEl.textContent = `LCK:${lockedSignalId} [${_sibPhase}]`;
-    lockEl.className = 'locked';
-    if (dirEl) dirEl.textContent = dir.toFixed(1) + '%';
-    if (triEl) triEl.textContent = tri.toFixed(1) + '%';
-    if (dirRate) dirRate.textContent = fmtRate(_sibDirRate);
-    if (triRate) triRate.textContent = fmtRate(_sibTriRate);
-}
-
-// ============================================================
-// 環境シグネチャオシロスコープ描画
-// ============================================================
-function updateEnvSigCanvas() {
-    if (!player || player.hp <= 0) return;
-    const envCanvas = document.getElementById('env-sig-canvas');
-    if (!envCanvas) return;
-    const ec = envCanvas.getContext('2d');
-    const w = envCanvas.width, h = envCanvas.height;
-    ec.clearRect(0, 0, w, h);
-    ec.fillStyle = 'rgba(0,5,12,0.9)';
-    ec.fillRect(0, 0, w, h);
-
-    // 周囲の敵シグネチャを各センサータイプごとに合算
-    // 検出範囲: パッシブ検知と同じ全マップ範囲 (距離減衰のみ適用)
-    const envDetectRange = FIELD_SIZE; // 環境SIGは全マップ対象 (距離で減衰)
-    const envVals = { heat: 0, optic: 0, em: 0, higgs: 0 };
-    enemies.forEach(e => {
-        if (e.hp <= 0) return;
-        const dist = Math.hypot(e.x - player.x, e.y - player.y);
-        const higgsPath = getHiggsIntensity((e.x + player.x)/2, (e.y + player.y)/2);
-        const distAtten = Math.max(0, 1 - dist / envDetectRange);
-        ['heat', 'optic', 'em', 'higgs'].forEach(key => {
-            const sc2 = sensorConfig[key];
-            envVals[key] = Math.min(1, envVals[key] + sc2.sig(e) * distAtten * (1 - higgsPath * sc2.higgsMod));
-        });
-    });
-
-    const sigs = [
-        { key: 'heat',  color: '#ff6600', label: 'H', baseFreq: 1.8 },
-        { key: 'optic', color: '#ffee00', label: 'O', baseFreq: 2.6 },
-        { key: 'em',    color: '#cc44ff', label: 'E', baseFreq: 1.3 },
-        { key: 'higgs', color: '#00ffff', label: 'G', baseFreq: 4.0 }
-    ];
-
-    sigs.forEach(sig => {
-        _envSigHistory[sig.key].push(envVals[sig.key]);
-        if (_envSigHistory[sig.key].length > ENV_SIG_HIST_LEN) _envSigHistory[sig.key].shift();
-    });
-
-    const nowSec = Date.now() * 0.001;
-    const rowH = h / 4;
-
-    sigs.forEach((sig, i) => {
-        const cy = (i + 0.5) * rowH;
-        const v = envVals[sig.key];
-
-        // グリッド線
-        ec.strokeStyle = 'rgba(255,255,255,0.07)';
-        ec.lineWidth = 0.5;
-        ec.beginPath(); ec.moveTo(0, cy); ec.lineTo(w, cy); ec.stroke();
-
-        // ラベル
-        ec.fillStyle = sig.color;
-        ec.font = 'bold 7px monospace';
-        ec.fillText(sig.label, 2, cy + 3);
-
-        const xStart = 10;
-        const xEnd = w - 6;
-
-        // sqrt スケーリング: 微小シグネチャでも視覚的に明確な波形を表示
-        const amp    = Math.sqrt(v) * rowH * 0.38;
-        const freq   = sig.baseFreq + v * 9.0;
-        const scroll = nowSec * (1.5 + v * 4.0) + i * 2.1; // 位相オフセット
-
-        const idleAmp  = rowH * 0.06;
-        const idleFreq = 0.7 + i * 0.2;
-
-        ec.save();
-        ec.shadowColor = sig.color;
-        ec.shadowBlur  = v > 0.02 ? 5 : 2;
-        ec.strokeStyle = sig.color;
-        ec.lineWidth   = v > 0.02 ? 1.4 : 0.9;
-        ec.globalAlpha = 0.35 + v * 0.65;
-        ec.beginPath();
-        // ステップ2でサンプリング (視覚的に同等、Math.sin()コストを半減)
-        const tScale   = 1 / (xEnd - xStart);
-        const piFreq   = 2 * Math.PI * freq;
-        const piFreq21 = 2 * Math.PI * freq * 2.1;
-        const piIdle   = 2 * Math.PI * idleFreq;
-        const phaseOff = scroll * 2 * Math.PI;
-        const phaseOff2 = scroll * 1.05 * 2 * Math.PI;
-        const idleOff  = nowSec * 0.5 * 2 * Math.PI;
-        for (let x = xStart; x <= xEnd; x += 2) {
-            const t = (x - xStart) * tScale;
-            const wave = amp * Math.sin(t * piFreq - phaseOff)
-                       + amp * 0.28 * Math.sin(t * piFreq21 - phaseOff2)
-                       + idleAmp * Math.sin(t * piIdle - idleOff);
-            const y = cy - wave;
-            if (x === xStart) ec.moveTo(x, y); else ec.lineTo(x, y);
-        }
-        ec.stroke();
-
-        // 走査線先端輝点
-        const tipWave = amp * Math.sin(2 * Math.PI * (1.0 * freq - scroll))
-                      + amp * 0.28 * Math.sin(2 * Math.PI * (1.0 * freq * 2.1 - scroll * 1.05))
-                      + idleAmp * Math.sin(2 * Math.PI * (1.0 * idleFreq - nowSec * 0.5));
-        ec.shadowBlur = v > 0.05 ? 8 : 2;
-        ec.fillStyle = '#ffffff';
-        ec.globalAlpha = 0.5 + v * 0.5;
-        ec.beginPath();
-        ec.arc(xEnd, cy - tipWave, v > 0.05 ? 1.8 : 1.0, 0, Math.PI * 2);
-        ec.fill();
-        ec.restore();
-    });
-
-    // 右端に現在値バー
-    sigs.forEach((sig, i) => {
-        const cy = (i + 0.5) * rowH;
-        const v = envVals[sig.key];
-        const barH = Math.max(2, v * rowH * 0.85);
-        ec.fillStyle = sig.color;
-        ec.globalAlpha = 0.7;
-        ec.fillRect(w - 4, cy - barH/2, 3, barH);
-        ec.globalAlpha = 1;
-    });
-}
-
 // ============================================================
 // 環境情報パネル動的更新
 // ============================================================
 function updateEnvInfo() {
     if (!player || player.hp <= 0) return;
-    {
-        const hpP = Math.max(0, (player.hp / player.maxHp) * 100);
-        const hpFill = document.querySelector('.hp-fill');
-        if (hpFill) { hpFill.style.width = hpP + '%'; hpFill.style.backgroundColor = hpP < 30 ? '#ff4d4d' : '#00ffaa'; }
-        const stEl = document.querySelector('.status-text');
-        if (stEl) stEl.textContent = `船体耐久度: ${Math.floor(hpP)}%`;
+    // 艦体耐久 (上帯)
+    const hpP = Math.max(0, Math.round(player.hp / player.maxHp * 100));
+    if (hpP !== _hudCache.hp) {
+        _hudCache.hp = hpP;
+        const col = hpP < 25 ? '#ff4d4d' : hpP < 55 ? '#ffaa44' : '#00ffaa';
+        const f = document.getElementById('hud-hp-fill'), t = document.getElementById('hud-hp-text');
+        if (f) { f.style.width = hpP + '%'; f.style.backgroundColor = col; }
+        if (t) { t.textContent = hpP + '%'; t.style.color = col; }
     }
-    const intensity = getHiggsIntensity(player.x, player.y);
-    // ヒッグス濃度を0-100%の連続値で表示
-    const higgsSpan = document.getElementById('env-higgs');
-    const radarSpan = document.getElementById('env-radar');
-    if (higgsSpan) {
-        higgsSpan.textContent = Math.round(intensity * 100) + '%';
-        higgsSpan.className = intensity > 0.75 ? 'warning-text' : (intensity > 0.4 ? 'highlight-text' : '');
+    // 兵装ボタンの残弾/リロード (旧: 状態行の「弾:」とSHIP STATUSの二重表示)
+    const w = currentWeapon();
+    let ammo, rld;
+    if (w === 'kinetic') { rld = player.kineticReloading; ammo = rld ? 'RLD ' + Math.ceil(player.kineticReloadTimer / 60) + 's' : player.kineticAmmo + '/' + player.kineticMaxAmmo; }
+    else if (w === 'missile') { rld = player.missileReloading; ammo = rld ? 'RLD ' + Math.ceil(player.missileReloadTimer / 60) + 's' : 'RDY'; }
+    else { rld = player.beamReloading; ammo = rld ? 'RLD ' + Math.ceil(player.beamReloadTimer / 60) + 's' : 'RDY'; }
+    if (ammo !== _hudCache.ammo) {
+        _hudCache.ammo = ammo;
+        const el = document.getElementById('abar-wep-ammo');
+        if (el) { el.textContent = ammo; el.classList.toggle('rld', !!rld); }
     }
-    // 地形ハザード密度 (§3-13 D)
-    const debrisSpan = document.getElementById('env-debris');
-    if (debrisSpan) debrisSpan.textContent = Math.round(getDebrisIntensity(player.x, player.y) * 100) + '%';
-    const stormSpan = document.getElementById('env-storm');
-    if (stormSpan) stormSpan.textContent = Math.round(getStormIntensity(player.x, player.y) * 100) + '%';
-    const thermalSpan = document.getElementById('env-thermal');
-    if (thermalSpan) thermalSpan.textContent = Math.round(getThermalIntensity(player.x, player.y) * 100) + '%';
-    if (radarSpan) {
-        const sLv = gameState.upgrades.sensor;
-        const omniR = Math.round(OMNI_SONAR_RANGE[sLv] * (genAlloc.sensors / 100) * genGain);
-        radarSpan.textContent = `全周囲 ${omniR}u / 指向 ${Math.round(DIR_SONAR_MAX_RANGE * genAlloc.sensors / 100 * genGain)}u`;
-    }
-    document.getElementById('hostile-count').textContent =
-        enemies.filter(e => e.visible).length > 0 ? enemies.filter(e => e.visible).length + '機' : '不明';
-
-    // センサーモード表示
-    const sensorEl = document.getElementById('env-sensor');
-    if (sensorEl) {
-        const sensorLabels = { heat: '🔥 熱源', optic: '👁 光学', em: '📡 電磁波', higgs: '〰 ヒッグス' };
-        const sensorColors = { heat: '#ff6600', optic: '#00ffaa', em: '#cc44ff', higgs: '#50c8ff' };
-        sensorEl.textContent = sensorLabels[currentSensor] || '---';
-        sensorEl.className = '';
-        sensorEl.style.color = sensorColors[currentSensor] || '';
-    }
-
-    // 受信シグネチャ強度表示 (複数の敵の最大値)
-    const sigEl = document.getElementById('env-signal');
-    if (sigEl) {
-        const sc_map = sensorConfig[currentSensor];
-        let maxSig = 0;
-        enemies.forEach(e => {
-            if (!e.visible) return;
-            const dist = Math.hypot(e.x - player.x, e.y - player.y);
-            const higgsBlock = getHiggsIntensity((e.x + player.x)/2, (e.y + player.y)/2);
-            const attenuated = sc_map.sig(e) * (1 - higgsBlock * sc_map.higgsMod);
-            maxSig = Math.max(maxSig, attenuated);
-        });
-        const bars = '█'.repeat(Math.round(maxSig * 5)) + '░'.repeat(5 - Math.round(maxSig * 5));
-        sigEl.textContent = bars;
-        sigEl.style.color = maxSig > 0.6 ? '#ff4d4d' : (maxSig > 0.3 ? '#ffaa00' : '#888');
-    }
-    // updateSigCanvas は gameLoop から毎2フレームで呼ばれるためここでは省略 (二重呼び出し防止)
-    updateEnvSigCanvas();
-
-    // GEN配分情報 (リソースノード数)
-    const nodeEl = document.getElementById('env-nodes');
-    if (nodeEl) {
-        const activeNodes = resourceNodes.filter(n => n.active).length;
-        nodeEl.textContent = `${activeNodes}/${resourceNodes.length}`;
-    }
-
-    // 弾薬・リロード状態表示
-    const ammoEl = document.getElementById('ammo-display');
-    if (ammoEl && player) {
-        const wTypeCur = document.getElementById('weapon-select') ? document.getElementById('weapon-select').value : 'kinetic';
-        let ammoText = '';
-        if (wTypeCur === 'kinetic') {
-            ammoText = player.kineticReloading
-                ? `RELOAD ${Math.ceil(player.kineticReloadTimer / 60)}s`
-                : `${player.kineticAmmo}/${player.kineticMaxAmmo}`;
-            ammoEl.style.color = player.kineticReloading ? '#ff4444' : '#ffaa00';
-        } else if (wTypeCur === 'missile') {
-            ammoText = player.missileReloading
-                ? `RELOAD ${Math.ceil(player.missileReloadTimer / 60)}s`
-                : 'READY';
-            ammoEl.style.color = player.missileReloading ? '#ff4444' : '#00ff88';
-        } else if (wTypeCur === 'beam') {
-            ammoText = player.beamReloading
-                ? `RELOAD ${Math.ceil(player.beamReloadTimer / 60)}s`
-                : 'READY';
-            ammoEl.style.color = player.beamReloading ? '#ff4444' : '#00aaff';
-        }
-        ammoEl.textContent = ammoText;
-    }
-
-    // ── モバイルステータスバー同期 ──
-    const msbHpFill = document.getElementById('msb-hp-fill');
-    const msbHpText = document.getElementById('msb-hp-text');
-    const msbHiggs  = document.getElementById('msb-higgs');
-    const msbEnemies = document.getElementById('msb-enemies');
-    const msbAmmo   = document.getElementById('msb-ammo');
-    const msbNodes  = document.getElementById('msb-nodes');
-    const msbDebris = document.getElementById('msb-debris');
-    const msbStorm  = document.getElementById('msb-storm');
-    if (player && player.hp > 0) {
-        const hpPct = Math.max(0, Math.round((player.hp / player.maxHp) * 100));
-        if (msbHpFill) msbHpFill.style.width = hpPct + '%';
-        if (msbHpText) { msbHpText.textContent = hpPct + '%'; msbHpText.style.color = hpPct < 25 ? '#ff4d4d' : hpPct < 55 ? '#ffaa44' : '#00ffaa'; }
-        if (msbHiggs) msbHiggs.textContent = Math.round(getHiggsIntensity(player.x, player.y) * 100) + '%';
-        if (msbDebris) msbDebris.textContent = Math.round(getDebrisIntensity(player.x, player.y) * 100) + '%';
-        if (msbStorm) msbStorm.textContent = Math.round(getStormIntensity(player.x, player.y) * 100) + '%';
-        const msbThermal = document.getElementById('msb-thermal');
-        if (msbThermal) msbThermal.textContent = Math.round(getThermalIntensity(player.x, player.y) * 100) + '%';
-        if (msbEnemies) msbEnemies.textContent = enemies.filter(e => e.visible).length || '?';
-        if (msbAmmo) {
-            const wTypeMsb = document.getElementById('weapon-select')?.value || 'kinetic';
-            if (wTypeMsb === 'kinetic') {
-                if (player.kineticReloading) {
-                    const _kMax = KINETIC_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0);
-                    const _kPct = Math.round((1 - player.kineticReloadTimer / _kMax) * 100);
-                    msbAmmo.textContent = `RLD(${_kPct}%)`;
-                } else {
-                    msbAmmo.textContent = `${player.kineticAmmo}/${player.kineticMaxAmmo}`;
-                }
-                msbAmmo.style.color = player.kineticReloading ? '#ff4444' : '#ffaa00';
-            } else {
-                const _rld = (wTypeMsb === 'missile' ? player.missileReloading : player.beamReloading);
-                if (_rld) {
-                    const _rldTimer = wTypeMsb === 'missile' ? player.missileReloadTimer : player.beamReloadTimer;
-                    const _rldMax = wTypeMsb === 'missile'
-                        ? MISSILE_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0)
-                        : BEAM_RELOAD_TIME;
-                    const _rldPct = Math.round((1 - _rldTimer / _rldMax) * 100);
-                    msbAmmo.textContent = `RLD(${_rldPct}%)`;
-                } else {
-                    msbAmmo.textContent = 'RDY';
-                }
-                msbAmmo.style.color = _rld ? '#ff4444' : '#00ff88';
-            }
-        }
-        if (msbNodes) {
-            const an = resourceNodes.filter(n => n.active).length;
-            msbNodes.textContent = `${an}/${resourceNodes.length}`;
-        }
-    }
-    // メニューモーダルのセクター/クレジットも同期
+    // GEN配分の要約 (上帯のGENボタン)
+    const gs = 'E' + Math.round(genAlloc.engine) + ' W' + Math.round(genAlloc.weapons) + ' S' + Math.round(genAlloc.sensors);
+    if (gs !== _hudCache.gen) { _hudCache.gen = gs; const el = document.getElementById('gen-summary'); if (el) el.textContent = gs; }
+    // メニューモーダルのセクター/クレジット
     const mmSector = document.getElementById('mm-sector');
     const mmCredits = document.getElementById('mm-credits');
     if (mmSector) mmSector.textContent = `セクター: ${gameState.sector}`;
     if (mmCredits) mmCredits.textContent = `クレジット: ${gameState.credits} SCR`;
 }
-
 // ============================================================
 // ゲームオーバー / セクタークリア
 // ============================================================
@@ -7313,71 +6853,26 @@ function drawHUDOverlay(ctx) {
     const { sx: psx, sy: psy } = worldToScreen(player.x, player.y);
     const t = Date.now();
 
-    // ── 露出度メーター (被探知状態) — フィールド上部中央の常時チップ ──
-    // 「今、隠れられているのか?」を1目で分かるように。潜水艦ゲームの緊張の芯。
+    // 第14弾: 被探知状態は上帯のDOMチップ(#hud-expo)へ移設。ここではフィールド内の演出と方向指示だけを描く
     {
         const exL = playerExposureLevel;
-        const exCol = exL === 0 ? '#00ff88' : exL === 1 ? '#ffdd00' : exL === 2 ? '#ff9500' : '#ff3344';
-        const exTxt = exL === 0 ? '隠密' : exL === 1 ? '痕跡' : exL === 2 ? '追跡' : '捕捉';
-        const _fW = cssW - uiInsets().right; // 実フィールド幅 (横持ちは右コンソール分を除く)
-        const _fCX = _fW / 2;
-        const chipY = uiInsets().topHud + 8; // 上部HUD(ミニマップ/ログ)の直下 (第13弾: ログ縮小に合わせ動的化)
+        const _ins = uiInsets();
+        const _fL = _ins.left, _fW = cssW - _ins.left - _ins.right; // 実フィールド (左右の列を除く)
+        const _fCX = _fL + _fW / 2;
+        const chipY = _ins.top + 4;
         ctx.save();
-        // ── 露出度ピル (小型化): ドット + 短い状態名。隠れている時は控えめ、見られるほど強調 ──
-        const _pl = exL >= 2 ? (0.6 + Math.sin(t * (exL === 3 ? 0.02 : 0.01)) * 0.35) : 0.7;
-        ctx.font = 'bold 10px Orbitron, monospace';
-        const _pillTextW = ctx.measureText(exTxt).width;
-        const _pillW = _pillTextW + 26, _pillH = 15, _pillX = _fCX - _pillW / 2;
-        ctx.globalAlpha = 0.45;
-        ctx.fillStyle = '#000d08';
-        _roundRect(ctx, _pillX, chipY, _pillW, _pillH, 7); ctx.fill();
-        ctx.globalAlpha = _pl;
-        ctx.strokeStyle = exCol; ctx.lineWidth = 1;
-        _roundRect(ctx, _pillX, chipY, _pillW, _pillH, 7); ctx.stroke();
-        ctx.fillStyle = exCol;
-        ctx.beginPath(); ctx.arc(_pillX + 9, chipY + _pillH / 2, 3, 0, Math.PI * 2); ctx.fill();
-        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-        ctx.fillText(exTxt, _pillX + 16, chipY + _pillH / 2 + 0.5);
-        const chipH = _pillH; // 後続のサージ/損傷表示の基準に流用
-        // 捕捉中: 画面縁を赤くパルス (狩られている感)
+        // 捕捉中: フィールドの縁を赤くパルス (狩られている感)
         if (exL === 3) {
             ctx.globalAlpha = 0.10 + Math.sin(t * 0.02) * 0.07;
             ctx.strokeStyle = '#ff2233'; ctx.lineWidth = 10;
-            ctx.strokeRect(5, 5, cssW - 10, cssH - 10);
+            ctx.strokeRect(_fL + 5, _ins.top + 5, _fW - 10, cssH - _ins.top - 10);
         }
-        // ── コンパス (磁気方位・360°) — 艦首の向きを水平テープで表示 ──
-        // (縦が狭い横持ちでは自機リングと重なるため省略: 方位はミニマップの矢印でも分かる)
-        if (cssH - uiInsets().bottom > 520) {
-            const headingDeg = (Math.atan2(Math.cos(player.angle), -Math.sin(player.angle)) * 180 / Math.PI + 360) % 360;
-            const tapeY = chipY + _pillH + 26, halfW = 78, spanDeg = 90; // ピルと重ならないよう十分下げる
-            ctx.globalAlpha = 0.5;
-            ctx.strokeStyle = '#00e0c0'; ctx.lineWidth = 1;
-            ctx.beginPath(); ctx.moveTo(_fCX - halfW, tapeY); ctx.lineTo(_fCX + halfW, tapeY); ctx.stroke();
-            ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-            const CARD = { 0:'N', 90:'E', 180:'S', 270:'W' };
-            for (let off = -spanDeg; off <= spanDeg; off += 15) {
-                let deg = Math.round(headingDeg + off); deg = ((deg % 360) + 360) % 360;
-                const x = _fCX + (off / spanDeg) * halfW;
-                const isCard = deg % 90 === 0;
-                ctx.globalAlpha = 0.35 + (1 - Math.abs(off) / spanDeg) * 0.4;
-                ctx.strokeStyle = isCard ? '#5affd0' : '#2a8c7c'; ctx.lineWidth = 1;
-                ctx.beginPath(); ctx.moveTo(x, tapeY - (isCard ? 5 : 3)); ctx.lineTo(x, tapeY); ctx.stroke();
-                if (isCard) { ctx.fillStyle = '#5affd0'; ctx.font = 'bold 8px Orbitron, monospace'; ctx.fillText(CARD[deg] || '', x, tapeY + 2); }
-            }
-            // 中央キャレット + 数値
-            ctx.globalAlpha = 0.95;
-            ctx.fillStyle = '#eafff8';
-            ctx.beginPath(); ctx.moveTo(_fCX, tapeY - 7); ctx.lineTo(_fCX - 4, tapeY - 12); ctx.lineTo(_fCX + 4, tapeY - 12); ctx.closePath(); ctx.fill();
-            ctx.font = 'bold 10px Orbitron, monospace'; ctx.textBaseline = 'bottom';
-            ctx.fillText(('' + Math.round(headingDeg)).padStart(3, '0') + '°', _fCX, tapeY - 13);
-        }
-        // (第13弾: 旧RX SIGメーター(キャンバス)は、常時表示のバンドチューナー(DOM・タップで同調)に置き換え)
-        // ── 司令部情報の方向指示: 画面端に「敵艦推定方面」を矢印で示す (ズームしても見失わない) ──
+        // ── 司令部情報の方向指示: フィールドの縁に「敵艦推定方面」を矢印で示す (ズームしても見失わない) ──
         if (intelBearing) {
             const ib = intelBearing;
             const tx = ib.ox + Math.cos(ib.angle) * 15000, ty = ib.oy + Math.sin(ib.angle) * 15000;
             const ang = Math.atan2(ty - player.y, tx - player.x);
-            const rad = Math.min(_fW, cssH - uiInsets().bottom - 90) * 0.38;
+            const rad = Math.min(_fW, cssH - _ins.top) * 0.40;
             const ex = psx + Math.cos(ang) * rad, ey = psy + Math.sin(ang) * rad;
             const fade = Math.min(1, ib.life / 600);
             ctx.save();
@@ -7386,15 +6881,16 @@ function drawHUDOverlay(ctx) {
             ctx.fillStyle = '#dfe9ff';
             ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(-4, -7); ctx.lineTo(-1, 0); ctx.lineTo(-4, 7); ctx.closePath(); ctx.fill();
             ctx.restore();
-            ctx.globalAlpha = 0.75 * fade;
+            ctx.globalAlpha = 0.7 * fade;
             ctx.fillStyle = '#dfe9ff';
             ctx.font = 'bold 9px Orbitron, monospace';
             ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-            ctx.fillText(`司令部情報 ${compassDeg(ib.angle)}°`, ex - Math.cos(ang) * 22, ey - Math.sin(ang) * 22 + 12);
+            ctx.fillText('敵方面', ex - Math.cos(ang) * 22, ey - Math.sin(ang) * 22 + 11);
             ctx.textBaseline = 'alphabetic';
         }
+        ctx.textAlign = 'center';
         // ── ヒッグスサージ表示 ──
-        let _infoY = chipY + chipH + 46; // コンパステープの下から
+        let _infoY = chipY + 14; // 上帯の直下 (イベント告知の行)
         if (surgePhase !== 'none') {
             const sTxt = surgePhase === 'warn' ? '⚠ ヒッグスサージ接近' : surgePhase === 'active' ? 'サージ通過中 — 全センサー縮退' : 'クリアリング — 高感度ウィンドウ';
             const sCol = surgePhase === 'active' ? '#66aaff' : surgePhase === 'warn' ? '#ffdd00' : '#00ffcc';
@@ -7430,24 +6926,12 @@ function drawHUDOverlay(ctx) {
             ctx.font = 'bold 12px Orbitron, monospace';
             ctx.fillText('奇襲可能 ×3.5', _tp.sx, _tp.sy - 36);
         }
-        // ── 静粛航行 / デブリ擬態 インジケータ ──
-        if (isBottomed) {
-            ctx.globalAlpha = 0.75 + Math.sin(t * 0.004) * 0.2;
-            ctx.fillStyle = '#99bbcc';
-            ctx.font = 'bold 11px Orbitron, monospace';
-            ctx.fillText('デブリ擬態中 — 岩塊に艦影が紛れている', _fCX, chipY - 10);
-        } else if (silentRunning) {
-            ctx.globalAlpha = 0.7 + Math.sin(t * 0.006) * 0.2;
-            ctx.fillStyle = '#66ccff';
-            ctx.font = 'bold 11px Orbitron, monospace';
-            ctx.fillText('静粛航行中 — 速度/シグネチャ抑制', _fCX, chipY - 10);
-        }
         // ── ニアミス「息を殺せ」表示 ──
         if (nearMissActive) {
             ctx.globalAlpha = 0.6 + Math.sin(t * 0.02) * 0.35;
             ctx.fillStyle = '#ffcc66';
             ctx.font = 'bold 12px Orbitron, monospace';
-            ctx.fillText('敵艦至近 — 息を殺せ', _fCX, chipY + chipH + 28);
+            ctx.fillText('敵艦至近 — 息を殺せ', _fCX, _infoY + 16);
         }
         // ── チャージビーム進捗リング (自機周り) ──
         if ((player._beamCharge || 0) > 0) {
@@ -7496,8 +6980,8 @@ function drawHUDOverlay(ctx) {
         // ── 前任艦の残骸マーカー (第5弾): 灰色ダイヤ + WRECK ──
         if (playerWreckObj) {
             const _wp2 = worldToScreen(playerWreckObj.x, playerWreckObj.y);
-            const wx2 = Math.max(24, Math.min(cssW - 24, _wp2.sx));
-            const wy2 = Math.max(90, Math.min(cssH - 30, _wp2.sy));
+            const wx2 = Math.max(_fL + 24, Math.min(_fL + _fW - 24, _wp2.sx));
+            const wy2 = Math.max(_ins.top + 24, Math.min(cssH - 30, _wp2.sy));
             ctx.globalAlpha = 0.45 + Math.sin(t * 0.004) * 0.2;
             ctx.strokeStyle = '#9ab0bb'; ctx.lineWidth = 1.5;
             ctx.beginPath();
@@ -7510,8 +6994,8 @@ function drawHUDOverlay(ctx) {
         // ── 遭難信号マーカー: 画面内はその位置、画面外は縁にクランプして方向を示す ──
         if (distressBeacon && !distressBeacon.claimed) {
             const _bp = worldToScreen(distressBeacon.x, distressBeacon.y);
-            const bx = Math.max(24, Math.min(cssW - 24, _bp.sx));
-            const by = Math.max(90, Math.min(cssH - 30, _bp.sy));
+            const bx = Math.max(_fL + 24, Math.min(_fL + _fW - 24, _bp.sx));
+            const by = Math.max(_ins.top + 24, Math.min(cssH - 30, _bp.sy));
             const _bPulse = 0.55 + Math.sin(t * 0.008) * 0.35;
             ctx.globalAlpha = _bPulse;
             ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 2;
@@ -7930,20 +7414,11 @@ function toggleSilentRunning() {
     playSound('ui');
 }
 function _updateSilentBtn() {
-    const b = document.getElementById('btn-silent');
-    if (!b) return;
-    b.style.borderColor = silentRunning ? '#66ccff' : '#1a3a4a';
-    b.style.color = silentRunning ? '#aaddff' : '#6699bb';
-    const lbl = document.getElementById('silent-label');
-    if (lbl) lbl.textContent = silentRunning ? '静粛 ON' : '静粛 OFF';
     const ab = document.getElementById('abar-silent');
-    if (ab) {
-        ab.style.borderColor = silentRunning ? '#66ccff' : '#1a3a4a';
-        ab.style.color = silentRunning ? '#cfefff' : '#6699bb';
-        ab.style.background = silentRunning ? 'rgba(40,120,180,0.25)' : '';
-        const al = document.getElementById('abar-silent-label');
-        if (al) al.textContent = silentRunning ? '静粛 ON' : '静粛';
-    }
+    if (ab) ab.classList.toggle('on', silentRunning);
+    const al = document.getElementById('abar-silent-label');
+    if (al) al.textContent = silentRunning ? '静粛 ON' : '静粛';
+    _updateExpoChip(); // 上帯チップの「・静粛」を即時反映
 }
 function cancelSilentRunning(reason) {
     if (!silentRunning) return;
@@ -8371,33 +7846,42 @@ function xoEvaluate() {
 }
 
 // ── 戦術ストリップ(XOバー+バンドチューナー)の描画同期 — DOM更新は値が変わった時だけ (GC/レイアウト抑制) ──
-let _xoState = null, _xoAct = null, _tacInsetsT = 0;
+let _xoState = null, _xoAct = null;
 const _bandEls = {};
+// 被探知状態 (上帯チップ)。静粛/デブリ擬態は同じチップに併記 (旧: フィールド上の文字列)
+function _updateExpoChip() {
+    const exL = playerExposureLevel;
+    const exTxt = (exL === 0 ? '隠密' : exL === 1 ? '痕跡' : exL === 2 ? '追跡' : '捕捉') + (isBottomed ? '・擬態' : silentRunning ? '・静粛' : '');
+    if (exTxt + exL === _hudCache.expo) return;
+    _hudCache.expo = exTxt + exL;
+    const ch = document.getElementById('hud-expo'), tx = document.getElementById('hud-expo-text');
+    if (ch) ch.className = 'expo-' + exL;
+    if (tx) tx.textContent = exTxt;
+}
 function updateTacStrip() {
     if (!player) return;
-    const now = Date.now();
-    // コンソールの被覆量をCSS変数へ (縦持ち=下 / 横持ち=右)。戦術ストリップと上部HUDの配置に使う
-    if (now - _tacInsetsT > 500) {
-        _tacInsetsT = now;
-        const ins = uiInsets();
-        const root = document.documentElement.style;
-        root.setProperty('--ins-bottom', ins.bottom + 'px');
-        root.setProperty('--ins-right', ins.right + 'px');
-    }
-    // バンドチューナー: 受信レベル (0.5=方位取得可能ライン) と同調中の帯域
+    // 4帯域ミキサー: 太=受信レベル (0.5の刻み=同調すれば方位が取れる) / 細=自艦の放射
+    // 自艦側は「受信機の半分の距離にいる敵が、その帯域で方位を取れるか」を同じ0.5基準で表す (対称)
     const rx = rxLevels();
     for (const b of BANDS) {
         let el = _bandEls[b];
         if (!el) {
             const btn = document.querySelector(`.band-btn[data-band="${b}"]`);
             if (!btn) continue;
-            el = _bandEls[b] = { btn, fill: btn.querySelector('.bt-fill'), w: -1, hot: null };
+            el = _bandEls[b] = { btn, fill: btn.querySelector('.bt-fill'), tx: btn.querySelector('.bt-tx-fill'), w: -1, t: -1, hot: null, txHi: null };
         }
         const w = Math.round(Math.min(1, rx[b]) * 100);
-        if (w !== el.w) { el.w = w; el.fill.style.width = w + '%'; }
+        if (w !== el.w) { el.w = w; el.fill.style.height = w + '%'; }
         const hot = rx[b] >= 0.5;
         if (hot !== el.hot) { el.hot = hot; el.btn.classList.toggle('hot', hot); }
+        const sc = sensorConfig[b];
+        const txv = Math.min(1, (sc.sig(player) || 0) * 0.5 / sc.threshold);
+        const tw = Math.round(txv * 100);
+        if (tw !== el.t && el.tx) { el.t = tw; el.tx.style.height = tw + '%'; }
+        const txHi = txv >= 0.5;
+        if (txHi !== el.txHi) { el.txHi = txHi; el.btn.classList.toggle('tx-hi', txHi); }
     }
+    _updateExpoChip();
     // 副長
     const r = xoEvaluate();
     const key = r ? (r.tone + '|' + r.text + '|' + (r.act ? r.act.label : '')) : '';
@@ -8407,7 +7891,7 @@ function updateTacStrip() {
         const tx = document.getElementById('xo-text');
         const ab = document.getElementById('xo-act');
         if (bar) bar.className = 'xo-' + (r ? r.tone : 'idle');
-        if (tx) tx.textContent = r ? r.text : '—';
+        if (tx) { tx.textContent = r ? r.text : '—'; tx.title = r ? r.text : ''; }
         if (ab) {
             if (r && r.act) { ab.textContent = r.act.label; ab.style.display = ''; }
             else ab.style.display = 'none';
@@ -8426,12 +7910,14 @@ function updateTacStrip() {
             else if (lk.assumed) { const hc = assumedHitChance(te, w, lk); lbl = hc > 0 ? `射撃 ${Math.round(hc * 100)}%` : '射程外'; on = hc > 0; }
         }
         if (fb._lbl !== lbl) { fb._lbl = lbl; const l = document.getElementById('abar-fire-label'); if (l) l.textContent = lbl; }
-        if (fb._on !== on) {
-            fb._on = on;
-            fb.style.borderColor = on ? '#ff4d4d' : '#5a1a1a';
-            fb.style.color = on ? '#ffd0d0' : '#aa5555';
-            fb.style.background = on ? 'rgba(255,60,60,0.18)' : '';
-        }
+        if (fb._on !== on) { fb._on = on; fb.classList.toggle('on', on); }
+    }
+    // 追跡ボタン: 追跡中の信号と解析度
+    const tb = document.getElementById('abar-track');
+    if (tb) {
+        const sa = lockedSignalId ? _signalAnalysis[lockedSignalId] : null;
+        const tl = sa ? 'SIG-' + String(_contactLabels[lockedSignalId] || '?').padStart(2, '0') + ' ' + Math.round(((sa.dirAnalysis || 0) + (sa.triParam || 0)) / 2) + '%' : '追跡';
+        if (tb._lbl !== tl) { tb._lbl = tl; const l = document.getElementById('abar-track-label'); if (l) l.textContent = tl; tb.classList.toggle('on', !!sa); }
     }
     const rc = document.getElementById('recenter-chip');
     if (rc) { const show = !cameraFollowPlayer && !mapMode; if (rc._show !== show) { rc._show = show; rc.style.display = show ? '' : 'none'; } }
@@ -8447,6 +7933,35 @@ function updateTacStrip() {
     const lp = document.getElementById('log-panel');
     if (lp) lp.addEventListener('click', () => { lp.classList.toggle('compact'); _uiInsetCache.t = 0; const ml = document.getElementById('message-log'); if (ml) ml.scrollTop = ml.scrollHeight; });
 })();
+// ═══ 第14弾: 横画面専用HUD — タッチ端末は出撃時に全画面+横向きロックを要求。縦持ちの間は進行を止める ═══
+// (Android Chrome は全画面中のみ orientation.lock が効く。iOS Safari は非対応 → 回転を促すオーバーレイで代替)
+function requestLandscape() {
+    const lock = () => {
+        try { const p = screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'); if (p && p.catch) p.catch(() => {}); } catch (e) { /* 非対応 */ }
+    };
+    try {
+        const el = document.documentElement;
+        if (!document.fullscreenElement && el.requestFullscreen) {
+            const p = el.requestFullscreen({ navigationUI: 'hide' });
+            if (p && p.then) p.then(lock).catch(() => {}); else lock();
+        } else lock();
+    } catch (e) { /* 非対応 */ }
+}
+function toggleFullscreen() {
+    if (document.fullscreenElement) { try { document.exitFullscreen(); } catch (e) {} }
+    else requestLandscape();
+}
+const _portraitMQ = window.matchMedia('(orientation: portrait) and (pointer: coarse)');
+function _syncOrientPause() {
+    _orientPaused = _portraitMQ.matches && document.body.classList.contains('in-game');
+}
+if (_portraitMQ.addEventListener) _portraitMQ.addEventListener('change', _syncOrientPause);
+else if (_portraitMQ.addListener) _portraitMQ.addListener(_syncOrientPause);
+(() => {
+    const b = document.getElementById('btn-rotate-fs');
+    if (b) b.addEventListener('click', (e) => { e.stopPropagation(); requestLandscape(); });
+})();
+
 // キーボード (デスクトップ): F=射撃 T=追跡 1-4=帯域 S=静粛 Q=ソナー X=副長の提案を実行
 window.addEventListener('keydown', (e) => {
     if (!player || player.hp <= 0 || e.repeat) return;
@@ -8474,7 +7989,7 @@ let _hitStop = 0; // 奇襲命中時のヒットストップ (ロジックだけ
 function gameLoop() {
     try {
         if (_hitStop > 0) _hitStop--;
-        else if (!gamePaused) stepWorld();
+        else if (!gamePaused && !_orientPaused) stepWorld();
         renderWorld();
     } catch (err) {
         console.error("Game loop error:", err);
@@ -9007,17 +8522,6 @@ function renderWorld() {
             ctx.stroke();
             ctx.setLineDash([]);
             ctx.lineDashOffset = 0;
-            // ラベル: サージ縮退▼/高感度▲/損傷を明示
-            ctx.font = `bold ${Math.round(8 / camera.zoom)}px Orbitron, monospace`;
-            ctx.fillStyle = damaged ? '#ff4444' : col;
-            ctx.globalAlpha = 0.42;
-            ctx.textAlign = 'left';
-            ctx.textBaseline = 'middle';
-            const rlabel = damaged ? 'SENSOR HIT' : (surgePhase === 'active' ? 'RADAR ▼' : (surgePhase === 'after' ? 'RADAR ▲' : 'RADAR'));
-            // 武器ラベル(艦首方向)と重ならないよう、艦尾斜め後方に置く
-            const _rla = player.angle + Math.PI * 0.75;
-            ctx.textAlign = 'center';
-            ctx.fillText(rlabel, player.x + Math.cos(_rla) * (ringR + 14 / camera.zoom), player.y + Math.sin(_rla) * (ringR + 14 / camera.zoom));
             ctx.globalAlpha = 1;
             ctx.restore();
         }
@@ -9027,7 +8531,6 @@ function renderWorld() {
             const wType  = currentWeapon();
             const wRange = weaponRange(wType); // 発射判定と同じ射程 (第13弾: 旧表示1600/4400/16000は実射程と不一致だった)
             const wCol   = wType === 'missile' ? '#ffaa00' : (wType === 'beam' ? '#00aaff' : '#88ff44');
-            const wLabel = wType === 'missile' ? 'MISSILE' : (wType === 'beam' ? 'BEAM' : 'KINETIC');
             const arc    = WEAPON_FIRE_ARC[wType] || Math.PI; // 射角(半角)
             const a0 = player.angle - arc, a1 = player.angle + arc;
             const zc = 1 / camera.zoom;
@@ -9049,13 +8552,6 @@ function renderWorld() {
             ctx.moveTo(player.x, player.y); ctx.lineTo(player.x + Math.cos(a0) * wRange, player.y + Math.sin(a0) * wRange);
             ctx.moveTo(player.x, player.y); ctx.lineTo(player.x + Math.cos(a1) * wRange, player.y + Math.sin(a1) * wRange);
             ctx.stroke();
-            // ラベル (艦首方向の射程端)
-            ctx.globalAlpha = 0.6;
-            ctx.font = `bold ${Math.round(8 * zc)}px Orbitron, monospace`;
-            ctx.fillStyle = wCol;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(wLabel, player.x + Math.cos(player.angle) * (wRange + 20 * zc), player.y + Math.sin(player.angle) * (wRange + 20 * zc));
             ctx.globalAlpha = 1;
             ctx.restore();
         }
@@ -9068,9 +8564,7 @@ function renderWorld() {
         ctx.restore();
 
         drawHUDOverlay(ctx);
-        if (_frameCount % 2 === 0) updateSigCanvas();
         if (_frameCount % 3 === 0) drawMinimap();
-        if (_frameCount % 6 === 0) updateSigInfoBar();
         if (_frameCount % 10 === 0) updateEnvInfo();
         if (_frameCount % 8 === 0) updateTacStrip();
         if (_frameCount % 20 === 0) updateLandmarkBanner();
@@ -9079,7 +8573,7 @@ function renderWorld() {
         if (PERF_SHOW_FPS) {
             ctx.save();
             const _fpsColor = _fpsDisplay >= 50 ? '#00ff88' : (_fpsDisplay >= 30 ? '#ffaa00' : '#ff4444');
-            const _fpsX = 8, _fpsY = 150; // ミニマップ(40-140px)直下・コンソールに隠れない位置
+            const _fpsX = uiInsets().left + 8, _fpsY = uiInsets().top + 8; // フィールド左上 (左列/上帯に隠れない位置)
             ctx.fillStyle = 'rgba(0,0,0,0.55)';
             ctx.fillRect(_fpsX - 2, _fpsY - 2, 58, 18);
             ctx.font = 'bold 11px monospace';
