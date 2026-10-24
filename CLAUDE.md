@@ -103,7 +103,7 @@ prototype/
 | 潜航型 Stealth | 700 | ×1.45 | ジャミング3種✅ + デコイ・哨戒機(積載3枠) | HP極低・失敗即死 |
 | 空母型 Carrier | 2500 | ×0.38 | 積載12枠: 戦闘機・人型・砲台など8種(第16弾) | 加速/旋回最鈍・設置中は停止＝最大脆弱 |
 
-> 巡航速度は `shipCruiseSpeed(cls, enginePct, gain)` = enginePct/100×gain×`SPEED_BASE`(2.4)×`SHIP_MAX_SPEED_MULT`×`MOVE_SPEED_MULT`（自機。敵は交戦時に別式 `ENEMY_COMBAT.speedMult`）。速度倍率は `SHIP_MAX_SPEED_MULT` による最高速倍率（慣性あり・旋回中はさらに低下）。加速レートは `SHIP_ACCEL_RATE`（carrier=0.00075 / assault=0.002 / stealth=0.0065）。攻撃型は全艦種「戦闘機・砲台」を積載4枠で持つ(第16弾)
+> 巡航速度は `shipCruiseSpeed(cls, enginePct, gain)` = enginePct/100×gain×`SPEED_BASE`(2.4)×`SHIP_MAX_SPEED_MULT`×`MOVE_SPEED_MULT`（自機。敵は交戦時に別式 `ENEMY_COMBAT.speedMult`）。速度倍率は `SHIP_MAX_SPEED_MULT` による最高速倍率（慣性あり・旋回中はさらに低下）。加速レートは `SHIP_ACCEL_RATE`（carrier=0.00075 / assault=0.002 / stealth=0.0065）。攻撃型は「戦闘機・砲台」を積載4枠で持つ(第16弾)
 
 ### 武器3種
 
@@ -202,7 +202,7 @@ prototype/
 
 ### タイトル画面・UI（2026-07-04 第4弾 ✅ → `TODO.md` §3-18）
 - **タイトルヒーロー**: Higgsfield生成キーアート `assets/title_keyart.jpg`(640px/33KB) + DARK ECHOロゴ(Orbitron+グロー) + ソナーリングCSSアニメ + タグライン
-- **艦種カード**: 実スプライト表示（`mix-blend-mode: screen` で黒背景PNGをDOM透過）。敵艦種ボタンにもサムネイル
+- **艦種カード**: 実スプライト表示（第16弾で透過PNG化したため合成なし `mix-blend-mode: normal`）。敵艦種ボタンにもサムネイル
 - **被弾方向インジケータ**: 被弾方位を自機周りの赤アークで1.25s表示（`playerHitDirs[]`）
 - **ボタン押下フィードバック**: 全UIボタンに `:active` スケール+輝度CSS
 
@@ -245,8 +245,8 @@ prototype/
 | `camera` | object | {x, y, zoom, vx, vy} |
 | `MAP_RADIUS` / `FIELD_SIZE` | const | 35000 / 70000 |
 | `ENGINE_TYPES` | const | thermonuclear/pulse/higgs/photon |
-| `SHIP_MAX_SPEED_MULT` | const | {assault:0.58, stealth:1.05, carrier:0.38} 最高速倍率 |
-| `SHIP_ACCEL_RATE` | const | {carrier:0.003, assault:0.008, stealth:0.016} 加速レート |
+| `SHIP_MAX_SPEED_MULT` | const | {assault:0.58, stealth:1.45, carrier:0.38} 最高速倍率（第16弾で潜航型1.05→1.45） |
+| `SHIP_ACCEL_RATE` | const | {carrier:0.00075, assault:0.002, stealth:0.0065} 加速レート |
 | `SHIP_TURN_SLOW` | const | {carrier:0.78, assault:0.52, stealth:0.22} 旋回中速度低下率 |
 | `PLAYER_TURN_RATES` | const | {assault:0.010, stealth:0.015, carrier:0.004} 旋回レート(rad/frame) |
 | `WEAPON_FIRE_ARC` | const | {kinetic:π×5/6, missile:π/4, beam:π/18} 射角（半角ラジアン） |
