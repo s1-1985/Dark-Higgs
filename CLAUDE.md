@@ -26,7 +26,7 @@ TODO.md         # 実装タスク台帳（壁打ち企画・実装状況・未�
 HANDOVER.md     # セッションログ・決定経緯・パフォーマンス教訓
 prototype/
 ├── index.html  # UI レイアウト（Homeworld2スタイル、日本語）
-├── game.js     # ゲームロジック全体（約9300行）
+├── game.js     # ゲームロジック全体（約8800行）
 ├── style.css   # SF緑パレット（Orbitronフォント）
 └── assets/     # 生成スプライト（透過PNG）: ship_*/enemy_*/structure_*/node_higgs/fx_beam_main
 ```
@@ -38,11 +38,11 @@ prototype/
 
 ### コアループ「聴く→測る→撃つ→消える」（2026-10-24 第13弾 ✅ → `TODO.md` §3-27）
 > 原案（先に見つけて撃つ / ジ・エンド戦的1対1）に回帰するため、探知→射撃の導線を一本化した。**自機/敵は同じ受信モデル**。
-- **聴く**: 4バンド受信チューナー（`#tac-strip`、`rxLevels()`）。50%ノッチ=方位が取れる閾値。タップ/キー1〜4で同調（同調外バンドの方位解析は×0.3）
+- **聴く**: 4帯域ミキサー（左列 `#band-tuner`、`rxLevels()`）。太バー=受信・刻み(50%)=方位が取れる閾値 / 細バー=自艦の放射（同じ0.5基準）。タップ/キー1〜4で同調（同調外バンドの方位解析は×0.3）
 - **測る**: `trackNextSignal()`（TRACK/キーT/ブリップタップ）で信号をロック → 方位線に**直交して動くほど**視差(`triParam`)が貯まり推定円が縮む（`R=300+34700*(1-q)^2`）→ `applyTrackContact()` で**推定位置を敵コンタクトに反映**
 - **撃つ**: `issueFireOrder()`（FIRE/キーF）= 完全ロック or 想定ロック(推定位置)へ現在武器で発射（`dmgScale=0.3+0.5*acc`、命中見込み`assumedHitChance()`）。**自動攻撃は完全ロック時のみ**。ミサイルは終末シーカー付き（敵ミサイルも対称）
 - **消える**: 発砲は位置を晒す（自機発砲フラッシュ／敵は被弾で射手方位を得てhuntingへ・逆も対称）。静粛(abar常設/キーS)・ヒッグス雲・直交回避で振り切る。奇襲×3.5は1回だけ（被弾した敵は45秒警戒）
-- **副長(XO)バー**: `xoEvaluate()` が優先度順に1件の状況判断+ワンタップ行動（キーX）を提示
+- **副長(XO)バー**: 上帯中央。`xoEvaluate()` が優先度順に1件の状況判断+ワンタップ行動（キーX）を提示
 - **司令部情報**: 開始時、自機はボス方面の粗い方位（`intelBearing`、最大4分）、敵は「マップ中央付近」の粗い情報（`boss.intelPos`）。正確な位置は誰も知らない
 - **メタフロー**: 初回ブリーフィング（作戦要領4ステップ、`darkEchoBriefed`）→ 制圧後に戦闘詳報(`openDebrief`) →「次のセクターへ」or「ドックで改修」
 
@@ -138,14 +138,14 @@ prototype/
 - **気配リング**(中・第9弾でMGS4式に是正): 敵がプレイヤーを視認している強さ(`contactFreshness`×aiState)を敵方位に波で表現。背後から強く見られれば背後が大きく波打つ。沈黙で見られてなければ静か(対称)。**+受信シグネチャのブリップ、トラッキング中はLCKで識別**
 - **レーダーリング**(外): 地形色反映(ヒッグス青→赤/デブリ灰/嵐紫/熱雲橙)+サージ伸縮+損傷明滅
 - **武器射角アーク**: 全周円廃止→実射角の輪郭(kinetic±150/missile±45/beam±10)
-- **コンパス**(上部): 艦首方位360°テープ。**露出度チップは小型ピル化**
+- ~~コンパス(上部)~~: 第14弾で撤去（マップは常に北が上・方位は副長/ログの数値で示す）。露出度は上帯のDOMチップへ移設
 
 ### 探知・三角測量（2026-07-05 第9弾 ✅ → `TODO.md` §3-23）
 > ⚠️ 第13弾で三角測量は**視差測量**（方位線と自機進路の角度`|sin α|`×移動距離で蓄積）に置換し、推定位置を敵コンタクトへ反映する方式に変更（§3-27）。下記の蓄積レート記述は旧方式。
 - **ソナー2倍** `OMNI_SONAR_RANGE`。**三角測量ハードル低下**: 蓄積~1.3%/sec(60fps)・約1分で概位置サークル・`_sourcePos()`で真値から自動ジッタ配置・閾値dir>6
 - **移動方向ガイド**: ロック中、方位線に垂直な最良進路を破線矢印で提示
 - **ランドマーク特定**(第12弾でavg>18%に早期化): ノード/コロニー/難破船を永続記録(ヒッグス手前+ミニマップ)
-- **RX SIGメーター**(第11弾): 折りたたみ時のみ左辺に4ch受信レベルバーを表示(env-sig-canvasの代替・平滑化)
+- ~~RX SIGメーター~~(第11弾): 第13弾で撤去 → 第14弾の左列4帯域ミキサーに統合
 
 ### 追跡ルーティン明確化（2026-07-11 第12弾 ✅ → `TODO.md` §3-26）
 - **移動速度1.5倍**: `MOVE_SPEED_MULT=1.5`（自機/敵対称。ドローン・弾体は据え置き）
@@ -168,11 +168,16 @@ prototype/
 - **撃破シーケンス**: 敵撃破→3秒の崩壊演出（漂流・誘爆→最終爆発+衝撃波+スクラップ散乱）。勝利判定は最終爆発後
 - **戦闘詳報**: `huntStats` をクリア時ログ+ゲームオーバー画面に表示
 
-### 画面レイアウト（2026-07-04 第6弾 ✅ → `TODO.md` §3-20）
-- **コンソール折りたたみ**: `body.console-min`（デフォルトON・localStorage）。折りたたみ時はステータスバー+アクションバーのみ=フィールド約75%
-- **横向き対応**: コンソール右サイド320px / 折りたたみ64px縦レール。ステータスバーは上部細帯
-- **カメラ補正**: `uiInsets()` で実フィールド中心に自機・HUDチップを配置（`topHud`=ログパネル下端）
-- **第13弾**: アクションバー=`WEP`(5モード循環)/`SCAN`/`静粛`/`EW`(潜航)or`DRONE`(空母)/`NAV`/`FIRE`。追従カメラ既定ON（パンで解除・`#recenter-chip`で復帰）。DEMO/FPSはメニュー内。横向きは`#bottom-console{backdrop-filter:none}`（fixed子要素の包含ブロック化でステータスバーが潰れる対策）。デスクトップはステータスバー+展開トグル常時表示
+### 画面レイアウト = 横画面専用HUD（2026-10-24 第14弾 ✅ → `TODO.md` §3-28。第6弾の下部コンソール/折りたたみは廃止）
+- **上帯** `#hud-top`: メニュー / セクター / HULLバー / 被探知チップ`#hud-expo`(隠密〜捕捉+「・静粛」「・擬態」) / 副長バー(2行まで) / `GEN`ボタン(配分要約)
+- **左列** `#hud-left`: ミニマップ + 4帯域ミキサー（左手=聴く）
+- **右列** `#hud-right`（下ほど重要=右手親指）: 航法 / 電子戦 or DRONE(空母) / 索敵 / 静粛 / 兵装(5モード循環+残弾バッジ) / 追跡(SIG-xx 解析%) / 射撃(命中予測)。親ボタンは右列の左にポップオーバー（実ボタンは非表示の`#action-store`に置き、開く時だけ移す）
+- **GENドロワー** `#gen-drawer`: 上帯の`GEN`で左から開く。エンジン種別+艦体/AIスライダー
+- **ログ**: フィールド左下の1行ティッカー（タップで展開）。パッシブ方位の2秒毎ログは廃止→**新規信号のみ**告知（`_passiveLastSeen`）
+- **縦持ち**（タッチ端末）: `#rotate-overlay`で横向きを促し**進行を一時停止**（`_orientPaused`）。出撃タップ時に`requestLandscape()`=全画面+`screen.orientation.lock('landscape')`（Android Chromeのみ有効、iOSはオーバーレイで代替）。メニューに「全画面 切替」
+- **カメラ補正**: `uiInsets()` = {left,right,top}（上帯・左右列の実測）。`centerCameraOnPlayer()` はフィールド中心に自機を置く。追従は既定ON（パンで解除・`#recenter-chip`で復帰）
+- **ロビー**: 横画面（高さ≤600px）は左=キーアート+ロゴ / 右=出撃準備の2カラム。ブリーフィングは4ステップを2×2
+- 撤去（重複）: 自SIG/環境SIGオシロ・解析ステータスバー・状態行(H/岩/嵐/熱/敵/弾/ノード)・センサー/エンジンGCB・キャンバス上の露出ピル/コンパステープ/RADAR・KINETICラベル/DIR・TRI文字/「測量に有効な進路」文字/静粛中の文字列
 - ⚠️ 初期化IIFEから後方宣言letを参照するとtypeofガードでもTDZで全滅 → 状態変数は最上部宣言
 
 ### 霧の中の物語（2026-07-04 第5弾 ✅ → `TODO.md` §3-19）
@@ -210,6 +215,7 @@ prototype/
 | `lockedSignalId` | string | 追跡(TRACK)中のシグネチャsourceId（敵は`'e-'+uid`） |
 | `intelBearing` | object | 司令部情報の粗い方位 {ox,oy,angle,halfWidth,range,life} |
 | `demoMode` | bool | デモモード（霧解除・全敵可視・敵AI通常動作） |
+| `_orientPaused` | bool | 縦持ち（タッチ端末）中は `stepWorld` を止める |
 | `higgsWakes[]` | array | {x, y, intensity, life} 移動軌跡 |
 | `passiveBearings[]` | array | パッシブ方位ウェッジ（計測位置アンカー、三角測量用） |
 | `resourceNodes[]` | array | ヒッグスノード |
@@ -235,20 +241,22 @@ prototype/
 | `trackNextSignal()` | 未識別信号を順に追跡ロック（TRACK） |
 | `issueFireOrder()` / `playerFireWeapon()` | 射撃命令（完全/想定ロック）/ 発射本体 |
 | `assumedHitChance(te,w,lk)` | 想定ロック時の命中見込み |
-| `xoEvaluate()` / `updateTacStrip()` | 副長の状況判断 / 副長バー+バンドチューナー更新 |
+| `xoEvaluate()` / `updateTacStrip()` | 副長の状況判断 / 副長バー・帯域ミキサー・射撃/追跡ボタン更新 |
 | `rxLevels()` / `passiveRange()` | 4バンド受信レベル / パッシブ受信レンジ |
 | `openDebrief()` / `showBriefing()` | 戦闘詳報 / 作戦要領 |
+| `uiInsets()` / `centerCameraOnPlayer()` | HUDの上帯・左右列の実測 / フィールド中心へカメラ |
+| `updateEnvInfo()` / `_updateExpoChip()` | 上帯HP・兵装残弾・GEN要約 / 被探知チップ |
+| `requestLandscape()` / `toggleFullscreen()` | 全画面+横向きロック要求 / 全画面切替 |
 | `worldToScreen(x,y)` | ワールド→スクリーン座標変換 |
 | `drawHUDOverlay(ctx)` | スクリーン空間HUD描画 |
-| `updateSigCanvas()` | オシロスコープ波形更新 |
-| `computeVisionRadius()` @746 | 有視界半径（ヒッグス濃度連動） |
-| `updateVisionLockOn()` @871 | 有視界ロックオン |
-| `checkPassiveDetection()` @5112 | パッシブ探知（2秒毎、方位ウェッジ生成） |
-| `fireOmniSonar()` @5790 | アクティブ/指向性ソナー（CD15秒） |
+| `computeVisionRadius()` @748 | 有視界半径（ヒッグス濃度連動） |
+| `updateVisionLockOn()` @873 | 有視界ロックオン |
+| `checkPassiveDetection()` @5080 | パッシブ探知（2秒毎、方位ウェッジ生成） |
+| `fireOmniSonar()` @5750 | アクティブ/指向性ソナー（CD15秒） |
 | `drawPassiveBearings()` | パッシブ方位ウェッジ描画（`passiveBearings[]`） |
 | `getHiggsIntensity(x,y)` | ヒッグス濃度（フレームキャッシュ付） |
-| `buyUpgrade(type)` @9153 | アップグレード購入（engine/weapons/armor/sensor Lv0-3） |
-| `generateSector()` @4260 | セクター生成 |
+| `buyUpgrade(type)` @8647 | アップグレード購入（engine/weapons/armor/sensor Lv0-3） |
+| `generateSector()` @4224 | セクター生成 |
 | `saveGame()` / `loadGame()` | localStorage 永続化 |
 | `toggleDemoMode()` | デモモードON/OFF切替（メニュー内`btn-demo-mode`から呼出） |
 
