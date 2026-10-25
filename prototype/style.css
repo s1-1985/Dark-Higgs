@@ -2193,6 +2193,14 @@ body.in-game #recenter-chip {
     color: #bfffe9; font-family: 'Orbitron', monospace;
 }
 .drone-btn.cg-empty { opacity: 0.45; }
+/* 第17弾: 離脱グループ — 噴射の再使用秒・機関停止中の点灯 */
+#btn-boost { position: relative; }
+#btn-boost .cg-n {
+    position: absolute; top: 2px; right: 3px; font-style: normal; font-size: 9px; font-weight: 700;
+    color: #ffcc66; font-family: 'Orbitron', monospace;
+}
+#btn-boost.cg-empty { opacity: 0.45; }
+#btn-coast.on { border-color: #66ccff !important; color: #cfefff !important; background: rgba(40,120,180,0.32) !important; }
 .hud-act .abar-cargo {
     position: absolute; top: 2px; right: 3px; font-style: normal; font-size: 8px; color: #9fffe0;
     font-family: 'Orbitron', monospace; pointer-events: none;

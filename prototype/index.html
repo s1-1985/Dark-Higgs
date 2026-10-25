@@ -11,7 +11,7 @@
     <title>Dark Echo: Tactical Space RTS</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23000' stroke='%2300ff88' stroke-width='2'/><circle cx='16' cy='16' r='6' fill='none' stroke='%2300ff88' stroke-width='1.5'/><line x1='16' y1='2' x2='16' y2='30' stroke='%2300ff88' stroke-width='1' opacity='0.4'/><line x1='2' y1='16' x2='30' y2='16' stroke='%2300ff88' stroke-width='1' opacity='0.4'/></svg>" type="image/svg+xml">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261024d">
+    <link rel="stylesheet" href="style.css?v=20261025a">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -99,6 +99,10 @@
                         <line x1="6" y1="4" x2="18" y2="9" stroke-opacity=".8"/>
                     </svg>
                     <span id="abar-silent-label">巡航</span>
+                </button>
+                <button class="hud-act" data-group="escape" id="abar-grp-escape" title="離脱 — 閃光弾 / ノイズメーカー / 煙幕弾 / 緊急噴射(B) / 機関停止(C)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3,17 q5,-1 8,-6 t10,-6" stroke-dasharray="2 2"/><polyline points="16,4 21,5 19.5,10"/><circle cx="6" cy="17" r="2.2" fill="currentColor" fill-opacity=".3"/></svg>
+                    <span>離脱</span>
                 </button>
                 <button class="hud-act" id="abar-wep-cycle" title="兵装切替 KIN→MSL→MSL·AI→BEM→BEM·CHG">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -251,6 +255,27 @@
                 <button class="act-icon-btn btn-info drone-btn" id="btn-drone-higgs" data-dtype="higgs" title="ヒッグス散布 (2枠) — 設置。周囲のヒッグスを濃くして身を隠す" style="display:none">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><ellipse cx="12" cy="13" rx="8" ry="4" stroke-opacity=".4"/><ellipse cx="12" cy="10" rx="5" ry="2.5" stroke-opacity=".65"/><ellipse cx="12" cy="7.5" rx="2.5" ry="1.5" fill="currentColor" fill-opacity=".2"/></svg>
                     <span>散布</span><em class="cg-n"></em>
+                </button>
+                <!-- 第17弾: 緊急離脱 (消耗品は積載の枠を使う / 噴射・機関停止は艦の機能) -->
+                <button class="act-icon-btn btn-info drone-btn" id="btn-item-flash" data-dtype="flash" title="閃光弾 (1枠) — 自艦の位置で炸裂。半径1500uの敵の目を5秒焼き、ミサイルの誘導を切る。その瞬間の位置は知られる" style="display:none">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="3.5" fill="currentColor" fill-opacity=".35"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="5" y1="5" x2="7.5" y2="7.5"/><line x1="16.5" y1="16.5" x2="19" y2="19"/><line x1="5" y1="19" x2="7.5" y2="16.5"/><line x1="16.5" y1="7.5" x2="19" y2="5"/></svg>
+                    <span>閃光弾</span><em class="cg-n"></em>
+                </button>
+                <button class="act-icon-btn btn-info drone-btn" id="btn-item-noise" data-dtype="noise" title="ノイズメーカー (1枠) — 艦首方向へ自艦の全速と同じ音と航跡を12秒出す囮。敵は強い方の音を追う" style="display:none">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12,8 l4,4 l-4,4 l-4,-4 z" fill="currentColor" fill-opacity=".25"/><path d="M18,7 q3,5 0,10" stroke-opacity=".7"/><path d="M6,7 q-3,5 0,10" stroke-opacity=".7"/><path d="M20.5,4.5 q5,7.5 0,15" stroke-opacity=".35"/></svg>
+                    <span>ノイズ</span><em class="cg-n"></em>
+                </button>
+                <button class="act-icon-btn btn-info drone-btn" id="btn-item-smoke" data-dtype="smoke" title="煙幕弾 (1枠) — 自艦の位置に半径900uのヒッグス雲を20秒。中では敵の探信が埋もれる (自分の有視界も縮む)" style="display:none">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="9" cy="13" r="4.5" fill="currentColor" fill-opacity=".2"/><circle cx="15" cy="11" r="5" fill="currentColor" fill-opacity=".15"/><circle cx="12" cy="16" r="4" stroke-opacity=".6"/></svg>
+                    <span>煙幕</span><em class="cg-n"></em>
+                </button>
+                <button class="act-icon-btn btn-info common-btn" id="btn-boost" onclick="useBoost()" title="緊急噴射 (B) — 4秒間 速度×2。熱が最大になり、終わると機関が8秒過熱。再使用45秒" style="display:none">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4,8 12,12 4,16"/><polyline points="11,8 19,12 11,16"/><line x1="2" y1="12" x2="6" y2="12" stroke-opacity=".5"/></svg>
+                    <span>噴射</span><em class="cg-n"></em>
+                </button>
+                <button class="act-icon-btn btn-info common-btn" id="btn-coast" onclick="toggleCoast()" title="機関停止 (C) — 惰性で漂う。推力の熱と音が消える。進路は変えられない (艦首は回して撃てる)。もう一度・移動命令・出力切替で再点火" style="display:none">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4,12 h12" stroke-dasharray="2 2.5"/><polyline points="13,8 17,12 13,16"/><circle cx="20" cy="12" r="1.5" fill="currentColor"/></svg>
+                    <span>機関停止</span>
                 </button>
                 <!-- §3-10 ミサイルモード切替 (全艦種) -->
                 <button class="act-icon-btn common-btn" id="btn-missile-mode" title="ミサイルモード: HON=熱源誘導(デコイ妨害可) / AI=AI追跡(ジャミング耐性・大閃光)" style="display:none;border-color:#ffaa33;color:#ffcc66;">
@@ -604,7 +629,7 @@
                         <li><b class="bs-1">聴く</b>左の受信機: 太いバー=受信、刻みを超えた帯域に<em>同調</em>すると方位が取れる。細いバー=<em>自艦の放射</em>、斜線=<em>自艦の雑音</em>(速く動くほど耳が塞がる)。</li>
                         <li><b class="bs-2">測る</b>右の<em>追跡</em>で方位を記録。<em>場所を変えて</em>聴くと方位線が交わり推定円が出る。交わらない=相手が動いている。止まって聴くと方位が鋭くなる。</li>
                         <li><b class="bs-3">撃つ</b>推定円が小さいほど当たる (右下の<em>射撃</em>に見込み%)。外れれば「そこには居ない」と分かるが、<em>撃った位置を教える</em>。ソナーは正確だが遠くまで聞かれる。</li>
-                        <li><b class="bs-4">消える</b>出力を<em>潜航</em>へ。ヒッグスの霧は音を隠すが、動けば<em>航跡が90秒残り</em>、敵はそれを辿ってくる (HIGGS帯で相手の航跡も見える)。</li>
+                        <li><b class="bs-4">消える</b>出力を<em>潜航</em>へ。ヒッグスの霧は音を隠すが、動けば<em>航跡が90秒残り</em>、敵はそれを辿ってくる (HIGGS帯で相手の航跡も見える)。見つかったら右列の<em>離脱</em>: 閃光で目を潰す→噴射で距離を取る→<em>機関停止</em>で音を消して漂う。</li>
                     </ol>
                     <div class="brief-tip">自艦の周りのリング: 0°=上・時計回り。ログや副長が言った方位はリング上で光る。青緑の縁(有視界)の内側に入った敵ははっきり見える — 縁の大きさは自艦の居る場所のヒッグス濃度で変わる。<br>ノードの近くに5秒留まると制圧 (資材+聴音局)、コロニーは8秒でハック (修理・資材・敵の方位線)。右列の「搭載」で戦闘機・砲台・人型など — 完成品はすぐ出せ、資材は組み立てに時間とEMがかかる。<br>副長は状況を読み上げるだけ — 決めるのはあなた。移動はフィールドを長押し →「移動」。ドラッグで見回し、ピンチか右下の＋−で拡大縮小。</div>
                     <button class="btn btn-primary" id="btn-brief-ok">了解 — 出撃</button>
@@ -706,7 +731,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261024d"></script>
+    <script src="game.js?v=20261025a"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -747,6 +772,7 @@
             nav:   ['btn-cancel', 'btn-camera-follow', 'btn-attack-toggle', 'btn-repair-drone', 'btn-game-speed'],
             drone: ['btn-drone-attack','btn-drone-mech','btn-drone-build','btn-drone-scout','btn-drone-decoy',
                     'btn-drone-buoy','btn-drone-barrier','btn-drone-higgs', 'btn-hack'],
+            escape: ['btn-item-flash', 'btn-item-noise', 'btn-item-smoke', 'btn-boost', 'btn-coast'],
         };
         var _apop  = document.getElementById('action-popover');
         var _store = document.getElementById('action-store');
