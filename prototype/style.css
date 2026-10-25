@@ -2157,6 +2157,7 @@ body.in-game #hud-top, body.in-game #hud-left, body.in-game #hud-right { display
 .hud-act.abar-active { border-color: #00ffaa; background: rgba(0,255,170,0.14); color: #c8fff0; }
 .hud-act.on { border-color: #66ccff; background: rgba(40,120,180,0.28); color: #cfefff; }
 #abar-track.on { border-color: #00ffd0; background: rgba(0,255,208,0.14); color: #c8fff4; }
+#abar-track-label { white-space: pre-line; text-align: center; font-size: 9px; } /* 第18弾: SIG番号と幅を2行で */
 .hud-fire { flex-grow: 1.5; max-height: 92px; border-color: #5a1a1a; color: #aa5555; }
 .hud-fire span { font-size: 11px; font-weight: 700; }
 .hud-fire.on { border-color: #ff4d4d; color: #ffe0e0; background: rgba(255,60,60,0.2); }

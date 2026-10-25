@@ -654,6 +654,13 @@ let _flashScreen = 0; // 閃光弾の画面フラッシュ (frame)
 const ENEMY_HIDE_SEARCH = 5000, ENEMY_HIDE_TIME = 2700, ENEMY_HIDE_HEAL = 0.005 / 60, ENEMY_HIDE_SIG = 0.55;
 // 副長の離脱助言: 捕捉中・耐久50%未満で、近くの濃い霧(0.5以上)/岩礁帯を探す半径
 const XO_ESCAPE_HP = 0.5, XO_ESCAPE_SEARCH = 4000;
+// 第18弾: 地図の縮尺 — コロニー等の画面上の最小サイズ / ノードの画面上の最小サイズ / これより引いたらラベルを短く
+const STRUCT_MIN_PX = 20, NODE_MIN_PX = 14, LABEL_FAR_ZOOM = 0.06;
+// ═══ 第18弾: 混信 (オーナー合意 2026-10-25) ═══
+// 周り1200u以内にある他の発信源の数n (ドローン・デコイ・ノイズメーカー・艦載機)。嵐・熱雲・岩礁の濃い所(0.3超)に居ればn+1。
+// 相手の推定誤差×(1+0.5n)(最大×3)・至近で掴まれる距離×1/(1+0.25n)。自艦/敵とも同じ物理 (混戦に紛れれば見分けにくい)
+const CLUTTER_R = 1200, CLUTTER_ERR = 0.5, CLUTTER_MAX = 3, CLUTTER_HARD = 0.25, CLUTTER_TERRAIN = 0.3;
+let _clutterCache = { f: -1, n: 0 };
 // 第16弾: ノード制圧 / コロニーハック (オーナー合意 2026-10-24)
 const NODE_CAP_R = 450, NODE_CAP_TIME = 300, NODE_RELAY_RANGE = 6000, NODE_MAT_GAIN = 4, NODE_SCR = 150;
 const COLONY_HACK_R = 600, COLONY_HACK_TIME = 480;
@@ -1084,6 +1091,24 @@ function findHidingSpot(nearX, nearY, searchRadius) {
         if (score > bestScore) { bestScore = score; best = raw; }
     }
     return best;
+}
+// 第18弾: 混信 — (x, y) の周りの発信源の数 (self は数えない)
+function clutterCount(x, y, self) {
+    const R2 = CLUTTER_R * CLUTTER_R;
+    const near = (o) => o !== self && (o.x - x) * (o.x - x) + (o.y - y) * (o.y - y) < R2;
+    let n = 0;
+    for (const d of playerDrones) if (d.hp > 0 && near(d)) n++;
+    for (const d of decoys) if (near(d)) n++;
+    for (const m of noiseMakers) if (near(m)) n++;
+    for (const e of enemies) if (e.type === 'fighter' && e.hp > 0 && !e._dying && near(e)) n++;
+    if (getStormIntensity(x, y) > CLUTTER_TERRAIN || getThermalIntensity(x, y) > CLUTTER_TERRAIN || getDebrisIntensity(x, y) > CLUTTER_TERRAIN) n++;
+    return n;
+}
+function clutterErrMult(n) { return Math.min(CLUTTER_MAX, 1 + CLUTTER_ERR * n); }
+// 自艦の周りの混信 (敵の探知で毎フレーム参照するので1フレーム1回だけ数える)
+function playerClutter() {
+    if (_clutterCache.f !== _frameCount) _clutterCache = { f: _frameCount, n: player ? clutterCount(player.x, player.y, player) : 0 };
+    return _clutterCache.n;
 }
 // 第17弾: 隠れ場所 — 半径R内で最も近い「濃い霧(敵の探信が埋もれる濃さ)」か「岩礁帯(擬態できる濃さ)」。無ければ null。
 // 自機の副長の離脱助言と、敵の潜伏で共用 (霧と岩礁は海図の既知物なので、どちらも知っていてよい)
@@ -1624,7 +1649,7 @@ class Structure {
                 ctx.beginPath(); ctx.arc(0, 0, this.radius * 1.6, 0, Math.PI * 2); ctx.fill();
                 ctx.globalAlpha = 1;
             }
-            drawSpriteCentered(ctx, _ssp, Math.max(this.radius * 2.6, 34 / camera.zoom)); // 第16弾: 引いても見失わない大きさ
+            drawSpriteCentered(ctx, _ssp, Math.max(this.radius * 2.6, STRUCT_MIN_PX / camera.zoom)); // 引いても見失わない最小の大きさ (第18弾: 34px→20px)
             ctx.restore();
         } else if (this.type === 'colony') {
             ctx.save();
@@ -1698,14 +1723,14 @@ class Structure {
         ctx.save();
         ctx.translate(this.x, this.y);
         const _lColor = this.type === 'colony' ? (this.hacked ? '#00ffcc' : '#6699ff') : (this.hacked ? '#00ffcc' : '#bb9966');
-        const _lText  = this.type === 'colony' ? (this.hacked ? 'コロニー (ハック済)' : 'コロニー — 近くに留まってハック') : (this.hacked ? '難破船 (ハック済)' : '難破船');
-        const _lFontPx = Math.max(9, Math.min(14, camera.zoom * 14)) / camera.zoom;
+        // 第18弾: 引いた時は短い名前だけ・アイコンのすぐ上に (旧: 長い説明文を画面上60px上に大きく出していた)
+        const _far = camera.zoom < LABEL_FAR_ZOOM;
+        const _lText  = this.type === 'colony' ? (this.hacked ? (_far ? 'コロニー済' : 'コロニー (ハック済)') : (_far ? 'コロニー' : 'コロニー — 近くに留まってハック')) : (this.hacked ? '難破船 (済)' : '難破船');
+        const _iconPx = Math.max(this.radius * 2.6 * camera.zoom, STRUCT_MIN_PX);
         ctx.fillStyle = _lColor;
-        ctx.font = `bold ${_lFontPx.toFixed(1)}px Orbitron, monospace`;
+        ctx.font = 'bold ' + Math.round(_far ? 9 : 11) / camera.zoom + 'px Orbitron, monospace';
         ctx.textAlign = 'center';
-        ctx.shadowColor = _lColor; ctx.shadowBlur = 2;
-        ctx.fillText(_lText, 0, -60 / camera.zoom);
-        ctx.shadowBlur = 0;
+        ctx.fillText(_lText, 0, -(_iconPx / 2 + 8) / camera.zoom);
         ctx.restore();
 
         // 偽装ビーコン エフェクト
@@ -1779,13 +1804,11 @@ class Station {
 
         // Label (adaptive font size so it remains readable at all zoom levels)
         ctx.save();
-        const _stnFontPx = Math.max(9, Math.min(16, camera.zoom * 16)) / camera.zoom;
-        ctx.font = `bold ${_stnFontPx.toFixed(1)}px Orbitron, monospace`;
+        const _stnFar = camera.zoom < LABEL_FAR_ZOOM;
+        ctx.font = 'bold ' + Math.round(_stnFar ? 9 : 11) / camera.zoom + 'px Orbitron, monospace';
         ctx.fillStyle = '#4da6ff';
         ctx.textAlign = 'center';
-        ctx.shadowBlur = 3; ctx.shadowColor = '#4da6ff';
-        ctx.fillText("中立補給ステーション", this.x, this.y - 130);
-        ctx.shadowBlur = 0;
+        ctx.fillText(_stnFar ? '補給所' : '中立補給ステーション', this.x, this.y - Math.max(130, 14 / camera.zoom));
         ctx.restore();
     }
 }
@@ -2243,7 +2266,9 @@ function playerLockInfo(te) {
     const full = !!te.inVision || (!!te._wasLocked && dist < persist);
     const assumed = !full && te.contactLife > 0;
     const acc = full ? 1 : Math.max(0, Math.min(1, te.contactAccuracy || 0));
-    return { full, assumed, acc, dist };
+    // 第18弾: 想定ロックの距離は推定位置までの距離 (旧: 真の距離で射程外を判定していた = 見えない相手の距離が漏れていた)
+    const dEst = !full && te.displayX != null ? Math.hypot(te.displayX - player.x, te.displayY - player.y) : dist;
+    return { full, assumed, acc, dist: dEst };
 }
 
 // 命中見込み (表示用): プレイヤーが持っている情報 = 推定円の幅だけから見積もる。
@@ -2253,7 +2278,8 @@ function assumedHitChance(te, w, lk) {
     if (lk.full) return 0.95;
     if (!lk.assumed) return 0;
     if (lk.dist > weaponRange(w)) return 0;
-    const sd = Math.max(80, (te.trackR || 3000) / 2); // 推定円R ≈ 2σ
+    // 第18弾: 弾が届く時刻の見越し点での幅 (着弾までに相手が動ける分を含む)
+    const sd = Math.max(80, assumedAimPoint(te, w).r / 2); // 推定円R ≈ 2σ
     const reach = w === 'missile' ? 900 : w === 'beam' ? BEAM_HIT_WIDTH + 60 : 260; // 当たり得る幅 (シーカー/ビーム幅/散布)
     return Math.max(0, Math.min(0.95, 1 - Math.exp(-(reach * reach) / (2 * sd * sd))));
 }
@@ -2286,9 +2312,10 @@ function leaveBeamChannel(x0, y0, x1, y1) {
 // 1射ぶんの発砲処理 (自動攻撃・射撃命令の共通口)。撃てたら true。
 function playerFireWeapon(s, target, wType, lk) {
     const dmgScale = 1;
-    // 想定ロックは「推定位置」を狙う (真の位置ではない)
-    const aimX = lk.full ? target.x : target.displayX;
-    const aimY = lk.full ? target.y : target.displayY;
+    // 想定ロックは「推定位置」を狙う (真の位置ではない)。第18弾: 運動解があれば弾が届く時刻の見越し点
+    const _ap = lk.full ? null : assumedAimPoint(target, wType);
+    const aimX = lk.full ? target.x : _ap.x;
+    const aimY = lk.full ? target.y : _ap.y;
     const genF = Math.max(0.3, 1.5 - (genAlloc.weapons / 100));
     const reloadMult = WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0;
     const pct = Math.round(assumedHitChance(target, wType, lk) * 100);
@@ -2740,7 +2767,7 @@ class Ship {
                 // ── 射撃命令: 推定位置へ艦首を向け、射角に入った瞬間に1射。その後は元の航路に戻る ──
                 const o = this._fireOrder;
                 const oLk = playerLockInfo(o.target);
-                const aim = oLk.full ? { x: o.target.x, y: o.target.y } : { x: o.target.displayX, y: o.target.displayY };
+                const aim = oLk.full ? { x: o.target.x, y: o.target.y } : assumedAimPoint(o.target, o.wType);
                 const ang = Math.atan2(aim.y - this.y, aim.x - this.x);
                 const moveSpd = this.state === 'moving' ? _baseTargetSpeed * 0.55 : 0;
                 const d = _steer(ang, moveSpd);
@@ -2875,7 +2902,8 @@ class Ship {
                     if (jamCont && distToPlayer < JAM_CONT_RADIUS) jamDegrade = Math.max(jamDegrade, JAM_CONT_DEGRADE);
                 }
             }
-            let myDetectRange = ENEMY_DETECT_BASE * (1 - higgsHereDetect * 0.55) * (1 + gameState.sector * 0.05) * playerEmBoost * (1 - jamDegrade) * (this.upgDetect || 1);
+            const _clN = playerClutter(); // 第18弾: 混信 — 周りに発信源が多いほど自艦を見分けにくい
+            let myDetectRange = ENEMY_DETECT_BASE * (1 - higgsHereDetect * 0.55) * (1 + gameState.sector * 0.05) * playerEmBoost * (1 - jamDegrade) * (this.upgDetect || 1) / (1 + CLUTTER_HARD * _clN);
             let sigRange = ENEMY_PASSIVE_RANGE * (1 - higgsHereDetect * 0.3) * (1 + gameState.sector * 0.03) * (1 - jamDegrade) * (this.upgDetect || 1);
             // ヒッグスサージ: 敵の探知も対称に縮退/ブースト (プレイヤーと同じ物理法則)
             if (surgePhase === 'active') { myDetectRange *= SURGE_DETECT_MULT; sigRange *= SURGE_DETECT_MULT; }
@@ -2948,7 +2976,7 @@ class Ship {
                 // 聞こえた音の主 (自艦 or ノイズメーカー)。敵には区別がつかない
                 const _sx = _noiseSrc ? _noiseSrc.x : player.x, _sy = _noiseSrc ? _noiseSrc.y : player.y;
                 const _srcDist = _noiseSrc ? Math.hypot(_sx - this.x, _sy - this.y) : distToPlayer;
-                const _err = _relayErr >= 0 ? _relayErr : (1 - _q) * _srcDist * 0.25 + 50;
+                const _err = (_relayErr >= 0 ? _relayErr : (1 - _q) * _srcDist * 0.25 + 50) * (_noiseSrc ? 1 : clutterErrMult(_clN));
                 const _ea = Math.random() * Math.PI * 2, _er = Math.sqrt(Math.random()) * _err;
                 let _lkx = _sx + Math.cos(_ea) * _er, _lky = _sy + Math.sin(_ea) * _er;
                 // §3-12残: ジャミングで相手の方位を広げる — JAM中は探知位置にノイズを加算
@@ -5361,6 +5389,7 @@ function recordMiss(sid, m) {
     (sa.misses || (sa.misses = [])).push(m);
     while (sa.misses.length > 4 || (sa.misses.length && _frameCount - sa.misses[0].f > TMA_KEEP)) sa.misses.shift();
     solveFix(sa);
+    sa.motion = null; sa.alt = null; // 外れた = 針路の見立ても怪しい。次の方位で解き直すまで止まった仮定に戻す
     if (sa.fix) sa.fix.r = Math.max(sa.fix.r, 1200);
     const e = enemyBySid(sid);
     if (e && !e.inVision) { if (sa.fix) { e.displayX = sa.fix.x; e.displayY = sa.fix.y; e.trackR = sa.fix.r; e.contactAccuracy = Math.max(0.05, 1 - sa.fix.r / 5000); } else e.contactLife = 0; }
@@ -5378,6 +5407,7 @@ function solveFix(sa) {
     sa.fix = f;
     sa.fix0 = f ? { x: f.x, y: f.y, r: f.r, f: now } : null;
     sa.dirty = false;
+    _solveMotion(sa); // 第18弾: 動いていると考えた方が記録とよく合うなら、針路と速さも解く
 }
 function _solveFix(sa, obs, ping, tau, warm) {
     const now = _frameCount;
@@ -5439,6 +5469,176 @@ function _solveFix(sa, obs, ping, tau, warm) {
     if (R > 14000) return null;
     const cl = clampToMapCircle(bx, by, 300);
     return { x: cl.x, y: cl.y, r: R, n: obs.length, f: now, chi2 };
+}
+
+// ═══ 第18弾: 速度つきの運動解析 (オーナー合意 2026-10-25) ═══
+// 方位の記録だけから「位置+針路+速さ」(等速直線) を解く。真値は一切参照しない。
+// 記録が15秒・6本以上あり、動いていると考えた方が記録とよく合う (静止解の残差の6割未満) 時だけ採用する。
+// 速さの見込み(事前分布)は標準60u/s。自艦が動かずに聴いた記録では速さは決まらない (見込みに引っ張られ、幅も広いまま)。
+const CV_MIN_OBS = 6, CV_MIN_SPAN = 900, CV_SIGMA_V = 1.0 /* u/frame = 60u/s */, CV_VMAX = 200 / 60, CV_ACCEPT = 0.4, CV_R_FLOOR = 0.15, CV_STABLE = 3, CV_SIG = 9, CV_VMIN = 30 / 60;
+function _solveMotion(sa) {
+    sa.motion = null; sa.alt = null;
+    const obs = sa.obs || [], fx = sa.fix, now = _frameCount;
+    if (obs.length < CV_MIN_OBS || now - obs[0].f < CV_MIN_SPAN) return;
+    if (!fx && (sa.base || 0) < TMA_MIN_BASE) return; // 同じ場所でしか聴いていなければ距離も速さも決まらない
+    const ping = sa.ping && now - sa.ping.f < TMA_KEEP ? sa.ping : null;
+    const tau = TMA_TAU, iv = 1 / (CV_SIGMA_V * CV_SIGMA_V);
+    // 残差とヤコビアン (p = [x, y, vx, vy]、時刻は now 基準)
+    const build = (p, wantJ) => {
+        let cost = 0, wsum = 0;
+        const H = wantJ ? new Float64Array(16) : null, g = wantJ ? new Float64Array(4) : null;
+        const add = (r, j0, j1, j2, j3) => {
+            cost += r * r;
+            if (!wantJ) return;
+            const J = [j0, j1, j2, j3];
+            for (let a = 0; a < 4; a++) { g[a] += J[a] * r; for (let b = 0; b < 4; b++) H[a * 4 + b] += J[a] * J[b]; }
+        };
+        for (const o of obs) {
+            const w = Math.exp(-(now - o.f) / tau), dt = o.f - now;
+            const X = p[0] + p[2] * dt - o.ox, Y = p[1] + p[3] * dt - o.oy, r2 = Math.max(1, X * X + Y * Y);
+            const res = _angRes(X + o.ox, Y + o.oy, o);
+            // 外れ値に強く (誤差の2倍を超えるずれは重みを下げる)。方位の記録はときどき大きく外れる
+            const z = Math.abs(res) / o.sig, sw = Math.sqrt(w * (z > 2 ? 2 / z : 1)) / o.sig;
+            const ex = -Y / r2 * sw, ey = X / r2 * sw;
+            add(res * sw, ex, ey, ex * dt, ey * dt);
+            wsum += w;
+        }
+        if (ping) {
+            const w = Math.exp(-(now - ping.f) / tau), s = Math.sqrt(w) / ping.r, dt = ping.f - now;
+            add((p[0] + p[2] * dt - ping.x) * s, s, 0, s * dt, 0);
+            add((p[1] + p[3] * dt - ping.y) * s, 0, s, 0, s * dt);
+        }
+        const obsCost = cost;
+        cost += (p[2] * p[2] + p[3] * p[3]) * iv;
+        if (wantJ) { H[10] += iv; H[15] += iv; g[2] += p[2] * iv; g[3] += p[3] * iv; }
+        return { cost, obsCost, wsum, H, g };
+    };
+    // ガウス・ニュートン (レーベンバーグ・マーカート減衰)
+    const gn = (p0) => {
+        let p = p0, cur = build(p, true), lam = 1e-3;
+        for (let it = 0; it < 20; it++) {
+            const A = new Float64Array(16);
+            for (let k = 0; k < 16; k++) A[k] = cur.H[k];
+            for (let k = 0; k < 4; k++) A[k * 5] *= 1 + lam;
+            const d = _solve4(A, [-cur.g[0], -cur.g[1], -cur.g[2], -cur.g[3]]);
+            if (!d) break;
+            const q = [p[0] + d[0], p[1] + d[1], p[2] + d[2], p[3] + d[3]];
+            const nxt = build(q, true);
+            if (nxt.cost < cur.cost) { p = q; cur = nxt; lam = Math.max(1e-6, lam * 0.3); if (Math.hypot(d[0], d[1]) < 1 && Math.hypot(d[2], d[3]) < 0.002) break; }
+            else lam *= 10;
+        }
+        return { p, cur };
+    };
+    // 出発点: 前回の運動解 → 静止の交点 → (交点が無ければ) 最新の方位に沿って距離を何通りか試す
+    const starts = [];
+    const m0 = sa.motion0;
+    if (m0 && now - m0.f < 600) { const dt = now - m0.f; starts.push([m0.x + m0.vx * dt, m0.y + m0.vy * dt, m0.vx, m0.vy]); }
+    if (fx) starts.push([fx.x, fx.y, 0, 0]);
+    // 方位だけの解析は「近くて遅い」と「遠くて速い」を取り違えやすい → 最新の方位に沿って距離を何通りか試し、いちばん合うものを採る
+    const L = obs[obs.length - 1];
+    for (const rho of [800, 1600, 3200, 6000, 10000, 15000]) starts.push([L.ox + Math.cos(L.ang) * rho, L.oy + Math.sin(L.ang) * rho, 0, 0]);
+    let best = null;
+    for (const s of starts) { const r = gn(s); if (!best || r.cur.cost < best.cur.cost) best = r; }
+    const p = best.p, cur = best.cur;
+    const speed = Math.hypot(p[2], p[3]);
+    // 採用の条件: 静止の交点があれば、それより記録とよく合う (残差が6割未満) こと。
+    // 交点が無い (止まった仮定では記録が矛盾する) 時は、動く仮定で記録が説明できること (1本あたりの残差が誤差の2倍以内)
+    const chi2 = cur.wsum > 0 ? cur.obsCost / cur.wsum : 99;
+    const st = fx ? build([fx.x, fx.y, 0, 0], false) : null;
+    // 動いている仮定 (速さの見込み込み) の方が記録に合うなら、その解を控えておく → 止まった仮定の推定円をそこまで広げる (trackEstimate)。
+    // 方位だけでは「止まっている」と「ゆっくり動いている」を見分けにくく、止まった仮定の円は動く目標を外しやすい
+    // (計測: 20u/sで横切る目標が静止解の円に入ったのは108回中4〜8回)
+    if (st && cur.cost < st.obsCost && speed <= CV_VMAX) sa.alt = { x: p[0], y: p[1], vx: p[2], vy: p[3], f: now };
+    if (st && !(cur.cost < st.obsCost * CV_ACCEPT)) { sa.motion0 = null; return; }
+    if (!st && chi2 > 4) { sa.motion0 = null; return; }
+    if (speed > CV_VMAX) { sa.motion0 = null; return; }
+    const C = _inv4(cur.H);
+    if (!C) return;
+    // 静止の交点がある時、運動解の「今の位置」がその幅から大きく外れるなら採らない (遠近の取り違え)
+    if (fx) { const dNow = Math.hypot(p[0] - fx.x, p[1] - fx.y), dObs = Math.hypot(fx.x - L.ox, fx.y - L.oy); if (dNow > Math.max(fx.r, dObs * 0.25)) { sa.motion0 = null; return; } }
+    // 速さが「誤差の3倍」よりはっきりしていて、30u/s以上でなければ動いているとは言えない (静止の解のまま)
+    const vdet = C[10] * C[15] - C[11] * C[14];
+    const mah = vdet > 0 ? (p[2] * p[2] * C[15] - 2 * p[2] * p[3] * C[11] + p[3] * p[3] * C[10]) / vdet : 0;
+    if ((mah < CV_SIG && fx) || speed < CV_VMIN) { sa.motion0 = null; return; }
+    // 針路と速さが前回の解と揃っている回数 (向き45°以内・速さ±50%以内)。4回続けて揃った時だけ射撃と矢印に使う
+    // (敵は撃っては位置を変えるので、1回の解で動きを決めつけない)
+    const pm = sa.motion0, sp0 = pm ? Math.hypot(pm.vx, pm.vy) : 0;
+    let da = pm ? Math.abs(Math.atan2(p[3], p[2]) - Math.atan2(pm.vy, pm.vx)) : 9;
+    if (da > Math.PI) da = Math.PI * 2 - da;
+    const stable = pm && da < Math.PI / 4 && speed > sp0 * 0.5 && speed < sp0 * 1.5 ? (pm.stable || 0) + 1 : 0;
+    sa.motion = { x: p[0], y: p[1], vx: p[2], vy: p[3], f: now, C, chi2, stable };
+    sa.motion0 = sa.motion;
+    if (stable < CV_STABLE) sa.motion = null; // まだ使わない (次の解の出発点としてだけ残す)
+    // 止まった仮定では交点が出ない時も、運動解から「今の推定位置」を作る (射撃・表示はこれを使う)
+    if (!fx && sa.motion) {
+        const est = trackEstimate(sa, 0);
+        if (est.r <= 14000) sa.fix = { x: est.x, y: est.y, r: est.r, n: obs.length, f: now, chi2, fromMotion: true };
+        else sa.motion = null;
+    }
+}
+// 4元連立一次方程式 (部分ピボットのガウス消去)。A は行優先の 4x4
+function _solve4(A, b) {
+    const M = [0, 1, 2, 3].map(i => [A[i * 4], A[i * 4 + 1], A[i * 4 + 2], A[i * 4 + 3], b[i]]);
+    for (let c = 0; c < 4; c++) {
+        let piv = c;
+        for (let r = c + 1; r < 4; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+        if (Math.abs(M[piv][c]) < 1e-12) return null;
+        [M[c], M[piv]] = [M[piv], M[c]];
+        for (let r = 0; r < 4; r++) { if (r === c) continue; const k = M[r][c] / M[c][c]; for (let j = c; j < 5; j++) M[r][j] -= k * M[c][j]; }
+    }
+    return [M[0][4] / M[0][0], M[1][4] / M[1][1], M[2][4] / M[2][2], M[3][4] / M[3][3]];
+}
+function _inv4(H) {
+    const out = new Float64Array(16);
+    for (let k = 0; k < 4; k++) {
+        const e = [0, 0, 0, 0]; e[k] = 1;
+        const c = _solve4(H, e);
+        if (!c) return null;
+        for (let i = 0; i < 4; i++) out[i * 4 + k] = c[i];
+    }
+    return out;
+}
+// 推定位置を「今から ahead フレーム後」へ外挿する。運動解があれば針路と速さで進め、幅は共分散から広げる。
+// 無ければ交点に留まる仮定 (幅は見込み60u/sぶん時間とともに広がる)。
+function trackEstimate(sa, ahead = 0) {
+    if (!sa) return null;
+    const now = _frameCount, m = sa.motion;
+    if (m) {
+        const dt = now - m.f + ahead, C = m.C;
+        const x = m.x + m.vx * dt, y = m.y + m.vy * dt;
+        const pxx = C[0] + 2 * dt * C[2] + dt * dt * C[10];
+        const pyy = C[5] + 2 * dt * C[7] + dt * dt * C[15];
+        const pxy = C[1] + dt * (C[3] + C[6]) + dt * dt * C[11];
+        const tr = pxx + pyy, det = pxx * pyy - pxy * pxy;
+        let r = 2 * Math.sqrt(Math.max(0, tr / 2 + Math.sqrt(Math.max(0, tr * tr / 4 - det)))) * Math.sqrt(Math.max(1, m.chi2));
+        r = Math.max(150, Math.hypot(x - player.x, y - player.y) * CV_R_FLOOR, r); // 等速の仮定そのものの誤差ぶん、静止の解(12%)より下限を高く
+        return { x, y, r, vx: m.vx, vy: m.vy, moving: true };
+    }
+    const f = sa.fix;
+    if (!f) return null;
+    const dt = Math.max(0, now - f.f) + ahead;
+    let r = Math.hypot(f.r, CV_SIGMA_V * dt);
+    // 動いている仮定でも記録が同じくらい説明できるなら、その仮定の位置まで円を広げる (どちらか分からない、が正直な答え)
+    const a = sa.alt;
+    if (a && !f.fromMotion) { const ta = now - a.f + ahead; r = Math.max(r, Math.hypot(a.x + a.vx * ta - f.x, a.y + a.vy * ta - f.y) + 150); }
+    return { x: f.x, y: f.y, r, vx: 0, vy: 0, moving: false };
+}
+// 追跡ボタンの幅表示 (±850 / ±1.2k)
+function _fmtR(r) { return '±' + (r >= 1000 ? (Math.round(r / 100) / 10) + 'k' : Math.round(r / 10) * 10); }
+// 弾が届くまでのフレーム数 (ビームは即着)
+function weaponFlightFrames(w, d) { return w === 'beam' ? 0 : w === 'missile' ? d / (missileMode === 'smart' ? 7.5 : 6) : d / 12; }
+// 見越し点: 弾が届く時刻の予測位置 (2回反復で飛翔時間と距離を合わせる)
+function leadPoint(sa, w) {
+    let est = trackEstimate(sa, 0);
+    if (!est || !player) return est;
+    for (let i = 0; i < 2; i++) est = trackEstimate(sa, weaponFlightFrames(w, Math.hypot(est.x - player.x, est.y - player.y)));
+    return est;
+}
+// 想定ロックで狙う点 (追跡の推定があれば見越し点、無ければソナー等の反応位置)
+function assumedAimPoint(te, w) {
+    const sa = _signalAnalysis[enemySid(te)];
+    const lp = sa && (sa.fix || sa.motion) ? leadPoint(sa, w) : null;
+    return lp ? lp : { x: te.displayX, y: te.displayY, r: te.trackR || 3000 };
 }
 // ═══ 第16弾: ノード(ヒッグス結晶) と コロニー — 「その場に留まる」行動に意味を持たせる ═══
 // ノード: 近くに5秒留まって制圧 (その間EMが漏れる) → 150SCR・資材+4・以後は自分の聴音局 (周囲6000uの方位線を送ってくる)。
@@ -5514,7 +5714,7 @@ function relayListen() {
             const sig = s0 * (1 - d / NODE_RELAY_RANGE) * (1 - getHiggsIntensity((e.x + n.x) / 2, (e.y + n.y) / 2) * 0.5);
             if (sig < 0.12) continue;
             const conf = Math.min(1, (sig - 0.12) / 0.5);
-            const sigma = 0.012 + 0.03 * (1 - conf);
+            const sigma = (0.012 + 0.03 * (1 - conf)) * clutterErrMult(clutterCount(e.x, e.y, e)); // 第18弾: 混信
             const ang = Math.atan2(e.y - n.y, e.x - n.x) + _gauss() * sigma;
             const sid = enemySid(e);
             if (!_contactLabels[sid]) _contactLabels[sid] = _contactLabelNext++;
@@ -5598,7 +5798,7 @@ function checkPassiveDetection() {
         const distAtten = Math.max(0, 1 - dist / range);
         const sig = sc.sig(e) * distAtten * (1 - hPath * sc.higgsMod) * (1 - noise * 0.5);
         if (sig > thr * 0.5) {
-            allContacts.push({ x: e.x, y: e.y, sig, angle: Math.atan2(e.y - player.y, e.x - player.x), sourceId: enemySid(e) });
+            allContacts.push({ x: e.x, y: e.y, sig, angle: Math.atan2(e.y - player.y, e.x - player.x), sourceId: enemySid(e), clN: e.type === 'fighter' ? 0 : clutterCount(e.x, e.y, e) });
             if (huntStats && huntStats.firstContact < 0) huntStats.firstContact = _frameCount - huntStats.startFrame; // 戦闘詳報: 初接触
         }
     }
@@ -5618,7 +5818,7 @@ function checkPassiveDetection() {
         const tracked = c.sourceId === lockedSignalId;
         // 方位誤差(1σ, rad): 強い信号ほど・静かなほど・追跡(狭帯域処理)中ほど鋭い
         const sigma = (0.005 + 0.035 * (1 - conf)) * (1 + 2 * noise) * (tracked ? 1 : 2.2)
-                    / (0.6 + 0.4 * sensorPrec) / (1 + aiPrec('sensor') * 0.8);
+                    / (0.6 + 0.4 * sensorPrec) / (1 + aiPrec('sensor') * 0.8) * clutterErrMult(c.clN || 0); // 第18弾: 混信
         const angle = c.angle + _gauss() * sigma;
         const compassDeg = Math.round((Math.atan2(Math.cos(angle), -Math.sin(angle)) * 180 / Math.PI + 360) % 360);
         if (!_contactLabels[c.sourceId]) _contactLabels[c.sourceId] = _contactLabelNext++;
@@ -5655,14 +5855,21 @@ function checkPassiveDetection() {
     }
 }
 
+const UNTRACKED_LINES = 2, TRACK_LINES_MAX = 8, TRACK_LINE_MERGE = 400; // 第18弾: 表示の整理 (オーナー合意 2026-10-25)
 function drawPassiveBearings(ctx) {
     const invZoom = 1 / camera.zoom;
-    // 追跡していない信号: 最新の方位を短い破線で1本だけ (「何かがあっちに居る」)
-    const _seen = {};
+    // 追跡していない信号: 最新の方位を短い破線で1本だけ (「何かがあっちに居る」)。
+    // 第18弾: 線を引くのは強い方から2つだけ (艦載機が群がると破線が飛び交って読めなかった)。残りは自艦リングの点で示す
+    const _seen = {}, _latest = [];
     for (let i = passiveBearings.length - 1; i >= 0; i--) {
         const b = passiveBearings[i];
-        if (b.life <= 0 || b.sourceId === lockedSignalId || _seen[b.sourceId]) continue;
+        if (b.life <= 0 || b.sourceId === lockedSignalId || _seen[b.sourceId] || b.relay) continue;
         _seen[b.sourceId] = true;
+        _latest.push(b);
+    }
+    _latest.sort((p, q) => (q.strength || 0) - (p.strength || 0));
+    for (let k = 0; k < Math.min(UNTRACKED_LINES, _latest.length); k++) {
+        const b = _latest[k];
         const vis = (b.life / b.maxLife) * Math.min(1, (b.maxLife - b.life) / 45);
         ctx.save();
         ctx.globalAlpha = 0.4 * vis;
@@ -5672,17 +5879,25 @@ function drawPassiveBearings(ctx) {
         ctx.beginPath(); ctx.moveTo(b.ox, b.oy); ctx.lineTo(b.ox + Math.cos(b.angle) * b.range * 0.35, b.oy + Math.sin(b.angle) * b.range * 0.35); ctx.stroke();
         ctx.restore();
     }
-    // 追跡中の信号: 記録した方位線をすべて描く (第15弾)。線が交わる所に相手が居る — 交わらなければ相手は動いている。
+    // 追跡中の信号: 記録した方位線 (第15弾)。線が交わる所に相手が居る — 交わらなければ相手は動いている。
+    // 第18弾: 近い場所(400u以内)で聴いた線は新しい1本で代表させ、最大8本。長さは推定位置の少し先まで
+    // (旧: 最大24本を推定位置の2500u先まで描き、同じ所で聴いた平行な線が束になって読めなかった。解析はすべての記録を使う)
     const sa = lockedSignalId ? _signalAnalysis[lockedSignalId] : null;
     if (!sa || !sa.obs.length) return;
     const now = _frameCount;
     const fx = sa.fix;
-    ctx.save();
-    for (let i = 0; i < sa.obs.length; i++) {
+    const pick = [];
+    for (let i = sa.obs.length - 1; i >= 0 && pick.length < TRACK_LINES_MAX; i--) {
         const o = sa.obs[i];
+        if (pick.some(q => Math.hypot(q.ox - o.ox, q.oy - o.oy) < TRACK_LINE_MERGE)) continue;
+        pick.push(o);
+    }
+    ctx.save();
+    for (let k = pick.length - 1; k >= 0; k--) {
+        const o = pick[k];
         const rec = Math.exp(-(now - o.f) / TMA_TAU);
-        const newest = i === sa.obs.length - 1;
-        const L = fx ? Math.hypot(fx.x - o.ox, fx.y - o.oy) + 2500 : passiveRange() * 0.9;
+        const newest = k === 0;
+        const L = fx ? Math.hypot(fx.x - o.ox, fx.y - o.oy) + Math.max(600, fx.r) : passiveRange() * 0.9;
         ctx.globalAlpha = (newest ? 0.75 : 0.15 + 0.45 * rec);
         ctx.strokeStyle = o.cs || (o.cs = 'rgb(' + (o.c || '0,255,170') + ')');
         ctx.lineWidth = (newest ? 1.8 : 1.1) * invZoom;
@@ -5742,11 +5957,14 @@ function drawTriangulationCircle(ctx) {
     // 第15弾: 記録した方位線の交点 (solveFix) をそのまま描く。真の位置とは無関係 — 外れていることもある
     if (!lockedSignalId || !_signalAnalysis[lockedSignalId]) return;
     const sa = _signalAnalysis[lockedSignalId];
-    if (!sa.fix) { sa.displayCenterX = null; return; }
-    if (sa.displayCenterX == null) { sa.displayCenterX = sa.fix.x; sa.displayCenterY = sa.fix.y; sa.displayR = sa.fix.r; }
-    sa.displayCenterX += (sa.fix.x - sa.displayCenterX) * 0.08;
-    sa.displayCenterY += (sa.fix.y - sa.displayCenterY) * 0.08;
-    sa.displayR += (sa.fix.r - sa.displayR) * 0.06;
+    // 第18弾: 運動解があれば推定位置は針路に沿って進む (円もそれに付いていく)
+    const est = sa.fix ? trackEstimate(sa, 0) : null;
+    if (!est) { sa.displayCenterX = null; return; }
+    if (sa.displayCenterX == null) { sa.displayCenterX = est.x; sa.displayCenterY = est.y; sa.displayR = est.r; }
+    const kc = est.moving ? 0.25 : 0.08;
+    sa.displayCenterX += (est.x - sa.displayCenterX) * kc;
+    sa.displayCenterY += (est.y - sa.displayCenterY) * kc;
+    sa.displayR += (est.r - sa.displayR) * 0.06;
     const R = sa.displayR, cx = sa.displayCenterX, cy = sa.displayCenterY;
     // 幅で色分け: 広い=橙 / 撃てる幅(ミサイルの終末シーカーに収まる)=緑 / 精密=シアン
     const col = R > 2400 ? 'rgb(255,150,40)' : R > 900 ? 'rgb(255,220,90)' : R > 350 ? 'rgb(80,255,140)' : 'rgb(100,220,255)';
@@ -5764,6 +5982,41 @@ function drawTriangulationCircle(ctx) {
     ctx.globalAlpha = 0.85;
     const m = 14 * inv;
     ctx.beginPath(); ctx.moveTo(cx - m, cy); ctx.lineTo(cx + m, cy); ctx.moveTo(cx, cy - m); ctx.lineTo(cx, cy + m); ctx.stroke();
+    ctx.font = 'bold ' + Math.round(11 * inv) + 'px Orbitron, monospace';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    // 第18弾: 推定した針路と速さ (10秒ぶんの矢印)。方位の記録だけから解いたもの — 外れていることもある
+    if (est.moving) {
+        const L = Math.hypot(est.vx, est.vy) * 600;
+        if (L > 30 * inv) {
+            const ux = est.vx / Math.hypot(est.vx, est.vy), uy = est.vy / Math.hypot(est.vx, est.vy);
+            const tx = cx + ux * L, ty = cy + uy * L;
+            ctx.globalAlpha = 0.8; ctx.lineWidth = 1.8 * inv;
+            ctx.setLineDash([10 * inv, 6 * inv]);
+            ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(tx, ty); ctx.stroke();
+            ctx.setLineDash([]);
+            const h = 12 * inv;
+            ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(tx - ux * h - uy * h * 0.5, ty - uy * h + ux * h * 0.5); ctx.lineTo(tx - ux * h + uy * h * 0.5, ty - uy * h - ux * h * 0.5); ctx.closePath();
+            ctx.fillStyle = col; ctx.fill();
+            ctx.fillText('針路' + compassDeg(Math.atan2(est.vy, est.vx)) + '° ' + Math.round(Math.hypot(est.vx, est.vy) * 60) + 'u/s', tx + 8 * inv, ty);
+        }
+    }
+    // 第18弾: 見越し点 — 今の兵装で撃つと、弾が届く時刻にここに居るはず (射撃命令はここを狙う)
+    const w = currentWeapon();
+    const te = enemyBySid(lockedSignalId);
+    if (w !== 'beam' && te && !te.inVision) {
+        const lp = leadPoint(sa, w);
+        if (lp && Math.hypot(lp.x - cx, lp.y - cy) > 40 * inv) {
+            const rr = 9 * inv;
+            ctx.globalAlpha = 0.9; ctx.strokeStyle = '#ffe08a'; ctx.fillStyle = '#ffe08a'; ctx.lineWidth = 1.6 * inv;
+            ctx.beginPath(); ctx.arc(lp.x, lp.y, rr, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(lp.x - rr * 1.7, lp.y); ctx.lineTo(lp.x - rr * 0.6, lp.y); ctx.moveTo(lp.x + rr * 0.6, lp.y); ctx.lineTo(lp.x + rr * 1.7, lp.y);
+            ctx.moveTo(lp.x, lp.y - rr * 1.7); ctx.lineTo(lp.x, lp.y - rr * 0.6); ctx.moveTo(lp.x, lp.y + rr * 0.6); ctx.lineTo(lp.x, lp.y + rr * 1.7); ctx.stroke();
+            ctx.globalAlpha = 0.5; ctx.setLineDash([4 * inv, 6 * inv]);
+            ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(lp.x, lp.y); ctx.stroke(); ctx.setLineDash([]);
+            ctx.globalAlpha = 0.9;
+            ctx.fillText('見越し', lp.x + rr * 2, lp.y);
+        }
+    }
     ctx.restore();
 }
 
@@ -5923,10 +6176,11 @@ function applyContact(e, accuracy, life = 600) {
 function applyTrackContact(e, sa) {
     // 交点が出ていなければ「方位だけ」= 位置は分からない (撃てない)
     if (!sa.fix || e.inVision) return;
-    e.contactAccuracy = Math.max(0.05, Math.min(0.95, 1 - sa.fix.r / 5000));
-    e.displayX = sa.fix.x;
-    e.displayY = sa.fix.y;
-    e.trackR = sa.fix.r;
+    const est = trackEstimate(sa, 0); // 第18弾: 運動解があれば針路と速さで今の位置へ進める
+    e.contactAccuracy = Math.max(0.05, Math.min(0.95, 1 - est.r / 5000));
+    e.displayX = est.x;
+    e.displayY = est.y;
+    e.trackR = est.r;
     e.contactLife = Math.max(e.contactLife, 260);
     e.visible = true;
 }
@@ -6044,9 +6298,9 @@ const RING_R = 92;
 function ringMarkBearing(deg, col) {
     deg = ((Math.round(deg) % 360) + 360) % 360;
     const ex = _ringMarks.find(m => Math.abs(m.deg - deg) < 3);
-    if (ex) { ex.life = 420; ex.col = col || ex.col; return; }
-    _ringMarks.push({ deg, life: 420, col: col || '#ffe08a' });
-    if (_ringMarks.length > 5) _ringMarks.shift();
+    if (ex) { ex.life = 300; ex.col = col || ex.col; return; }
+    _ringMarks.push({ deg, life: 300, col: col || '#ffe08a' }); // 第18弾: 5秒・最新2つ (旧: 7秒・5つ)
+    if (_ringMarks.length > 2) _ringMarks.shift();
 }
 function _degToScreen(deg) { return (deg - 90) * Math.PI / 180; }
 function drawShipRing(ctx) {
@@ -6180,7 +6434,7 @@ function drawShipRing(ctx) {
     // (6) 測量ガイド: 追跡中の方位線に直交する2方向 (そちらへ動くと交点が締まる)。推定が十分に絞れたら消える
     if (lockedSignalId && _sigBlips[lockedSignalId]) {
         const sa = _signalAnalysis[lockedSignalId];
-        if (!sa || !sa.fix || sa.fix.r > 900) {
+        if (!sa || !sa.fix || trackEstimate(sa, 0).r > 900) {
             ctx.globalAlpha = 0.55 + Math.sin(t * 0.004) * 0.15;
             ctx.fillStyle = '#00ffd0';
             for (const k of [1, -1]) {
@@ -6582,12 +6836,11 @@ function drawMinimap() {
         }
     });
 
-    // リソースノード (特定済みは通常表示; HIGGSセンサー時は微かに表示)
+    // リソースノード — 第18弾: 海図の既知物として常に点を打つ (未確認は薄く)
     resourceNodes.forEach(n => {
         const mine = n.owner === 'player', theirs = n.owner === 'enemy' && n.knownLost;
-        if (!mine && !theirs && !n.identified && currentSensor !== 'higgs') return; // HIGGS以外で未特定は非表示
         const mx = n.x * mmScale + offX, my = n.y * mmScale + offY;
-        minimapCtx.globalAlpha = mine || theirs || n.identified ? 1 : 0.35;
+        minimapCtx.globalAlpha = mine || theirs || n.identified ? 1 : 0.45;
         minimapCtx.fillStyle = mine ? '#00ffd0' : theirs ? '#ff5a5a' : '#50c8ff';
         minimapCtx.beginPath(); minimapCtx.arc(mx, my, mine || theirs ? 3.2 : 2.5, 0, Math.PI * 2); minimapCtx.fill();
         if (mine) { // 第16弾: 自分の聴音局は聴音範囲も薄く
@@ -7939,12 +8192,12 @@ function drawNodesAndColonies(ctx, vpX, vpY, vpW, vpH) {
     for (const n of resourceNodes) {
         const mine = n.owner === 'player', theirs = n.owner === 'enemy' && n.knownLost;
         if (isHiggsSnsr && Math.hypot(n.x - player.x, n.y - player.y) < higgsNodeRange) n.identified = true; // HIGGS帯で見たノードは海図に記録
-        if (!mine && !theirs && !n.identified && !isHiggsSnsr) continue;
+        // 第18弾: ノードは海図に載っている既知物 — 常に描く (未確認は薄く)。旧: HIGGS帯で確認するまで描かれず「ノードが見えない」
         const mg = 90 * zc;
         if (n.x < vpX - mg || n.x > vpX + vpW + mg || n.y < vpY - mg || n.y > vpY + vpH + mg) continue;
         const pulse = 0.5 + Math.sin(t * 0.003 + n.x * 0.001) * 0.5;
-        const bright = mine ? 0.95 : n.identified ? (isHiggsSnsr ? 0.55 + 0.45 * pulse : 0.4 + 0.2 * pulse) : 0.25 * pulse;
-        const size = Math.max(72, 26 * zc);
+        const bright = mine ? 0.95 : n.identified ? (isHiggsSnsr ? 0.55 + 0.45 * pulse : 0.45 + 0.2 * pulse) : (isHiggsSnsr ? 0.35 + 0.25 * pulse : 0.32);
+        const size = Math.max(72, NODE_MIN_PX * zc);
         ctx.save();
         ctx.translate(n.x, n.y);
         ctx.rotate((t * 0.0008 + n.x * 0.0003) % (Math.PI * 2));
@@ -7952,8 +8205,14 @@ function drawNodesAndColonies(ctx, vpX, vpY, vpW, vpH) {
         if (spriteReady(SPRITES.node_higgs)) drawSpriteCentered(ctx, SPRITES.node_higgs, size);
         else { ctx.fillStyle = '#50c8ff'; ctx.beginPath(); ctx.arc(0, 0, size * 0.3, 0, Math.PI * 2); ctx.fill(); }
         ctx.restore();
+        // 引いた時はスプライトの細い線が霧に溶けるので、画面上で一定の大きさの輪と点を重ねる (未確認は薄め)
+        ctx.globalAlpha = mine ? 0.9 : n.identified ? 0.8 : 0.55;
+        ctx.strokeStyle = '#50c8ff'; ctx.fillStyle = '#50c8ff';
+        ctx.lineWidth = 1.5 * zc;
+        ctx.beginPath(); ctx.arc(n.x, n.y, Math.max(36, NODE_MIN_PX * 0.5 * zc), 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(n.x, n.y, Math.max(10, 2.5 * zc), 0, Math.PI * 2); ctx.fill();
         // 持ち主の輪: 自分の聴音局=青緑 / 奪われた聴音局=赤
-        const rr = Math.max(60, 22 * zc);
+        const rr = Math.max(60, (NODE_MIN_PX * 0.5 + 4) * zc);
         if (mine || theirs) {
             ctx.globalAlpha = 0.75;
             ctx.strokeStyle = mine ? '#00ffd0' : '#ff5a5a';
@@ -7964,7 +8223,8 @@ function drawNodesAndColonies(ctx, vpX, vpY, vpW, vpH) {
                 ctx.beginPath(); ctx.arc(n.x, n.y, NODE_RELAY_RANGE, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
             }
         }
-        if (mine || theirs || n.identified) {
+        // ラベル: 寄った時は全部、引いた時は自分/敵の聴音局だけ (ノードの名札が並ぶと読めない)
+        if (mine || theirs || camera.zoom >= LABEL_FAR_ZOOM) {
             ctx.globalAlpha = 0.85;
             ctx.fillStyle = mine ? '#9ffff0' : theirs ? '#ff9a9a' : '#80e8ff';
             ctx.font = 'bold ' + fontPx + 'px Orbitron, monospace';
@@ -8534,11 +8794,15 @@ function xoEvaluate() {
                 return { tone: 'bad', text: `SIG-${no} 方位が動かず信号が強まる — こちらへ向かってくる。横へ外すか、止まって待ち伏せろ` };
         }
         if (!fx) {
+            // 第18弾: あと何u横へ動けば交点が出るか (基線=方位線に直交する向きへ聴いた場所の広がり)
+            const need = Math.max(0, Math.ceil((TMA_MIN_BASE - (sa.base || 0)) / 50) * 50);
             const t = n < 3 ? `SIG-${no} 方位${b.bearingDeg}° — 方位だけでは距離が分からない。横へ動いて別の場所から聴け`
-                            : `SIG-${no} 方位線${n}本 — まだ交わらない。方位線に直交して動け`;
+                            : need > 0 ? `SIG-${no} 方位線${n}本 — まだ交わらない。方位線に直交してあと約${need}u動け`
+                                       : `SIG-${no} 方位線${n}本 — 線が食い違う (相手が動いている)。直交してもう一度聴け`;
             return { tone: 'info', text: t, act: player.state !== 'moving' ? { label: '直交航路', fn: () => xoPerpendicularLeg(b.angle) } : null };
         }
-        const rr = Math.round(fx.r / 100) * 100;
+        const estR = (trackEstimate(sa, 0) || fx).r; // 表示・射撃と同じ幅 (時間と「動いているかも」で広がる)
+        const rr = Math.round(estR / 100) * 100;
         if (fx.chi2 > 4) return { tone: 'info', text: `SIG-${no} 方位線が食い違う (±${rr}u) — 相手は動いている。新しい方位を重ねろ`, act: player.state !== 'moving' ? { label: '直交航路', fn: () => xoPerpendicularLeg(b.angle) } : null };
         const isEnemy = /^e-/.test(lockedSignalId);
         if (isEnemy && te && lk && lk.assumed && lk.dist > weaponRange(w)) {
@@ -8559,9 +8823,13 @@ function xoEvaluate() {
             return { tone: 'info', text: `SIG-${no} 推定 ±${rr}u・距離${Math.round(lk.dist)}u — ${w.toUpperCase()}の射程外。詰めるか兵装を変えろ`, act: heading ? null : { label: '接近', fn: () => _setLeg(a, Math.min(lk.dist * 0.5, 5000), '接近') } };
         }
         // 遠い相手は方位だけでは推定が距離の12%より狭まらない — ビームで狙うならソナーで点を取る
-        if (fx.r > 900 && w === 'beam' && te && lk && lk.assumed && lk.dist > 2800 && omniSonarCooldown <= 0)
+        if (!sa.motion && sa.alt && estR > 900 && estR > fx.r * 1.5)
+            return { tone: 'info', text: `SIG-${no} 推定 ±${rr}u — 止まっているとも、ゆっくり動いているとも取れる。直交してもう一度聴け`, act: player.state !== 'moving' ? { label: '直交航路', fn: () => xoPerpendicularLeg(b.angle) } : null };
+        if (estR > 900 && w === 'beam' && te && lk && lk.assumed && lk.dist > 2800 && omniSonarCooldown <= 0)
             return { tone: 'info', text: `SIG-${no} 推定 ±${rr}u — 遠くて方位だけでは絞れない。ソナーで点を取ればビームで狙える (聞かれる)`, act: { label: 'ソナーで測る', fn: fireOmniSonar } };
-        if (fx.r > 900) return { tone: 'info', text: `SIG-${no} 推定 ±${rr}u — まだ広い。止まって聴く(耳が澄む)か、角度を変えて重ねろ`, act: player.state !== 'moving' ? { label: '直交航路', fn: () => xoPerpendicularLeg(b.angle) } : null };
+        if (estR > 900) return { tone: 'info', text: `SIG-${no} 推定 ±${rr}u — まだ広い。止まって聴く(耳が澄む)か、角度を変えて重ねろ`, act: player.state !== 'moving' ? { label: '直交航路', fn: () => xoPerpendicularLeg(b.angle) } : null };
+        // 第18弾: 針路が読めていれば伝える (射撃命令は見越し点を狙う)
+        if (sa.motion) return { tone: 'go', text: `SIG-${no} 推定 ±${rr}u・針路${compassDeg(Math.atan2(sa.motion.vy, sa.motion.vx))}° 約${Math.round(Math.hypot(sa.motion.vx, sa.motion.vy) * 60)}u/s — 見越して撃てる。外せば自位置を教える` };
         return { tone: 'go', text: `SIG-${no} 推定 ±${rr}u — 撃てる幅だ。外せば自位置を教える` };
     }
     // 6) 受信中だが未追跡
@@ -8602,7 +8870,8 @@ const _bandEls = {};
 // 被探知状態 (上帯チップ)。静粛/デブリ擬態は同じチップに併記 (旧: フィールド上の文字列)
 function _updateExpoChip() {
     const exL = playerExposureLevel;
-    const exTxt = (exL === 0 ? '隠密' : exL === 1 ? '痕跡' : exL === 2 ? '追跡' : '捕捉') + (isBottomed ? '・擬態' : playerCoasting ? '・機関停止' : boostT > 0 ? '・噴射' : silentRunning ? '・潜航' : powerStance === 'flank' ? '・全速' : '');
+    const exTxt = (exL === 0 ? '隠密' : exL === 1 ? '痕跡' : exL === 2 ? '追跡' : '捕捉') + (isBottomed ? '・擬態' : playerCoasting ? '・機関停止' : boostT > 0 ? '・噴射' : silentRunning ? '・潜航' : powerStance === 'flank' ? '・全速' : '')
+        + (player && player.hp > 0 && playerClutter() > 0 ? '・混信' : ''); // 第18弾: 周りの発信源・地形に紛れている
     if (exTxt + exL === _hudCache.expo) return;
     _hudCache.expo = exTxt + exL;
     const ch = document.getElementById('hud-expo'), tx = document.getElementById('hud-expo-text');
@@ -8668,7 +8937,8 @@ function updateTacStrip() {
     const tb = document.getElementById('abar-track');
     if (tb) {
         const sa = lockedSignalId ? _signalAnalysis[lockedSignalId] : null;
-        const tl = sa ? 'SIG-' + String(_contactLabels[lockedSignalId] || '?').padStart(2, '0') + ' ' + (sa.fix ? '±' + (sa.fix.r >= 1000 ? (Math.round(sa.fix.r / 100) / 10) + 'k' : Math.round(sa.fix.r / 10) * 10) : '方位' + (sa.obs ? sa.obs.length : 0)) : '追跡';
+        // 第18弾: 2行に分けてボタン幅に収める (旧: 「SIG-01 方位16」がボタンからはみ出していた)
+        const tl = sa ? 'SIG-' + String(_contactLabels[lockedSignalId] || '?').padStart(2, '0') + '\n' + (sa.fix ? _fmtR(trackEstimate(sa, 0).r) + (sa.motion ? '・動' : '') : '線' + (sa.obs ? sa.obs.length : 0)) : '追跡';
         if (tb._lbl !== tl) { tb._lbl = tl; const l = document.getElementById('abar-track-label'); if (l) l.textContent = tl; tb.classList.toggle('on', !!sa); }
     }
     const rc = document.getElementById('recenter-chip');
@@ -8829,6 +9099,10 @@ function stepWorld() {
                     const k = 0.005 * e.contactAccuracy * e.contactAccuracy;
                     e.displayX += (e.x - e.displayX) * k;
                     e.displayY += (e.y - e.displayY) * k;
+                } else if (e.trackR && !e.inVision) {
+                    // 第18弾: 運動解のある追跡は、推定した針路と速さで推定位置を進める (解析のない時間も「今どこか」を示す)
+                    const saM = _signalAnalysis[enemySid(e)];
+                    if (saM && saM.motion) { const est = trackEstimate(saM, 0); e.displayX = est.x; e.displayY = est.y; e.trackR = est.r; e.contactAccuracy = Math.max(0.05, Math.min(0.95, 1 - est.r / 5000)); }
                 }
             } else if (e.fireFlashTimer <= 0) {
                 e.visible = false;

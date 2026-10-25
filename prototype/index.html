@@ -11,7 +11,7 @@
     <title>Dark Echo: Tactical Space RTS</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23000' stroke='%2300ff88' stroke-width='2'/><circle cx='16' cy='16' r='6' fill='none' stroke='%2300ff88' stroke-width='1.5'/><line x1='16' y1='2' x2='16' y2='30' stroke='%2300ff88' stroke-width='1' opacity='0.4'/><line x1='2' y1='16' x2='30' y2='16' stroke='%2300ff88' stroke-width='1' opacity='0.4'/></svg>" type="image/svg+xml">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261025a">
+    <link rel="stylesheet" href="style.css?v=20261025b">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -628,8 +628,8 @@
                     <ol class="brief-steps">
                         <li><b class="bs-1">聴く</b>左の受信機: 太いバー=受信、刻みを超えた帯域に<em>同調</em>すると方位が取れる。細いバー=<em>自艦の放射</em>、斜線=<em>自艦の雑音</em>(速く動くほど耳が塞がる)。</li>
                         <li><b class="bs-2">測る</b>右の<em>追跡</em>で方位を記録。<em>場所を変えて</em>聴くと方位線が交わり推定円が出る。交わらない=相手が動いている。止まって聴くと方位が鋭くなる。</li>
-                        <li><b class="bs-3">撃つ</b>推定円が小さいほど当たる (右下の<em>射撃</em>に見込み%)。外れれば「そこには居ない」と分かるが、<em>撃った位置を教える</em>。ソナーは正確だが遠くまで聞かれる。</li>
-                        <li><b class="bs-4">消える</b>出力を<em>潜航</em>へ。ヒッグスの霧は音を隠すが、動けば<em>航跡が90秒残り</em>、敵はそれを辿ってくる (HIGGS帯で相手の航跡も見える)。見つかったら右列の<em>離脱</em>: 閃光で目を潰す→噴射で距離を取る→<em>機関停止</em>で音を消して漂う。</li>
+                        <li><b class="bs-3">撃つ</b>推定円が小さいほど当たる (右下の<em>射撃</em>に見込み%)。針路が読めると推定円に<em>矢印</em>が出て、射撃は弾が届く時の<em>見越し点</em>を狙う。外れれば「そこには居ない」と分かるが、<em>撃った位置を教える</em>。ソナーは正確だが遠くまで聞かれる。</li>
+                        <li><b class="bs-4">消える</b>出力を<em>潜航</em>へ。ヒッグスの霧は音を隠すが、動けば<em>航跡が90秒残り</em>、敵はそれを辿ってくる (HIGGS帯で相手の航跡も見える)。見つかったら右列の<em>離脱</em>: 閃光で目を潰す→噴射で距離を取る→<em>機関停止</em>で音を消して漂う。ドローンや艦載機が飛び交う所・嵐・熱雲・岩礁に紛れると見分けにくい (<em>混信</em>)。</li>
                     </ol>
                     <div class="brief-tip">自艦の周りのリング: 0°=上・時計回り。ログや副長が言った方位はリング上で光る。青緑の縁(有視界)の内側に入った敵ははっきり見える — 縁の大きさは自艦の居る場所のヒッグス濃度で変わる。<br>ノードの近くに5秒留まると制圧 (資材+聴音局)、コロニーは8秒でハック (修理・資材・敵の方位線)。右列の「搭載」で戦闘機・砲台・人型など — 完成品はすぐ出せ、資材は組み立てに時間とEMがかかる。<br>副長は状況を読み上げるだけ — 決めるのはあなた。移動はフィールドを長押し →「移動」。ドラッグで見回し、ピンチか右下の＋−で拡大縮小。</div>
                     <button class="btn btn-primary" id="btn-brief-ok">了解 — 出撃</button>
@@ -731,7 +731,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261025a"></script>
+    <script src="game.js?v=20261025b"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
