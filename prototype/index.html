@@ -11,7 +11,7 @@
     <title>Dark Echo: Tactical Space RTS</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23000' stroke='%2300ff88' stroke-width='2'/><circle cx='16' cy='16' r='6' fill='none' stroke='%2300ff88' stroke-width='1.5'/><line x1='16' y1='2' x2='16' y2='30' stroke='%2300ff88' stroke-width='1' opacity='0.4'/><line x1='2' y1='16' x2='30' y2='16' stroke='%2300ff88' stroke-width='1' opacity='0.4'/></svg>" type="image/svg+xml">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261024c">
+    <link rel="stylesheet" href="style.css?v=20261024d">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -63,7 +63,7 @@
                 <!-- S&D進捗バー (S&Dモード時のみ表示・ミニマップの直下) -->
                 <div id="sd-progress-bar" style="display:none;">
                     <div style="font-size:9px; color:#00ffaa; font-family:'Orbitron',monospace; margin-bottom:2px;">
-                        <span id="sd-progress-text">ノード: 0/0</span>
+                        <span id="sd-progress-text">コロニー: 0/0</span>
                     </div>
                     <div style="background:rgba(0,255,170,0.15); border:1px solid #00ffaa44; height:6px; border-radius:3px; overflow:hidden;">
                         <div id="sd-progress-fill" style="height:100%; width:0%; background:#00ffaa; transition:width 0.3s;"></div>
@@ -83,11 +83,11 @@
                 <button class="hud-act" data-group="nav" title="航法 — 停止 / 追従 / 自動攻撃 / 修復 / 速度">
                     <img src="assets/icon_nav.png" alt="" class="abar-icon"><span>航法</span>
                 </button>
-                <button class="hud-act" data-group="ew" id="abar-grp-ew" title="電子戦 — ハック / ジャム / デコイ">
-                    <img src="assets/icon_ew.png" alt="" class="abar-icon"><span>電子戦</span>
+                <button class="hud-act" data-group="ew" id="abar-grp-ew" title="電子戦 — ジャム / ハック / デコイ・哨戒機 (潜航型)" style="display:none">
+                    <img src="assets/icon_ew.png" alt="" class="abar-icon"><span>電子戦</span><em class="abar-cargo"></em>
                 </button>
-                <button class="hud-act" data-group="drone" id="abar-grp-drone" title="ドローン展開 — 空母専用" style="display:none">
-                    <img src="assets/icon_drone.png" alt="" class="abar-icon"><span>DRONE</span>
+                <button class="hud-act" data-group="drone" id="abar-grp-drone" title="搭載 — 戦闘機・砲台・人型など (完成品はすぐ出せる / 資材は組み立て)">
+                    <img src="assets/icon_drone.png" alt="" class="abar-icon"><span>搭載</span><em class="abar-cargo"></em>
                 </button>
                 <button class="hud-act" data-group="scan" title="索敵 — ソナー / 指向ソナー / 信号一覧">
                     <img src="assets/icon_scan.png" alt="" class="abar-icon"><span>索敵</span>
@@ -219,43 +219,38 @@
                     </svg>
                     <span>PULSE</span>
                 </button>
-                <button class="act-icon-btn btn-warning jam-btn" id="btn-decoy" title="デコイ射出 (敵ミサイル誘引)" style="display:none;border-color:#aa66ff;color:#cc99ff;">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12,3 l3,5 l-3,2 l-3,-2 z" fill="currentColor" fill-opacity=".3"/>
-                        <line x1="12" y1="10" x2="12" y2="20"/>
-                        <path d="M9,17 l3,3 l3,-3"/>
-                    </svg>
-                    <span>DECOY</span>
-                </button>
-                <!-- 空母型ドローン展開ボタン (§3-6・carrier専用) -->
-                <button class="act-icon-btn btn-info drone-btn" id="btn-drone-attack" title="攻撃ドローン (自動追尾射撃)" style="display:none;border-color:#33cc88;color:#00ffaa;">
+                <!-- 第16弾: 搭載物 (全艦種・積める種類だけ表示)。数字=完成品の数 / 「資材」=資材から組み立て -->
+                <button class="act-icon-btn btn-info drone-btn" id="btn-drone-attack" data-dtype="attack" title="戦闘機 (1枠) — 見えている敵へ自動射撃" style="display:none">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12,3 l7,4 l-3,2 l-4,-2 l-4,2 l-3,-2 z" fill="currentColor" fill-opacity=".25"/><line x1="12" y1="9" x2="12" y2="20"/></svg>
-                    <span>D-ATK</span>
+                    <span>戦闘機</span><em class="cg-n"></em>
                 </button>
-                <button class="act-icon-btn btn-info drone-btn" id="btn-drone-decoy" title="デコイドローン (ミサイル誘引)" style="display:none;border-color:#33cc88;color:#00ffaa;">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12,4 l4,4 l-4,3 l-4,-3 z" fill="currentColor" fill-opacity=".25"/><circle cx="12" cy="16" r="3" stroke-opacity=".6"/></svg>
-                    <span>D-DCY</span>
+                <button class="act-icon-btn btn-info drone-btn" id="btn-drone-mech" data-dtype="mech" title="人型 (4枠) — 重装・低速。重砲と格闘で自艦を守る" style="display:none">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2.2"/><rect x="8.5" y="8" width="7" height="7" rx="1" fill="currentColor" fill-opacity=".25"/><line x1="8.5" y1="9" x2="5" y2="14"/><line x1="15.5" y1="9" x2="19" y2="7"/><line x1="10" y1="15" x2="9" y2="21"/><line x1="14" y1="15" x2="15" y2="21"/></svg>
+                    <span>人型</span><em class="cg-n"></em>
                 </button>
-                <button class="act-icon-btn btn-info drone-btn" id="btn-drone-scout" title="哨戒ドローン (センサー拡張)" style="display:none;border-color:#33cc88;color:#00ffaa;">
+                <button class="act-icon-btn btn-info drone-btn" id="btn-drone-build" data-dtype="build" title="砲台 (2枠) — 設置・移動不可。近づく敵を撃つ" style="display:none">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="14" r="4" fill="currentColor" fill-opacity=".25"/><line x1="12" y1="14" x2="20" y2="8"/><line x1="6" y1="20" x2="18" y2="20"/></svg>
+                    <span>砲台</span><em class="cg-n"></em>
+                </button>
+                <button class="act-icon-btn btn-info drone-btn" id="btn-drone-scout" data-dtype="scout" title="哨戒機 (1枠) — 前へ出て周囲2200uの敵を探知" style="display:none">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="11" cy="11" r="6"/><line x1="15.5" y1="15.5" x2="20" y2="20"/></svg>
-                    <span>D-SCT</span>
+                    <span>哨戒機</span><em class="cg-n"></em>
                 </button>
-                <button class="act-icon-btn btn-info drone-btn" id="btn-drone-build" title="建設タレット (固定砲台を設置)" style="display:none;border-color:#33cc88;color:#00ffaa;">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="14" r="4" fill="currentColor" fill-opacity=".25"/><line x1="12" y1="14" x2="20" y2="8"/></svg>
-                    <span>D-BLD</span>
+                <button class="act-icon-btn btn-info drone-btn" id="btn-drone-decoy" data-dtype="decoy" title="デコイ (1枠) — 強EMで敵ミサイルを誘引" style="display:none">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12,4 l4,4 l-4,3 l-4,-3 z" fill="currentColor" fill-opacity=".25"/><circle cx="12" cy="16" r="3" stroke-opacity=".6"/></svg>
+                    <span>デコイ</span><em class="cg-n"></em>
                 </button>
-                <!-- §3-7 建設物3種 (carrier専用) -->
-                <button class="act-icon-btn btn-info drone-btn" id="btn-drone-barrier" title="ビームバリア — 周囲の敵を撃退する防衛リング (EM弱)" style="display:none;border-color:#33cc88;color:#00ffaa;">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="8" stroke-opacity=".5"/><line x1="5" y1="12" x2="19" y2="12" stroke-width="2"/><line x1="12" y1="5" x2="12" y2="19" stroke-opacity=".5"/></svg>
-                    <span>D-BAR</span>
-                </button>
-                <button class="act-icon-btn btn-info drone-btn" id="btn-drone-buoy" title="センサーブイ — 広域センサー拡張 (EM放射)" style="display:none;border-color:#33cc88;color:#00ffaa;">
+                <button class="act-icon-btn btn-info drone-btn" id="btn-drone-buoy" data-dtype="buoy" title="センサーブイ (1枠) — 設置。周囲3200uを探知 (EM放射)" style="display:none">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="3" fill="currentColor" fill-opacity=".3"/><circle cx="12" cy="12" r="7" stroke-opacity=".5"/><circle cx="12" cy="12" r="11" stroke-opacity=".25"/></svg>
-                    <span>D-BUY</span>
+                    <span>ブイ</span><em class="cg-n"></em>
                 </button>
-                <button class="act-icon-btn btn-info drone-btn" id="btn-drone-higgs" title="ヒッグス散布装置 — 局所的にヒッグス濃度を高め盾を形成" style="display:none;border-color:#33cc88;color:#00ffaa;">
+                <button class="act-icon-btn btn-info drone-btn" id="btn-drone-barrier" data-dtype="barrier" title="ビームバリア (2枠) — 設置。周囲の敵に周期ダメージ" style="display:none">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="8" stroke-opacity=".5"/><line x1="5" y1="12" x2="19" y2="12" stroke-width="2"/><line x1="12" y1="5" x2="12" y2="19" stroke-opacity=".5"/></svg>
+                    <span>バリア</span><em class="cg-n"></em>
+                </button>
+                <button class="act-icon-btn btn-info drone-btn" id="btn-drone-higgs" data-dtype="higgs" title="ヒッグス散布 (2枠) — 設置。周囲のヒッグスを濃くして身を隠す" style="display:none">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><ellipse cx="12" cy="13" rx="8" ry="4" stroke-opacity=".4"/><ellipse cx="12" cy="10" rx="5" ry="2.5" stroke-opacity=".65"/><ellipse cx="12" cy="7.5" rx="2.5" ry="1.5" fill="currentColor" fill-opacity=".2"/></svg>
-                    <span>D-HGS</span>
+                    <span>散布</span><em class="cg-n"></em>
                 </button>
                 <!-- §3-10 ミサイルモード切替 (全艦種) -->
                 <button class="act-icon-btn common-btn" id="btn-missile-mode" title="ミサイルモード: HON=熱源誘導(デコイ妨害可) / AI=AI追跡(ジャミング耐性・大閃光)" style="display:none;border-color:#ffaa33;color:#ffcc66;">
@@ -274,6 +269,11 @@
                 </button>
             </div>
             <button id="recenter-chip" title="自艦へ戻る (追従ON)" style="display:none">◎ 自艦</button>
+            <!-- 第16弾: ズームボタン (ピンチ・ホイールに加えて。追従中は自艦中心で拡大縮小) -->
+            <div id="zoom-ctl">
+                <button id="zoom-in" onclick="zoomStep(1.6)" title="拡大 (+)">＋</button>
+                <button id="zoom-out" onclick="zoomStep(1 / 1.6)" title="縮小 (−)">－</button>
+            </div>
 
             <!-- GEN配分ドロワー (上帯のGENで開閉) — ゼロサム配分は「時々変える」設定なので常設しない -->
             <div id="gen-drawer" class="hidden">
@@ -441,6 +441,12 @@
                         </div>
 
                         <div class="service-card">
+                            <h3>積み込み・補給</h3>
+                            <p>ドッキングすると積み荷は積み込み計画どおりに補充される。<span id="dock-cargo-sum"></span></p>
+                            <button class="btn btn-info" id="btn-dock-loadout">積み込みを変更</button>
+                        </div>
+
+                        <div class="service-card">
                             <h3>システムアップグレード</h3>
                             <div class="upgrade-grid">
                                 <div class="upgrade-item">
@@ -525,7 +531,7 @@
                             <div class="mode-card" id="mode-card-sd" data-mode="sd">
                                 <img src="assets/icon_ew.png" alt="" class="mode-icon-img">
                                 <div class="mode-name">サーチ&amp;デストロイ</div>
-                                <div class="mode-desc">全ノードをハック、または相手を殲滅</div>
+                                <div class="mode-desc">全コロニーをハック、または相手を殲滅</div>
                             </div>
                         </div>
                     </div>
@@ -551,6 +557,8 @@
                                 <div class="stat-row"><span>隠密</span><div class="stat-bar"><div class="stat-fill" style="width:15%"></div></div></div>
                             </div>
                             <div class="ship-ability">特殊: 3連装同時発射</div>
+                            <div class="ship-cargo" data-type="assault"></div>
+                            <button class="btn btn-small loadout-btn" data-type="assault">積み込みを変更</button>
                             <button class="btn btn-primary ship-select-btn" data-type="assault">選択して出撃</button>
                         </div>
                         <div class="ship-card" id="card-stealth">
@@ -564,6 +572,8 @@
                                 <div class="stat-row"><span>隠密</span><div class="stat-bar"><div class="stat-fill" style="width:95%"></div></div></div>
                             </div>
                             <div class="ship-ability">特殊: 3種ジャミング装備</div>
+                            <div class="ship-cargo" data-type="stealth"></div>
+                            <button class="btn btn-small loadout-btn" data-type="stealth">積み込みを変更</button>
                             <button class="btn btn-primary ship-select-btn" data-type="stealth">選択して出撃</button>
                         </div>
                         <div class="ship-card" id="card-carrier">
@@ -576,7 +586,9 @@
                                 <div class="stat-row"><span>火力</span><div class="stat-bar"><div class="stat-fill" style="width:60%"></div></div></div>
                                 <div class="stat-row"><span>隠密</span><div class="stat-bar"><div class="stat-fill" style="width:30%"></div></div></div>
                             </div>
-                            <div class="ship-ability">特殊: ドローン初期展開済み</div>
+                            <div class="ship-ability">特殊: 戦闘機・砲台・人型など8種を積める</div>
+                            <div class="ship-cargo" data-type="carrier"></div>
+                            <button class="btn btn-small loadout-btn" data-type="carrier">積み込みを変更</button>
                             <button class="btn btn-primary ship-select-btn" data-type="carrier">選択して出撃</button>
                         </div>
                     </div>
@@ -594,7 +606,7 @@
                         <li><b class="bs-3">撃つ</b>推定円が小さいほど当たる (右下の<em>射撃</em>に見込み%)。外れれば「そこには居ない」と分かるが、<em>撃った位置を教える</em>。ソナーは正確だが遠くまで聞かれる。</li>
                         <li><b class="bs-4">消える</b>出力を<em>潜航</em>へ。ヒッグスの霧は音を隠すが、動けば<em>航跡が90秒残り</em>、敵はそれを辿ってくる (HIGGS帯で相手の航跡も見える)。</li>
                     </ol>
-                    <div class="brief-tip">副長は状況を読み上げるだけ — 決めるのはあなた。移動はフィールドを長押し →「移動」。ドラッグで見回し、信号のブリップをタップで追跡。</div>
+                    <div class="brief-tip">自艦の周りのリング: 0°=上・時計回り。ログや副長が言った方位はリング上で光る。青緑の縁(有視界)の内側に入った敵ははっきり見える — 縁の大きさは自艦の居る場所のヒッグス濃度で変わる。<br>ノードの近くに5秒留まると制圧 (資材+聴音局)、コロニーは8秒でハック (修理・資材・敵の方位線)。右列の「搭載」で戦闘機・砲台・人型など — 完成品はすぐ出せ、資材は組み立てに時間とEMがかかる。<br>副長は状況を読み上げるだけ — 決めるのはあなた。移動はフィールドを長押し →「移動」。ドラッグで見回し、ピンチか右下の＋−で拡大縮小。</div>
                     <button class="btn btn-primary" id="btn-brief-ok">了解 — 出撃</button>
                 </div>
             </div>
@@ -608,6 +620,20 @@
                     <div class="db-btns">
                         <button class="btn btn-info" id="btn-db-dock">補給・改修</button>
                         <button class="btn btn-primary" id="btn-db-next">次の狩りへ ▶</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 第16弾: 積み込み — 完成品(すぐ出せる・枠を食う) と 資材(1枠=2個・組み立てが要る) の配分 -->
+            <div id="loadout-overlay" class="hidden">
+                <div class="brief-box lo-box">
+                    <div class="brief-title">積み込み <span id="lo-ship">—</span></div>
+                    <div class="brief-lead">完成品は<b>すぐ出せる</b>が枠を食う。資材は1枠で2個 — 同じ場所でより多く作れるが、<b>組み立てに時間がかかり、その間EMと熱が漏れる</b>。ノードを制圧すると資材を補給できる。</div>
+                    <div id="lo-rows"></div>
+                    <div class="lo-cap"><span class="lo-cap-track"><span id="lo-cap-fill"></span></span><span id="lo-cap-text">0/0枠</span></div>
+                    <div class="db-btns">
+                        <button class="btn btn-small" id="lo-default">既定に戻す</button>
+                        <button class="btn btn-primary" id="lo-ok">決定</button>
                     </div>
                 </div>
             </div>
@@ -680,7 +706,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261024c"></script>
+    <script src="game.js?v=20261024d"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -717,10 +743,10 @@
     (function() {
         var ACTION_GROUPS = {
             scan:  ['btn-scan', 'btn-dir-sonar', 'btn-sig-panel'],
-            ew:    ['btn-hack', 'btn-jam-burst', 'btn-jam-cont', 'btn-jam-pulse', 'btn-decoy'],
+            ew:    ['btn-jam-burst', 'btn-jam-cont', 'btn-jam-pulse', 'btn-drone-decoy', 'btn-drone-scout', 'btn-hack'],
             nav:   ['btn-cancel', 'btn-camera-follow', 'btn-attack-toggle', 'btn-repair-drone', 'btn-game-speed'],
-            drone: ['btn-drone-attack','btn-drone-decoy','btn-drone-scout','btn-drone-build',
-                    'btn-drone-barrier','btn-drone-buoy','btn-drone-higgs', 'btn-hack'],
+            drone: ['btn-drone-attack','btn-drone-mech','btn-drone-build','btn-drone-scout','btn-drone-decoy',
+                    'btn-drone-buoy','btn-drone-barrier','btn-drone-higgs', 'btn-hack'],
         };
         var _apop  = document.getElementById('action-popover');
         var _store = document.getElementById('action-store');

@@ -26,9 +26,9 @@ TODO.md         # 実装タスク台帳（壁打ち企画・実装状況・未�
 HANDOVER.md     # セッションログ・決定経緯・パフォーマンス教訓
 prototype/
 ├── index.html  # UI レイアウト（Homeworld2スタイル、日本語）
-├── game.js     # ゲームロジック全体（約8800行）
+├── game.js     # ゲームロジック全体（約9000行）
 ├── style.css   # SF緑パレット（Orbitronフォント）
-└── assets/     # 生成スプライト（透過PNG）: ship_*/enemy_*/structure_*/node_higgs/fx_beam_main
+└── assets/     # 生成スプライト: ship_*/enemy_*/drone_* は第16弾で黒背景→透過PNG(256px)化。fx_*/particle_*/icon_* は黒背景(加算合成で使う)
 ```
 
 > 旧 `MEMORY.md` / `game_design_v2.md` / `game_requirements.md` / `LESSONS_LEARNED.md` は
@@ -46,6 +46,16 @@ prototype/
 - **副長(XO)バー**: 上帯中央。**助言だけ**（実行ボタンなし）。記録の状態（方位n本・交わらない・推定±R・射程外・外れた・方位一定で接近中）を読み上げる
 - **司令部情報**: 開始時、自機はボス方面の粗い方位（`intelBearing`、最大4分）、敵は「マップ中央付近」の粗い情報（`boss.intelPos`）
 - **メタフロー**: 初回ブリーフィング（作戦要領4ステップ、`darkEchoBriefed`）→ 制圧後に戦闘詳報(`openDebrief`) →「次のセクターへ」or「ドックで改修」
+
+### 第16弾: 見える・測れる・積める（2026-10-24 ✅ → `TODO.md` §3-30）
+- **有視界 = アメーバの内側は100%見える**: 判定と描画は同じ形(`visionReachAt`/`_amoebaNoise`)。縁の内側は暗くしない(ぼかしは外側だけ)・縁を青緑線で表示。大きさは**自艦の居る場所のヒッグス濃度**で伸縮(`computeVisionRadius`)。敵の居る場所の濃度ゲート(旧§3-13 C)は撤去。見えている敵艦・自艦・自分の弾/ドローンは霧の**上**に不透明で描く。音だけのコンタクトは艦影でなく反応マーカー
+- **自艦リング**(`drawShipRing`・画面上で半径92px): 方位目盛り(0°=上・時計回り)/気配/艦首/敵方面/受信信号(タップで追跡)/測量ガイド/被弾方向/接近ミサイル/組み立て進捗。**ログ・副長が口にした「方位n°」をリング上で点灯**(`ringMarkBearing`)。マップ外周の目盛り・レーダー破線円・散らばった方向表示は撤去
+- **ズーム**: ピンチ(2本目がHUD上からでも可・ピンチ後は全指を離すまでパンしない)/右下＋−(×1.6)/ホイール/キー+−。追従中は自艦中心。範囲0.01〜2
+- **敵は撃ったら移動**(`_relocateAfterFire`・艦載機除く): ミサイル/ビーム後=直交方向へ(攻撃型は斜め前へ詰める)最大4秒 / 実弾後=横へ1.5秒。行き先は撃った推定点の方位だけで決める(真の自機位置は使わない)
+- **潜航型**: 最高速×1.45(既定GENで巡航≈126u/s)・加速0.0065・航跡の深さ×0.55(`STEALTH_WAKE_MULT`、敵の潜航型も同じ)
+- **積載(全艦種・オーナー合意値)**: 積載枠 `HOLD_CAP` 空母12/攻撃4/潜航3。完成品の枠=強さ(`DRONE_SPEC.w`: 戦闘機・哨戒機・デコイ・ブイ=1/砲台・バリア・散布=2/人型=4)。資材1枠=2個(`MAT_PER_SLOT`)、組み立ては1機ずつ・時間(4〜20秒)+EM/熱が漏れる・完成で自動展開。資材は完成品が占めていない枠まで。積める種類 `SHIP_DRONES`(空母=全8種/攻撃=戦闘機・砲台/潜航=デコイ・哨戒機)。同時展開上限は従来の`CARGO_CAP`(2/3/6)。積み込み計画は艦種ごとに保存(`gameState.loadout`・ロビー/ドックで編集)、出撃・ドッキングのたびに補充
+- **人型**: 耐久900・速度2.2・90秒。自艦の近くを守り重砲(実弾×1.6)・200u以内で格闘。スプライト未生成(ベクター)
+- **ノード**: 450u以内に5秒留まって制圧(EM漏れ)→150SCR・資材+4・**聴音局**(周囲6000uの方位線を送る`relayListen`)。敵も制圧し返し敵の聴音局になる(対称)。**コロニー**: 600u以内に8秒でハック(EM漏れ)→耐久+25%・資材補充・敵艦の方位線1本。S&Dは全コロニーハックで勝利
 
 ### マップ
 - 円形マップ `MAP_RADIUS=35000`（`FIELD_SIZE`=直径70000）@`game.js:35`
@@ -90,10 +100,10 @@ prototype/
 | 艦種 | HP | 速度 | 固有 | 弱点 |
 |---|---|---|---|---|
 | 攻撃型 Assault | 3500 | ×0.58 | 複数武器同時発射（kinetic3連装） | シグネチャ大・旋回時速度低下大 |
-| 潜航型 Stealth | 700 | ×1.05 | ジャミング3種✅ + デコイ射出✅(ミサイル誘引) | HP極低・失敗即死 |
-| 空母型 Carrier | 2500 | ×0.38 | ドローン4種✅+建設物4種✅ | 加速/旋回最鈍・建設中は停止＝最大脆弱 |
+| 潜航型 Stealth | 700 | ×1.45 | ジャミング3種✅ + デコイ・哨戒機(積載3枠) | HP極低・失敗即死 |
+| 空母型 Carrier | 2500 | ×0.38 | 積載12枠: 戦闘機・人型・砲台など8種(第16弾) | 加速/旋回最鈍・設置中は停止＝最大脆弱 |
 
-> 巡航速度は `shipCruiseSpeed(cls, enginePct, gain)` = enginePct/100×gain×`SPEED_BASE`(2.4)×`SHIP_MAX_SPEED_MULT`×`MOVE_SPEED_MULT`（自機/敵共用）。速度倍率は `SHIP_MAX_SPEED_MULT` による最高速倍率（慣性あり・旋回中はさらに低下）。加速レートは `SHIP_ACCEL_RATE`（carrier=0.003 / assault=0.008 / stealth=0.016）。
+> 巡航速度は `shipCruiseSpeed(cls, enginePct, gain)` = enginePct/100×gain×`SPEED_BASE`(2.4)×`SHIP_MAX_SPEED_MULT`×`MOVE_SPEED_MULT`（自機。敵は交戦時に別式 `ENEMY_COMBAT.speedMult`）。速度倍率は `SHIP_MAX_SPEED_MULT` による最高速倍率（慣性あり・旋回中はさらに低下）。加速レートは `SHIP_ACCEL_RATE`（carrier=0.00075 / assault=0.002 / stealth=0.0065）。攻撃型は「戦闘機・砲台」を積載4枠で持つ(第16弾)
 
 ### 武器3種
 
@@ -136,6 +146,7 @@ prototype/
 - **手負いの獲物**: HP20%未満で冷却材漏洩（heatSig下限0.45・熱trail滴下）。自機/敵対称
 
 ### 自機リングHUD（2026-07-04 第8弾 / 2026-07-05 第9弾で気配リング是正 ✅ → `TODO.md` §3-22,§3-23）
+> ⚠️ 第16弾で**画面上の自艦リング1本**(`drawShipRing`)に統合。気配・受信信号・被弾方向・ミサイル・敵方面・測量ガイド・方位目盛りはすべてそこ。下記の世界座標のリング/レーダー破線円は撤去済み
 - ~~シグネチャハロー~~: 第15弾で撤去（左列ミキサーの細バー「自艦」と重複）
 - **気配リング**(中・第9弾でMGS4式に是正): 敵がプレイヤーを視認している強さ(`contactFreshness`×aiState)を敵方位に波で表現。背後から強く見られれば背後が大きく波打つ。沈黙で見られてなければ静か(対称)。**+受信シグネチャのブリップ、トラッキング中はLCKで識別**
 - **レーダーリング**(外): 地形色反映(ヒッグス青→赤/デブリ灰/嵐紫/熱雲橙)+サージ伸縮+損傷明滅
@@ -191,12 +202,13 @@ prototype/
 
 ### タイトル画面・UI（2026-07-04 第4弾 ✅ → `TODO.md` §3-18）
 - **タイトルヒーロー**: Higgsfield生成キーアート `assets/title_keyart.jpg`(640px/33KB) + DARK ECHOロゴ(Orbitron+グロー) + ソナーリングCSSアニメ + タグライン
-- **艦種カード**: 実スプライト表示（`mix-blend-mode: screen` で黒背景PNGをDOM透過）。敵艦種ボタンにもサムネイル
+- **艦種カード**: 実スプライト表示（第16弾で透過PNG化したため合成なし `mix-blend-mode: normal`）。敵艦種ボタンにもサムネイル
 - **被弾方向インジケータ**: 被弾方位を自機周りの赤アークで1.25s表示（`playerHitDirs[]`）
 - **ボタン押下フィードバック**: 全UIボタンに `:active` スケール+輝度CSS
 
 ### 敵AI設計原則
 - **センサー制約型（全知禁止）**: プレイヤーと同じセンサールールで情報収集。直接位置は知らず、検知から行動を予測
+- **撃ったら移動**（第16弾）: 全艦種(艦載機除く)。発砲後の移動先も推定方位だけから決める。敵が制圧したノードは敵の聴音局
 - **受信モデル（第13弾）**: `ENEMY_PASSIVE_RANGE=11000`×(1-ヒッグス×0.3)×(1+sector×0.03)×(1-ジャム)、閾値×0.5。推定位置に誤差 `(1-q)*dist*0.25+50` + EMA平滑。推定位置へのミサイル射撃は `ENEMY_MISSILE_ENGAGE=2100` 以内
 - 敵空母のファイターは有限（`droneStock=6+sector`、燃料3600f）
 - 4状態: lurking（潜伏）/ gathering（収集）/ hunting（追跡）/ combat（射程内発砲→再配置）✅
@@ -204,7 +216,8 @@ prototype/
 - `predictedBehavior` 適応戦略（収集→先回り/チャージ→回避/実弾→カイト&長射程）も**実装済** ✅（`TODO.md` §2-2）
 
 ### 構造物
-- **colony**: S&Dハック目標（全ハックで勝利）/ **derelict**: 難破船。EWハックで偽コンタクト発生
+- **colony**: 600u以内に8秒留まってハック → 修理・資材・敵の方位線（S&Dは全ハックで勝利）/ **derelict**: 難破船。EWハックで偽コンタクト発生
+- **ノード**(`resourceNodes[]`): 450u以内に5秒で制圧 → 資材・聴音局。`owner` = null/'player'/'enemy'（第16弾）
 
 ## 主要グローバル変数（game.js）
 
@@ -220,17 +233,20 @@ prototype/
 | `_signalAnalysis` | object | sourceId → {obs:[方位記録], fix:{x,y,r,chi2}, ping, misses, base}（第15弾: 真値は持たない） |
 | `wakeRibbons` / `higgsCurrent` | array / object | ヒッグス航跡 {owner, pts:[{x,y,f,s}]} / 霧の流れ(u/frame) |
 | `powerStance` | string | 'silent'(潜航) \| 'cruise'(巡航) \| 'flank'(全速) |
+| `cargo` | object | {stock:{種類:完成品数}, mat:資材の個数, asm:{type,t,total,ready}\|null}（第16弾の積み荷） |
+| `HOLD_CAP` / `DRONE_SPEC` / `SHIP_DRONES` / `DEFAULT_LOADOUT` | const | 積載枠 / 搭載物の仕様(w=枠, mat=資材, build=組立frame, life, hp, placed) / 艦種ごとに積める種類 / 既定の積み方 |
+| `_capturing` | object | 今まさに制圧/ハックしている対象 {kind:'node'\|'colony', obj, p}（EM漏れ・副長・表示用） |
 | `demoMode` | bool | デモモード（霧解除・全敵可視・敵AI通常動作） |
 | `_orientPaused` | bool | 縦持ち（タッチ端末）中は `stepWorld` を止める |
 | `higgsWakes[]` | array | {x, y, intensity, life} 移動軌跡 |
 | `passiveBearings[]` | array | パッシブ方位ウェッジ（計測位置アンカー、三角測量用） |
-| `resourceNodes[]` | array | ヒッグスノード |
+| `resourceNodes[]` | array | ヒッグスノード {x,y,owner,capP,identified,knownLost,...}（第16弾: 消えない・制圧で持ち主が変わる） |
 | `structures[]` | array | Structure('colony'\|'derelict') |
 | `camera` | object | {x, y, zoom, vx, vy} |
 | `MAP_RADIUS` / `FIELD_SIZE` | const | 35000 / 70000 |
 | `ENGINE_TYPES` | const | thermonuclear/pulse/higgs/photon |
-| `SHIP_MAX_SPEED_MULT` | const | {assault:0.58, stealth:1.05, carrier:0.38} 最高速倍率 |
-| `SHIP_ACCEL_RATE` | const | {carrier:0.003, assault:0.008, stealth:0.016} 加速レート |
+| `SHIP_MAX_SPEED_MULT` | const | {assault:0.58, stealth:1.45, carrier:0.38} 最高速倍率（第16弾で潜航型1.05→1.45） |
+| `SHIP_ACCEL_RATE` | const | {carrier:0.00075, assault:0.002, stealth:0.0065} 加速レート |
 | `SHIP_TURN_SLOW` | const | {carrier:0.78, assault:0.52, stealth:0.22} 旋回中速度低下率 |
 | `PLAYER_TURN_RATES` | const | {assault:0.010, stealth:0.015, carrier:0.004} 旋回レート(rad/frame) |
 | `WEAPON_FIRE_ARC` | const | {kinetic:π×5/6, missile:π/4, beam:π/18} 射角（半角ラジアン） |
@@ -247,6 +263,15 @@ prototype/
 | `trackNextSignal()` | 受信中の信号を順に追跡ロック（TRACK） |
 | `solveFix(sa)` / `recordMiss(sid,m)` | 方位の記録から推定位置と幅Rを解く（真値を参照しない）/ 外れを否定の観測として追加 |
 | `playerSelfNoise()` / `shipSelfNoise(e)` | 自艦ノイズ 0..1（速度から） |
+| `addBearingObs(sid,ox,oy,ang,σ,str,col)` | 方位の記録を1本足す（自艦/聴音局/コロニー共通。同じ場所の再観測はまとめる） |
+| `visionReachAt(ang)` / `drawFogOfWar` | 有視界アメーバの縁までの距離（判定と描画で共通） |
+| `drawShipRing(ctx)` / `ringMarkBearing(deg,col)` | 自艦リング / ログ・副長が言った方位をリングで点灯 |
+| `zoomAt(z,cx,cy)` / `zoomStep(m)` | ズーム（追従中は自艦中心）/ ボタンの滑らかなズーム |
+| `deployDrone(type)` / `updateCargo()` / `resetCargo()` | 搭載物の展開(完成品→即/資材→組み立て) / 組み立て進行 / 積み込み計画どおりに積む |
+| `openLoadout(ship, fromDock)` | 積み込み画面（ロビー/ドック） |
+| `updateNodesAndColonies()` / `relayListen()` / `enemyCaptureNode(e,n)` | ノード制圧・コロニーハック / 聴音局の方位 / 敵の制圧 |
+| `Ship._relocateAfterFire(far, aimAng, retreat)` | 敵の「撃ったら移動」 |
+| `drawOwnOrdnanceMarkers(ctx)` | 霧の中の自分のミサイルの印 |
 | `setStance(st)` / `cycleStance()` | 出力スタンス 潜航/巡航/全速 |
 | `recordWake` / `updateWakes` / `readWakeClue(e)` / `drawWakes` | 航跡の記録・漂流 / 敵の航跡読み / 描画 |
 | `missRevealsShooter()` / `pingHeardBy()` | 外した射撃・探信音で敵が射手位置を掴む |
@@ -260,14 +285,14 @@ prototype/
 | `requestLandscape()` / `toggleFullscreen()` | 全画面+横向きロック要求 / 全画面切替 |
 | `worldToScreen(x,y)` | ワールド→スクリーン座標変換 |
 | `drawHUDOverlay(ctx)` | スクリーン空間HUD描画 |
-| `computeVisionRadius()` @747 | 有視界半径（ヒッグス濃度連動） |
-| `updateVisionLockOn()` @872 | 有視界ロックオン |
-| `checkPassiveDetection()` @5288 | パッシブ探知（2秒毎、方位の記録を追加） |
-| `fireOmniSonar()` @5778 | アクティブ/指向性ソナー（CD15秒） |
+| `computeVisionRadius()` @782 | 有視界半径（ヒッグス濃度連動） |
+| `updateVisionLockOn()` @885 | 有視界ロックオン |
+| `checkPassiveDetection()` @5408 | パッシブ探知（1秒毎、方位の記録を追加。聴音局の方位もここで） |
+| `fireOmniSonar()` @5779 | アクティブ/指向性ソナー（CD15秒） |
 | `drawPassiveBearings()` | パッシブ方位ウェッジ描画（`passiveBearings[]`） |
 | `getHiggsIntensity(x,y)` | ヒッグス濃度（フレームキャッシュ付） |
-| `buyUpgrade(type)` @8837 | アップグレード購入（engine/weapons/armor/sensor Lv0-3） |
-| `generateSector()` @4265 | セクター生成 |
+| `buyUpgrade(type)` @8883 | アップグレード購入（engine/weapons/armor/sensor Lv0-3） |
+| `generateSector()` @4219 | セクター生成 |
 | `saveGame()` / `loadGame()` | localStorage 永続化 |
 | `toggleDemoMode()` | デモモードON/OFF切替（メニュー内`btn-demo-mode`から呼出） |
 
