@@ -11,7 +11,7 @@
     <title>Dark Echo: Tactical Space RTS</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23000' stroke='%2300ff88' stroke-width='2'/><circle cx='16' cy='16' r='6' fill='none' stroke='%2300ff88' stroke-width='1.5'/><line x1='16' y1='2' x2='16' y2='30' stroke='%2300ff88' stroke-width='1' opacity='0.4'/><line x1='2' y1='16' x2='30' y2='16' stroke='%2300ff88' stroke-width='1' opacity='0.4'/></svg>" type="image/svg+xml">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261025b">
+    <link rel="stylesheet" href="style.css?v=20261025c">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -418,6 +418,12 @@
                 </div>
             </div>
 
+            <!-- 第19弾: COM思考ログ (COM対戦デモ時のみ・自機COM=水色 / 敵COM=橙)。見出しタップで広げる -->
+            <div id="think-panel">
+                <div id="think-head"><span class="tk-title">COM思考ログ</span> <span class="tk-p">■自機</span> <span class="tk-e">■敵</span> <span id="think-who"></span></div>
+                <div id="think-log"></div>
+            </div>
+
             <div id="log-panel" class="compact">
                 <div id="log-header">
                     <span>SYSTEM LOG</span>
@@ -617,6 +623,10 @@
                             <button class="btn btn-primary ship-select-btn" data-type="carrier">選択して出撃</button>
                         </div>
                     </div>
+                    <!-- 第19弾: COM対戦デモ (自機もCOMが操作する観戦・調整用) -->
+                    <div class="com-entry">
+                        <button class="btn btn-small" id="btn-com-demo">COM対戦デモ ▶ <span>自機もCOMが操作・性格を選んで観戦</span></button>
+                    </div>
                 </div>
             </div>
 
@@ -663,6 +673,23 @@
                 </div>
             </div>
 
+            <!-- 第19弾: COM対戦デモの設定 — 双方の艦種・性格・表示 -->
+            <div id="com-overlay" class="hidden">
+                <div class="brief-box com-box">
+                    <div class="brief-title">COM対戦デモ <span>COM vs COM</span></div>
+                    <div class="brief-lead">自機も敵もCOMが操作する。どちらも<b>相手は見えない前提</b>で、方位と記録だけから判断する。性格を変えて挙動を見比べるための観戦モード (戦歴・クレジットには残らない)。</div>
+                    <div class="com-cols">
+                        <div class="com-side" data-side="p"></div>
+                        <div class="com-side" data-side="e"></div>
+                    </div>
+                    <div class="com-opts" id="com-opts"></div>
+                    <div class="db-btns">
+                        <button class="btn btn-small" id="com-cancel">戻る</button>
+                        <button class="btn btn-primary" id="com-start">COM対戦を開始 ▶</button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Game Over Overlay -->
             <div id="game-over-overlay" class="hidden">
                 <div class="game-over-box">
@@ -691,7 +718,9 @@
                 </div>
                 <div class="mm-btns">
                     <button class="btn btn-small" id="mm-briefing" onclick="showBriefing(true)">作戦要領 (遊び方)</button>
-                    <button class="btn btn-small" id="btn-demo-mode" onclick="toggleDemoMode()">DEMO: OFF</button>
+                    <button class="btn btn-small" id="btn-higgs-view" onclick="toggleHiggsView()">ヒッグス表示: ON</button>
+                    <button class="btn btn-small com-only" id="btn-think-log" onclick="toggleThinkLog()">思考ログ: ON</button>
+                    <button class="btn btn-small com-only" id="btn-com-exit" onclick="exitComDemo()">COM対戦を終えてロビーへ</button>
                     <button class="btn btn-small" id="mm-fullscreen" onclick="toggleFullscreen()">全画面 切替</button>
                     <button class="btn btn-small" id="mm-fps" onclick="toggleFpsDisplay()">FPS表示: OFF</button>
                     <button class="btn btn-primary btn-small" id="mm-save">データ保存</button>
@@ -731,7 +760,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261025b"></script>
+    <script src="game.js?v=20261025c"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {

@@ -54,7 +54,14 @@ let omniSonarCooldown = 0;
 let dirSonarCooldown = 0;
 let passiveAlertTimer = 0;
 let passiveCheckTimer = 0;
-let demoMode = false; // デモモード: フォグなし・全エンティティ可視
+// 第19弾: ヒッグス表示OFF (見た目だけ) — 霧の暗幕を外し、相手の艦影・航跡も全部描く観戦用の表示。
+// 旧DEMOモードと違い、探知・ロック・COMの判断には一切影響しない (自機も敵も相手が見えない前提のまま)
+let higgsViewOff = false;
+// ═══ 第19弾: COM対戦デモ — 自機もCOMが操作する観戦モード (性格は自機/敵それぞれ設定) ═══
+let comDemo = false;     // 自機COMが操作中
+let thinkLogOn = true;   // 思考ログ欄を出すか
+let comCfg = null;       // { ship, enemy, mode, pp, ep, pPreset, ePreset, higgsView, think } (ロビーの設定画面で決める)
+let _com = null;         // 自機COMの作業メモ (startGame/generateSector でリセット)
 // パッシブ方位ウェッジ: 計測時のワールド位置にアンカーした方位扇形。
 // 強信号=狭い確信、弱信号=広いボケ。移動して2回計測→三角測量で敵位置が絞れる。
 // { ox, oy, angle, halfWidth, range, quality, color, life, maxLife }
@@ -395,6 +402,7 @@ function loadGame() {
     }
 }
 function saveGame() {
+    if (comDemo) return; // 第19弾: COM対戦デモは保存しない (戦歴・クレジットに残さない。ロビーへ戻る時に読み直す)
     localStorage.setItem('darkEchoSave', JSON.stringify(gameState));
     logMessage('SYSTEM: Game state saved to local storage.', 'system-msg');
 }
@@ -852,7 +860,7 @@ function _amoebaPath(ctx, pts) {
 
 function drawFogOfWar(ctx) {
     if (!player || player.hp <= 0) return;
-    if (demoMode) return; // デモモード: ヒッグス暗幕解除
+    if (higgsViewOff) return; // ヒッグス表示OFF: 暗幕を描かない (見た目だけ)
 
     playerVisionRadius = computeVisionRadius();
     const cx = player.x;
@@ -917,7 +925,6 @@ function drawFogOfWar(ctx) {
 // 視野内の敵を自動ロックオン (毎フレーム呼び出し)
 function updateVisionLockOn() {
     if (!player || player.hp <= 0) return;
-    if (demoMode) { enemies.forEach(e => { e.visible = true; e.inVision = true; }); return; }
 
     // 視野半径をヒッグス濃度に応じて毎フレーム更新 (描画OFFでもロックオン判定が正しく動く)
     playerVisionRadius = computeVisionRadius();
@@ -1348,7 +1355,7 @@ canvas.addEventListener('mousedown', (e) => {
 
 // Double-click to set waypoint
 canvas.addEventListener('dblclick', (e) => {
-    if (!player || player.hp <= 0) return;
+    if (!player || player.hp <= 0 || comDemo) return; // 第19弾: COM対戦デモ中は自機COMが操艦する
     if (dirSonarPendingFire) return; // sonar takes priority
     const { x: worldX, y: worldY } = screenToWorld(e.clientX, e.clientY);
     const clickedEnemy = enemies.find(en => en.visible && Math.hypot(en.x - worldX, en.y - worldY) < en.radius * 2);
@@ -1385,7 +1392,7 @@ canvas.addEventListener('wheel', e => {
 }, { passive: false });
 canvas.addEventListener('contextmenu', e => {
     e.preventDefault();
-    if (!player || player.hp <= 0 || !gameLoopRunning) return;
+    if (!player || player.hp <= 0 || !gameLoopRunning || comDemo) return;
     if (player._weaponJamTimer > 0) { logMessage('WEP: 火器管制ダウン — 復旧まで発砲不能', 'warning-msg'); return; }
     const wType = document.getElementById('weapon-select')?.value;
     if (wType !== 'missile' && wType !== 'beam') return;
@@ -2527,6 +2534,7 @@ class Ship {
         const spot = far ? findHidingSpot(tx, ty, 900) : clampToMapCircle(tx, ty, 600);
         this.setTarget(spot.x, spot.y);
         this.postFireCooldown = far ? 240 : 90;
+        if (comDemo && this.type !== 'fighter') comThinkEvent('e', '撃った → 位置を変える (' + _dirTxt(this.x, this.y, spot.x, spot.y) + (brawl ? '・斜め前へ詰めながら' : retreat ? '・少し下がりながら' : '') + ')', 'e' + this.uid);
         // 長い再配置で霧へ消える時だけ、相手(自機)がその艦を掴んでいれば知らせる (掴んでいない情報は出さない)
         if (far && (this.inVision || this.contactLife > 0) && _frameCount - (this._relocLog || -9999) > 900) {
             this._relocLog = _frameCount;
@@ -3028,6 +3036,7 @@ class Ship {
                 if (clue) {
                     this.playerLastKnownPos = { x: clue.x, y: clue.y, vx: 0, vy: 0 };
                     this.contactFreshness = 0.4;
+                    if (comDemo) comThinkEvent('e', '霧に残った航跡を見つけた → 辿る (' + _dirTxt(this.x, this.y, clue.x, clue.y) + ')', 'e' + this.uid);
                     if (this.aiState === 'lurking' || this.aiState === 'gathering') { this.aiState = 'hunting'; this.huntTimer = 900; }
                 }
             }
@@ -3074,12 +3083,14 @@ class Ship {
                         this.lurking = false;
                         this.detectionState = 'alerted';
                         if (!this.alertLogged) { this.alertLogged = true; logMessage(`WARN: 敵艦(${personalityTag(this.personality || {})}個体)があなたのシグネチャを捕捉。迎撃態勢に入ります。`, 'warning-msg'); }
+                        if (comDemo && this.type !== 'fighter') comThinkEvent('e', (_hardDetect ? '至近で直接掴んだ' : _noiseSrc ? '強い音を捕捉 (実はノイズメーカー)' : _relayErr >= 0 ? '聴音局が自機の音を拾った' : '自機の' + ({ heat: '熱', optic: '光', em: 'EM', higgs: '航跡' }[domSig] || '') + 'を捕捉') + ' (推定' + Math.round(_distBelief / 100) * 100 + 'u) → 交戦', 'e' + this.uid);
                     }
                 } else if (this.aiState === 'lurking' || this.aiState === 'gathering') {
                     this.aiState = 'hunting';
                     this.gatherTarget = null;
                     this.lurking = false;
                     logMessage(`SENSOR: 敵艦が索敵パターンに移行。接近警戒。`, 'warning-msg');
+                    if (comDemo && this.type !== 'fighter') comThinkEvent('e', '遠くに微かな反応 (推定' + Math.round(_distBelief / 100) * 100 + 'u) → 索敵へ', 'e' + this.uid);
                 }
             }
 
@@ -3105,6 +3116,7 @@ class Ship {
                     enemies.push(drone);
                     this.droneSpawnTimer = _engaged ? (380 + Math.floor(Math.random() * 320)) : (700 + Math.floor(Math.random() * 500));
                     logMessage('TACTICAL: 敵空母がファイタードローンを射出！', 'warning-msg');
+                    if (comDemo) comThinkEvent('e', '戦闘機を射出 → 推定位置 (' + _dirTxt(this.x, this.y, _bel.x, _bel.y) + ') へ向かわせる (残り' + this.droneStock + '機)', 'e' + this.uid);
                 }
             }
 
@@ -3139,6 +3151,7 @@ class Ship {
                     }
                     if (this._hideT <= 0) {
                         this._hideT = 0; this._hiding = false; this._hideCD = 3600;
+                        if (comDemo) comThinkEvent('e', '潜伏を終える (耐久' + _pct(this.hp / this.maxHp) + ') → 狩りへ戻る', 'e' + this.uid);
                         this.aiState = 'hunting'; this.huntTimer = 900; this.lurking = false;
                     }
                     _hideActive = true; // 他のAIは止める (シグネチャの計算はこの後も毎フレーム行う)
@@ -3178,6 +3191,10 @@ class Ship {
                 // 第15弾: 相手の方が明らかに頑丈なら殴り合わない — 間合いを取り、推定位置へ撃っては位置を変える (ジ・エンド戦)。
                 // 旧: 攻撃型は常に近接で殴り続け、待ち伏せしているだけの自機(耐久3500)に撃ち負けていた (放置が2戦2勝)
                 const outmatched = !killInstinct && player && player.hp > this.hp * 2.3;
+                // 第19弾: 思考ログ用に今の判断材料を控える (COM対戦デモで表示。挙動には影響しない)
+                const _ct = this._cThink || (this._cThink = {});
+                _ct.thr = retreatThresh; _ct.kill = killInstinct; _ct.out = outmatched; _ct.dist = distToBelief;
+                if (desperate) _ct.mode = 'retreat';
                 // 撤退中の自己修復: ノードに触れたら回収して回復 (経済↔生存の結節点)
                 if (desperate) {
                     if (!this._desperateLogged) { logMessage('SENSOR: 敵艦が損傷により後退 — 回復行動に移行。', 'system-msg'); this._desperateLogged = true; }
@@ -3185,7 +3202,7 @@ class Ship {
                     if (!(this._hideCD > 0) && this.type !== 'fighter') {
                         const lkC = this.playerLastKnownPos;
                         const cs = findCoverSpot(this.x, this.y, ENEMY_HIDE_SEARCH, lkC ? Math.atan2(lkC.y - this.y, lkC.x - this.x) : null);
-                        if (cs) { this._hideSpot = cs; this._hideT = ENEMY_HIDE_TIME; this._hiding = false; }
+                        if (cs) { this._hideSpot = cs; this._hideT = ENEMY_HIDE_TIME; this._hiding = false; if (comDemo) comThinkEvent('e', '耐久' + _pct(hpFrac) + ' < 退き際' + _pct(retreatThresh) + ' → 近くの' + (cs.kind === 'fog' ? '濃い霧' : '岩礁帯') + 'に潜んで修復する', 'e' + this.uid); }
                     }
                     for (const n of resourceNodes) {
                         if (!_nodeUsefulForEnemy(n)) continue;
@@ -3253,6 +3270,7 @@ class Ship {
                     const sigLabel = { kinetic: '銃口炎[光学]', missile: '推進炎[熱源+EM]', beam: 'EMパルス[EM+光学]' };
                     effects.push({ x: this.x, y: this.y, r: 0, maxR: 200, a: 0.9, c: '#ff4d4d', type: 'circle' });
                     logMessage(`WARNING: 敵艦発砲 — ${sigLabel[wType]||''}シグネチャ捕捉。`, 'warning-msg');
+                    if (comDemo) comThinkEvent('e', '推定点へ' + _WPN_JP[wType] + 'を撃つ (' + Math.round(distToBelief / 100) * 100 + 'u先・確信' + _pct(this.contactFreshness) + (desperate ? '・後退しながら' : '') + ')', 'e' + this.uid);
                     // 第16弾: 撃ったら必ず位置を変える (全艦種・ファイター除く)。撃てば位置を教えるのは自機と同じ —
                     // 撃った場所に留まらない。ミサイル/ビーム=推定方位と直交する方向へ1800〜3000u (霧を選ぶ) /
                     // 実弾=近接戦は続けたまま横へ600〜900u跳ぶ。旧: 間合いを取る艦種だけで、攻撃型は撃った場所で殴り続けた
@@ -3266,6 +3284,8 @@ class Ship {
                     if (killInstinct) { standoffDist *= 0.5; fleeCloseFrac *= 0.35; }
                     if (outmatched) { standoffDist = Math.max(standoffDist, ENEMY_MISSILE_ENGAGE * 0.9); fleeCloseFrac = Math.max(fleeCloseFrac, 1.4); }
                     let moveAngle = Math.atan2(aimY - this.y, aimX - this.x); // 既定: 信念点へ前進
+                    _ct.standoff = standoffDist;
+                    _ct.mode = desperate ? 'retreat' : distToBelief > standoffDist ? 'approach' : (fleeCloseFrac > 0 && distToBelief < fireRange * fleeCloseFrac) ? 'flee' : (prof.kite && distToBelief < standoffDist * 0.8) ? 'kite' : 'hold';
                     let doMove = false;
                     if (desperate) {
                         // 損傷大: 近くにノードがあれば回復に向かう、なければ獲物から離脱
@@ -3306,7 +3326,7 @@ class Ship {
                 // シグネチャ喪失 → lurking
                 if (!playerSigDetected) {
                     this.huntTimer = Math.max(0, this.huntTimer - 1);
-                    if (this.huntTimer <= 0) { this.aiState = 'lurking'; this.lurking = true; this.alertLogged = false; if (_frameCount > (this._alertUntil || 0)) this.detectionState = 'unaware'; }
+                    if (this.huntTimer <= 0) { this.aiState = 'lurking'; this.lurking = true; this.alertLogged = false; if (_frameCount > (this._alertUntil || 0)) this.detectionState = 'unaware'; if (comDemo && this.type !== 'fighter') comThinkEvent('e', '自機の音が途絶えた → 交戦を解いて潜伏へ (残り香を追う)', 'e' + this.uid); }
                 } else {
                     this.huntTimer = Math.min(600, this.huntTimer + 2);
                 }
@@ -3322,6 +3342,7 @@ class Ship {
                     this._pingCD = ENEMY_PING_CD_MIN + Math.random() * ENEMY_PING_CD_VAR
                                  + ((this.personality && this.personality.stealth) || 0.3) * 900;
                     firePingFromEnemy(this);
+                    if (comDemo) comThinkEvent('e', '接触が薄い (確信' + _pct(this.contactFreshness) + ') → 探信を打つ (位置を晒すが正確な位置が取れる)', 'e' + this.uid);
                 }
                 this.speed = Math.min(1.6, 0.8 + gameState.sector * 0.06) * _huntProf.speedMult * (this.upgSpeed || 1) * this.terrainSpeedMult() * gameSpeedFactor * MOVE_SPEED_MULT;
                 if (this.huntTimer > 0) this.huntTimer--;
@@ -3414,6 +3435,7 @@ class Ship {
                         // 貪欲な個体ほど積極的にノードを奪取しに行く (性格による行動分岐)
                         this.aiState = 'gathering';
                         logMessage('SENSOR: 敵艦がリソース収集パターンに移行。', 'system-msg');
+                        if (comDemo && this.type !== 'fighter') comThinkEvent('e', '気配なし・貪欲さ' + _pct(_pers.greed) + ' → ノードを取りに行く', 'e' + this.uid);
                     } else if (this.predictedBehavior === 'silent' && Math.random() < 0.014) {
                         // silent推定（接触喪失）: 最終既知位置周辺のヒッグス濃密域を集中捜索
                         const _lkp = this.playerLastKnownPos;
@@ -3557,7 +3579,7 @@ class Ship {
     draw(ctx) {
         // 第16弾: 敵の艦影は「見えている」時だけ描く (有視界の内側 / 発砲の閃光 / 崩壊中) — 見えたら不透明100%。
         // 音で掴んだだけのコンタクトは艦影ではなく drawSensorTrace の反応マーカーで示す (旧: 推定位置に半透明の艦影を重ねていた)
-        if (!this.isPlayer && !(this.inVision || this.fireFlashTimer > 0 || this._dying)) { this._drawLockReticle(ctx); return; }
+        if (!this.isPlayer && !(this.inVision || this.fireFlashTimer > 0 || this._dying || higgsViewOff)) { this._drawLockReticle(ctx); return; }
         ctx.save();
         ctx.translate(this.x, this.y);
         ctx.rotate(this.angle);
@@ -4640,6 +4662,14 @@ function generateSector() {
     boss.hp = boss.maxHp;
     boss.lurking = true;
     enemies.push(boss);
+    // 第19弾: COM対戦デモ — 敵の性格を設定どおりに (ランダムは試合ごとに艦種の範囲で振る)。自機COMの性格も試合ごとに決め直す
+    if (comDemo && comCfg) {
+        boss.personality = comPersonalityFor('e');
+        _com = comNewMemo(); _thinkLast = {};
+        const _tl = document.getElementById('think-log'); if (_tl) _tl.textContent = '';
+        const _th = document.getElementById('think-who');
+        if (_th) _th.textContent = '自機COM ' + SHIP_JP[comCfg.ship] + ' [' + persLabel(_com.pp) + ']  vs  敵COM ' + SHIP_JP[comCfg.enemy] + ' [' + persLabel(boss.personality) + ']';
+    }
     // 第13弾: 開戦時の司令部情報 — 互いに「大まかな方面」だけを知った状態で狩りが始まる。
     // (旧: 互いに一切の手掛かりが無く、シミュレーションでは10分間接触ゼロのまま終わることもあった)
     {
@@ -4732,15 +4762,16 @@ function generateSector() {
     logMessage(`SYSTEM: ワープ完了。セクター ${gameState.sector} に到着しました [${shipLabel[gameState.shipType] || '不明'}]。環境マッピング中...`, 'system-msg');
 }
 
-function toggleDemoMode() {
-    demoMode = !demoMode;
-    const btn = document.getElementById('btn-demo-mode');
+// 第19弾: ヒッグス表示のオン・オフ (旧DEMOモードを置き換え。見た目だけで、探知・ロック・COMの判断には影響しない)
+function toggleHiggsView(off) {
+    higgsViewOff = off === undefined ? !higgsViewOff : !!off;
+    const btn = document.getElementById('btn-higgs-view');
     if (btn) {
-        btn.style.borderColor = demoMode ? '#ffff00' : '';
-        btn.style.color = demoMode ? '#ffff00' : '';
-        btn.textContent = demoMode ? 'DEMO: ON' : 'DEMO: OFF';
+        btn.textContent = higgsViewOff ? 'ヒッグス表示: OFF' : 'ヒッグス表示: ON';
+        btn.classList.toggle('btn-warn-on', higgsViewOff);
     }
-    logMessage(demoMode ? 'DEMO MODE: 全視界・ヒッグス暗幕解除 (AI挙動は通常と同一)' : 'DEMO MODE: 解除', 'system-msg');
+    if (comCfg) comCfg.higgsView = !higgsViewOff;
+    logMessage(higgsViewOff ? 'VIEW: ヒッグス表示OFF — 霧を外して全艦を表示 (見た目だけ。艦の探知・判断は変わらない)' : 'VIEW: ヒッグス表示ON', 'system-msg');
 }
 
 function updateLandmarkBanner() { /* ランドマーク距離表示廃止 */ }
@@ -4788,7 +4819,7 @@ function startGame(shipType) {
     }
     let _briefed = false;
     try { _briefed = localStorage.getItem('darkEchoBriefed') === '1'; } catch (e) {}
-    if (!_briefed) showBriefing();
+    if (!_briefed && !comDemo) showBriefing();
 }
 
 // ゲームモード選択ボタン
@@ -6042,6 +6073,7 @@ function hideLongPressMenu() {
 function lpmSelectMove() {
     hideLongPressMenu();
     if (!_lpmWorld || !player) return;
+    if (comDemo) { logMessage('COM対戦デモ中は自機COMが操艦する (観戦のみ)', 'system-msg'); return; }
     player.targetEntity = null;
     player.setTarget(_lpmWorld.x, _lpmWorld.y);
     createClickEffect(_lpmWorld.x, _lpmWorld.y, '#00ffaa');
@@ -6824,7 +6856,7 @@ function drawMinimap() {
     // Enemies / センサー痕跡 (完全ロック=実位置 / センサー検知=推定位置を精度色で)
     enemies.forEach(e => {
         if (e.hp <= 0) return;
-        if (e.inVision) {
+        if (e.inVision || higgsViewOff) { // ヒッグス表示OFF(観戦)では真の位置も点で出す
             minimapCtx.fillStyle = '#ff4d4d';
             minimapCtx.beginPath(); minimapCtx.arc(e.x * mmScale + offX, e.y * mmScale + offY, 2.4, 0, Math.PI * 2); minimapCtx.fill();
         } else if (e.contactLife > 0 && e.visible) {
@@ -7577,14 +7609,14 @@ function drawWakes(ctx) {
     ctx.lineCap = 'round';
     for (const rb of wakeRibbons) {
         const own = rb.owner === 'player';
-        if (!own && !higgsOn && !demoMode) continue;
+        if (!own && !higgsOn && !higgsViewOff) continue;
         const pts = rb.pts;
         if (pts.length < 2) continue;
         ctx.strokeStyle = own ? '#bee1ff' : '#46ebff';
         for (let i = 1; i < pts.length; i += 5) {
             const j = Math.min(pts.length - 1, i + 5);
             const pm = pts[Math.min(pts.length - 1, i + 2)];
-            if (!own && !demoMode && Math.hypot(pm.x - player.x, pm.y - player.y) > readR) continue;
+            if (!own && !higgsViewOff && Math.hypot(pm.x - player.x, pm.y - player.y) > readR) continue;
             const ageF = (_frameCount - pm.f) / WAKE_LIFE;
             const a = Math.min(1, pm.s * 1.3) * (1 - ageF) * (own ? 0.45 : 0.95);
             if (a < 0.02) continue;
@@ -7818,6 +7850,7 @@ function useFlash() {
         e.playerLastKnownPos = { x: px, y: py, vx, vy };
         e.contactFreshness = Math.max(e.contactFreshness || 0, 0.9);
         if (e.aiState === 'lurking' || e.aiState === 'gathering') { e.aiState = 'hunting'; e.huntTimer = 600 + d / 1.2; }
+        if (comDemo && e.type !== 'fighter') comThinkEvent('e', (d < FLASH_RADIUS ? '閃光でセンサーが焼けた (' + Math.round(FLASH_BLIND / 60) + '秒ほぼ盲目)。' : '') + '閃光を見た → 炸裂点 (' + _dirTxt(e.x, e.y, px, py) + ') に自機が居たと分かる', 'e' + e.uid);
     }
     for (const p of projectiles) {
         if (p.isPlayer || !p.active || p.type !== 'missile' || p._blind) continue;
@@ -8714,6 +8747,384 @@ function switchWeapon(w) {
     playSound('ui');
 }
 
+// ═══ 第19弾: COM対戦デモ — 自機もCOMが操作する (オーナー合意 2026-10-25) ═══
+// 性格は4軸 (攻撃性・隠密性・貪欲さ・慎重さ 各0〜1)。プリセットで一括設定し、スライダーで微調整できる。ランダムは試合ごとに艦種の範囲で振る (敵の通常の決め方と同じ)
+const COM_AXES = [['aggression', '攻撃性'], ['stealth', '隠密性'], ['greed', '貪欲さ'], ['caution', '慎重さ']];
+const COM_PRESETS = {
+    standard:   { label: '標準',     p: { aggression: 0.5, stealth: 0.4,  greed: 0.4, caution: 0.4 } },
+    aggressive: { label: '攻撃的',   p: { aggression: 0.9, stealth: 0.15, greed: 0.2, caution: 0.15 } },
+    cautious:   { label: '慎重',     p: { aggression: 0.3, stealth: 0.5,  greed: 0.3, caution: 0.85 } },
+    stealthy:   { label: '隠密',     p: { aggression: 0.4, stealth: 0.9,  greed: 0.3, caution: 0.6 } },
+    greedy:     { label: '貪欲',     p: { aggression: 0.4, stealth: 0.4,  greed: 0.9, caution: 0.5 } },
+    random:     { label: 'ランダム', p: null },
+};
+const COM_ITYPE = { assault: 'destroyer', stealth: 'corvette', carrier: 'carrier' }; // ロビーの艦種 → 性格の範囲
+function comDefaultCfg() {
+    return { ship: 'assault', enemy: 'assault', mode: 'br', pPreset: 'standard', ePreset: 'standard',
+             pp: Object.assign({}, COM_PRESETS.standard.p), ep: Object.assign({}, COM_PRESETS.standard.p), higgsView: true, think: true };
+}
+function loadComCfg() {
+    try { const c = JSON.parse(localStorage.getItem('darkEchoComDemo') || 'null'); if (c && c.pp && c.ep) return Object.assign(comDefaultCfg(), c); } catch (e) {}
+    return comDefaultCfg();
+}
+function saveComCfg() { try { localStorage.setItem('darkEchoComDemo', JSON.stringify(comCfg)); } catch (e) {} }
+// その試合で使う性格 ('p'=自機 / 'e'=敵)
+function comPersonalityFor(side) {
+    const pre = side === 'p' ? comCfg.pPreset : comCfg.ePreset;
+    if (pre === 'random') return rollEnemyPersonality(COM_ITYPE[side === 'p' ? comCfg.ship : comCfg.enemy]);
+    return Object.assign({}, side === 'p' ? comCfg.pp : comCfg.ep);
+}
+function persLabel(p) { return COM_AXES.map(([k, l]) => l.slice(0, 2) + Math.round((p[k] || 0) * 100)).join(' '); }
+
+// ── 思考ログ (専用欄。自機COM=水色 / 敵COM=橙) ──
+// 同じ判断の繰り返しは出さない (sig が変わった時だけ。同じ判断でも15秒たてば数字を更新して出し直す)
+const COM_THINK_REPEAT = 900;
+let _thinkLast = {}, _thinkLastP = -1e9;
+function comThink(side, sig, text, key) {
+    if (!comDemo || !thinkLogOn) return;
+    // 同じ判断(sig)は15秒に1回まで (別の判断と交互に出ても数えるのは判断ごと)。15秒たっても文が同じなら出さない
+    const m = _thinkLast[key || side] || (_thinkLast[key || side] = {});
+    const L = m[sig];
+    if (L && (_frameCount - L.t < COM_THINK_REPEAT || L.text === text)) return;
+    m[sig] = { t: _frameCount, text };
+    _thinkWrite(side, text);
+}
+// 出来事 (撃った・探信した等) は判断の要約とは別に、その都度出す (同じ文が2秒以内に続く時だけ省く)
+function comThinkEvent(side, text, key) {
+    if (!comDemo || !thinkLogOn) return;
+    const m = _thinkLast[(key || side) + ':ev'] || (_thinkLast[(key || side) + ':ev'] = {});
+    if (m.text === text && _frameCount - m.t < 120) return;
+    m.text = text; m.t = _frameCount;
+    _thinkWrite(side, text);
+}
+function _thinkWrite(side, text) {
+    const box = document.getElementById('think-log');
+    if (!box) return;
+    const d = document.createElement('div');
+    d.className = 'tk ' + (side === 'p' ? 'tk-p' : 'tk-e');
+    if (side === 'p') _thinkLastP = _frameCount;
+    const sec = Math.floor(_frameCount / 60);
+    d.textContent = Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0') + ' ' + (side === 'p' ? '自機COM' : '敵COM') + ' — ' + text;
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    box.appendChild(d);
+    while (box.children.length > 80) box.removeChild(box.firstChild);
+    if (atBottom) box.scrollTop = box.scrollHeight;
+}
+function toggleThinkLog(on) {
+    thinkLogOn = on === undefined ? !thinkLogOn : !!on;
+    if (comCfg) comCfg.think = thinkLogOn;
+    document.body.classList.toggle('think-on', comDemo && thinkLogOn);
+    const b = document.getElementById('btn-think-log');
+    if (b) b.textContent = thinkLogOn ? '思考ログ: ON' : '思考ログ: OFF';
+}
+const _EXPO_JP = ['隠密', '痕跡', '追跡', '捕捉'];
+const _WPN_JP = { kinetic: '実弾', missile: 'ミサイル', beam: 'ビーム' };
+const _pct = (v) => Math.round(v * 100) + '%';
+const _dirTxt = (fx, fy, tx, ty) => '方位' + compassDeg(Math.atan2(ty - fy, tx - fx)) + '° ' + Math.round(Math.hypot(tx - fx, ty - fy) / 100) * 100 + 'u';
+
+// ── 自機COM — 見てよいのはプレイヤーと同じ情報だけ (方位の記録・推定・視界・被探知チップ)。敵の真の位置・耐久は見ない ──
+//  退く: 耐久 < 0.12 + 慎重さ×0.43 (敵と同じ式。敵は相手の耐久も見て+0.12するが、自機COMは知らないので使わない) で、追跡以上 → 副長の離脱手順
+//        振り切ったら未ハックのコロニーへ修理に / 無ければ止まって潜む (敵の潜伏と同じ45秒)
+//  撃つ: 想定ロックの命中予測 ≥ 65% − 35%×攻撃性 (有視界の完全ロックは自動攻撃)
+//  出力: 隠密性0.5以上=潜航・未満=巡航 / 攻撃性0.7以上は接近する時だけ全速
+//  取る: 貪欲さ0.5以上なら、敵を掴んでいない間に近くのノード・未ハックのコロニーへ
+//  出す: 攻撃性0.5以上なら、敵を掴んでいる間に人型・戦闘機・砲台・哨戒機を展開
+//  あとは副長の助言に従う (追跡・直交航路・兵装の持ち替え・回避)。手掛かりが何も無ければ自分で捜索航路を引く
+const COM_TICK = 30, COM_GOAL_RANGE = 9000, COM_DEPLOY_GAP = 600, COM_HIDE_TIME = ENEMY_HIDE_TIME, COM_SEARCH_LEG = 4000;
+const COM_SKIP = { '帰投': 1, 'ソナー': 1, '離脱': 1, '射撃': 1 }; // 自機COMが自分で決める (退く・撃つ) / 使わない (副長の「静寂ならソナー」は位置を晒すだけ)
+function comNewMemo() { return { pp: comPersonalityFor('p'), lastDeploy: -1e9, hideUntil: 0, flankUntil: 0, silentUntil: 0, mode: '' }; }
+function comPilotStep() {
+    if (!comDemo || !player || player.hp <= 0 || sectorCleared || _frameCount % COM_TICK) return;
+    const c = _com || (_com = comNewMemo());
+    const P = c.pp, now = _frameCount;
+    const hpF = player.hp / player.maxHp;
+    const retreat = 0.12 + P.caution * 0.43;
+    const fireThr = 0.65 - 0.35 * P.aggression;
+    const sigs = currentSignals();
+    const contact = Object.keys(sigs).some(k => /^e-/.test(k)) || enemies.some(e => e.hp > 0 && !e._dying && e.inVision);
+    const r = xoEvaluate();
+    c.mode = '';
+    // 1) 退く
+    if (hpF < retreat) {
+        if (playerExposureLevel >= 2) {
+            c.mode = 'escape'; c.hideUntil = 0;
+            xoEscapeStep();
+            comThink('p', 'esc', '耐久' + _pct(hpF) + ' < 退き際' + _pct(retreat) + ' (慎重さ' + _pct(P.caution) + ')・' + _EXPO_JP[playerExposureLevel] + 'されている → 離脱手順 (閃光→ノイズ→噴射→機関停止)');
+            return;
+        }
+        const col = _comNearest(false, true);
+        if (col) {
+            c.mode = 'repair';
+            _comGoTo(col, COLONY_HACK_R * 0.6);
+            comThink('p', 'repair', '耐久' + _pct(hpF) + ' < 退き際' + _pct(retreat) + '・振り切った → コロニーをハックして修理 (' + _dirTxt(player.x, player.y, col.x, col.y) + ')');
+            _comStance(c, P);
+            return;
+        }
+        if (!c.hideUntil) c.hideUntil = now + COM_HIDE_TIME;
+        if (now < c.hideUntil) {
+            c.mode = 'hide';
+            if (playerCoasting) toggleCoast(false);
+            player.setTarget(player.x, player.y);
+            if (powerStance !== 'silent') setStance('silent', true);
+            comThink('p', 'hide', '耐久' + _pct(hpF) + '・振り切った・修理できるコロニーが無い → 止まって潜む (残り' + Math.ceil((c.hideUntil - now) / 60) + '秒)');
+            return;
+        }
+        comThink('p', 'hide-end', '潜伏を終える — 耐久' + _pct(hpF) + 'のまま狩りへ戻る (また追われたら退く)');
+    }
+    if (playerCoasting) toggleCoast(false);
+    // 2) 迫るミサイル (副長の回避・デコイ)
+    if (r && r.act && (r.act.label === '回避' || r.act.label === 'デコイ')) {
+        r.act.fn();
+        comThink('p', 'evade' + r.act.label, '副長「' + r.text + '」→ ' + r.act.label);
+        _comStance(c, P);
+        return;
+    }
+    // 3) 撃つ
+    const te = bestFireTarget(), lk = te ? playerLockInfo(te) : null;
+    let held = null;
+    if (te && lk.full) {
+        // 見えている間は自動攻撃に任せる (航路を引くと自動攻撃より移動命令が優先されて撃ち合いから外れる)
+        comThink('p', 'full', '有視界で捉えた (' + Math.round(lk.dist / 100) * 100 + 'u) → 自動攻撃で撃つ');
+        if (contact && P.aggression >= 0.5 && now - c.lastDeploy > COM_DEPLOY_GAP) _comDeploy(c, P);
+        _comStance(c, P);
+        return;
+    } else if (te && lk.assumed) {
+        const w = currentWeapon(), sa = _signalAnalysis[enemySid(te)];
+        const lm = sa && sa.misses && sa.misses[sa.misses.length - 1], lo = sa && sa.obs[sa.obs.length - 1];
+        const hc = assumedHitChance(te, w, lk);
+        let bw = w, bh = hc;
+        for (const w2 of ['beam', 'missile']) { const h2 = assumedHitChance(te, w2, lk); if (h2 > bh + 0.15) { bw = w2; bh = h2; } }
+        const no = String(_contactLabels[enemySid(te)] || '?').padStart(2, '0');
+        if (lm && (!lo || lo.f < lm.f + 90)) held = 'SIG-' + no + ' 推定点は外れた → 新しい方位を取るまで撃たない';
+        else if (bw !== w && bh >= fireThr) {
+            switchWeapon(bw);
+            comThink('p', 'sw' + bw, 'SIG-' + no + ' ' + _WPN_JP[bw] + 'なら命中予測' + _pct(bh) + ' ≥ 撃つ基準' + _pct(fireThr) + ' → 持ち替える');
+        } else if (hc >= fireThr && playerWeaponReady(player, w)) {
+            issueFireOrder();
+            comThinkEvent('p', 'SIG-' + no + ' 命中予測' + _pct(hc) + ' ≥ 撃つ基準' + _pct(fireThr) + ' (攻撃性' + _pct(P.aggression) + ') → ' + _WPN_JP[w] + 'で撃つ (推定' + Math.round(lk.dist / 100) * 100 + 'u)');
+            _comStance(c, P);
+            return;
+        } else if (hc > 0) held = 'SIG-' + no + ' 命中予測' + _pct(hc) + ' < 撃つ基準' + _pct(fireThr) + ' → まだ撃たない';
+    }
+    // 4) 出す
+    if (contact && P.aggression >= 0.5 && now - c.lastDeploy > COM_DEPLOY_GAP) _comDeploy(c, P);
+    // 5) 取る
+    if (!contact && P.greed >= 0.5) {
+        const g = _comNearest(true, true);
+        if (g) {
+            const isNode = !g.type;
+            _comGoTo(g, (isNode ? NODE_CAP_R : COLONY_HACK_R) * 0.6);
+            comThink('p', 'greed' + (isNode ? 'n' : 'c'), '敵の気配なし・貪欲さ' + _pct(P.greed) + ' → ' + (isNode ? 'ノードを制圧しに行く' : 'コロニーをハックしに行く') + ' (' + _dirTxt(player.x, player.y, g.x, g.y) + ')');
+            _comStance(c, P);
+            return;
+        }
+    }
+    // 6) 副長の助言に従う
+    // 副長は移動中だと「直交航路」のボタンを出さない → 交点がまだ無い/広い時は、今の航路が方位線に直交していなければ自分で引く
+    const bL = lockedSignalId && sigs[lockedSignalId], saL = lockedSignalId && _signalAnalysis[lockedSignalId];
+    const towards = r && !r.act && /こちらへ向かってくる/.test(r.text);
+    if (towards && bL) {
+        // 「横へ外すか、止まって待ち伏せろ」— 攻撃性0.5以上は止まって待ち伏せ (潜航)、未満は横へ外す
+        if (P.aggression >= 0.5) {
+            if (player.state === 'moving') player.setTarget(player.x, player.y);
+            c.silentUntil = now + 600;
+            comThink('p', 'ambush', 'SIG-' + String(_contactLabels[lockedSignalId] || '?').padStart(2, '0') + ' がこちらへ向かってくる・攻撃性' + _pct(P.aggression) + ' → 止まって潜航で待ち伏せる');
+        } else {
+            const hd = player.state === 'moving' ? Math.atan2(player.targetY - player.y, player.targetX - player.x) : null;
+            if (hd === null || Math.abs(Math.sin(hd - bL.angle)) < 0.7) xoPerpendicularLeg(bL.angle);
+            comThink('p', 'sidestep', 'SIG-' + String(_contactLabels[lockedSignalId] || '?').padStart(2, '0') + ' がこちらへ向かってくる・攻撃性' + _pct(P.aggression) + ' → 横へ外す');
+        }
+        _comStance(c, P);
+        return;
+    }
+    if (r && !r.act && bL && !bL.relay && (!saL || !saL.fix || trackEstimate(saL, 0).r > 900)) {
+        const hd = player.state === 'moving' ? Math.atan2(player.targetY - player.y, player.targetX - player.x) : null;
+        if (hd === null || Math.abs(Math.sin(hd - bL.angle)) < 0.5) {
+            xoPerpendicularLeg(bL.angle);
+            comThink('p', 'perp', '副長「' + r.text + '」→ 方位線に直交する航路へ (場所を変えて聴き、交点を出す)');
+            _comStance(c, P);
+            return;
+        }
+    }
+    if (r && r.act && !COM_SKIP[r.act.label]) {
+        r.act.fn();
+        if (r.act.label === '接近' && P.aggression >= 0.7) c.flankUntil = now + 1200;
+        if (r.act.label === '潜航') c.silentUntil = now + 1200;
+        comThink('p', 'xo' + r.act.label, (held ? held + '。' : '') + '副長「' + r.text + '」→ ' + r.act.label + (c.flankUntil > now && r.act.label === '接近' ? ' (攻撃性' + _pct(P.aggression) + ' → 全速で)' : ''));
+    } else if (held) {
+        // 撃たないなら測り直す (方位線に直交して動く)
+        const b = te && sigs[enemySid(te)];
+        if (b && player.state !== 'moving') xoPerpendicularLeg(b.angle);
+        comThink('p', 'held', held + (b ? ' — 直交して測り直す' : ''));
+    } else if (player.state !== 'moving') {
+        // 手掛かりが無い: 最後の推定位置 → マップ中央の順に捜索航路を引く
+        let tx = MAP_CX, ty = MAP_CY, why = 'マップ中央方面';
+        const sa = lockedSignalId && _signalAnalysis[lockedSignalId], est = sa && trackEstimate(sa, 0);
+        if (est) { tx = est.x; ty = est.y; why = '最後の推定位置'; }
+        let ang = Math.atan2(ty - player.y, tx - player.x);
+        if (Math.hypot(tx - player.x, ty - player.y) < 1500) ang = Math.random() * Math.PI * 2;
+        _setLeg(ang + (Math.random() - 0.5) * 0.6, COM_SEARCH_LEG, '捜索航路');
+        comThink('p', 'search', (r ? '副長「' + r.text + '」。' : '') + '手掛かりなし → ' + why + 'へ捜索航路 (動けば痕跡が残る)');
+    } else if (r && _frameCount - _thinkLastP > 180) { // 直前(3秒以内)に何か決めたばかりなら「続ける」は言わない
+        comThink('p', 'xo-' + r.tone + r.text.replace(/[\d.±]+/g, '#'), '副長「' + r.text + '」→ 今の航路を続ける');
+    }
+    _comStance(c, P);
+}
+function _comDeploy(c, P) {
+    for (const k of ['mech', 'attack', 'build', 'scout']) {
+        if (!(SHIP_DRONES[gameState.shipType] || []).includes(k) || !canDeployNow(k)) continue;
+        deployDrone(k); c.lastDeploy = _frameCount;
+        comThinkEvent('p', '敵を掴んでいる・攻撃性' + _pct(P.aggression) + ' → ' + DRONE_SPEC[k].label + 'を出す');
+        return;
+    }
+}
+// 出力スタンス: 全速(接近中・攻撃的) > 潜航(隠密 or 副長が「追われている」と言った) > 巡航
+function _comStance(c, P) {
+    if (c.mode === 'escape' || c.mode === 'hide') return;
+    const want = c.flankUntil > _frameCount ? 'flank' : (P.stealth >= 0.5 || c.silentUntil > _frameCount) ? 'silent' : 'cruise';
+    if (powerStance !== want) setStance(want, true);
+}
+// 最寄りの「取れる」もの: ノード(自分のもの以外) / 未ハックのコロニー
+function _comNearest(nodes, colonies) {
+    let best = null, bd = COM_GOAL_RANGE;
+    if (nodes) for (const n of resourceNodes) { if (n.owner === 'player') continue; const d = Math.hypot(n.x - player.x, n.y - player.y); if (d < bd) { bd = d; best = n; } }
+    if (colonies) for (const st of structures) { if (st.type !== 'colony' || st.hacked) continue; const d = Math.hypot(st.x - player.x, st.y - player.y); if (d < bd) { bd = d; best = st; } }
+    return best;
+}
+function _comGoTo(o, near) {
+    if (Math.hypot(o.x - player.x, o.y - player.y) > near) { if (player.state !== 'moving' || Math.hypot(player.targetX - o.x, player.targetY - o.y) > 50) player.setTarget(o.x, o.y); }
+    else if (player.state === 'moving') player.setTarget(player.x, player.y); // 着いたら止まって制圧/ハック
+}
+
+// ── COM対戦デモの設定画面 (ロビー) ──
+function openComDemo() {
+    comCfg = loadComCfg();
+    _renderComCfg();
+    document.getElementById('com-overlay').classList.remove('hidden');
+    playSound('ui');
+}
+function _renderComCfg() {
+    const c = comCfg;
+    for (const side of ['p', 'e']) {
+        const box = document.querySelector('.com-side[data-side="' + side + '"]');
+        if (!box) continue;
+        const ship = side === 'p' ? c.ship : c.enemy, pre = side === 'p' ? c.pPreset : c.ePreset, pp = side === 'p' ? c.pp : c.ep;
+        const h = ['<div class="com-side-title ' + (side === 'p' ? 'cs-p' : 'cs-e') + '">' + (side === 'p' ? '自機COM' : '敵COM') + '</div><div class="com-row">'];
+        for (const k of ['assault', 'stealth', 'carrier']) h.push('<button class="com-chip' + (ship === k ? ' on' : '') + '" data-act="ship" data-v="' + k + '">' + SHIP_JP[k] + '</button>');
+        h.push('</div><div class="com-row">');
+        for (const k in COM_PRESETS) h.push('<button class="com-chip' + (pre === k ? ' on' : '') + '" data-act="preset" data-v="' + k + '">' + COM_PRESETS[k].label + '</button>');
+        h.push('</div>');
+        const rnd = pre === 'random';
+        for (const [k, lbl] of COM_AXES) {
+            const v = Math.round((pp[k] || 0) * 100);
+            h.push('<label class="com-sl"><span>' + lbl + '</span><input type="range" min="0" max="100" step="5" value="' + v + '" data-act="axis" data-v="' + k + '"' + (rnd ? ' disabled' : '') + '><b>' + (rnd ? '—' : v) + '</b></label>');
+        }
+        if (rnd) h.push('<div class="com-note">ランダム: 試合ごとに' + SHIP_JP[ship] + 'の範囲で決まる (敵の通常の決め方と同じ)</div>');
+        else if (pre === 'custom') h.push('<div class="com-note">カスタム (スライダーで調整)</div>');
+        box.innerHTML = h.join('');
+    }
+    const o = document.getElementById('com-opts');
+    if (o) o.innerHTML = '<span class="com-opt-lbl">モード</span>'
+        + '<button class="com-chip' + (c.mode === 'br' ? ' on' : '') + '" data-act="mode" data-v="br">バトルロワイアル</button>'
+        + '<button class="com-chip' + (c.mode === 'sd' ? ' on' : '') + '" data-act="mode" data-v="sd">サーチ&amp;デストロイ</button>'
+        + '<span class="com-opt-lbl">ヒッグス表示</span><button class="com-chip' + (c.higgsView ? ' on' : '') + '" data-act="higgs">' + (c.higgsView ? 'ON' : 'OFF (全艦が見える)') + '</button>'
+        + '<span class="com-opt-lbl">思考ログ</span><button class="com-chip' + (c.think ? ' on' : '') + '" data-act="think">' + (c.think ? 'ON' : 'OFF') + '</button>'
+        + '<span class="com-opt-lbl com-sector">セクター' + gameState.sector + '・今の改修のまま</span>';
+}
+function startComDemo() {
+    saveComCfg();
+    document.getElementById('com-overlay').classList.add('hidden');
+    comDemo = true;
+    document.body.classList.add('com-demo');
+    document.querySelectorAll('.enemy-select-btn').forEach(b => b.classList.toggle('active', b.dataset.type === comCfg.enemy));
+    document.querySelectorAll('.mode-card').forEach(m => m.classList.toggle('active', m.dataset.mode === comCfg.mode));
+    gameState.mode = comCfg.mode;
+    toggleThinkLog(comCfg.think);
+    startGame(comCfg.ship);
+    toggleHiggsView(!comCfg.higgsView);
+    logMessage('COM対戦デモ: 自機もCOMが操作する (観戦のみ)。メニューで ヒッグス表示 / 思考ログ を切替、終わる時は「COM対戦を終えてロビーへ」', 'system-msg');
+}
+// デモは保存しないので、ページを読み直せば出撃前の状態 (戦歴・クレジット) に戻る
+function exitComDemo() { location.reload(); }
+(() => {
+    const ov = document.getElementById('com-overlay');
+    if (!ov) return;
+    document.getElementById('btn-com-demo')?.addEventListener('click', openComDemo);
+    document.getElementById('com-cancel').addEventListener('click', () => { saveComCfg(); ov.classList.add('hidden'); });
+    document.getElementById('com-start').addEventListener('click', startComDemo);
+    ov.addEventListener('click', (ev) => {
+        const b = ev.target.closest('button[data-act]');
+        if (!b || !comCfg) return;
+        const side = b.closest('.com-side')?.dataset.side, act = b.dataset.act, v = b.dataset.v;
+        if (act === 'ship') { if (side === 'p') comCfg.ship = v; else comCfg.enemy = v; }
+        else if (act === 'preset') {
+            if (side === 'p') comCfg.pPreset = v; else comCfg.ePreset = v;
+            if (COM_PRESETS[v].p) Object.assign(side === 'p' ? comCfg.pp : comCfg.ep, COM_PRESETS[v].p);
+        }
+        else if (act === 'mode') comCfg.mode = v;
+        else if (act === 'higgs') comCfg.higgsView = !comCfg.higgsView;
+        else if (act === 'think') comCfg.think = !comCfg.think;
+        _renderComCfg();
+        playSound('ui');
+    });
+    ov.addEventListener('input', (ev) => {
+        const r = ev.target.closest('input[data-act="axis"]');
+        if (!r || !comCfg) return;
+        const side = r.closest('.com-side').dataset.side;
+        (side === 'p' ? comCfg.pp : comCfg.ep)[r.dataset.v] = +r.value / 100;
+        if (side === 'p') comCfg.pPreset = 'custom'; else comCfg.ePreset = 'custom';
+        r.nextElementSibling.textContent = r.value;
+        r.closest('.com-side').querySelectorAll('button[data-act="preset"]').forEach(x => x.classList.remove('on'));
+    });
+    document.getElementById('think-head')?.addEventListener('click', () => document.getElementById('think-panel').classList.toggle('wide'));
+})();
+
+// ── 敵COMの思考 — 敵AIが今「何を信じ・何をしようとしているか」を1秒ごとに要約 (変わった時だけ出す) ──
+const _ESTATE_SIG = (fr) => fr > 0.5 ? 'hi' : fr > 0.02 ? 'lo' : 'no';
+function comEnemyThinkTick() {
+    if (!comDemo || !thinkLogOn || _frameCount % 30) return;
+    for (const e of enemies) {
+        if (e.type === 'fighter' || e.hp <= 0 || e._dying) continue;
+        const t = _enemyThought(e);
+        comThink('e', t.sig, t.text, 'e' + e.uid);
+    }
+}
+function _enemyThought(e) {
+    const lk = e.playerLastKnownPos, fr = e.contactFreshness || 0;
+    const belief = lk && fr > 0.02
+        ? '自機は' + _dirTxt(e.x, e.y, lk.x, lk.y) + 'と見る (確信' + _pct(fr) + (e._noiseLk ? '・実はノイズメーカーの音' : '') + ')'
+        : (e.intelPos ? '自機の位置は司令部情報の概位置だけ' : '自機の位置は掴めていない');
+    const hp = _pct(e.hp / e.maxHp);
+    const ct = e._cThink || {};
+    let sig, act;
+    if (e._hideT > 0) {
+        if (e._hiding) { sig = 'hide'; act = '潜伏中 — 機関を止めて修復 (耐久' + hp + '・残り' + Math.ceil(e._hideT / 60) + '秒)'; }
+        else { sig = 'tohide'; act = '耐久' + hp + ' → 隠れ場所の' + (e._hideSpot.kind === 'fog' ? '濃い霧' : '岩礁帯') + 'へ (' + _dirTxt(e.x, e.y, e._hideSpot.x, e._hideSpot.y) + ')'; }
+    } else if (e.postFireCooldown > 0) {
+        sig = 'reloc'; act = '撃った位置から離れている (撃てば位置を教えるので留まらない)';
+    } else if (e.aiState === 'combat') {
+        sig = 'c-' + (ct.mode || '');
+        const why = (ct.kill ? '・相手は瀕死と見て踏み込む' : '') + (ct.out ? '・相手の方が頑丈 → 殴り合わず間合いを取る' : '');
+        act = ct.mode === 'retreat' ? '耐久' + hp + ' < 退き際' + _pct(ct.thr || 0) + ' (慎重さ' + _pct((e.personality || {}).caution || 0) + ') → 後退・回復を探す'
+            : ct.mode === 'approach' ? '交戦 — 推定位置まで' + Math.round((ct.dist || 0) / 100) * 100 + 'u > 間合い' + Math.round((ct.standoff || 0) / 100) * 100 + 'u → 詰める' + why
+            : ct.mode === 'flee' ? '交戦 — 近すぎる (' + Math.round((ct.dist || 0) / 100) * 100 + 'u) → 離れる' + why
+            : ct.mode === 'kite' ? '交戦 — 間合いを詰められた → 下がる' + why
+            : '交戦 — 間合いを保ち横へ動く (読まれにくく)' + why;
+    } else if (e.aiState === 'hunting') {
+        sig = 'hunt'; act = '索敵 — 反応のあった所へ向かう (確信が45%を切ったら探信を打つ)';
+    } else if (e.aiState === 'gathering') {
+        const g = e.gatherTarget;
+        sig = 'gather'; act = g ? 'ノードを取りに行く (' + _dirTxt(e.x, e.y, g.x, g.y) + '・貪欲さ' + _pct((e.personality || {}).greed || 0) + ')' : 'ノードを探す';
+    } else if (lk && fr > 0.04) {
+        sig = 'scent'; act = '潜伏 — 残り香を追って忍び寄る';
+    } else if (e.intelPos) {
+        sig = 'intel'; act = '潜伏 — 司令部情報の方面へ隠れ場所伝いに前進';
+    } else {
+        sig = 'lurk'; act = '潜伏 — 待ち伏せて聴いている';
+    }
+    return { sig: sig + '|' + _ESTATE_SIG(fr), text: act + '。' + belief };
+}
+
 // 副長の状況判断。優先度順に「今いちばん大事なこと」と、その場で押せる1アクションを返す
 function xoEvaluate() {
     if (!player) return null;
@@ -9344,6 +9755,8 @@ function stepWorld() {
             if (passiveBearings.some(b => /^e-/.test(b.sourceId))) intelBearing.life = Math.min(intelBearing.life, 600);
             if (--intelBearing.life <= 0) intelBearing = null;
         }
+        // 第19弾: COM対戦デモ — 自機COMの判断と、双方の思考ログ
+        if (comDemo) { comPilotStep(); comEnemyThinkTick(); }
 }
 
 function renderWorld() {
