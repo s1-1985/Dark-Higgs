@@ -2357,3 +2357,59 @@ body.in-game #map-mode-banner { left: var(--field-cx) !important; top: calc(var(
 #hud-left .bt-fill { z-index: 0; }
 #hud-left .bt-notch { z-index: 2; }
 #band-legend .bl-nz::before { width: 7px; height: 9px; background: repeating-linear-gradient(135deg, rgba(255,255,255,0.5) 0 2px, transparent 2px 4px); }
+
+/* ═══ 第19弾: COM対戦デモ ═══ */
+.com-entry { display: flex; justify-content: center; margin: 14px 0 4px; }
+#btn-com-demo { border-color: rgba(255,170,80,0.55); color: #ffcc88; padding: 7px 14px; }
+#btn-com-demo span { display: block; font-size: 9px; color: #c9a37a; margin-top: 2px; }
+#com-overlay {
+    position: fixed; inset: 0; z-index: 10050; /* ロビー(9999)の上 */
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0, 4, 8, 0.82); pointer-events: auto; padding: 8px;
+}
+#com-overlay.hidden { display: none !important; }
+.com-box { width: min(760px, 100%); max-height: 100%; overflow-y: auto; }
+.com-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 8px 0; }
+.com-side { border: 1px solid rgba(0,255,170,0.18); border-radius: 6px; padding: 6px 8px; background: rgba(0,16,14,0.5); }
+.com-side[data-side="e"] { border-color: rgba(255,166,77,0.28); background: rgba(24,12,2,0.45); }
+.com-side-title { font-size: 12px; font-weight: 700; margin-bottom: 4px; letter-spacing: 1px; }
+.com-side-title.cs-p { color: #5fe8ff; }
+.com-side-title.cs-e { color: #ffa64d; }
+.com-row { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 5px; }
+.com-chip {
+    padding: 3px 8px; font-size: 11px; border-radius: 12px; cursor: pointer;
+    border: 1px solid rgba(160,220,210,0.35); background: rgba(0,30,26,0.6); color: #a8d8cc;
+}
+.com-chip.on { border-color: #00ffaa; color: #00ffaa; background: rgba(0,80,60,0.45); }
+.com-side[data-side="e"] .com-chip.on { border-color: #ffa64d; color: #ffc88a; background: rgba(90,45,0,0.45); }
+.com-sl { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #c8e8e0; margin: 2px 0; }
+.com-sl span { width: 46px; flex-shrink: 0; }
+.com-sl input { flex: 1; min-width: 0; }
+.com-sl b { width: 26px; text-align: right; font-family: 'Orbitron', monospace; font-size: 11px; color: #fff; }
+.com-note { font-size: 10px; color: #8fb8ad; margin-top: 3px; }
+.com-opts { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 6px; margin-bottom: 8px; }
+.com-opt-lbl { font-size: 10px; color: #7fb8a8; margin-left: 4px; }
+.com-opt-lbl.com-sector { margin-left: auto; color: #6f9890; }
+@media (max-width: 560px) { .com-cols { grid-template-columns: 1fr; } }
+
+/* メニュー: COM対戦デモの時だけ出すボタン / ヒッグス表示OFF中の強調 */
+.com-only { display: none; }
+body.com-demo .com-only { display: inline-block; }
+.btn-warn-on { border-color: #ffcc00 !important; color: #ffdd55 !important; }
+
+/* 思考ログ欄 (フィールド左上。COM対戦デモ+思考ログONの時だけ) — 自機COM=水色 / 敵COM=橙 */
+#think-panel { display: none; }
+body.in-game.com-demo.think-on #think-panel {
+    display: flex; flex-direction: column; position: absolute; z-index: 21;
+    top: calc(var(--hud-top) + 6px); left: calc(var(--hud-left) + 8px);
+    width: min(480px, calc(100% - var(--hud-left) - var(--hud-right) - 120px));
+    max-height: 24%; background: rgba(0,6,12,0.72); border: 1px solid rgba(255,166,77,0.22); border-radius: 4px;
+    pointer-events: auto; overflow: hidden;
+}
+body.in-game.com-demo.think-on #think-panel.wide { max-height: 62%; }
+#think-head { padding: 2px 8px; font-size: 9px; color: #9fb8b0; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }
+#think-head .tk-title { color: #e8e8e8; font-weight: 700; }
+#think-log { overflow-y: auto; padding: 0 0 3px; }
+#think-log .tk { font-size: 10px; line-height: 1.5; padding: 1px 8px; }
+.tk-p { color: #5fe8ff; }
+.tk-e { color: #ffa64d; }
