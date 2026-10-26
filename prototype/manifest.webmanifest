@@ -1,0 +1,13 @@
+{
+  "name": "Dark Echo: Tactical Space RTS",
+  "short_name": "Dark Echo",
+  "start_url": "./index.html",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#020a06",
+  "theme_color": "#020a06",
+  "icons": [
+    { "src": "assets/app_icon_192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "assets/app_icon_512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

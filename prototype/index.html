@@ -9,9 +9,12 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Dark Echo: Tactical Space RTS</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23000' stroke='%2300ff88' stroke-width='2'/><circle cx='16' cy='16' r='6' fill='none' stroke='%2300ff88' stroke-width='1.5'/><line x1='16' y1='2' x2='16' y2='30' stroke='%2300ff88' stroke-width='1' opacity='0.4'/><line x1='2' y1='16' x2='30' y2='16' stroke='%2300ff88' stroke-width='1' opacity='0.4'/></svg>" type="image/svg+xml">
+    <link rel="icon" type="image/png" sizes="64x64" href="assets/favicon_64.png">
+    <link rel="apple-touch-icon" href="assets/apple_touch_icon.png">
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261026a">
+    <link rel="stylesheet" href="style.css?v=20261027a">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -93,33 +96,20 @@
                     <img src="assets/icon_scan.png" alt="" class="abar-icon"><span>索敵</span>
                 </button>
                 <button class="hud-act" id="abar-silent" onclick="cycleStance()" title="出力 — 潜航(静か・耳が澄む) / 巡航 / 全速(速い・うるさい・耳が塞がる) (S)">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                        <path d="M3,13 q4.5,-5 9,0 t9,0" stroke-opacity=".85"/>
-                        <path d="M3,18 q4.5,-3 9,0 t9,0" stroke-opacity=".4"/>
-                        <line x1="6" y1="4" x2="18" y2="9" stroke-opacity=".8"/>
-                    </svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_stance.png)"></i>
                     <span id="abar-silent-label">巡航</span>
                 </button>
                 <button class="hud-act" data-group="escape" id="abar-grp-escape" title="離脱 — 閃光弾 / ノイズメーカー / 煙幕弾 / 緊急噴射(B) / 機関停止(C)">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3,17 q5,-1 8,-6 t10,-6" stroke-dasharray="2 2"/><polyline points="16,4 21,5 19.5,10"/><circle cx="6" cy="17" r="2.2" fill="currentColor" fill-opacity=".3"/></svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_escape.png)"></i>
                     <span>離脱</span>
                 </button>
                 <button class="hud-act" id="abar-wep-cycle" title="兵装切替 KIN→MSL→MSL·AI→BEM (ビームはチャージ専用)">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <line x1="4" y1="12" x2="17" y2="12"/>
-                        <polyline points="13,8 17,12 13,16"/>
-                        <circle cx="20" cy="12" r="2" fill="currentColor" fill-opacity=".5"/>
-                    </svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_weapon.png)"></i>
                     <span id="abar-wep-label">KIN</span>
                     <em id="abar-wep-ammo">8/8</em>
                 </button>
                 <button class="hud-act" id="abar-track" onclick="trackNextSignal()" title="追跡 — 受信中の信号を順にロック (T)">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <polygon points="12,3 21,19 3,19"/>
-                        <circle cx="12" cy="13" r="2" fill="currentColor" fill-opacity=".4"/>
-                        <line x1="6" y1="19" x2="12" y2="13" stroke-opacity=".5"/>
-                        <line x1="18" y1="19" x2="12" y2="13" stroke-opacity=".5"/>
-                    </svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_track.png)"></i>
                     <span id="abar-track-label">追跡</span>
                 </button>
                 <button class="hud-act hud-fire" id="abar-fire" onclick="issueFireOrder()" title="射撃命令 — 推定位置へ艦首を向けて1射 (撃てば自位置も露出) (F)">
@@ -132,162 +122,129 @@
             <!-- ポップオーバーで使う実ボタンの置き場 (非表示)。game.js がIDでイベントを結び付けている -->
             <div id="action-store" class="action-grid">
                 <button class="act-icon-btn btn-info" id="btn-scan" title="全周囲ソナー">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                        <circle cx="12" cy="12" r="2.5" fill="currentColor" fill-opacity=".4"/>
-                        <path d="M5,12 a7,7 0 0,1 7,-7"/><path d="M2,12 a10,10 0 0,1 10,-10"/>
-                        <path d="M19,12 a7,7 0 0,1 -7,7"/><path d="M22,12 a10,10 0 0,1 -10,10"/>
-                        <line x1="12" y1="5" x2="12" y2="19" stroke-width=".6" stroke-opacity=".4"/>
-                        <line x1="5" y1="12" x2="19" y2="12" stroke-width=".6" stroke-opacity=".4"/>
-                    </svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_sonar.png)"></i>
                     <span>SONAR</span>
                 </button>
                 <button class="act-icon-btn btn-info" id="btn-dir-sonar" title="指向性ソナー">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                        <circle cx="5" cy="12" r="2" fill="currentColor" fill-opacity=".5"/>
-                        <line x1="7" y1="12" x2="22" y2="12"/>
-                        <path d="M7,12 L20,6"/><path d="M7,12 L20,18"/>
-                        <path d="M13,9 a5,5 0 0,1 0,6" stroke-opacity=".5"/>
-                    </svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_dirsonar.png)"></i>
                     <span>DIR</span>
                 </button>
                 <button class="act-icon-btn btn-info" id="btn-sig-panel" onclick="window.openSigPanel && window.openSigPanel()" title="受信シグネチャ一覧 — 選んで追跡">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                        <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/>
-                        <circle cx="18" cy="18" r="2" fill="currentColor" fill-opacity=".5"/>
-                    </svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_siglist.png)"></i>
                     <span>SIG一覧</span>
                 </button>
                 <button class="act-icon-btn btn-warning" id="btn-hack" title="電子戦 EW">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="16,3 10,12 14,12 8,21"/>
-                        <path d="M18,7 a5,5 0 0,1 0,10" stroke-width="1.2"/>
-                        <path d="M20,5 a8,8 0 0,1 0,14" stroke-width="1" stroke-opacity=".5"/>
-                    </svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_ew.png)"></i>
                     <span>EW</span>
                 </button>
                 <button class="act-icon-btn btn-danger" id="btn-cancel" title="停止">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                        <rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor" fill-opacity=".2"/>
-                        <line x1="9" y1="9" x2="15" y2="15"/>
-                        <line x1="15" y1="9" x2="9" y2="15"/>
-                    </svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_stop.png)"></i>
                     <span>STOP</span>
                 </button>
                 <button class="act-icon-btn btn-primary" id="btn-camera-follow" title="自艦追従">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                        <circle cx="12" cy="12" r="5"/>
-                        <line x1="12" y1="2" x2="12" y2="7"/><line x1="12" y1="17" x2="12" y2="22"/>
-                        <line x1="2" y1="12" x2="7" y2="12"/><line x1="17" y1="12" x2="22" y2="12"/>
-                        <circle cx="12" cy="12" r="1.5" fill="currentColor"/>
-                    </svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_follow.png)"></i>
                     <span id="follow-label">追従 OFF</span>
                 </button>
                 <button class="act-icon-btn" id="btn-attack-toggle" title="攻撃ON/OFF" style="border-color:#00b43c;color:#00ff66;">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                        <circle cx="12" cy="12" r="7"/>
-                        <line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
-                        <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
-                        <circle cx="12" cy="12" r="2.5" fill="currentColor"/>
-                    </svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_attack.png)"></i>
                     <span id="attack-label">攻撃 ON</span>
                 </button>
                 <!-- 潜航型専用ジャミング (stealth選択時のみ表示) -->
                 <button class="act-icon-btn btn-warning jam-btn" id="btn-jam-burst" title="範囲ジャミング" style="display:none;border-color:#aa66ff;color:#cc99ff;">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                        <circle cx="12" cy="12" r="3" fill="currentColor" fill-opacity=".3"/>
-                        <path d="M12,4 v3 M12,17 v3 M4,12 h3 M17,12 h3"/>
-                        <path d="M6.5,6.5 l2,2 M15.5,15.5 l2,2 M17.5,6.5 l-2,2 M8.5,15.5 l-2,2" stroke-opacity=".6"/>
-                    </svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_jam.png)"></i>
                     <span>JAM</span>
                 </button>
                 <button class="act-icon-btn btn-warning jam-btn" id="btn-jam-cont" title="継続EMジャム" style="display:none;border-color:#aa66ff;color:#cc99ff;">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                        <path d="M3,12 q3,-7 6,0 t6,0 t6,0"/>
-                        <path d="M3,16 q3,-4 6,0 t6,0 t6,0" stroke-opacity=".5"/>
-                    </svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_emjam.png)"></i>
                     <span>EM-J</span>
                 </button>
                 <button class="act-icon-btn btn-warning jam-btn" id="btn-jam-pulse" title="EMパルス (広域ブラインド)" style="display:none;border-color:#aa66ff;color:#cc99ff;">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                        <circle cx="12" cy="12" r="3"/>
-                        <circle cx="12" cy="12" r="7" stroke-opacity=".6"/>
-                        <circle cx="12" cy="12" r="10.5" stroke-opacity=".3"/>
-                    </svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_pulse.png)"></i>
                     <span>PULSE</span>
                 </button>
                 <!-- 第16弾: 搭載物 (全艦種・積める種類だけ表示)。数字=完成品の数 / 「資材」=資材から組み立て -->
                 <button class="act-icon-btn btn-info drone-btn" id="btn-drone-attack" data-dtype="attack" title="戦闘機 (1枠) — 見えている敵へ自動射撃" style="display:none">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12,3 l7,4 l-3,2 l-4,-2 l-4,2 l-3,-2 z" fill="currentColor" fill-opacity=".25"/><line x1="12" y1="9" x2="12" y2="20"/></svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_fighter.png)"></i>
                     <span>戦闘機</span><em class="cg-n"></em>
                 </button>
                 <button class="act-icon-btn btn-info drone-btn" id="btn-drone-mech" data-dtype="mech" title="人型 (4枠) — 重装・低速。重砲と格闘で自艦を守る" style="display:none">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2.2"/><rect x="8.5" y="8" width="7" height="7" rx="1" fill="currentColor" fill-opacity=".25"/><line x1="8.5" y1="9" x2="5" y2="14"/><line x1="15.5" y1="9" x2="19" y2="7"/><line x1="10" y1="15" x2="9" y2="21"/><line x1="14" y1="15" x2="15" y2="21"/></svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_mech.png)"></i>
                     <span>人型</span><em class="cg-n"></em>
                 </button>
                 <button class="act-icon-btn btn-info drone-btn" id="btn-drone-build" data-dtype="build" title="砲台 (2枠) — 設置・移動不可。近づく敵を撃つ" style="display:none">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="14" r="4" fill="currentColor" fill-opacity=".25"/><line x1="12" y1="14" x2="20" y2="8"/><line x1="6" y1="20" x2="18" y2="20"/></svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_turret.png)"></i>
                     <span>砲台</span><em class="cg-n"></em>
                 </button>
                 <button class="act-icon-btn btn-info drone-btn" id="btn-drone-scout" data-dtype="scout" title="哨戒機 (1枠) — 前へ出て周囲2200uの敵を探知" style="display:none">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="11" cy="11" r="6"/><line x1="15.5" y1="15.5" x2="20" y2="20"/></svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_scout.png)"></i>
                     <span>哨戒機</span><em class="cg-n"></em>
                 </button>
                 <button class="act-icon-btn btn-info drone-btn" id="btn-drone-decoy" data-dtype="decoy" title="デコイ (1枠) — 強EMで敵ミサイルを誘引" style="display:none">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12,4 l4,4 l-4,3 l-4,-3 z" fill="currentColor" fill-opacity=".25"/><circle cx="12" cy="16" r="3" stroke-opacity=".6"/></svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_decoy.png)"></i>
                     <span>デコイ</span><em class="cg-n"></em>
                 </button>
                 <button class="act-icon-btn btn-info drone-btn" id="btn-drone-buoy" data-dtype="buoy" title="センサーブイ (1枠) — 設置。周囲3200uを探知 (EM放射)" style="display:none">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="3" fill="currentColor" fill-opacity=".3"/><circle cx="12" cy="12" r="7" stroke-opacity=".5"/><circle cx="12" cy="12" r="11" stroke-opacity=".25"/></svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_buoy.png)"></i>
                     <span>ブイ</span><em class="cg-n"></em>
                 </button>
                 <button class="act-icon-btn btn-info drone-btn" id="btn-drone-barrier" data-dtype="barrier" title="ビームバリア (2枠) — 設置。周囲の敵に周期ダメージ" style="display:none">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="8" stroke-opacity=".5"/><line x1="5" y1="12" x2="19" y2="12" stroke-width="2"/><line x1="12" y1="5" x2="12" y2="19" stroke-opacity=".5"/></svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_barrier.png)"></i>
                     <span>バリア</span><em class="cg-n"></em>
                 </button>
                 <button class="act-icon-btn btn-info drone-btn" id="btn-drone-higgs" data-dtype="higgs" title="ヒッグス散布 (2枠) — 設置。周囲のヒッグスを濃くして身を隠す" style="display:none">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><ellipse cx="12" cy="13" rx="8" ry="4" stroke-opacity=".4"/><ellipse cx="12" cy="10" rx="5" ry="2.5" stroke-opacity=".65"/><ellipse cx="12" cy="7.5" rx="2.5" ry="1.5" fill="currentColor" fill-opacity=".2"/></svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_disperse.png)"></i>
                     <span>散布</span><em class="cg-n"></em>
                 </button>
                 <!-- 第17弾: 緊急離脱 (消耗品は積載の枠を使う / 噴射・機関停止は艦の機能) -->
                 <button class="act-icon-btn btn-info drone-btn" id="btn-item-flash" data-dtype="flash" title="閃光弾 (1枠) — 自艦の位置で炸裂。半径1500uの敵の目を5秒焼き、ミサイルの誘導を切る。その瞬間の位置は知られる" style="display:none">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="3.5" fill="currentColor" fill-opacity=".35"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="5" y1="5" x2="7.5" y2="7.5"/><line x1="16.5" y1="16.5" x2="19" y2="19"/><line x1="5" y1="19" x2="7.5" y2="16.5"/><line x1="16.5" y1="7.5" x2="19" y2="5"/></svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_flash.png)"></i>
                     <span>閃光弾</span><em class="cg-n"></em>
                 </button>
                 <button class="act-icon-btn btn-info drone-btn" id="btn-item-noise" data-dtype="noise" title="ノイズメーカー (1枠) — 艦首方向へ自艦の全速と同じ音と航跡を12秒出す囮。敵は強い方の音を追う" style="display:none">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12,8 l4,4 l-4,4 l-4,-4 z" fill="currentColor" fill-opacity=".25"/><path d="M18,7 q3,5 0,10" stroke-opacity=".7"/><path d="M6,7 q-3,5 0,10" stroke-opacity=".7"/><path d="M20.5,4.5 q5,7.5 0,15" stroke-opacity=".35"/></svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_noise.png)"></i>
                     <span>ノイズ</span><em class="cg-n"></em>
                 </button>
                 <button class="act-icon-btn btn-info drone-btn" id="btn-item-smoke" data-dtype="smoke" title="煙幕弾 (1枠) — 自艦の位置に半径900uのヒッグス雲を20秒。中では敵の探信が埋もれる (自分の有視界も縮む)" style="display:none">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="9" cy="13" r="4.5" fill="currentColor" fill-opacity=".2"/><circle cx="15" cy="11" r="5" fill="currentColor" fill-opacity=".15"/><circle cx="12" cy="16" r="4" stroke-opacity=".6"/></svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_smoke.png)"></i>
                     <span>煙幕</span><em class="cg-n"></em>
                 </button>
+                <!-- 第21弾: 囮 (押してから射出する地点をタップ / 長押しメニューからも) -->
+                <button class="act-icon-btn btn-info drone-btn" id="btn-item-fsos" data-dtype="fsos" title="偽SOS (1枠) — 押してから地点をタップ。そこへ射出し、本物と同じ遭難信号を90秒出す。敵は区別できず寄ってくる">
+                    <i class="ico" style="--ico:url(assets/icons/icon_fsos.png)"></i>
+                    <span>偽SOS</span><em class="cg-n"></em>
+                </button>
+                <button class="act-icon-btn btn-info drone-btn" id="btn-item-lure" data-dtype="lure" title="偽艦影ブイ (1枠) — 押してから地点をタップ。そこへ射出し、巡航中の艦なみの熱・光・EM・航跡を60秒出しながらゆっくり動く">
+                    <i class="ico" style="--ico:url(assets/icons/icon_lure.png)"></i>
+                    <span>偽艦影</span><em class="cg-n"></em>
+                </button>
                 <button class="act-icon-btn btn-info common-btn" id="btn-boost" onclick="useBoost()" title="緊急噴射 (B) — 4秒間 速度×2。熱が最大になり、終わると機関が8秒過熱。再使用45秒" style="display:none">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4,8 12,12 4,16"/><polyline points="11,8 19,12 11,16"/><line x1="2" y1="12" x2="6" y2="12" stroke-opacity=".5"/></svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_boost.png)"></i>
                     <span>噴射</span><em class="cg-n"></em>
                 </button>
                 <button class="act-icon-btn btn-info common-btn" id="btn-coast" onclick="toggleCoast()" title="機関停止 (C) — 惰性で漂う。推力の熱と音が消える。進路は変えられない (艦首は回して撃てる)。もう一度・移動命令・出力切替で再点火" style="display:none">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4,12 h12" stroke-dasharray="2 2.5"/><polyline points="13,8 17,12 13,16"/><circle cx="20" cy="12" r="1.5" fill="currentColor"/></svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_coast.png)"></i>
                     <span>機関停止</span>
                 </button>
                 <!-- §3-10 ミサイルモード切替 (全艦種) -->
                 <button class="act-icon-btn common-btn" id="btn-missile-mode" title="ミサイルモード: HON=熱源誘導(デコイ妨害可) / AI=AI追跡(ジャミング耐性・大閃光)" style="display:none;border-color:#ffaa33;color:#ffcc66;">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><ellipse cx="13" cy="12" rx="7" ry="3" fill="currentColor" fill-opacity=".2"/><polygon points="20,12 17,9.5 17,14.5" fill="currentColor"/><circle cx="6" cy="12" r="3" stroke-opacity=".7"/></svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_missile.png)"></i>
                     <span id="missile-mode-label">MSL:HON</span>
                 </button>
                 <!-- §3-9 修復ドローン (全艦種) -->
                 <button class="act-icon-btn common-btn" id="btn-repair-drone" title="修復モード — 完全停止してHP回復 (全センサーに脆弱)" style="display:none;border-color:#44bbff;color:#88ddff;">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12,5 v14 M5,12 h14"/><circle cx="12" cy="12" r="7" stroke-opacity=".4"/></svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_repair.png)"></i>
                     <span id="repair-drone-label">REGEN</span>
                 </button>
                 <!-- ゲームスピードトグル (戦闘時スロー・移動時ファスト) -->
                 <button class="act-icon-btn common-btn" id="btn-game-speed" title="ゲームスピード切替: 0.5x低速 / 1x通常 / 2x高速" style="border-color:#aaffcc;color:#ccffee;">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="9" stroke-opacity=".5"/><polyline points="12,7 12,12 16,12"/></svg>
+                    <i class="ico" style="--ico:url(assets/icons/icon_speed.png)"></i>
                     <span>SPD:1x</span>
                 </button>
             </div>
             <button id="recenter-chip" title="自艦へ戻る (追従ON)" style="display:none">◎ 自艦</button>
             <!-- 第16弾: ズームボタン (ピンチ・ホイールに加えて。追従中は自艦中心で拡大縮小) -->
             <div id="zoom-ctl">
+                <button id="btn-density" onclick="toggleDensityView()" title="濃度表示 — 全マップの霧の濃さと地形 (岩礁・嵐・熱雲) を重ねる。OFFの時は自艦の周り3000uだけ (H)"><i class="ico" style="--ico:url(assets/icons/icon_density.png)"></i></button>
                 <button id="zoom-in" onclick="zoomStep(1.6)" title="拡大 (+)">＋</button>
                 <button id="zoom-out" onclick="zoomStep(1 / 1.6)" title="縮小 (−)">－</button>
             </div>
@@ -310,41 +267,19 @@
                     <span class="isel-label">ENGINE</span>
                     <div class="isel-group" id="engine-icon-group">
                         <button class="isel-btn active" data-val="thermonuclear" title="熱核エンジン — 高出力・熱源大">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                                <circle cx="12" cy="12" r="4" fill="currentColor" fill-opacity=".25"/>
-                                <line x1="12" y1="3" x2="12" y2="6.5"/><line x1="12" y1="17.5" x2="12" y2="21"/>
-                                <line x1="3" y1="12" x2="6.5" y2="12"/><line x1="17.5" y1="12" x2="21" y2="12"/>
-                                <line x1="5.6" y1="5.6" x2="7.8" y2="7.8"/><line x1="16.2" y1="16.2" x2="18.4" y2="18.4"/>
-                                <line x1="18.4" y1="5.6" x2="16.2" y2="7.8"/><line x1="7.8" y1="16.2" x2="5.6" y2="18.4"/>
-                            </svg>
+                            <i class="ico" style="--ico:url(assets/icons/icon_eng_thr.png)"></i>
                             <span>THR</span>
                         </button>
                         <button class="isel-btn" data-val="pulse" title="パルスエンジン — EM高・機動性重視">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                                <polyline points="15,3 9,12 13,12 9,21"/>
-                                <line x1="18" y1="7" x2="19.5" y2="7" stroke-width="1"/><line x1="19" y1="10" x2="21" y2="10" stroke-width="1"/>
-                                <line x1="18" y1="14" x2="20" y2="14" stroke-width="1"/>
-                            </svg>
+                            <i class="ico" style="--ico:url(assets/icons/icon_eng_pls.png)"></i>
                             <span>PLS</span>
                         </button>
                         <button class="isel-btn" data-val="higgs" title="ヒッグスエンジン — 低シグネチャ・隠密">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                                <path d="M2,12 Q5,7 8,12 Q11,17 14,12 Q17,7 20,12 Q21,14 22,12"/>
-                                <circle cx="2" cy="12" r="1.5" fill="currentColor"/>
-                                <circle cx="22" cy="12" r="1.5" fill="currentColor"/>
-                            </svg>
+                            <i class="ico" style="--ico:url(assets/icons/icon_eng_hgs.png)"></i>
                             <span>HGS</span>
                         </button>
                         <button class="isel-btn" data-val="photon" title="フォトンエンジン — 光学大・EM低">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                                <circle cx="12" cy="12" r="3.5" fill="currentColor" fill-opacity=".3"/>
-                                <line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
-                                <line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/>
-                                <line x1="4.9" y1="4.9" x2="7" y2="7"/><line x1="17" y1="17" x2="19.1" y2="19.1"/>
-                                <line x1="19.1" y1="4.9" x2="17" y2="7"/><line x1="7" y1="17" x2="4.9" y2="19.1"/>
-                                <line x1="4.9" y1="8" x2="6.5" y2="9.5"/><line x1="19.1" y1="8" x2="17.5" y2="9.5"/>
-                                <line x1="4.9" y1="16" x2="6.5" y2="14.5"/><line x1="19.1" y1="16" x2="17.5" y2="14.5"/>
-                            </svg>
+                            <i class="ico" style="--ico:url(assets/icons/icon_eng_pht.png)"></i>
                             <span>PHT</span>
                         </button>
                     </div>
@@ -355,13 +290,13 @@
                     <button class="gd-focus-btn" data-focus="sensor">探知重視</button>
                     <button class="gd-focus-btn" data-focus="weapon">兵装重視</button>
                 </div>
-                <div class="gd-note">出力の大小は右列の 潜航/巡航/全速。配分は上の重点だけで決める (第20弾: 詳細スライダーは撤去)</div>
+                <div class="gd-note">出力の大小は右列の 潜航/巡航/全速。配分は上の重点だけで決める。エンジンは戦闘中も切り替えられるが、切替の10秒は推力ゼロ (惰性) でEMが漏れる</div>
             </div>
 
             <!-- 縦持ち時: 横向きを促す (ゲーム中のみ・進行は一時停止) -->
             <div id="rotate-overlay">
                 <div class="ro-box">
-                    <div class="ro-icon"><svg viewBox="0 0 48 48" width="52" height="52" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="15" y="6" width="18" height="34" rx="3"/><line x1="21" y1="35" x2="27" y2="35"/></svg></div>
+                    <div class="ro-icon"><i class="ico" style="--ico:url(assets/icons/icon_rotate.png)"></i></div>
                     <div class="ro-title">端末を横向きにしてください</div>
                     <div class="ro-sub">Dark Echo は横画面で遊ぶゲームです。縦向きの間は進行を一時停止しています。</div>
                     <button class="btn btn-primary" id="btn-rotate-fs">全画面・横向きにする</button>
@@ -707,11 +642,12 @@
         <button onclick="lpmSelectMove()" style="display:block; width:100%; background:#001a0e; border:1px solid #00ffaa; color:#00ffaa; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">▶ 移動</button>
         <button onclick="lpmSelectFire()" style="display:block; width:100%; background:#1a0008; border:1px solid #ff4466; color:#ff4466; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">⊕ 射撃</button>
         <div id="lpm-drones"></div>
+        <div id="lpm-lures"></div>
         <button onclick="hideLongPressMenu()" style="display:block; width:100%; background:#0a0a0a; border:1px solid #446655; color:#668877; padding:5px 4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">× キャンセル</button>
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261026a"></script>
+    <script src="game.js?v=20261027a"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -752,7 +688,7 @@
             nav:   ['btn-cancel', 'btn-camera-follow', 'btn-attack-toggle', 'btn-repair-drone', 'btn-game-speed'],
             drone: ['btn-drone-attack','btn-drone-mech','btn-drone-build','btn-drone-scout','btn-drone-decoy',
                     'btn-drone-buoy','btn-drone-barrier','btn-drone-higgs', 'btn-hack'],
-            escape: ['btn-item-flash', 'btn-item-noise', 'btn-item-smoke', 'btn-boost', 'btn-coast'],
+            escape: ['btn-item-flash', 'btn-item-noise', 'btn-item-smoke', 'btn-item-fsos', 'btn-item-lure', 'btn-boost', 'btn-coast'],
         };
         var _apop  = document.getElementById('action-popover');
         var _store = document.getElementById('action-store');
