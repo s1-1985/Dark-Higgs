@@ -856,7 +856,7 @@ input[type=range]::-webkit-slider-thumb {
     border-radius: 3px;
     gap: 2px;
 }
-.isel-btn svg {
+.isel-btn svg, .isel-btn .ico {
     width: 22px;
     height: 22px;
     flex-shrink: 0;
@@ -909,7 +909,7 @@ input[type=range]::-webkit-slider-thumb {
     min-height: 50px;
     font-family: 'Orbitron', monospace;
 }
-.act-icon-btn svg { width: 26px; height: 26px; }
+.act-icon-btn svg, .act-icon-btn .ico { width: 26px; height: 26px; }
 .act-icon-btn span { font-size: 7px; letter-spacing: 0.5px; line-height: 1; }
 .act-icon-btn:hover { background: rgba(255,255,255,0.07); }
 .act-icon-btn.btn-info    { border-color:#1a3d6a; color:#4da6ff; }
@@ -1386,7 +1386,7 @@ input[type=range]::-webkit-slider-thumb {
     .isel-label { font-size: 7px !important; width: 36px !important; min-width: 36px !important; flex-shrink: 0; }
     .isel-group { gap: 5px !important; flex-wrap: nowrap; overflow: hidden; }
     .isel-btn { width: 44px; height: 30px; padding: 2px; }
-    .isel-btn svg { width: 16px; height: 16px; }
+    .isel-btn svg, .isel-btn .ico { width: 16px; height: 16px; }
     .isel-btn span { font-size: 6.5px; }
 
     /* ENGINE/SENSOR isel-section: モバイルでは gcb フライアウトで操作するため非表示 */
@@ -1456,7 +1456,7 @@ input[type=range]::-webkit-slider-thumb {
         cursor: pointer;
         gap: 2px;
     }
-    .gcb-opt svg { width: 18px; height: 18px; flex-shrink: 0; }
+    .gcb-opt svg, .gcb-opt .ico { width: 18px; height: 18px; flex-shrink: 0; }
     .gcb-opt span { font-size: 6.5px; line-height: 1; }
     .gcb-opt:hover { border-color: #555; color: #99a; }
     .gcb-opt.active { border-color: #00ffaa; color: #00ffaa; background: rgba(0,40,30,0.6); }
@@ -1495,7 +1495,7 @@ input[type=range]::-webkit-slider-thumb {
         min-height: 48px;
         padding: 4px 2px;
     }
-    #action-popover .act-icon-btn svg { width: 22px; height: 22px; }
+    #action-popover .act-icon-btn svg, #action-popover .act-icon-btn .ico { width: 22px; height: 22px; }
     #action-popover .act-icon-btn span { font-size: 7.5px; }
 
     /* 親アクションバー: 1行6ボタン */
@@ -1523,7 +1523,7 @@ input[type=range]::-webkit-slider-thumb {
         font-family: 'Orbitron', monospace;
         transition: border-color 0.15s, color 0.15s, background 0.15s;
     }
-    .abar-btn svg { width: 22px; height: 22px; flex-shrink: 0; }
+    .abar-btn svg, .abar-btn .ico { width: 22px; height: 22px; flex-shrink: 0; }
     .abar-btn .abar-icon { width: 26px; height: 26px; flex-shrink: 0; object-fit: contain; }
     .abar-btn span { font-size: 7px; letter-spacing: 0.4px; line-height: 1; }
     .abar-btn.btn-info    { border-color: #1a3d6a; color: #4da6ff; }
@@ -1534,7 +1534,7 @@ input[type=range]::-webkit-slider-thumb {
         color: #00ffaa !important;
     }
     .act-icon-btn { min-height: 42px; padding: 3px 2px; }
-    .act-icon-btn svg { width: 20px; height: 20px; }
+    .act-icon-btn svg, .act-icon-btn .ico { width: 20px; height: 20px; }
     .act-icon-btn span { font-size: 7px; }
 
     .panel-header { font-size: 9px; margin-bottom: 2px; letter-spacing: 0.5px; }
@@ -2147,7 +2147,7 @@ body.in-game #hud-top, body.in-game #hud-left, body.in-game #hud-right { display
     background: rgba(0,0,0,0.5); border: 1px solid #23423a; border-radius: 6px;
     color: #7fb8a8; cursor: pointer; padding: 2px;
 }
-.hud-act svg { width: 22px; height: 22px; flex-shrink: 0; }
+.hud-act svg, .hud-act .ico { width: 22px; height: 22px; flex-shrink: 0; }
 .hud-act .abar-icon { width: 24px; height: 24px; object-fit: contain; flex-shrink: 0; }
 .hud-act span { font-size: 10px; line-height: 1.1; white-space: nowrap; }
 /* 残弾/リロードはボタン右上のバッジ (高さの低い画面でもラベルと重ならない) */
@@ -2175,7 +2175,7 @@ body.in-game #action-popover {
 }
 body.in-game #action-popover.open { display: grid; }
 body.in-game #action-popover .act-icon-btn { min-height: 54px; padding: 4px 2px; }
-body.in-game #action-popover .act-icon-btn svg { width: 22px; height: 22px; }
+body.in-game #action-popover .act-icon-btn svg, body.in-game #action-popover .act-icon-btn .ico { width: 22px; height: 22px; }
 body.in-game #action-popover .act-icon-btn span { font-size: 9px; }
 
 /* ── 追従解除時の「自艦へ戻る」 ── */
@@ -2219,6 +2219,8 @@ body.in-game #zoom-ctl button {
     background: rgba(0,24,20,0.72); border: 1px solid rgba(0,255,170,0.45); cursor: pointer;
 }
 body.in-game #zoom-ctl button:active { transform: scale(0.92); background: rgba(0,60,46,0.9); }
+body.in-game #zoom-ctl #btn-density { font-size: 14px; font-weight: bold; color: #7fd8ff; border-color: rgba(127,216,255,0.45); }
+body.in-game #zoom-ctl #btn-density.on { background: rgba(60,40,120,0.85); color: #e6d4ff; border-color: #c79bff; }
 
 /* ── ログ: フィールド左下に最新1行のティッカー。タップで展開 ── */
 body.in-game #log-panel {
@@ -2415,11 +2417,29 @@ body.in-game.com-demo.think-on #think-panel.wide { max-height: 62%; }
 .tk-e { color: #ffa64d; }
 
 /* ═══ 第20弾: 長押しメニューのドローン指示 ═══ */
-#lpm-drones .lpm-dhead { font-size: 9px; color: #8fc8ff; margin: 2px 0 3px; letter-spacing: 1px; }
-#lpm-drones .lpm-drow { display: flex; align-items: center; gap: 3px; margin-bottom: 4px; }
+#lpm-drones .lpm-dhead, #lpm-lures .lpm-dhead { font-size: 9px; color: #8fc8ff; margin: 2px 0 3px; letter-spacing: 1px; }
+#lpm-drones .lpm-drow, #lpm-lures .lpm-drow { display: flex; align-items: center; gap: 3px; margin-bottom: 4px; }
 #lpm-drones .lpm-drow span { flex: 1; font-size: 9px; color: #c8e8ff; white-space: nowrap; }
 #lpm-drones .lpm-drow span small { display: block; font-size: 8px; color: #7fa8c0; }
-#lpm-drones .lpm-drow button { padding: 5px 4px; font-size: 9px; font-family: inherit; border-radius: 3px; cursor: pointer; background: #00121e; border: 1px solid #4da6ff; color: #9fd0ff; }
+#lpm-drones .lpm-drow button, #lpm-lures .lpm-drow button { padding: 5px 4px; font-size: 9px; font-family: inherit; border-radius: 3px; cursor: pointer; background: #00121e; border: 1px solid #4da6ff; color: #9fd0ff; }
 #lpm-drones .lpm-drow button[data-k="attack"] { border-color: #ff9966; color: #ffbb99; background: #1e0a00; }
 #lpm-drones .lpm-drow button[data-k="return"] { border-color: #446655; color: #88aa99; background: #0a0a0a; }
 #gen-drawer .gd-note { font-size: 10px; color: #7fb8a8; line-height: 1.5; margin-top: 4px; }
+
+/* 第21弾: エンジン切替 (GENドロワー) — スマホの横画面でも表示する。切替中のボタンは点滅 */
+#gen-drawer #engine-isel-section { display: flex !important; }
+#gen-drawer .isel-btn.switching { animation: engSwitch 0.6s infinite alternate; border-color: #ffcc55 !important; color: #ffcc55 !important; }
+@keyframes engSwitch { from { opacity: 0.55; } to { opacity: 1; } }
+/* 第21弾: センサー帯域 ON/OFF — OFFは暗く、2本目以降 (漏れる) は右上に点 */
+.band-btn.off { opacity: 0.38; }
+.band-btn.off .bt-fill { opacity: 0 !important; }
+.band-btn.leak { position: relative; }
+.band-btn.leak::after { content: ''; position: absolute; top: 3px; right: 3px; width: 5px; height: 5px; border-radius: 50%; background: #ff8a6a; box-shadow: none; }
+
+#lpm-lures .lpm-drow button { flex: 1; border-color: #c48bff; color: #e0c8ff; background: #140a1e; }
+
+/* 第21弾: アイコンは Higgsfield の白線画 (assets/icons/*.png) を CSS マスクにして色は文字色 (currentColor) */
+.ico { display: inline-block; width: 24px; height: 24px; flex-shrink: 0; background-color: currentColor;
+  -webkit-mask: var(--ico) center / contain no-repeat; mask: var(--ico) center / contain no-repeat; }
+.ro-icon .ico { width: 52px; height: 52px; }
+#btn-density .ico { width: 18px; height: 18px; }
