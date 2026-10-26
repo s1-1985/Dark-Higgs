@@ -2413,3 +2413,13 @@ body.in-game.com-demo.think-on #think-panel.wide { max-height: 62%; }
 #think-log .tk { font-size: 10px; line-height: 1.5; padding: 1px 8px; }
 .tk-p { color: #5fe8ff; }
 .tk-e { color: #ffa64d; }
+
+/* ═══ 第20弾: 長押しメニューのドローン指示 ═══ */
+#lpm-drones .lpm-dhead { font-size: 9px; color: #8fc8ff; margin: 2px 0 3px; letter-spacing: 1px; }
+#lpm-drones .lpm-drow { display: flex; align-items: center; gap: 3px; margin-bottom: 4px; }
+#lpm-drones .lpm-drow span { flex: 1; font-size: 9px; color: #c8e8ff; white-space: nowrap; }
+#lpm-drones .lpm-drow span small { display: block; font-size: 8px; color: #7fa8c0; }
+#lpm-drones .lpm-drow button { padding: 5px 4px; font-size: 9px; font-family: inherit; border-radius: 3px; cursor: pointer; background: #00121e; border: 1px solid #4da6ff; color: #9fd0ff; }
+#lpm-drones .lpm-drow button[data-k="attack"] { border-color: #ff9966; color: #ffbb99; background: #1e0a00; }
+#lpm-drones .lpm-drow button[data-k="return"] { border-color: #446655; color: #88aa99; background: #0a0a0a; }
+#gen-drawer .gd-note { font-size: 10px; color: #7fb8a8; line-height: 1.5; margin-top: 4px; }
