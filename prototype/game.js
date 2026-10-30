@@ -202,6 +202,8 @@ const SPRITE_FILES = {
     drone_turret:       'assets/drone_turret.png',
     drone_buoy:         'assets/drone_buoy.png',
     drone_mech:         'assets/drone_mech.png', // 第20弾: 人型 (Higgsfield生成・透過256px)
+    drone_barrier:      'assets/drone_barrier.png',      // 第22弾: ビームの盾 (Higgsfield生成・透過256px)
+    fx_barrier_shield:  'assets/fx_barrier_shield.png',  // 第22弾: 盾の泡 (黒背景・加算)
     fx_decoy:           'assets/fx_decoy.png',
     // センサーtrailパーティクル
     particle_heat:      'assets/particle_heat.png',
@@ -486,6 +488,7 @@ let enemies = [];
 let projectiles = [];
 let structures = [];
 let effects = [];
+const BEAM_FX_SEC = 6; // 第22弾: ビームの表示時間 (秒・オーナー指定5〜8秒)
 let damagePuffs = []; // 第21弾: 損傷した艦の煙と火花 (艦影の上に描く・上限70)
 let particles = [];
 let debris = [];
@@ -512,7 +515,15 @@ let emTrails    = [];   // §3-12 EMセンサー向けEM放射跡
 let resourceNodes = []; // リソースノード {x, y, active, emFlashTimer}
 
 // ── ゲームスピード制御 ──────────────────────────────────────
-let gameSpeedFactor = 1.0; // 0.5=低速 / 1.0=通常 / 2.0=高速
+// 第22弾: 倍速は「1フレームにロジックを何回進めるか」(0.5=2フレームに1回 / 2・4・8=n回)。物理の1ステップは常に同じ。
+// 旧: gameSpeedFactor で艦の移動量とタイマーだけを倍にしていた → 1ステップの移動量が速さとして読まれ、
+// 自艦のシグネチャ (速さで熱・EMが増える) が倍速で上がっていた / 弾・ミサイルは倍にならず釣り合いが崩れていた
+const GAME_SPEEDS = [1, 2, 4, 8, 0.5];
+let gameSpeed = 1, _speedAcc = 0;
+const gameSpeedFactor = 1.0; // 1ステップの時間 (常に1。式に残っている掛け算は互換のため)
+// 第22弾: 自艦の戦闘モード (ロックすると画面下に出るバー)。mode: 'manual'(手動) | 'face'(正対) | 'flank'(回り込み) /
+// range: 'auto'(兵装に合わせる) | 'near' | 'mid' | 'far' / prio: 'attack' | 'evade'。移動命令を出すと手動に戻る
+let combatMode = { mode: 'manual', range: 'auto', prio: 'attack' };
 const PLAYER_TURN_RATE = 0.010; // 自機最大回頭レート (rad/frame) - assault基準
 const PLAYER_TURN_RATES = { assault: 0.010, stealth: 0.015, carrier: 0.004 }; // 艦種別回頭レート (重量感重視)
 const ENEMY_TURN_RATES  = { corvette: 0.018, fighter: 0.025, destroyer: 0.009, carrier: 0.006 }; // 敵艦種別回頭レート
@@ -545,6 +556,60 @@ const ENEMY_COMBAT = {
     // ファイター(ドローン): 突撃ハラサー。一直線に肉薄してkineticを浴びせる。
     fighter:   { rangeMult: 0.55, speedMult: 1.60, standoff: 0.32, fireCD: 90,  kite: false, strafe: 0.12, fleeClose: 0,    weaponEarly: 'kinetic', weaponLate: 'kinetic', burst: 1 },
 };
+// ═══ 第22弾 (オーナー合意): 戦艦の戦闘機動 — 自機の戦闘モード・自機COM・敵で同じ式 ═══
+// 機動: 正対 (艦首を相手へ向けたまま間合いを保つ) / 回り込み (相手の後方へ大きく周回) / 手動 (自機のみ)
+// 間合い: 兵装に合わせる (実弾600u・ミサイル1800u・ビーム5000u) / 近600・中1800・遠5000
+// 優先: 攻撃 (射角に入れて撃つ) / 回避 (相手の射角から外れる・近づくミサイルを横へかわす)
+// ストレイフ (横滑り・左右へ急に振る) は禁止 — 戦艦は艦首の向きにしか進まず、速さは慣性で変わる
+const CM_RANGE = { kinetic: 600, missile: 1800, beam: 5000 };
+const CM_DIST = { near: 600, mid: 1800, far: 5000 };
+const CM_HOLD = 600;              // COM が選んだ機動を続ける最短 (10秒)
+const CM_MISSILE_EVADE_R = 1500;  // 回避優先: この距離に入った相手のミサイルを横へかわす (実装で決めた値)
+const ENEMY_CLASS = { destroyer: 'assault', corvette: 'stealth', carrier: 'carrier' }; // 敵の内部の型 → 同じ艦種の自機
+// 戦闘機動の舵: 進む向き ang と 速さの割合 spd (0..1 = 最高速に対する割合) を返す
+// tAng = 相手の艦首の向き (分からなければ null) / oppArc = 相手の今の兵装の射角 (半角) / incoming = 近づく相手のミサイル
+function combatManeuver(me, tx, ty, tAng, D, mode, prio, oppArc, incoming) {
+    const dx = tx - me.x, dy = ty - me.y, dist = Math.hypot(dx, dy) || 1, bearing = Math.atan2(dy, dx);
+    if (prio === 'evade' && incoming) {
+        const ma = Math.atan2(incoming.y - me.y, incoming.x - me.x); // ミサイルの来る向きと直角へ
+        const a1 = ma + Math.PI / 2, a2 = ma - Math.PI / 2;
+        return { ang: Math.abs(_angDiff(a1, me.angle)) < Math.abs(_angDiff(a2, me.angle)) ? a1 : a2, spd: 1, why: 'dodge' };
+    }
+    const polar = Math.atan2(me.y - ty, me.x - tx); // 相手から見た自分の方位
+    const inArc = tAng !== null && oppArc ? Math.abs(_angDiff(polar, tAng)) < oppArc + 0.2 : false;
+    if (tAng !== null && (mode === 'flank' || (prio === 'evade' && inArc))) {
+        const dphi = _angDiff(tAng + Math.PI, polar); // 相手の真後ろまで、周りを何rad回るか
+        if (Math.abs(dphi) > 0.4) {
+            const dir = dphi >= 0 ? 1 : -1;
+            const corr = Math.max(-0.9, Math.min(0.9, (dist - D) / Math.max(400, D) * 1.5)); // 遠ければ内へ・近ければ外へ
+            return { ang: polar + dir * (Math.PI / 2 + corr), spd: 1, why: 'flank' };
+        }
+    }
+    const band = Math.max(150, D * 0.15);
+    if (dist > D + band) return { ang: bearing, spd: dist > D * 1.6 ? 1 : 0.6, why: 'close' };
+    if (dist < D - band * 1.5) return { ang: bearing + Math.PI, spd: 0.8, why: 'open' };
+    return { ang: bearing, spd: 0, why: 'hold' };
+}
+// 近づく相手のミサイル (自分を狙って CM_MISSILE_EVADE_R 以内・こちらへ向かっている)。byPlayer=撃った側
+function incomingMissile(me, byPlayer) {
+    let best = null, bd = CM_MISSILE_EVADE_R;
+    for (const pr of projectiles) {
+        if (!pr.active || pr.type !== 'missile' || pr.isPlayer !== byPlayer) continue;
+        const d = Math.hypot(pr.x - me.x, pr.y - me.y);
+        if (d >= bd) continue;
+        const toMe = Math.atan2(me.y - pr.y, me.x - pr.x);
+        if (Math.abs(_angDiff(toMe, pr.angle)) > 0.9) continue;
+        bd = d; best = pr;
+    }
+    return best;
+}
+// COM (自機COM・敵) の機動の選び方: 性格と相手の兵装で決める
+function comChooseManeuver(pers, hpFrac, myW, oppW) {
+    let mode = (pers.aggression || 0) >= 0.6 ? 'flank' : 'face';
+    if (oppW === 'missile' || oppW === 'beam') mode = 'flank';          // 相手がミサイル/ビーム → 射角から外れて後ろへ回る
+    const prio = ((pers.caution || 0) >= 0.6 || hpFrac < 0.5 || oppW === 'missile') ? 'evade' : 'attack';
+    return { mode, prio, D: CM_RANGE[myW] || CM_RANGE.missile };
+}
 // ── 敵の「性格」(マッチ毎ランダム・艦種でレンジを縛る) ──
 // 艦種ドクトリン(ENEMY_COMBAT)が土台。性格はその上の"気質"で、ドクトリンを覆さない範囲で行動を変調する。
 //  aggression: 距離を詰める/撃つ積極性  stealth: 隠密・低シグネチャ志向  greed: ノード奪取優先度  caution: 損傷時の退き際
@@ -684,14 +749,16 @@ const AMMO_PER_SLOT = { kinetic: 48, missile: 3 };
 // w=完成品が食う枠 / mat=組み立てに要る資材(個) / build=組み立て時間(frame) / life=展開後の稼働時間(frame)
 const DRONE_SPEC = {
     // 第20弾: 組み立て時間を2倍に (オーナー合意。8〜40秒)
-    attack:  { label: '戦闘機',       w: 1, mat: 1, build: 720,  life: 3600, hp: 150 },
-    scout:   { label: '哨戒機',       w: 1, mat: 1, build: 720,  life: 2400, hp: 150 },
-    decoy:   { label: 'デコイ',       w: 1, mat: 1, build: 480,  life: 2400, hp: 150 },
-    build:   { label: '砲台',         w: 2, mat: 2, build: 1200, life: 7200, hp: 400, placed: true },
-    buoy:    { label: 'センサーブイ', w: 1, mat: 1, build: 720,  life: 7200, hp: 400, placed: true },
-    mech:    { label: '人型',         w: 4, mat: 4, build: 2400, life: 5400, hp: 900 },
-    barrier: { label: 'ビームバリア', w: 2, mat: 2, build: 1200, life: 7200, hp: 400, placed: true },
-    higgs:   { label: 'ヒッグス散布', w: 2, mat: 2, build: 1200, life: 7200, hp: 400, placed: true },
+    // 第22弾 (オーナー合意): 耐久はミサイル(350)何発で沈むかで決める・自機と敵で同じ —
+    // 哨戒機1発 / 戦闘機3発 / 人型6発 / その他は1発。バリアはビームを1発だけ止める盾 (止めたら壊れる)
+    attack:  { label: '戦闘機',       w: 1, mat: 1, build: 720,  life: 3600, hp: 1050 },
+    scout:   { label: '哨戒機',       w: 1, mat: 1, build: 720,  life: 2400, hp: 350 },
+    decoy:   { label: 'デコイ',       w: 1, mat: 1, build: 480,  life: 2400, hp: 350 },
+    build:   { label: '砲台',         w: 2, mat: 2, build: 1200, life: 7200, hp: 350, placed: true },
+    buoy:    { label: 'センサーブイ', w: 1, mat: 1, build: 720,  life: 7200, hp: 350, placed: true },
+    mech:    { label: '人型',         w: 4, mat: 4, build: 2400, life: 5400, hp: 2100 },
+    barrier: { label: 'ビームバリア', w: 2, mat: 2, build: 1200, life: 7200, hp: 350, placed: true },
+    higgs:   { label: 'ヒッグス散布', w: 2, mat: 2, build: 1200, life: 7200, hp: 350, placed: true },
     // 第17弾: 離脱用の消耗品 (item=使い切り。同時展開の上限には数えない。資材から作ると完成した瞬間に使う)
     flash:   { label: '閃光弾',         w: 1, mat: 1, build: 480, item: true },
     noise:   { label: 'ノイズメーカー', w: 1, mat: 1, build: 480, item: true },
@@ -714,7 +781,7 @@ const DEFAULT_LOADOUT = {
 let cargo = { stock: {}, mat: 0, asm: null, ammoK: 0, ammoM: 0 }; // asm = { type, t, total, ready } / ammoK=実弾の残り(斉射) / ammoM=ミサイルの残り(発)
 // ═══ 第17弾: 緊急離脱 (オーナー合意 2026-10-25) ═══
 // 閃光弾: 自艦の位置で炸裂。半径内の敵はセンサー損傷(探知×0.1)・敵ミサイルは誘導を失う。閃光の瞬間の位置は周囲の敵に知られる
-const FLASH_RADIUS = 1500, FLASH_BLIND = 300;
+const FLASH_RADIUS = 2500, FLASH_BLIND = 300; // 第22弾: 1500→2500u (オーナー合意)
 // ノイズメーカー: 投下時の艦首方向へ自艦の全速で直進し、全速並みの熱と航跡を出す囮
 const NOISE_LIFE = 720, NOISE_HEAT = 0.7;
 let noiseMakers = []; // {x, y, vx, vy, life, _wid}
@@ -722,14 +789,14 @@ let noiseMakers = []; // {x, y, vx, vy, life, _wid}
 const LURE_SOS_LIFE = 5400, LURE_SHIP_LIFE = 3600, LURE_FLY_SPEED = 12, LURE_SHIP_SPEED = 0.8, LURE_SIG = 0.55, LURE_REVEAL_R = 400;
 let lures = [], _lureSeq = 0, pendingLure = null;
 // 煙幕弾: 自艦の位置にヒッグス雲 (半径の半分までは濃さ一定・外側は線形に薄れる)。後半で薄れる
-const SMOKE_R = 900, SMOKE_DENS = 0.6, SMOKE_LIFE = 1200, SMOKE_FADE = 600;
+const SMOKE_R = 900, SMOKE_DENS = 0.6, SMOKE_LIFE = 1800, SMOKE_FADE = 600; // 第22弾: 20→30秒 (最後の10秒で薄れる)
 const HIGGS_DRONE_R = 700, HIGGS_DRONE_DENS = 0.4; // ヒッグス散布ドローン (稼働中ずっと)
 let smokeClouds = []; // {x, y, r, dens, life, max, follow}
 // 機関停止(惰性): 進路は変えられない (艦首は回せる)。速度は霧の外で20秒で半減、濃さ1.0で4倍早く減る
 const COAST_DECAY = Math.LN2 / 1200, COAST_FOG_DRAG = 3;
 let playerCoasting = false;
 // 緊急噴射: 速度×2を4秒 → 過熱8秒 (既存の機関損傷と同じ: 最高速×0.45・熱漏れ) / 再使用45秒
-const BOOST_MULT = 2, BOOST_DUR = 240, BOOST_OVERHEAT = 480, BOOST_CD = 2700, BOOST_ACCEL = 20;
+const BOOST_MULT = 2, BOOST_DUR = 360, BOOST_OVERHEAT = 480, BOOST_CD = 2700, BOOST_ACCEL = 20; // 第22弾: 噴射4→6秒
 let boostT = 0, boostCD = 0;
 let _flashScreen = 0; // 閃光弾の画面フラッシュ (frame)
 // 敵の潜伏: 後退時に半径5000u内の濃い霧/岩礁帯へ。潜んでいる間は止まってシグネチャ×0.55・毎秒0.5%修復・45秒で狩りへ戻る
@@ -774,7 +841,7 @@ const ENEMY_PD_RANGE = 800; // 第20弾: 敵の迎撃 (実弾の射程)
 let droneOrders = {}; // 種類 → { kind:'patrol'|'attack', x, y } (帰還=無し)
 
 // §3-7 建設物3種 (carrier) 定数
-const DRONE_BARRIER_RADIUS = 880; // バリア: この半径内の敵に周期ダメージ
+const DRONE_BARRIER_RADIUS = 600; // 第22弾: バリア=ビームの盾。この半径の内を通る相手のビームを1発止めて壊れる (半径は実装で決めた値。旧880u=周期ダメージの範囲)
 const DRONE_BUOY_RANGE     = 3200;// センサーブイ: 探知半径
 const DRONE_HIGGS_RADIUS   = 700; // ヒッグス散布: 影響半径
 
@@ -924,28 +991,28 @@ function visionRadiusAt(s, x, y, base = BASE_VISION_RADIUS) {
     return r;
 }
 
-// ═══ 第21弾: 視線 — 霧の濃さを積み重ね、ヒッグス100%を VIS_OCCLUDE (400u) 進むと見えなくなる (50%なら800u) ═══
-// 有視界の形は「最大半径 (居る場所の濃度)」と「視線の先の濃度」で決まる。自機/敵/ドローンで同じ関数を使う。
-// 旧: 半径だけ居る場所の濃度で決め、形は時間で揺れる飾りの波だった (周りの濃度とは無関係)
-const VIS_RAYS = 96, VIS_STEP = 30, VIS_OCCLUDE = 400;
+// ═══ 第22弾 (オーナー合意): 視線 — 最大半径は居る場所 (直下) の濃度で決まる。300uより先で、直下より30ポイント以上
+// 濃い所に視線が入るとそこで止まり、その奥 (影) も見えない → 周りの濃度に応じて歪な形になる。300u以内は必ず見える。
+// 自機/敵/ドローンで同じ関数を使う。旧 (第21弾): 濃さを積み重ねて 100%なら400u進むと遮る (薄い霧でも遠くは欠けた)
+const VIS_RAYS = 96, VIS_STEP = 30, VIS_CLOSE = 300, VIS_STEP_UP = 0.30;
 let _visRays = new Float32Array(VIS_RAYS), _visRaysF = -1;
-function losReach(x, y, ang, maxR) {
+function losReach(x, y, ang, maxR, h0) {
+    if (maxR <= VIS_CLOSE) return maxR;
+    if (h0 === undefined) h0 = getHiggsIntensity(x, y);
+    const lim = h0 + VIS_STEP_UP;
+    if (lim > 1.0001) return maxR; // 直下がほぼ最も濃い (70%超) なら、それより濃い所は無い
     const ca = Math.cos(ang), sa = Math.sin(ang);
-    let depth = 0, d = 0;
-    while (d < maxR) {
-        const st = Math.min(VIS_STEP, maxR - d);
-        const h = getHiggsIntensity(x + ca * (d + st * 0.5), y + sa * (d + st * 0.5));
-        const add = h * st / VIS_OCCLUDE;
-        if (depth + add >= 1) return d + st * (1 - depth) / add; // この区間の途中で見えなくなる
-        depth += add; d += st;
+    for (let d = VIS_CLOSE; d < maxR; d += VIS_STEP) {
+        if (getHiggsIntensity(x + ca * d, y + sa * d) >= lim) return d;
     }
     return maxR;
 }
 // 自艦の有視界 (1フレームに1回、96本の視線)
 function updatePlayerVision() {
     _visRaysF = _frameCount;
-    playerVisionRadius = computeVisionRadius();
-    for (let k = 0; k < VIS_RAYS; k++) _visRays[k] = losReach(player.x, player.y, k / VIS_RAYS * Math.PI * 2, playerVisionRadius);
+    playerVisionRadius = Math.max(VIS_CLOSE, computeVisionRadius()); // 第22弾: 300u以内は必ず見える
+    const h0 = getHiggsIntensity(player.x, player.y);
+    for (let k = 0; k < VIS_RAYS; k++) _visRays[k] = losReach(player.x, player.y, k / VIS_RAYS * Math.PI * 2, playerVisionRadius, h0);
 }
 // 角度 ang の方向に、自艦から何uまで見えるか (視線の間は線形補間)
 function visionReachAt(ang) {
@@ -962,18 +1029,17 @@ function getAmoebaPoints(cx, cy, baseR, numPts, timeSec, k = 1) {
     if (_visRaysF !== _frameCount) updatePlayerVision();
     const pts = [];
     for (let i = 0; i < VIS_RAYS; i++) {
-        const a = (i / VIS_RAYS) * Math.PI * 2, r = Math.max(30, _visRays[i]) * k;
+        const a = (i / VIS_RAYS) * Math.PI * 2, r = _visRays[i] * k;
         pts.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r });
     }
     return pts;
 }
 function _amoebaPath(ctx, pts) {
+    // 第22弾: 視線の端を直線でつなぐ (判定と同じ形)。旧: 中点を通る曲線で、濃い霧のくぼみでは描いた縁が判定より外へ膨らみ、
+    // 「有視界の内に見えるのに敵が描かれない」場所ができていた
     const n = pts.length;
-    ctx.moveTo((pts[n - 1].x + pts[0].x) / 2, (pts[n - 1].y + pts[0].y) / 2);
-    for (let i = 0; i < n; i++) {
-        const next = pts[(i + 1) % n];
-        ctx.quadraticCurveTo(pts[i].x, pts[i].y, (pts[i].x + next.x) / 2, (pts[i].y + next.y) / 2);
-    }
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < n; i++) ctx.lineTo(pts[i].x, pts[i].y);
     ctx.closePath();
 }
 
@@ -2005,6 +2071,43 @@ function applyDaze(t, frames, why) {
     if (t === player && !was) logMessage('SENSOR: ' + why + ' — センサー撹乱 ' + Math.round(frames / 60) + '秒 (受信・探知が鈍る)', 'warning-msg');
     else if (t !== player && comDemo && !was && t.type !== 'fighter') comThinkEvent('e', why + ' → センサーが乱れた (' + Math.round(frames / 60) + '秒)', 'e' + t.uid);
 }
+// 第22弾: バリア (自機のビームの盾)。相手のビームの線が盾の半径の内を通れば、撃った側から見て最初の盾で止まり、盾は壊れる。
+// 実弾・ミサイルは止めない。止めた位置を返す (無ければ null)
+function barrierBlocksBeam(x0, y0, x1, y1) {
+    let best = null, bt = 2;
+    const dx = x1 - x0, dy = y1 - y0, L2 = dx * dx + dy * dy || 1;
+    for (const d of playerDrones) {
+        if (d.type !== 'barrier' || d.hp <= 0) continue;
+        const t = Math.max(0, Math.min(1, ((d.x - x0) * dx + (d.y - y0) * dy) / L2));
+        if (Math.hypot(x0 + dx * t - d.x, y0 + dy * t - d.y) > DRONE_BARRIER_RADIUS) continue;
+        // 盾の泡に入る点 (線と円の交点のうち撃った側に近い方)
+        const fx = x0 - d.x, fy = y0 - d.y, b = 2 * (fx * dx + fy * dy), c = fx * fx + fy * fy - DRONE_BARRIER_RADIUS * DRONE_BARRIER_RADIUS;
+        const disc = b * b - 4 * L2 * c; const te = disc > 0 ? Math.max(0, (-b - Math.sqrt(disc)) / (2 * L2)) : t;
+        if (te < bt) { bt = te; best = d; }
+    }
+    if (!best) return null;
+    const px = x0 + dx * bt, py = y0 + dy * bt;
+    best.hp = 0;
+    createExplosion(best.x, best.y, '#66aaff', 12);
+    effects.push({ x: px, y: py, r: 0, maxR: 260, a: 0.9, c: '#88ccff', type: 'circle' });
+    logMessage('DRONE: ビームバリアが敵のビームを止めた — 盾は崩壊', 'system-msg');
+    if (typeof matchRecEvent === 'function') matchRecEvent('shield', px, py, 'バリアがビームを止めた');
+    return { x: px, y: py };
+}
+// 第22弾: 自艦が受けた被弾の記録 (撃沈した時に「何にやられたか」を出す)。最新8件
+let playerHitLog = [];
+const _HIT_JP = { beam: 'ビームの直撃', missile: 'ミサイル', smart: 'AIミサイル', kinetic: '実弾', nearmiss: 'ミサイルの至近弾' };
+function notePlayerHit(kind, dmg, sx, sy, strike, byFighter) {
+    if (!player) return;
+    const h = { f: _frameCount, kind, dmg, hp: Math.max(0, player.hp), byFighter: !!byFighter,
+        deg: compassDeg(Math.atan2(sy - player.y, sx - player.x)), dist: Math.round(Math.hypot(sx - player.x, sy - player.y) / 50) * 50,
+        ambush: !!(strike && strike.preempt), back: !!(strike && strike.rear) };
+    playerHitLog.push(h); if (playerHitLog.length > 8) playerHitLog.shift();
+    if (typeof matchRecEvent === 'function') matchRecEvent('hitP', player.x, player.y, '自艦に被弾: ' + (byFighter ? '艦載機の' : '') + (_HIT_JP[kind] || kind) + ' −' + dmg + (h.ambush ? '・奇襲' : '') + (h.back ? '・後方' : ''));
+}
+function _hitText(h) {
+    return (h.byFighter ? '艦載機の' : '') + (_HIT_JP[h.kind] || h.kind) + ' −' + h.dmg + (h.ambush ? '・奇襲' : '') + (h.back ? '・後方' : '') + ' (方位' + h.deg + '°' + (h.kind === 'nearmiss' ? '' : '・' + h.dist + 'u先から') + ')';
+}
 // ミサイルの近接爆発: 半径300uの相手側 (撃った側の反対) に威力15%とセンサー撹乱
 function nearMissBlast(x, y, byPlayer, dmg) {
     effects.push({ x, y, r: 0, maxR: NEAR_MISS_R, a: 0.7, c: '#ffb070', type: 'circle' });
@@ -2014,6 +2117,7 @@ function nearMissBlast(x, y, byPlayer, dmg) {
         if (!t || t.hp <= 0 || t._dying || Math.hypot(t.x - x, t.y - y) > NEAR_MISS_R) return;
         const d = Math.floor(dmg * NEAR_MISS_DMG);
         t.hp -= d;
+        if (t === player) notePlayerHit('nearmiss', d, x, y, null);
         if (huntStats) { if (byPlayer && t !== player) huntStats.dmgDealt += d; else if (!byPlayer && t === player) huntStats.dmgTaken += d; }
         effects.push({ x: t.x, y: t.y - 30, text: '至近弾 -' + d, life: 1.0, type: 'floatText', c: byPlayer ? '#ffcc66' : '#ff8866' });
         applyDaze(t, NEAR_MISS_DAZE, 'ミサイルの至近弾');
@@ -2115,12 +2219,13 @@ function applyStrikeBonuses(byPlayer, attacker, target, hitAng, wType) {
         logMessage(target === player ? `WARN: サブシステム被害 — ${label}` : `TAC: 敵艦に${label} — 好機`, 'warning-msg');
         if (huntStats && target !== player) huntStats.crits++;
     }
-    return { mult, preempt };
+    return { mult, preempt, rear };
 }
 
 class Projectile {
     constructor(x, y, target, isPlayer, type, dmgScale = 1) {
         this.x = x; this.y = y; this.isPlayer = isPlayer; this.type = type;
+        this.ox = x; this.oy = y; // 第22弾: 撃った位置 (撃沈の原因の表示用)
         this.target = target;
         this.active = true;
         this.distTraveled = 0;
@@ -2151,9 +2256,11 @@ class Projectile {
                 addHiggsClear(x, y, target.x, target.y); // 第21弾: 命中したビームの軌跡も霧が晴れる
                 const _beamDmg = Math.floor(BEAM_DMG * higgsBeamPenalty * dmgScale * (1 - beamArmorRes) * _bStrike.mult);
                 target.hp -= _beamDmg;
+                if (isPlayer && target !== player && target.type !== 'fighter') matchRecEvent('hitE', target.x, target.y, '敵に命中: ビーム −' + _beamDmg + (_bStrike.preempt ? '・奇襲' : ''));
                 if (huntStats) { if (isPlayer && target !== player) huntStats.dmgDealt += _beamDmg; else if (!isPlayer && target === player) huntStats.dmgTaken += _beamDmg; }
                 // 被弾方向インジケータ (敵ビームが自機に命中)
                 if (!isPlayer && target === player) {
+                    notePlayerHit('beam', _beamDmg, x, y, _bStrike);
                     playerHitDirs.push({ ang: Math.atan2(y - target.y, x - target.x), life: HIT_DIR_LIFE });
                     if (playerHitDirs.length > 6) playerHitDirs.shift();
                 }
@@ -2330,9 +2437,11 @@ class Projectile {
             const _fall = this.type === 'kinetic' ? 1 - KINETIC_FALLOFF * Math.min(1, this.distTraveled / WEAPON_RANGE.kinetic) : 1;
             const _hitDmg = Math.floor(this.dmg * dmgMult * _fall);
             hitTarget.hp -= _hitDmg;
+            if (this.isPlayer && hitTarget !== player && hitTarget.type !== 'fighter' && hitTarget.maxHp) matchRecEvent('hitE', hitTarget.x, hitTarget.y, '敵に命中: ' + (_HIT_JP[this.type] || this.type) + ' −' + _hitDmg + (preemptive ? '・奇襲' : ''));
             if (huntStats) { if (this.isPlayer) huntStats.dmgDealt += _hitDmg; else if (hitTarget === player) huntStats.dmgTaken += _hitDmg; }
             // 被弾方向インジケータ: どの方位から撃たれたか (自機のみ)
             if (!this.isPlayer && hitTarget === player) {
+                notePlayerHit(this.type, _hitDmg, this.ox, this.oy, _strike, this.owner && this.owner.type === 'fighter');
                 playerHitDirs.push({ ang: _hitAng, life: HIT_DIR_LIFE });
                 if (playerHitDirs.length > 6) playerHitDirs.shift();
             }
@@ -2369,7 +2478,7 @@ class Projectile {
             const hitDrone = playerDrones.find(d => d.hp > 0 && Math.hypot(d.x - this.x, d.y - this.y) < 18);
             if (hitDrone && !this._evaded && Math.random() < evadeChance(this.type, hitDrone)) this._evaded = true; // ドローンも速さで避ける
             if (hitDrone && !this._evaded) {
-                hitDrone.hp -= this.dmg * 0.8;
+                hitDrone.hp -= this.dmg; // 第22弾: 全威力 (旧0.8倍 — 「ミサイル何発で沈む」と合わなかった・敵の艦載機は全威力で非対称だった)
                 this.active = false;
                 createHitEffect(this.x, this.y, '#ffaa00');
                 if (hitDrone.hp <= 0) logMessage(`搭載: ${(DRONE_SPEC[hitDrone.type] || {}).label || hitDrone.type} 撃墜`, 'warning-msg');
@@ -2643,7 +2752,8 @@ function playerFireWeapon(s, target, wType, lk) {
         logMessage('WEP: ビーム発射 — 次まで' + Math.round(s.beamReloadTimer / 60) + '秒 (リロード中も熱/EM/ヒッグスが漏れる・霧に軌跡が残る)', 'system-msg');
     }
     s.weaponType = wType;
-    s._fireFlash = 90; s._fireFlashType = wType;
+    s._fireFlash = 90; s._fireFlashType = wType; s._lastFireType = wType; s._lastFireF = _frameCount; // 第22弾: 敵は撃たれた兵装で機動を選ぶ
+    matchRecEvent('fireP', s.x, s.y, '自艦: ' + _WPN_JP[wType] + 'を撃つ' + (lk && lk.full ? ' (有視界)' : ' (推定点へ)'));
     if (wType === 'beam') s._beamDrain = BEAM_DRAIN_DUR; // ビームはジェネレータを食う: 発射後しばらく機関出力が落ちる
     playSound('shoot');
     cancelSilentRunning('発砲');
@@ -2714,7 +2824,7 @@ class Ship {
         } else {
             this.type = type; // corvette, destroyer, carrier, fighter
             this.radius = type === 'carrier' ? 30 : (type === 'destroyer' ? 18 : (type === 'fighter' ? 6 : 12));
-            this.maxHp = type === 'carrier' ? 800 : (type === 'destroyer' ? 500 : (type === 'fighter' ? 50 : 150));
+            this.maxHp = type === 'carrier' ? 800 : (type === 'destroyer' ? 500 : (type === 'fighter' ? DRONE_SPEC.attack.hp : 150)); // 第22弾: 敵の艦載機も自機の戦闘機と同じ耐久 (旧50)
         }
         this.hp = this.maxHp;
         this.prevHp = this.hp;
@@ -2782,12 +2892,47 @@ class Ship {
 
     setTarget(tx, ty) {
         this.targetX = tx; this.targetY = ty; this.state = 'moving';
-        if (this.isPlayer) { this._moveOrderF = _frameCount; if (playerCoasting) toggleCoast(false); }
+        if (this.isPlayer) { this._moveOrderF = _frameCount; if (playerCoasting) toggleCoast(false); if (!comDemo && combatMode.mode !== 'manual') { combatMode.mode = 'manual'; syncCombatBar(); } }
     }
 
     // 第16弾: 敵の「撃ったら移動」。行き先は撃った方位(=自分が晒した方位)と直交する方向。
     // 真の自機位置は使わない (撃った先の推定点 aimAng だけを基準にする)。far=ミサイル/ビーム、retreat=損傷・格下時は少し下がる
     // 第20弾: 今撃てる兵装 (弾数・リロード・間合い)。望む兵装が使えなければ使える物へ持ち替える。無ければ null
+    // 第22弾: 敵の操舵 — 自機と同じ慣性 (加速・逆噴射)・回頭・旋回減速・最高速。艦首の向きにしか進まない
+    _maxSpeeds() {
+        const cls = ENEMY_CLASS[this.type];
+        if (!cls) return null;
+        const base = shipCruiseSpeed(cls, 40, 1) * (this.upgSpeed || 1) * this.terrainSpeedMult();
+        return { silent: base * SILENT_SPEED_MULT, cruise: base, flank: base * 1.5 };
+    }
+    _moveHeading(targetAng, desired) {
+        const cls = ENEMY_CLASS[this.type];
+        const d = _angDiff(targetAng, this.angle);
+        if (!cls) { // 艦載機は小回りが利く (従来どおり)
+            this.angle += Math.sign(d) * Math.min(Math.abs(d), ENEMY_TURN_RATES[this.type] || 0.035);
+            this._v = desired;
+        } else {
+            this.angle += Math.sign(d) * Math.min(Math.abs(d), PLAYER_TURN_RATES[cls]);
+            const tm = Math.min(1, Math.abs(d) / (Math.PI * 0.12));
+            const ts = Math.max(0, desired) * (1 - (SHIP_TURN_SLOW[cls] || 0.5) * tm);
+            const ar = SHIP_ACCEL_RATE[cls];
+            const brake = (this._sysEngineTimer || 0) > 0 ? 0.25 : 2.5;
+            const v = this._v || 0;
+            this._v = v < ts ? Math.min(ts, v + ar) : Math.max(ts, v - ar * brake);
+        }
+        this.x += Math.cos(this.angle) * this._v; this.y += Math.sin(this.angle) * this._v;
+        this.speed = this._v; this.currentSpeed = this._v;
+        this._movedF = _frameCount;
+        return d;
+    }
+    // 舵を取らなかったフレーム: 慣性で進みながら減速する (急停止しない)
+    _coastIfIdle() {
+        if (this._movedF === _frameCount || !(this._v > 0.005)) return;
+        const cls = ENEMY_CLASS[this.type];
+        this._v = cls ? Math.max(0, this._v - SHIP_ACCEL_RATE[cls] * 3) : 0;
+        this.x += Math.cos(this.angle) * this._v; this.y += Math.sin(this.angle) * this._v;
+        this.speed = this._v; this.currentSpeed = this._v;
+    }
     _usableWeapon(pref, d) {
         // 第20弾: 艦載機は機銃(実弾)だけ。旧: 実弾の射程外だとミサイルへ切り替え、弾数の管理外で撃ち放題だった (自機の戦闘機も機銃だけ)
         if (this.type === 'fighter') return d <= 760 ? 'kinetic' : null;
@@ -3081,6 +3226,28 @@ class Ship {
                 if (Math.abs(d) < arc * 0.9 && this._weaponJamTimer <= 0 && this.fireCooldown <= 0 && playerWeaponReady(this, o.wType)) {
                     if (playerFireWeapon(this, o.target, o.wType, oLk)) this._fireOrder = null;
                 }
+            } else if (combatMode.mode !== 'manual' && te && lk && (lk.full || lk.assumed) && !playerCoasting && boostT <= 0 && engineSwitchT <= 0) {
+                // ── 第22弾: 戦闘モード — 正対 / 回り込み で操艦し、射角に入った完全ロックの目標を撃つ (横滑りしない) ──
+                let tx, ty, tAng = null;
+                if (lk.full) { tx = te.x; ty = te.y; tAng = te.angle; }
+                else {
+                    const sa = _signalAnalysis[enemySid(te)];
+                    const est = sa && sa.fix ? trackEstimate(sa, 0) : null;
+                    tx = est ? est.x : (te.displayX ?? te.x); ty = est ? est.y : (te.displayY ?? te.y);
+                    if (sa && sa.motion && Math.hypot(sa.motion.vx, sa.motion.vy) > 0.2) tAng = Math.atan2(sa.motion.vy, sa.motion.vx);
+                }
+                const D = combatMode.range === 'auto' ? (CM_RANGE[wType] || CM_RANGE.missile) : CM_DIST[combatMode.range];
+                const oppW = te._lastFireType && _frameCount - (te._lastFireF || -1e9) < 1200 ? te._lastFireType : null;
+                const man = combatManeuver(this, tx, ty, tAng, D, combatMode.mode, combatMode.prio, oppW ? WEAPON_FIRE_ARC[oppW] : null, combatMode.prio === 'evade' ? incomingMissile(this, false) : null);
+                this._cmWhy = man.why;
+                const d = _steer(man.ang, man.spd * _baseTargetSpeed);
+                // 射角と射程に入っている兵装で撃つ (今の兵装が射角の外なら、入っている実弾/ミサイルで — 敵と同じ)
+                const da = _angDiff(Math.atan2(ty - this.y, tx - this.x), this.angle);
+                if (autoAttackEnabled && lk.full && this.fireCooldown <= 0 && this._weaponJamTimer <= 0) {
+                    for (const w of [wType, 'kinetic', 'missile']) {
+                        if (lk.dist < weaponRange(w) && Math.abs(da) < (WEAPON_FIRE_ARC[w] || Math.PI / 4) && playerWeaponReady(this, w)) { playerFireWeapon(this, te, w, lk); break; }
+                    }
+                }
             } else if (autoAttackEnabled && te && lk && lk.full && !playerCoasting && boostT <= 0 &&
                        !(this.state === 'moving' && (this._moveOrderF || 0) > (this._fullLockF || 0))) {
                 // 第17弾: 敵を視認した「後」に出した移動命令は自動攻撃より優先する (旧: 視界内に敵がいると移動命令が無視され、
@@ -3183,15 +3350,9 @@ class Ship {
                 const dDist = Math.hypot(decoyPosX - this.x, decoyPosY - this.y);
                 if (dDist > 200) {
                     const ta = Math.atan2(decoyPosY - this.y, decoyPosX - this.x);
-                    let diff = ta - this.angle;
-                    while (diff < -Math.PI) diff += Math.PI * 2;
-                    while (diff > Math.PI) diff -= Math.PI * 2;
-                    const _eTR_dc = (ENEMY_TURN_RATES[this.type] || 0.035) * gameSpeedFactor;
-                    this.angle += Math.sign(diff) * Math.min(Math.abs(diff), _eTR_dc);
-                    this.speed = 0.8 * MOVE_SPEED_MULT;
-                    this.x += Math.cos(this.angle) * this.speed;
-                    this.y += Math.sin(this.angle) * this.speed;
-                }
+                    const _ms = this._maxSpeeds();
+                    this._moveHeading(ta, Math.min(0.8 * MOVE_SPEED_MULT, _ms ? _ms.cruise : 99)); // 第22弾: 慣性つき
+                } else this._coastIfIdle();
                 return; // 囮を追ってる間は他のAIをスキップ
             }
 
@@ -3200,18 +3361,13 @@ class Ship {
             // ──────────────────────────────────────
             if (this.postFireCooldown > 0) {
                 this.postFireCooldown--;
-                this.speed = 1.2 * MOVE_SPEED_MULT * (this.upgSpeed || 1) * this.terrainSpeedMult() * gameSpeedFactor; // 素早く移動して新しい位置へ
+                // 第22弾: 再配置も艦首を回してから進む (旧: 艦首と関係なく目標点へ横滑りしていた)
+                const _msR = this._maxSpeeds();
+                const _relV = _msR ? _msR.flank : 1.2 * MOVE_SPEED_MULT * (this.upgSpeed || 1) * this.terrainSpeedMult();
                 if (this.state === 'moving') {
                     const dist = Math.hypot(this.targetX - this.x, this.targetY - this.y);
-                    if (dist > this.speed) {
-                        this.x += ((this.targetX - this.x) / dist) * this.speed;
-                        this.y += ((this.targetY - this.y) / dist) * this.speed;
-                        const ta = Math.atan2(this.targetY - this.y, this.targetX - this.x);
-                        let diff = ta - this.angle;
-                        while (diff < -Math.PI) diff += Math.PI * 2;
-                        while (diff > Math.PI) diff -= Math.PI * 2;
-                        const _eTR_pf = (ENEMY_TURN_RATES[this.type] || 0.035) * gameSpeedFactor;
-                        this.angle += Math.sign(diff) * Math.min(Math.abs(diff), _eTR_pf);
+                    if (dist > 150) {
+                        this._moveHeading(Math.atan2(this.targetY - this.y, this.targetX - this.x), _relV);
                     } else {
                         this.state = 'idle';
                         this.postFireCooldown = 0; // 着いたら聴き直して次の一撃へ (交戦状態はそのまま)
@@ -3276,7 +3432,7 @@ class Ship {
                     if (attenuated > domVal) { domVal = attenuated; domSig = sName; }
                 });
                 // 接近探知 (デブリ擬態中は岩塊に紛れて至近でも掴めない — 至近を通過されてもやり過ごせる)
-                if (!isBottomed && distToPlayer < myDetectRange && losReach(this.x, this.y, Math.atan2(player.y - this.y, player.x - this.x), distToPlayer + 1) >= distToPlayer) {
+                if (!isBottomed && distToPlayer < Math.max(VIS_CLOSE, myDetectRange) && losReach(this.x, this.y, Math.atan2(player.y - this.y, player.x - this.x), Math.max(VIS_CLOSE, myDetectRange)) >= distToPlayer) { // 第22弾: 自機と同じ視線ルール (300u以内は必ず)
                     this.detectionTimer++;
                     if (this.detectionTimer > 60) { playerSigDetected = true; _hardDetect = true; }
                 } else {
@@ -3356,7 +3512,10 @@ class Ship {
                 // 第13弾: 旧0.012/フレームでは記憶が約1.4秒で消えていた(コメントの「83秒」と60倍ずれ)。
                 // 0.0004/f → 通常≈42秒 / 静粛×1.5≈28秒 / デブリ擬態×2.2≈19秒 で「追われている」状態が抜ける
                 const _decayMult = isBottomed ? 2.2 : (silentRunning ? 1.5 : 1);
-                this.contactFreshness = Math.max(0, this.contactFreshness - FRESHNESS_DECAY * _decayMult);
+                // 第22弾 (オーナー合意): 追い続ける長さは性格と残り耐久で変わる — 攻撃的で無傷なら約70秒・慎重で手負いなら約20秒
+                const _pm = this.personality || { caution: 0.4 };
+                const _memMult = (0.6 + 0.8 * (_pm.caution ?? 0.4)) * (1.6 - 0.6 * Math.max(0, Math.min(1, this.hp / this.maxHp)));
+                this.contactFreshness = Math.max(0, this.contactFreshness - FRESHNESS_DECAY * _decayMult * _memMult);
                 // §3-6残: 攻撃型ドローンの熱シグネチャ — コンタクト薄い時のみ誤誘引
                 if (playerDrones.length > 0 && this.contactFreshness < 0.3) {
                     for (const dr of playerDrones) {
@@ -3439,7 +3598,8 @@ class Ship {
                 this.droneSpawnTimer--;
                 const _engaged = this.aiState === 'combat' || this.aiState === 'hunting';
                 const _hasContact = _engaged || this.contactFreshness > 0.1;
-                if (this.droneStock === undefined) this.droneStock = 6 + gameState.sector; // 積載ドローン数 (自機空母の積載量と対称に有限)
+                // 第22弾: 艦載機の数は自機の空母と同じ既定の積み方 (戦闘機2)。旧 6+セクター — 戦闘機の耐久を自機と同じ1050にしたため、自機の既定(2機)と数もそろえる
+                if (this.droneStock === undefined) this.droneStock = DEFAULT_LOADOUT.carrier.attack || 2;
                 if (this.droneSpawnTimer <= 0 && _hasContact && this.droneStock > 0 && enemies.filter(e => e.hp > 0 && e.type === 'fighter').length < CARGO_CAP.carrier) { // 第21弾: 同時に出せる数は自機の空母と同じ上限
                     this.droneStock--;
                     const _bel = this.playerLastKnownPos || (player ? { x: player.x, y: player.y } : { x: this.x, y: this.y });
@@ -3475,14 +3635,8 @@ class Ship {
                     if (dH > 200) {
                         this._hiding = false;
                         const ang = Math.atan2(hs.y - this.y, hs.x - this.x);
-                        let diff = ang - this.angle;
-                        while (diff < -Math.PI) diff += Math.PI * 2;
-                        while (diff > Math.PI) diff -= Math.PI * 2;
-                        this.angle += Math.sign(diff) * Math.min(Math.abs(diff), (ENEMY_TURN_RATES[this.type] || 0.035) * gameSpeedFactor);
-                        const prof = ENEMY_COMBAT[this.type] || ENEMY_COMBAT.destroyer;
-                        const sp = Math.min(2.2, 0.9 + gameState.sector * 0.08) * prof.speedMult * (this.upgSpeed || 1) * this.terrainSpeedMult() * gameSpeedFactor * MOVE_SPEED_MULT;
-                        this.x += Math.cos(this.angle) * sp * (1 - Math.min(0.6, Math.abs(diff) / Math.PI * 0.7));
-                        this.y += Math.sin(this.angle) * sp * (1 - Math.min(0.6, Math.abs(diff) / Math.PI * 0.7));
+                        const _msH = this._maxSpeeds();
+                        this._moveHeading(ang, _msH ? _msH.flank : 1.5); // 第22弾: 隠れ場所へ全速 (自機の全速と同じ)
                     } else {
                         if (!this._hiding && (this.inVision || this.contactLife > 0)) logMessage('SENSOR: 敵艦が' + (hs.kind === 'fog' ? '濃い霧' : '岩礁帯') + 'で機関を止めた — 潜んで修復している', 'system-msg');
                         this._hiding = true;
@@ -3517,12 +3671,8 @@ class Ship {
                     const dS = Math.hypot(sp.x - this.x, sp.y - this.y);
                     if (dS > RESUPPLY_R * 0.6) {
                         const ang = Math.atan2(sp.y - this.y, sp.x - this.x);
-                        const diff = _angDiff(ang, this.angle);
-                        this.angle += Math.sign(diff) * Math.min(Math.abs(diff), (ENEMY_TURN_RATES[this.type] || 0.035) * gameSpeedFactor);
-                        const prof = ENEMY_COMBAT[this.type] || ENEMY_COMBAT.destroyer;
-                        const spv = Math.min(2.2, 0.9 + gameState.sector * 0.08) * prof.speedMult * (this.upgSpeed || 1) * this.terrainSpeedMult() * gameSpeedFactor * MOVE_SPEED_MULT;
-                        const tf = 1 - Math.min(0.6, Math.abs(diff) / Math.PI * 0.7);
-                        this.x += Math.cos(this.angle) * spv * tf; this.y += Math.sin(this.angle) * spv * tf;
+                        const _msS = this._maxSpeeds();
+                        this._moveHeading(ang, _msS ? _msS.cruise : 1.2); // 第22弾: 補給へは巡航
                     } else if ((sp.t += gameSpeedFactor) >= RESUPPLY_TIME) {
                         this.ammoK = this._fullK; this.ammoM = this._fullM; this._kMag = KINETIC_MAG; this._kReload = 0; this._mReload = 0;
                         this._supply = null;
@@ -3544,7 +3694,7 @@ class Ship {
                 const prof = ENEMY_COMBAT[this.type] || ENEMY_COMBAT.destroyer;
                 const pers = this.personality || { aggression: 0.5, stealth: 0.3, greed: 0.4, caution: 0.4 };
                 const fireRange = (700 + gameState.sector * 25) * prof.rangeMult;
-                this.speed = Math.min(2.2, 0.9 + gameState.sector * 0.08) * prof.speedMult * (this.upgSpeed || 1) * this.terrainSpeedMult() * gameSpeedFactor * MOVE_SPEED_MULT;
+                this.speed = Math.min(2.2, 0.9 + gameState.sector * 0.08) * prof.speedMult * (this.upgSpeed || 1) * this.terrainSpeedMult() * gameSpeedFactor * MOVE_SPEED_MULT; // 艦載機の速さ (戦艦は _maxSpeeds)
 
                 // センサー制約型照準: 実プレイヤーではなく「最終既知位置」へ撃つ。
                 // 接触が新しいほど速度ぶんリード外挿、喪失するほど古い点で凍結 → 移動/沈黙で外れる。
@@ -3553,8 +3703,7 @@ class Ship {
                 const aimX = lk ? lk.x + lk.vx * lead : (player ? player.x : this.x);
                 const aimY = lk ? lk.y + lk.vy * lead : (player ? player.y : this.y);
                 const distToBelief = Math.hypot(aimX - this.x, aimY - this.y);
-                // 側方機動の向きは時々反転させ、ストレイフを読まれにくくする
-                if (this._dodgeDir === undefined || Math.random() < 0.004) this._dodgeDir = (Math.random() < 0.5 ? 1 : -1);
+                // 第22弾: ストレイフ (左右へ振る横移動) は撤去 — 戦艦の機動は combatManeuver (正対 / 回り込み) だけ
 
                 // ── HP状況による行動変容 (自他HP比 + 性格caution) ──
                 const hpFrac = this.hp / this.maxHp;
@@ -3572,7 +3721,16 @@ class Ship {
                 if (desperate) _ct.mode = 'retreat';
                 // 撤退中の自己修復: ノードに触れたら回収して回復 (経済↔生存の結節点)
                 if (desperate) {
-                    if (!this._desperateLogged) { logMessage('SENSOR: 敵艦が損傷により後退 — 回復行動に移行。', 'system-msg'); this._desperateLogged = true; }
+                    if (!this._desperateLogged) {
+                        logMessage('SENSOR: 敵艦が損傷により後退 — 回復行動に移行。', 'system-msg'); this._desperateLogged = true;
+                        // 第22弾: 退き始めに離脱の消耗品を使う — 近くに自機かミサイルがいれば閃光 / 追われていればノイズを横へ / 煙幕
+                        if (this.type !== 'fighter') {
+                            const _dP = player ? Math.hypot(player.x - this.x, player.y - this.y) : 1e9;
+                            if (_dP < FLASH_RADIUS || incomingMissile(this, true)) enemyUseFlash(this);
+                            if (this.contactFreshness > 0.5) enemyUseNoise(this, this.angle + (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2);
+                            if (_dP < 4000) enemyUseSmoke(this);
+                        }
+                    }
                     // 第17弾: 近くに濃い霧/岩礁帯があればそこへ潜む (ノードより優先。ノードは位置が知られている)
                     if (!(this._hideCD > 0) && this.type !== 'fighter') {
                         const lkC = this.playerLastKnownPos;
@@ -3603,14 +3761,45 @@ class Ship {
                 // 第13弾: ミサイルは推定位置へ2100uまで撃てる (終末シーカー付き)。旧: 全艦種が約1km以内でしか撃たず、
                 // 自機の長距離射撃に一方的に削られていた。近接火器(kinetic)の間合いは従来どおり fireRange。
                 const engageRange = Math.max(fireRange, ENEMY_MISSILE_ENGAGE);
+                // ── 第22弾: 戦艦の戦闘機動 (毎フレーム・慣性つき)。機動の選び方は10秒続ける (相手の兵装が変わった時と耐久が半分を切った時は選び直す) ──
+                let _plannedW = gameState.sector <= 3 ? prof.weaponEarly : prof.weaponLate;
+                if (this.predictedBehavior === 'kinetic' && _plannedW === 'kinetic') _plannedW = 'missile';
+                if (outmatched && _plannedW === 'kinetic') _plannedW = 'missile';
+                if (ENEMY_CLASS[this.type]) {
+                    const _ms = this._maxSpeeds();
+                    const oppW = player && player._lastFireType && _frameCount - (player._lastFireF || -1e9) < 1200 && this.contactFreshness > 0.3 ? player._lastFireType : null;
+                    const cp = this._cmPlan;
+                    if (!cp || _frameCount - cp.f >= CM_HOLD || cp.oppW !== oppW || (cp.hp >= 0.5) !== (hpFrac >= 0.5)) {
+                        const ch = comChooseManeuver(pers, hpFrac, _plannedW, oppW);
+                        if (killInstinct) ch.prio = 'attack';
+                        if (outmatched) { ch.D = Math.max(ch.D, CM_RANGE.missile); ch.prio = 'evade'; }
+                        this._cmPlan = { f: _frameCount, oppW, hp: hpFrac, mode: ch.mode, prio: ch.prio, D: ch.D };
+                        if (comDemo && (!cp || cp.mode !== ch.mode || cp.prio !== ch.prio)) comThinkEvent('e', '戦闘機動 → ' + (ch.mode === 'flank' ? '回り込み' : '正対') + '・間合い' + ch.D + 'u・' + (ch.prio === 'evade' ? '回避' : '攻撃') + '優先' + (oppW ? ' (相手は' + _WPN_JP[oppW] + ')' : ''), 'e' + this.uid);
+                    }
+                    const pl = this._cmPlan;
+                    // 相手の艦首の向き: 近くで掴んでいれば見える / それ以外は推定の動きから (止まっていれば分からない)
+                    let tAng = null;
+                    if (distToBelief < 1500 && this.contactFreshness > 0.6 && player) tAng = player.angle;
+                    else if (lk && Math.hypot(lk.vx, lk.vy) > 0.2) tAng = Math.atan2(lk.vy, lk.vx);
+                    const oppArc = oppW ? WEAPON_FIRE_ARC[oppW] : null;
+                    let man;
+                    if (desperate) {
+                        const nn = nearestActiveNode(this.x, this.y, 7000);
+                        man = { ang: nn ? Math.atan2(nn.y - this.y, nn.x - this.x) : Math.atan2(this.y - aimY, this.x - aimX), spd: 1, why: 'retreat' };
+                    } else man = combatManeuver(this, aimX, aimY, tAng, pl.D, pl.mode, pl.prio, oppArc, pl.prio === 'evade' ? incomingMissile(this, true) : null);
+                    // 撃てる兵装が射角に入るまで艦首を向ける (攻撃優先・射程内・間合いを保っている時)
+                    if (!desperate && pl.prio === 'attack' && man.why === 'hold') man.ang = Math.atan2(aimY - this.y, aimX - this.x);
+                    this._moveHeading(man.ang, man.spd * (_ms ? _ms.flank : 1.5));
+                    _ct.mode = desperate ? 'retreat' : man.why;
+                }
                 const _wantFire = distToBelief < engageRange && this.fireCooldown <= 0 && this._weaponJamTimer <= 0 && player && player.hp > 0 && (!desperate || Math.random() < 0.25);
                 if (_wantFire) {
                     const ta = Math.atan2(aimY - this.y, aimX - this.x);
-                    let diff = ta - this.angle;
-                    while (diff < -Math.PI) diff += Math.PI * 2;
-                    while (diff > Math.PI) diff -= Math.PI * 2;
-                    const _eTR_cb = (ENEMY_TURN_RATES[this.type] || 0.035) * gameSpeedFactor;
-                    this.angle += Math.sign(diff) * Math.min(Math.abs(diff), _eTR_cb);
+                    if (!ENEMY_CLASS[this.type]) { // 艦載機は撃つ時に向きを変える (小回り)
+                        const _d0 = _angDiff(ta, this.angle);
+                        this.angle += Math.sign(_d0) * Math.min(Math.abs(_d0), ENEMY_TURN_RATES[this.type] || 0.035);
+                    }
+                    const diff = _angDiff(ta, this.angle);
                     // 艦種別の武器選択 (序盤/終盤) + 既存の行動推定適応
                     let wType = gameState.sector <= 3 ? prof.weaponEarly : prof.weaponLate;
                     // 適応: プレイヤーが実弾近接戦と推定 & 自分も近接武器なら長射程へ (アウトレンジ)
@@ -3621,14 +3810,16 @@ class Ship {
                     if (wType === 'kinetic' && distToBelief > 760) wType = 'missile';
                     // 第20弾: 弾数・リロード・ビームのチャージ (自機と同じ)。使えない兵装は持ち替え、何も無ければ撃たない
                     wType = this._usableWeapon(wType, distToBelief);
+                    // 第22弾: 自機と同じく射角に入っていなければ撃たない (旧: 艦首の向きに関係なく撃てた)。ビームのチャージは射角の外でもできる
+                    if (wType && wType !== 'beam' && Math.abs(diff) > (WEAPON_FIRE_ARC[wType] || Math.PI / 4)) { wType = wType === 'missile' && this._usableWeapon('kinetic', distToBelief) === 'kinetic' && Math.abs(diff) < WEAPON_FIRE_ARC.kinetic ? 'kinetic' : null; if (!wType) this.fireCooldown = 10; }
                     let _canShoot = !!wType;
-                    if (!wType) this.fireCooldown = 30;
+                    if (!wType) this.fireCooldown = Math.max(this.fireCooldown, 10);
                     else if (wType === 'beam' && (this._eCharge || 0) < BEAM_CHARGE_DUR) {
                         if (!(this._eCharge > 0) && comDemo) comThinkEvent('e', 'ビームをチャージ (2秒・熱/EM/ヒッグスが漏れる)', 'e' + this.uid);
                         this._eCharge = (this._eCharge || 0) + gameSpeedFactor; this._eChargeF = _frameCount;
                         this.weaponType = 'beam';
                         _canShoot = false;
-                    }
+                    } else if (wType === 'beam' && Math.abs(diff) > WEAPON_FIRE_ARC.beam) { _canShoot = false; this._eChargeF = _frameCount; } // 溜まったまま艦首が向くのを待つ
                     if (_canShoot) {
                     // 攻撃型は3連装、それ以外は単発。kinetic時のみ弾幕、ミサイル/ビームは単発。
                     const shots = (wType === 'kinetic') ? prof.burst : 1;
@@ -3644,6 +3835,12 @@ class Ship {
                             // beamは即着弾。照準点が実プレイヤーに十分近い時だけ実弾化、外れなら空撃ち(無害だがダークチャネルは残る)。
                             const missDist = Math.hypot(player.x - tgX, player.y - tgY);
                             beamRevealsShooter(this.x, this.y, false, this); // 第20弾: 霧に軌跡が残る → 自艦に射手の方位線
+                            const _blk = barrierBlocksBeam(this.x, this.y, tgX, tgY); // 第22弾: バリアがあれば1発止める
+                            if (_blk) {
+                                effects.push({ x: this.x, y: this.y, tx: _blk.x, ty: _blk.y, type: 'beam', a: 1, c: '#ff4d4d' });
+                                leaveBeamChannel(this.x, this.y, _blk.x, _blk.y);
+                                continue;
+                            }
                             if (missDist >= player.radius * 2.2) {
                                 effects.push({ x: this.x, y: this.y, tx: tgX, ty: tgY, type: 'beam', a: 1, c: '#ff4d4d' });
                                 leaveBeamChannel(this.x, this.y, tgX, tgY);
@@ -3665,6 +3862,8 @@ class Ship {
                     else if (wType === 'missile' && this.ammoM !== undefined) { this.ammoM--; this._mReload = MISSILE_RELOAD_TIME; }
                     else if (wType === 'beam') { this._bReload = BEAM_RELOAD_TIME; this._eCharge = 0; }
                     this.fireFlashTimer = 120;
+                    this._lastFireType = wType; this._lastFireF = _frameCount; // 第22弾: 自機(COM)は撃たれた兵装で機動を選ぶ
+                    if (this.type !== 'fighter') matchRecEvent('fireE', this.x, this.y, '敵: ' + _WPN_JP[wType] + 'を撃つ (推定点まで' + Math.round(distToBelief / 100) * 100 + 'u)');
                     this.visible = true;
                     const sigLabel = { kinetic: '銃口炎[光学]', missile: '推進炎[熱源+EM]', beam: 'EMパルス[EM+光学]' };
                     effects.push({ x: this.x, y: this.y, r: 0, maxR: 200, a: 0.9, c: '#ff4d4d', type: 'circle' });
@@ -3673,10 +3872,11 @@ class Ship {
                     // 第16弾: 撃ったら必ず位置を変える (全艦種・ファイター除く)。撃てば位置を教えるのは自機と同じ —
                     // 撃った場所に留まらない。ミサイル/ビーム=推定方位と直交する方向へ1800〜3000u (霧を選ぶ) /
                     // 実弾=近接戦は続けたまま横へ600〜900u跳ぶ。旧: 間合いを取る艦種だけで、攻撃型は撃った場所で殴り続けた
-                    if (this.type !== 'fighter') this._relocateAfterFire(wType !== 'kinetic', Math.atan2(aimY - this.y, aimX - this.x), desperate || outmatched);
+                    // 第22弾: 撃ったら移動は「遠くから撃って、相手に見られていない時」だけ (霧へ移る)。近接の撃ち合いでは機動を続ける
+                    if (this.type !== 'fighter' && wType !== 'kinetic' && distToBelief > 2500 && !this.inVision) this._relocateAfterFire(true, Math.atan2(aimY - this.y, aimX - this.x), desperate || outmatched);
                     } // _canShoot
-                } else {
-                    // 艦種別の機動 (ドクトリン) を性格とHP状況で変調。
+                } else if (!ENEMY_CLASS[this.type]) {
+                    // 艦種別の機動 (ドクトリン) を性格とHP状況で変調。第22弾: 艦載機だけ (戦艦は上の combatManeuver)
                     const pbv = this.predictedBehavior;
                     // 性格: 攻撃的ほど間合いを詰め・近接でも逃げない / killInstinctでさらに踏み込む
                     let standoffDist = fireRange * prof.standoff * (1.25 - pers.aggression * 0.5);
@@ -3699,18 +3899,7 @@ class Ship {
                     } else if (prof.kite && distToBelief < standoffDist * 0.8) {
                         moveAngle += Math.PI; doMove = true;                                          // 間合い詰められた → 下がる
                     }
-                    // 側方ストレイフ (潜航型ほど強い)。間合いを保つ局面でのみ実施 — 大きく離れている時は
-                    // 直進で詰める(さもないと遠方を周回するだけで近寄れない)。撤退中・キル踏込時は抑制。
-                    const _nearHold = distToBelief <= standoffDist * 1.3;
-                    if (!desperate && prof.strafe > 0 && _nearHold) {
-                        moveAngle += this._dodgeDir * (Math.PI / 2) * prof.strafe * (killInstinct ? 0.4 : 1);
-                        doMove = true;
-                    }
-                    // ビームチャージ推定: 側方回避を上乗せ
-                    if (!desperate && pbv === 'charging') {
-                        moveAngle += this._dodgeDir * (Math.PI / 2.5);
-                        doMove = true;
-                    }
+                    // 第22弾: ストレイフ・ビームチャージ推定の横移動は撤去 (オーナー指示「ストレイフは一切禁止」)
                     if (doMove) {
                         let diff = moveAngle - this.angle;
                         while (diff < -Math.PI) diff += Math.PI * 2;
@@ -3750,15 +3939,8 @@ class Ship {
                     const dist = Math.hypot(this.huntTarget.x - this.x, this.huntTarget.y - this.y);
                     if (dist > this.speed * 2) {
                         const ta = Math.atan2(this.huntTarget.y - this.y, this.huntTarget.x - this.x);
-                        let diff = ta - this.angle;
-                        while (diff < -Math.PI) diff += Math.PI * 2;
-                        while (diff > Math.PI) diff -= Math.PI * 2;
-                        const _eTR_hn = (ENEMY_TURN_RATES[this.type] || 0.035) * gameSpeedFactor;
-                        this.angle += Math.sign(diff) * Math.min(Math.abs(diff), _eTR_hn);
-                        const _turnFrac_hn = Math.abs(diff) / Math.PI;
-                        const _spdMult_hn = 1 - Math.min(0.5, _turnFrac_hn * 0.6);
-                        this.x += Math.cos(this.angle) * this.speed * _spdMult_hn;
-                        this.y += Math.sin(this.angle) * this.speed * _spdMult_hn;
+                        const _msN = this._maxSpeeds();
+                        this._moveHeading(ta, _msN ? Math.min(this.speed, _msN.cruise) : this.speed); // 第22弾: 追う時は巡航まで
                     } else {
                         this.huntTarget = null;
                     }
@@ -3780,13 +3962,8 @@ class Ship {
                     const dist = Math.hypot(this.gatherTarget.x - this.x, this.gatherTarget.y - this.y);
                     if (dist > 220) {
                         const ta = Math.atan2(this.gatherTarget.y - this.y, this.gatherTarget.x - this.x);
-                        let diff = ta - this.angle;
-                        while (diff < -Math.PI) diff += Math.PI * 2;
-                        while (diff > Math.PI) diff -= Math.PI * 2;
-                        const _eTR_ga = (ENEMY_TURN_RATES[this.type] || 0.035) * gameSpeedFactor;
-                        this.angle += Math.sign(diff) * Math.min(Math.abs(diff), _eTR_ga);
-                        this.x += Math.cos(this.angle) * this.speed;
-                        this.y += Math.sin(this.angle) * this.speed;
+                        const _msG = this._maxSpeeds();
+                        this._moveHeading(ta, _msG ? Math.min(this.speed, _msG.cruise) : this.speed);
                     } else if ((this._capT = (this._capT || 0) + gameSpeedFactor) >= NODE_CAP_TIME) {
                         // 自機と同じく近くに5秒留まって制圧 (その間EMが漏れる = 自機に聞かれうる)
                         enemyCaptureNode(this, this.gatherTarget);
@@ -3886,18 +4063,13 @@ class Ship {
                 }
                 if (this.state === 'moving') {
                     const dist = Math.hypot(this.targetX - this.x, this.targetY - this.y);
-                    if (dist > this.speed) {
-                        this.x += ((this.targetX - this.x) / dist) * this.speed;
-                        this.y += ((this.targetY - this.y) / dist) * this.speed;
-                        const ta = Math.atan2(this.targetY - this.y, this.targetX - this.x);
-                        let diff = ta - this.angle;
-                        while (diff < -Math.PI) diff += Math.PI * 2;
-                        while (diff > Math.PI) diff -= Math.PI * 2;
-                        const _eTR_lk = (ENEMY_TURN_RATES[this.type] || 0.035) * gameSpeedFactor;
-                        this.angle += Math.sign(diff) * Math.min(Math.abs(diff), _eTR_lk);
+                    if (dist > Math.max(60, (this._v || 0) * 30)) {
+                        const _msL = this._maxSpeeds();
+                        this._moveHeading(Math.atan2(this.targetY - this.y, this.targetX - this.x), _msL ? Math.min(this.speed, _msL.cruise) : this.speed); // 第22弾: 横滑りしない
                     } else { this.state = 'idle'; this._roam = null; }
                 }
             }
+            this._coastIfIdle(); // 第22弾: 舵を取らなかった時は慣性で減速しながら進む
         }
 
         // 敵艦: エンジン排気エフェクトは非表示 (センサー検知のみで捕捉)
@@ -4795,43 +4967,7 @@ function updateDrawEffects(ctx) {
             ctx.globalAlpha = 1;
             if (ef.life <= 0) effects.splice(i, 1);
         } else if (ef.type === 'beam') {
-            ef.a -= 0.04;
-            if (ef.a <= 0) { effects.splice(i, 1); continue; }
-            const _bdx = ef.tx - ef.x, _bdy = ef.ty - ef.y;
-            const _bAng = Math.atan2(_bdy, _bdx);
-            const _bLen = Math.hypot(_bdx, _bdy);
-            ctx.save();
-            ctx.translate(ef.x, ef.y);
-            ctx.rotate(_bAng);
-            ctx.lineCap = 'round';
-            // 第21弾: Higgsfieldのビームの絵 (自機=緑 / 敵=赤) を加算で重ねる
-            const _bImg = SPRITES[/^#ff/i.test(ef.c) ? 'fx_beam_enemy' : 'fx_beam_player'];
-            if (spriteReady(_bImg)) {
-                ctx.globalCompositeOperation = 'lighter';
-                ctx.globalAlpha = Math.min(1, ef.a * 1.2);
-                const _bw = 70 * (0.5 + ef.a * 0.5);
-                ctx.drawImage(_bImg, 0, -_bw / 2, _bLen, _bw);
-                ctx.globalCompositeOperation = 'source-over';
-            }
-            // 外側拡散グロウ
-            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(_bLen, 0);
-            ctx.strokeStyle = ef.c; ctx.lineWidth = 28 * ef.a; ctx.globalAlpha = ef.a * 0.10; ctx.stroke();
-            // 中間グロウ
-            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(_bLen, 0);
-            ctx.lineWidth = 12 * ef.a; ctx.globalAlpha = ef.a * 0.35; ctx.stroke();
-            // コア白線
-            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(_bLen, 0);
-            ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3 * ef.a; ctx.globalAlpha = ef.a * 0.95; ctx.stroke();
-            ctx.restore();
-            // 着弾点フラッシュ
-            if (ef.a > 0.65) {
-                const _flashR = 20 * ef.a;
-                ctx.beginPath(); ctx.arc(ef.tx, ef.ty, _flashR, 0, Math.PI * 2);
-                ctx.fillStyle = ef.c; ctx.globalAlpha = ef.a * 0.5; ctx.fill();
-                ctx.beginPath(); ctx.arc(ef.tx, ef.ty, _flashR * 0.4, 0, Math.PI * 2);
-                ctx.fillStyle = '#ffffff'; ctx.globalAlpha = ef.a * 0.9; ctx.fill();
-            }
-            ctx.globalAlpha = 1;
+            continue; // 第22弾: ビームは霧の上に描く (updateDrawBeams)。旧: 霧の下で、視界の外のビームは見えなかった
         } else if (ef.type === 'sonar' || ef.type === 'sonar-fill' || ef.type === 'sonar-boundary') {
             // ソナー系エフェクトはヒッグスフォグより手前に描く: updateDrawSonarEffects() で更新+描画
             continue;
@@ -4861,6 +4997,54 @@ function updateDrawEffects(ctx) {
 
 // ソナー系エフェクト専用パス — フォグ/ヒッグス層の「手前」に描画する (updateDrawEffectsから分離)。
 // 探信音の波紋・充満・境界リングはプレイヤーの索敵成果なので、ヒッグス雲に隠されると視認できず意味を失う。
+// 第22弾: ビームは霧の上に描く — 強い光の筋は霧越しでも見える (旧: 霧の下に描いていて、視界の外から撃たれたビームが見えなかった)
+function updateDrawBeams(ctx) {
+    for (let i = effects.length - 1; i >= 0; i--) {
+        const ef = effects[i];
+        if (ef.type !== 'beam') continue;
+        // 第22弾: ビームは6秒残す (最初の1.2秒は最大の明るさ → 消えるまで薄れる)。旧: 約0.4秒で消え、何を撃たれたか分からなかった
+        const _now = performance.now();
+        if (ef.born === undefined) ef.born = _now;
+        const _age = (_now - ef.born) / 1000;
+        if (_age >= BEAM_FX_SEC) { effects.splice(i, 1); continue; }
+        ef.a = _age < 1.2 ? 1 : 1 - (_age - 1.2) / (BEAM_FX_SEC - 1.2);
+        const _bdx = ef.tx - ef.x, _bdy = ef.ty - ef.y;
+        const _bAng = Math.atan2(_bdy, _bdx);
+        const _bLen = Math.hypot(_bdx, _bdy);
+        ctx.save();
+        ctx.translate(ef.x, ef.y);
+        ctx.rotate(_bAng);
+        ctx.lineCap = 'round';
+        // 第21弾: Higgsfieldのビームの絵 (自機=緑 / 敵=赤) を加算で重ねる
+        const _bImg = SPRITES[/^#ff/i.test(ef.c) ? 'fx_beam_enemy' : 'fx_beam_player'];
+        if (spriteReady(_bImg)) {
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.globalAlpha = Math.min(1, ef.a * 1.2);
+            const _bw = 140 * (0.5 + ef.a * 0.5); // 第22弾: 太さ2倍
+            ctx.drawImage(_bImg, 0, -_bw / 2, _bLen, _bw);
+            ctx.globalCompositeOperation = 'source-over';
+        }
+        // 外側拡散グロウ
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(_bLen, 0);
+        ctx.strokeStyle = ef.c; ctx.lineWidth = 56 * ef.a; ctx.globalAlpha = ef.a * 0.10; ctx.stroke();
+        // 中間グロウ
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(_bLen, 0);
+        ctx.lineWidth = 24 * ef.a; ctx.globalAlpha = ef.a * 0.35; ctx.stroke();
+        // コア白線 (画面上で最低2pxは残す)
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(_bLen, 0);
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(6 * ef.a, 2 / camera.zoom); ctx.globalAlpha = ef.a * 0.95; ctx.stroke();
+        ctx.restore();
+        // 着弾点フラッシュ
+        if (ef.a > 0.65) {
+            const _flashR = 40 * ef.a;
+            ctx.beginPath(); ctx.arc(ef.tx, ef.ty, _flashR, 0, Math.PI * 2);
+            ctx.fillStyle = ef.c; ctx.globalAlpha = ef.a * 0.5; ctx.fill();
+            ctx.beginPath(); ctx.arc(ef.tx, ef.ty, _flashR * 0.4, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff'; ctx.globalAlpha = ef.a * 0.9; ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+    }
+}
 function updateDrawSonarEffects(ctx) {
     for (let i = effects.length - 1; i >= 0; i--) {
         const ef = effects[i];
@@ -5136,9 +5320,15 @@ function generateSector() {
     boss.maxHp = Math.round((_bossHp[boss.type] || 2000) * (1 + 0.1 * (gameState.sector - 1)));
     boss.hp = boss.maxHp;
     // 第20弾: 敵も自機の同じ艦種の既定の積み方と同じ弾数 (攻撃型 実弾144斉射・ミサイル12 / 潜航型 48・6 / 空母型 48・9)
-    { const lo = DEFAULT_LOADOUT[{ destroyer: 'assault', corvette: 'stealth', carrier: 'carrier' }[boss.type] || 'assault'];
-      boss._fullK = lo.ammoK * AMMO_PER_SLOT.kinetic; boss._fullM = lo.ammoM * AMMO_PER_SLOT.missile;
-      boss.ammoK = boss._fullK; boss.ammoM = boss._fullM; boss._kMag = KINETIC_MAG; }
+    { const _es = { destroyer: 'assault', corvette: 'stealth', carrier: 'carrier' }[boss.type] || 'assault';
+      // 第22弾: COM対戦では設定画面の「敵の積み込み」を使う (無ければ同じ艦種の既定)
+      const _comLo = comDemo && comCfg && comCfg.lo && comCfg.lo.e && comCfg.lo.e[_es];
+      const lo = _comLo || DEFAULT_LOADOUT[_es];
+      boss._fullK = (lo.ammoK || 0) * AMMO_PER_SLOT.kinetic; boss._fullM = (lo.ammoM || 0) * AMMO_PER_SLOT.missile;
+      boss.ammoK = boss._fullK; boss.ammoM = boss._fullM; boss._kMag = KINETIC_MAG;
+      // 第22弾: 離脱の消耗品も積み込みどおり (旧: 敵は使わなかった)。空母の艦載機の数は COM対戦では積み込みの戦闘機の数
+      boss.itemFlash = lo.flash || 0; boss.itemNoise = lo.noise || 0; boss.itemSmoke = lo.smoke || 0;
+      boss._eLo = _comLo ? { fsos: lo.fsos, lure: lo.lure, attack: lo.attack } : null; }
     boss.lurking = true;
     enemies.push(boss);
     // 第19弾: COM対戦デモ — 敵の性格を設定どおりに (ランダムは試合ごとに艦種の範囲で振る)。自機COMの性格も試合ごとに決め直す
@@ -5152,6 +5342,7 @@ function generateSector() {
     // 第21弾: 敵のエンジン (性格で選ぶ。速さはエンジンの倍率) / 自機のエンジン切替をリセット
     boss.engine = pickEnemyEngine(boss.personality);
     boss.lureSOS = 1; boss.lureShip = 1; // 第21弾: 敵の囮 (各1個 — 実装で決めた数)
+    if (boss._eLo) { boss.lureSOS = boss._eLo.fsos || 0; boss.lureShip = boss._eLo.lure || 0; if (boss.type === 'carrier') boss.droneStock = boss._eLo.attack || 0; } // 第22弾: COM対戦で敵の積み込みを編集した時だけ
     boss.upgSpeed = (ENGINE_TYPES[boss.engine] || ENGINE_TYPES.thermonuclear).speedMult;
     engineSwitchT = 0; engineSwitchTo = null; _engCoast = false; _syncEngineUI();
     // 第20弾: 開戦時の司令部情報は撤去 (オーナー指示「開始と同時に敵の方角が分かるのはいらない」・双方なくす)。
@@ -5204,7 +5395,9 @@ function generateSector() {
     lures = []; pendingLure = null; // 第21弾
     noiseMakers = []; smokeClouds = []; playerCoasting = false; boostT = 0; boostCD = 0; _flashScreen = 0; _xoEsc = null; // 第17弾
     huntStats = { startFrame: _frameCount, firstContact: -1, ambushes: 0, crits: 0, timesEngaged: 0, dmgDealt: 0, dmgTaken: 0, pings: 0 };
-    playerHitDirs = [];
+    matchRecStart(); // 第22弾: 試合の記録
+    playerHitDirs = []; playerHitLog = []; // 第22弾: 被弾の記録もセクターごとに
+    combatMode = { mode: 'manual', range: 'auto', prio: 'attack' }; _cbVis = null; // 第22弾: 戦闘モードは手動から
     // 前任艦の残骸: 前回撃沈されていれば争奪帯の途中に漂う (回収でサルベージ)
     playerWreckObj = null;
     if (gameState.wreckSalvage > 0) {
@@ -5330,9 +5523,26 @@ function cargoSummaryNow() {
     parts.push('資材' + cargo.mat + '個');
     return parts.join('・');
 }
-function openLoadout(ship, fromDock) {
-    _loEdit = { ship, lo: shipLoadout(ship), fromDock: !!fromDock };
-    document.getElementById('lo-ship').textContent = SHIP_JP[ship] + ' — 積載' + HOLD_CAP[ship] + '枠';
+// 第22弾: 敵COMが使える搭載物 (それ以外は積んでも使わないので敵の積み込みには出さない)
+const ENEMY_USES = ['flash', 'noise', 'smoke', 'fsos', 'lure'];
+function comLoadout(side, ship) {
+    const st = comCfg && comCfg.lo && comCfg.lo[side] && comCfg.lo[side][ship];
+    const lo = Object.assign({ mat: 0 }, st || DEFAULT_LOADOUT[ship]);
+    if (side === 'e') { // 敵が使わない物 (資材・設置物・人型など) は外す — 枠を空けて弾や消耗品に回せるように
+        lo.mat = 0;
+        for (const t of SHIP_DRONES[ship] || []) if (!(ENEMY_USES.includes(t) || (t === 'attack' && ship === 'carrier'))) lo[t] = 0;
+    }
+    return lo;
+}
+function loSummary(lo, ship, enemySide) {
+    const parts = ['実弾' + (lo.ammoK || 0), 'ミサイル' + (lo.ammoM || 0)];
+    for (const t of SHIP_DRONES[ship] || []) if (lo[t] && (!enemySide || ENEMY_USES.includes(t) || (t === 'attack' && ship === 'carrier'))) parts.push(DRONE_SPEC[t].label + lo[t]);
+    if (!enemySide && lo.mat) parts.push('資材' + lo.mat);
+    return parts.join('・') + ' (' + loadoutSlots(lo, ship) + '/' + HOLD_CAP[ship] + '枠)';
+}
+function openLoadout(ship, fromDock, comSide) {
+    _loEdit = { ship, lo: comSide ? comLoadout(comSide, ship) : shipLoadout(ship), fromDock: !!fromDock, comSide: comSide || null };
+    document.getElementById('lo-ship').textContent = (comSide ? (comSide === 'p' ? 'COM対戦 自機: ' : 'COM対戦 敵: ') : '') + SHIP_JP[ship] + ' — 積載' + HOLD_CAP[ship] + '枠';
     _renderLoadout();
     document.getElementById('loadout-overlay').classList.remove('hidden');
     playSound('ui');
@@ -5347,14 +5557,17 @@ function _renderLoadout() {
             + '<button data-k="' + k + '" data-d="-1"' + (e.lo[k] > 0 ? '' : ' disabled') + '>−</button><b>' + (e.lo[k] || 0) + '</b>'
             + '<button data-k="' + k + '" data-d="1"' + (used + 1 <= cap ? '' : ' disabled') + '>＋</button></div>');
     }
+    const _eSide = e.comSide === 'e';
     for (const t of SHIP_DRONES[e.ship]) {
+        if (_eSide && !(ENEMY_USES.includes(t) || (t === 'attack' && e.ship === 'carrier'))) continue; // 敵が使わない物は出さない
         const sp = DRONE_SPEC[t];
         rows.push('<div class="lo-row"><span class="lo-name">' + sp.label + '<small>' + sp.w + '枠' + (sp.placed ? '・設置' : sp.item ? '・使い切り' : '') + '</small></span>'
             + '<button data-k="' + t + '" data-d="-1"' + (e.lo[t] > 0 ? '' : ' disabled') + '>−</button><b>' + (e.lo[t] || 0) + '</b>'
             + '<button data-k="' + t + '" data-d="1"' + (used + sp.w <= cap ? '' : ' disabled') + '>＋</button></div>');
     }
     const matHint = SHIP_DRONES[e.ship].map(t => DRONE_SPEC[t].label + DRONE_SPEC[t].mat + '個').join('・');
-    rows.push('<div class="lo-row lo-mat"><span class="lo-name">資材<small>1枠=' + MAT_PER_SLOT + '個 — ' + matHint + 'で組み立て</small></span>'
+    if (_eSide) rows.push('<div class="lo-row lo-note">敵が使う物だけ: 弾・' + (e.ship === 'carrier' ? '戦闘機 (艦載機)・' : '') + '閃光弾・ノイズ・煙幕 (退く時)・偽SOS・偽艦影ブイ。資材の組み立てはしない</div>');
+    else rows.push('<div class="lo-row lo-mat"><span class="lo-name">資材<small>1枠=' + MAT_PER_SLOT + '個 — ' + matHint + 'で組み立て</small></span>'
         + '<button data-k="mat" data-d="-1"' + (e.lo.mat > 0 ? '' : ' disabled') + '>−</button><b>' + e.lo.mat + '</b>'
         + '<button data-k="mat" data-d="1"' + (used + 1 <= cap ? '' : ' disabled') + '>＋</button></div>');
     const box = document.getElementById('lo-rows');
@@ -5378,11 +5591,16 @@ function _renderLoadout() {
     });
     document.getElementById('lo-default').addEventListener('click', () => {
         if (!_loEdit) return;
+        if (_loEdit.comSide) { const keep = comCfg.lo[_loEdit.comSide][_loEdit.ship]; delete comCfg.lo[_loEdit.comSide][_loEdit.ship]; _loEdit.lo = comLoadout(_loEdit.comSide, _loEdit.ship); if (keep) comCfg.lo[_loEdit.comSide][_loEdit.ship] = keep; _renderLoadout(); return; }
         _loEdit.lo = Object.assign({ mat: 0 }, DEFAULT_LOADOUT[_loEdit.ship]);
         _renderLoadout();
     });
     document.getElementById('lo-ok').addEventListener('click', () => {
         if (!_loEdit) return;
+        if (_loEdit.comSide) { // 第22弾: COM対戦の積み込み (自機/敵) — 設定画面に戻る
+            if (comCfg) { if (!comCfg.lo) comCfg.lo = { p: {}, e: {} }; comCfg.lo[_loEdit.comSide][_loEdit.ship] = Object.assign({}, _loEdit.lo); saveComCfg(); _renderComCfg(); }
+            _loEdit = null; ov.classList.add('hidden'); playSound('ui'); return;
+        }
         if (!gameState.loadout) gameState.loadout = {};
         gameState.loadout[_loEdit.ship] = Object.assign({}, _loEdit.lo);
         try { localStorage.setItem('darkEchoSave', JSON.stringify(gameState)); } catch (e) {}
@@ -5540,7 +5758,7 @@ function setGenFocus(key) {
         if (v) v.textContent = f.prec[k] + '%';
     }
     updateGenTotal();
-    document.querySelectorAll('.gd-focus-btn').forEach(b => b.classList.toggle('active', b.dataset.focus === key));
+    document.querySelectorAll('.gd-focus-btn, .focus-btn').forEach(b => b.classList.toggle('active', b.dataset.focus === key));
     playSound('ui');
 }
 document.querySelectorAll('.gd-focus-btn').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); setGenFocus(b.dataset.focus); }));
@@ -5734,6 +5952,7 @@ function requestEngineSwitch(type) {
 }
 function updateEngineSwitch() {
     if (engineSwitchT <= 0) return;
+    if (engineSwitchT % 60 === 0) _syncEngineUI(); // 残り秒の表示
     if ((engineSwitchT -= gameSpeedFactor) <= 0) {
         engineSwitchT = 0;
         gameState.engineType = engineSwitchTo; engineSwitchTo = null;
@@ -5750,7 +5969,14 @@ function _syncEngineUI() {
         b.classList.toggle('switching', engineSwitchT > 0 && b.dataset.val === engineSwitchTo);
     });
     const sel = document.getElementById('engine-type-select'); if (sel) sel.value = cur;
+    // 第22弾: 右列の「機関」
+    document.querySelectorAll('.eng-btn').forEach(b => { b.classList.toggle('active', b.dataset.eng === cur); b.classList.toggle('switching', engineSwitchT > 0 && b.dataset.eng === engineSwitchTo); });
+    const lb = document.getElementById('abar-engine-label');
+    if (lb) lb.textContent = engineSwitchT > 0 ? '切替' + Math.ceil(engineSwitchT / 60) + 's' : (ENGINE_JP[cur] || '').replace('エンジン', '');
 }
+document.querySelectorAll('.eng-btn').forEach(b => b.addEventListener('click', () => requestEngineSwitch(b.dataset.eng)));
+document.querySelectorAll('#combat-bar .cb-grp button').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); setCombatMode(b.parentElement.dataset.k, b.dataset.v); }));
+document.querySelectorAll('.focus-btn').forEach(b => b.addEventListener('click', () => setGenFocus(b.dataset.focus)));
 document.getElementById('engine-type-select')?.addEventListener('change', e => { requestEngineSwitch(e.target.value); });
 
 document.getElementById('gen-gain')?.addEventListener('input', e => {
@@ -6285,6 +6511,7 @@ function updateNodesAndColonies() {
 }
 function captureNodeByPlayer(n) {
     n.owner = 'player'; n.capP = 0; n.emFlashTimer = 180; n.knownLost = false;
+    matchRecEvent('nodeP', n.x, n.y, '自艦がノードを制圧');
     gameState.credits += NODE_SCR;
     updateTopUI();
     const got = addMaterials(NODE_MAT_GAIN);
@@ -6294,6 +6521,7 @@ function captureNodeByPlayer(n) {
 }
 function hackColonyByPlayer(st) {
     st.hacked = true; st.hackP = 0;
+    matchRecEvent('colonyP', st.x, st.y, '自艦がコロニーをハック');
     const heal = Math.floor(player.maxHp * 0.25);
     player.hp = Math.min(player.maxHp, player.hp + heal);
     const got = addMaterials(999);
@@ -6349,6 +6577,7 @@ function relayListen() {
 function enemyCaptureNode(e, n) {
     const wasMine = n.owner === 'player';
     n.owner = 'enemy'; n.capP = 0; n.emFlashTimer = 120;
+    matchRecEvent('nodeE', n.x, n.y, '敵がノードを制圧');
     if (wasMine) { n.knownLost = true; logMessage('聴音局: ノードとの通信途絶 — 敵に制圧された。敵の耳になる', 'warning-msg'); }
 }
 
@@ -6771,7 +7000,7 @@ function freeFireAt(wx, wy) {
         player.fireCooldown = WEAPON_COOLDOWNS.missile * genF;
         player.missileReloading = true;
         player.missileReloadTimer = Math.round(MISSILE_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0));
-        player._fireFlash = 90; player._fireFlashType = 'missile';
+        player._fireFlash = 90; player._fireFlashType = 'missile'; player._lastFireType = 'missile'; player._lastFireF = _frameCount;
         logMessage('WEP: ミサイル座標射撃 — 自位置シグネチャ露出', 'warning-msg');
         return;
     }
@@ -6813,7 +7042,7 @@ function updateFreeBeam() {
     player.beamReloading = true;
     player.beamReloadTimer = Math.round(BEAM_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0));
     player.fireCooldown = WEAPON_COOLDOWNS.beam * Math.max(0.3, 1.5 - (genAlloc.weapons / 100));
-    player._fireFlash = 90; player._fireFlashType = 'beam'; player._beamDrain = BEAM_DRAIN_DUR;
+    player._fireFlash = 90; player._fireFlashType = 'beam'; player._lastFireType = 'beam'; player._lastFireF = _frameCount; player._beamDrain = BEAM_DRAIN_DUR;
     playSound('shoot');
     cancelSilentRunning('発砲');
     logMessage('WEP: ビーム座標射撃 — 次まで' + Math.round(player.beamReloadTimer / 60) + '秒 (霧に軌跡が残る)', 'warning-msg');
@@ -8039,12 +8268,35 @@ function updateEnvInfo() {
 // ============================================================
 // ゲームオーバー / セクタークリア
 // ============================================================
+// 第22弾: 撃沈の瞬間に何が起きたかを画面中央に出す (崩壊の演出の間)
+function showDeathBanner(cause) {
+    let el = document.getElementById('death-banner');
+    if (!el) { el = document.createElement('div'); el.id = 'death-banner'; document.body.appendChild(el); }
+    el.innerHTML = '';
+    const a = document.createElement('div'); a.className = 'db-title'; a.textContent = '被弾 — 船体崩壊';
+    const b = document.createElement('div'); b.className = 'db-cause'; b.textContent = cause;
+    el.appendChild(a); el.appendChild(b);
+    el.classList.add('active');
+    setTimeout(() => el.classList.remove('active'), 4200);
+}
 function showGameOver() {
     document.getElementById('go-sector').textContent = gameState.sector;
     document.getElementById('go-credits').textContent = gameState.credits;
     document.getElementById('go-kills').textContent = enemiesKilled;
     const _rep = document.getElementById('go-report');
     if (_rep) _rep.textContent = '戦闘詳報 — ' + formatHuntReport();
+    // 第22弾: 撃沈の原因と、その前の被弾 (新しい順に最大4件)
+    const _cz = document.getElementById('go-cause');
+    if (_cz) {
+        _cz.innerHTML = '';
+        const head = document.createElement('div'); head.className = 'go-cause-head'; head.textContent = '撃沈の原因: ' + (player && player._deathCause || '不明'); _cz.appendChild(head);
+        const t0 = playerHitLog.length ? playerHitLog[playerHitLog.length - 1].f : 0;
+        for (const h of playerHitLog.slice(-4).reverse()) {
+            const row = document.createElement('div'); row.className = 'go-cause-row';
+            row.textContent = (h.f === t0 ? '最後 ' : ((h.f - t0) / 60).toFixed(0) + '秒 ') + _hitText(h) + ' → 残り' + h.hp;
+            _cz.appendChild(row);
+        }
+    }
     // 前任艦の残骸: 喪失クレジットの一部が次の出撃でサルベージ可能になる
     gameState.wreckSalvage = Math.max(100, Math.floor(gameState.credits * 0.35));
     saveGame();
@@ -8662,12 +8914,14 @@ function useFlash() {
     effects.push({ x: px, y: py, r: 0, maxR: FLASH_RADIUS * 0.55, a: 0.7, c: '#fff6cc', type: 'circle' });
     _flashScreen = 18;
     playSound('alert');
+    matchRecEvent('flashP', px, py, '自艦: 閃光弾' + (blinded ? ' (敵' + blinded + '隻の目を焼いた)' : ''));
     logMessage('離脱: 閃光弾 — ' + (blinded ? '敵' + blinded + '隻の目を' + Math.round(FLASH_BLIND / 60) + '秒焼いた' : '半径' + FLASH_RADIUS + 'u内に敵なし')
         + (lost ? '・ミサイル' + lost + '発の誘導を切った' : '') + '。この位置は知られた — 進路を変えて離れろ', 'warning-msg');
 }
 // ノイズメーカー: 自艦の全速と同じ熱と航跡を出しながら艦首方向へ直進する囮。
 // 敵は「強い方の音」を自艦と思い込む → こちらは潜航/機関停止で別方向へ
 function useNoise() {
+    if (player) matchRecEvent('escP', player.x, player.y, '自艦: ノイズメーカー');
     const sp = shipCruiseSpeed(gameState.shipType, genAlloc.engine, STANCE_GAIN.flank);
     const a = player.angle;
     noiseMakers.push({ x: player.x + Math.cos(a) * 40, y: player.y + Math.sin(a) * 40, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
@@ -8679,8 +8933,53 @@ function useNoise() {
 // ただし霧の中では自分の有視界も縮み、動けば航跡が深く残る (ヒッグス帯の受信は霧で減衰しない)
 function useSmoke() {
     smokeClouds.push({ x: player.x, y: player.y, r: SMOKE_R, dens: SMOKE_DENS, life: SMOKE_LIFE, max: SMOKE_LIFE, follow: null });
+    matchRecEvent('escP', player.x, player.y, '自艦: 煙幕弾');
     playSound('ui');
     logMessage('離脱: 煙幕弾 — 半径' + SMOKE_R + 'uにヒッグス雲 (' + Math.round(SMOKE_LIFE / 60) + '秒)。中では探信が埋もれる。動けば航跡は深く残る', 'system-msg');
+}
+// 第22弾: 敵も離脱の消耗品を使う (積み込みで持たせた分だけ・自機と同じ効き目)
+function enemyUseFlash(e) {
+    if (!(e.itemFlash > 0)) return false;
+    e.itemFlash--;
+    const d = player ? Math.hypot(player.x - e.x, player.y - e.y) : 1e9;
+    if (player && player.hp > 0 && d < FLASH_RADIUS) player._sysSensorTimer = Math.max(player._sysSensorTimer || 0, FLASH_BLIND);
+    let lost = 0;
+    for (const p of projectiles) {
+        if (!p.isPlayer || !p.active || p.type !== 'missile' || p._blind) continue;
+        if (Math.hypot(p.x - e.x, p.y - e.y) < FLASH_RADIUS) { p._blind = true; lost++; }
+    }
+    effects.push({ x: e.x, y: e.y, r: 0, maxR: FLASH_RADIUS, a: 0.9, c: '#ffffff', type: 'circle' });
+    effects.push({ x: e.x, y: e.y, r: 0, maxR: FLASH_RADIUS * 0.55, a: 0.7, c: '#fff6cc', type: 'circle' });
+    // 閃光は見える (霧越しでは光学が減衰) → 炸裂点の方位線が入る
+    const hMid = player ? getHiggsIntensity((e.x + player.x) / 2, (e.y + player.y) / 2) : 0;
+    if (player && player.hp > 0 && d < ENEMY_PASSIVE_RANGE * (1 - hMid * sensorConfig.optic.higgsMod)) {
+        const ang = Math.atan2(e.y - player.y, e.x - player.x);
+        addBearingObs(enemySid(e), player.x, player.y, ang, 0.03, 1, '255,255,255');
+        ringMarkBearing(compassDeg(ang), '#ffffff');
+        logMessage('SENSOR: 閃光 — 方位' + compassDeg(ang) + '°' + (d < FLASH_RADIUS ? '。センサーが焼けた (' + Math.round(FLASH_BLIND / 60) + '秒)' : '') + (lost ? '・ミサイル' + lost + '発の誘導が切れた' : ''), 'warning-msg');
+        if (d < FLASH_RADIUS) _flashScreen = 18;
+    }
+    if (comDemo) comThinkEvent('e', '閃光弾 — 追手の目を焼く' + (lost ? ' (ミサイル' + lost + '発の誘導を切った)' : ''), 'e' + e.uid);
+    if (typeof matchRecEvent === 'function') matchRecEvent('flashE', e.x, e.y, '敵の閃光弾');
+    return true;
+}
+function enemyUseSmoke(e) {
+    if (!(e.itemSmoke > 0)) return false;
+    e.itemSmoke--;
+    smokeClouds.push({ x: e.x, y: e.y, r: SMOKE_R, dens: SMOKE_DENS, life: SMOKE_LIFE, max: SMOKE_LIFE, follow: null });
+    if (comDemo) comThinkEvent('e', '煙幕弾 — この場にヒッグス雲 (' + Math.round(SMOKE_LIFE / 60) + '秒)', 'e' + e.uid);
+    if (typeof matchRecEvent === 'function') matchRecEvent('smokeE', e.x, e.y, '敵の煙幕弾');
+    return true;
+}
+function enemyUseNoise(e, ang) {
+    if (!(e.itemNoise > 0)) return false;
+    e.itemNoise--;
+    const ms = e._maxSpeeds ? e._maxSpeeds() : null, v = ms ? ms.flank : 1.5;
+    // 偽艦影と同じ仕組みで、全速で12秒まっすぐ進む音源 (自機の受信には艦と同じに聞こえる)
+    const seq = ++_lureSeq;
+    lures.push({ owner: 'e', kind: 'ship', noise: true, x: e.x, y: e.y, tx: e.x, ty: e.y, vx: Math.cos(ang) * v, vy: Math.sin(ang) * v, a: ang, phase: 'on', life: NOISE_LIFE, sid: 'L-' + seq, wid: 'e-lure-' + seq });
+    if (comDemo) comThinkEvent('e', 'ノイズメーカー — ' + _dirTxt(e.x, e.y, e.x + Math.cos(ang) * 3000, e.y + Math.sin(ang) * 3000) + 'へ走らせて耳を逸らす', 'e' + e.uid);
+    return true;
 }
 // 機関停止 (惰性): 推力が無いので熱と推進のEMが消える。進路は変えられない (艦首は回して撃てる)。
 // 速度は霧の外で20秒で半減、霧が濃いほど早く止まる。移動命令・出力の切替・もう一度押すと再点火
@@ -8712,6 +9011,7 @@ function useBoost() {
     if (playerCoasting) { playerCoasting = false; }
     if (silentRunning) setStance('cruise', true);
     boostT = BOOST_DUR; boostCD = BOOST_CD;
+    matchRecEvent('escP', player.x, player.y, '自艦: 緊急噴射');
     playSound('alert');
     logMessage('離脱: 緊急噴射 — ' + Math.round(BOOST_DUR / 60) + '秒間 速度×' + BOOST_MULT + '。熱が最大になり、終わると機関が' + Math.round(BOOST_OVERHEAT / 60) + '秒過熱する', 'warning-msg');
     _updateEscapeBtns();
@@ -8761,6 +9061,7 @@ function _updateEscapeBtns() {
 // ═══ 第21弾: 囮 (偽SOS / 偽艦影ブイ) — 自機/敵とも同じもの。射出 → 地点で作動 → 寿命で消える ═══
 function launchLure(owner, kind, fx, fy, tx, ty) {
     const a = Math.atan2(ty - fy, tx - fx), seq = ++_lureSeq;
+    matchRecEvent(owner === 'p' ? 'lureP' : 'lureE', tx, ty, (owner === 'p' ? '自艦: ' : '敵: ') + (kind === 'sos' ? '偽SOS' : '偽艦影ブイ') + 'を出す');
     // 航跡の持ち主: 敵の囮は 'e-lure-n' (自機は敵の航跡として読む・敵は自分の航跡として読まない) / 自機の囮は 'lure-n' (敵が自機の航跡として読む)
     lures.push({ owner, kind, x: fx, y: fy, tx, ty, vx: Math.cos(a) * LURE_FLY_SPEED, vy: Math.sin(a) * LURE_FLY_SPEED, a, phase: 'fly', life: 0, sid: 'L-' + seq, wid: (owner === 'e' ? 'e-lure-' : 'lure-') + seq });
     playSound('ui');
@@ -8910,7 +9211,8 @@ class Drone {
         if (q >= DRONE_LINK_WEAK) this._order = droneOrders[this.type] || null; // 届いた指示だけ
         const base = DRONE_VIS[this.type] || 0;
         if (!base) { this._seen = null; this._visPts = null; return; }
-        const R = visionRadiusAt(null, this.x, this.y, base);
+        const R = Math.max(Math.min(VIS_CLOSE, base), visionRadiusAt(null, this.x, this.y, base)); // 第22弾: 至近は必ず見える
+        const h0 = getHiggsIntensity(this.x, this.y);
         this._visR = R;
         const seen = this._seen || (this._seen = new Set());
         seen.clear();
@@ -8918,14 +9220,14 @@ class Drone {
             if (e.hp <= 0 || e._dying) continue;
             const d = Math.hypot(e.x - this.x, e.y - this.y);
             if (d > R) continue;
-            if (losReach(this.x, this.y, Math.atan2(e.y - this.y, e.x - this.x), d + 1) < d) continue;
+            if (losReach(this.x, this.y, Math.atan2(e.y - this.y, e.x - this.x), R, h0) < d) continue;
             seen.add(e);
             if (q >= DRONE_LINK_STRONG) e._dSeenF = _frameCount;              // 自艦も「見える」
             else if (q >= DRONE_LINK_WEAK) applyContact(e, 0.25 + 0.5 * q, 40); // 誤差つきの反応だけ
         }
         // 描画用の縁 (24本の視線)
         const pts = this._visPts || (this._visPts = new Float32Array(24));
-        for (let k = 0; k < 24; k++) pts[k] = losReach(this.x, this.y, k / 24 * Math.PI * 2, R);
+        for (let k = 0; k < 24; k++) pts[k] = losReach(this.x, this.y, k / 24 * Math.PI * 2, R, h0);
     }
     _nearestEnemy(range) {
         let best = null, bd = range;
@@ -8994,20 +9296,7 @@ class Drone {
             const tgt = this._nearestEnemy(DRONE_TURRET_RANGE);
             if (tgt) { this.angle = Math.atan2(tgt.y - this.y, tgt.x - this.x); if (this.fireCD <= 0 && tgt.hp > 0) { projectiles.push(new Projectile(this.x, this.y, tgt, true, 'kinetic', 0.6)); this.fireCD = 55; } }
         } else if (this.type === 'barrier') {
-            // §3-7 ビームバリア: 周囲の敵に周期ダメージ + EMシグネチャ放射 (位置バレ)
-            if (this.fireCD <= 0) {
-                let hit = 0;
-                for (const e of enemies) {
-                    if (e.hp <= 0) continue;
-                    if (Math.hypot(e.x - this.x, e.y - this.y) < DRONE_BARRIER_RADIUS) {
-                        e.hp -= 10;
-                        createHitEffect(e.x, e.y, '#4499ff');
-                        hit++;
-                    }
-                }
-                if (hit > 0) effects.push({ x: this.x, y: this.y, r: 0, maxR: DRONE_BARRIER_RADIUS * 0.06, a: 0.5, c: '#4499ff', type: 'circle' });
-                this.fireCD = 45;
-            }
+            // 第22弾: ビームの盾 — 動作は barrierBlocksBeam (相手のビームが撃たれた時に判定)。周期ダメージは撤去
         } else if (this.type === 'buoy') {
             // §3-7 センサーブイ: 広域スキャンで敵コンタクト付与 (EM放射 = 位置特定されやすい)
             if (this._scanCD <= 0) {
@@ -9110,14 +9399,24 @@ class Drone {
             ctx.globalAlpha = a * 0.3; ctx.strokeStyle = '#ffaa33'; ctx.lineWidth = 1;
             ctx.beginPath(); ctx.arc(0, 0, DRONE_TURRET_RANGE * 0.04 + 9, 0, Math.PI * 2); ctx.stroke();
         } else if (this.type === 'barrier') {
-            // §3-7 ビームバリア: 六角形コア + 周期で光るバリアリング (スプライト未生成→キャンバス)
-            ctx.strokeStyle = '#4499ff'; ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            for (let i = 0; i < 6; i++) { const ba = (i / 6) * Math.PI * 2; (i === 0 ? ctx.moveTo : ctx.lineTo).call(ctx, Math.cos(ba) * 8, Math.sin(ba) * 8); }
-            ctx.closePath(); ctx.stroke();
-            ctx.globalAlpha = a * (0.15 + 0.1 * Math.sin(Date.now() * 0.006));
-            ctx.strokeStyle = '#6699ff'; ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.arc(0, 0, DRONE_BARRIER_RADIUS * 0.04 + 8, 0, Math.PI * 2); ctx.stroke();
+            // 第22弾: ビームの盾 — 本体 (Higgsfield生成) と半径600uの六角セルの泡 (加算)
+            const _bs = SPRITES.drone_barrier, _sh = SPRITES.fx_barrier_shield;
+            if (spriteReady(_sh)) {
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.globalAlpha = a * (0.22 + 0.08 * Math.sin(Date.now() * 0.004));
+                const R2 = DRONE_BARRIER_RADIUS * 1.08 / _zs; // 盾は世界の大きさ (本体はズームで縮まない描き方なので割り戻す)
+                ctx.drawImage(_sh, -R2, -R2, R2 * 2, R2 * 2);
+                ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = a;
+            } else {
+                ctx.globalAlpha = a * 0.3; ctx.strokeStyle = '#6699ff'; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.arc(0, 0, DRONE_BARRIER_RADIUS / _zs, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = a;
+            }
+            if (spriteReady(_bs)) ctx.drawImage(_bs, -18, -18, 36, 36);
+            else {
+                ctx.strokeStyle = '#4499ff'; ctx.lineWidth = 1.5; ctx.beginPath();
+                for (let i = 0; i < 6; i++) { const ba = (i / 6) * Math.PI * 2; (i === 0 ? ctx.moveTo : ctx.lineTo).call(ctx, Math.cos(ba) * 8, Math.sin(ba) * 8); }
+                ctx.closePath(); ctx.stroke();
+            }
         } else if (this.type === 'buoy') {
             const _sp = _droneSprite;
             if (spriteReady(_sp)) {
@@ -9731,10 +10030,11 @@ const COM_PRESETS = {
 const COM_ITYPE = { assault: 'destroyer', stealth: 'corvette', carrier: 'carrier' }; // ロビーの艦種 → 性格の範囲
 function comDefaultCfg() {
     return { ship: 'assault', enemy: 'assault', mode: 'br', pPreset: 'standard', ePreset: 'standard',
-             pp: Object.assign({}, COM_PRESETS.standard.p), ep: Object.assign({}, COM_PRESETS.standard.p), higgsView: true, think: true };
+             pp: Object.assign({}, COM_PRESETS.standard.p), ep: Object.assign({}, COM_PRESETS.standard.p), higgsView: true, think: true,
+             lo: { p: {}, e: {} } }; // 第22弾: COM対戦の積み込み (自機/敵・艦種ごと。無ければ既定)
 }
 function loadComCfg() {
-    try { const c = JSON.parse(localStorage.getItem('darkEchoComDemo') || 'null'); if (c && c.pp && c.ep) return Object.assign(comDefaultCfg(), c); } catch (e) {}
+    try { const c = JSON.parse(localStorage.getItem('darkEchoComDemo') || 'null'); if (c && c.pp && c.ep) { const r = Object.assign(comDefaultCfg(), c); if (!r.lo || !r.lo.p || !r.lo.e) r.lo = { p: {}, e: {} }; return r; } } catch (e) {}
     return comDefaultCfg();
 }
 function saveComCfg() { try { localStorage.setItem('darkEchoComDemo', JSON.stringify(comCfg)); } catch (e) {} }
@@ -9806,6 +10106,195 @@ const _dirTxt = (fx, fy, tx, ty) => '方位' + compassDeg(Math.atan2(ty - fy, tx
 const COM_TICK = 120, COM_LEG_HOLD = 1200, COM_GOAL_RANGE = 9000, COM_DEPLOY_GAP = 600, COM_HIDE_TIME = ENEMY_HIDE_TIME, COM_SEARCH_LEG = 4000;
 const COM_SKIP = { '帰投': 1, 'ソナー': 1, '離脱': 1, '射撃': 1 }; // 自機COMが自分で決める (退く・撃つ) / 使わない (副長の「静寂ならソナー」は位置を晒すだけ)
 function comNewMemo() { return { pp: comPersonalityFor('p'), lastDeploy: -1e9, hideUntil: 0, flankUntil: 0, silentUntil: 0, mode: '' }; }
+
+// ═══ 第22弾: 試合の記録 — 1秒ごとの位置と出来事を残し、試合が終わったら地図と時間のスライダーで振り返る ═══
+// (見た目だけ: 記録は判断に使わない。真の位置を記録するので、表示するのは試合が終わった後だけ)
+let matchRec = null;
+const REC_EVENTS_MAX = 3000;
+const _AI_JP = { lurking: '潜伏', gathering: '収集', hunting: '追跡', combat: '交戦' };
+function matchRecStart() {
+    const lm = [];
+    for (const st of structures) if (st.type === 'colony' || st.type === 'derelict') lm.push({ k: st.type, x: st.x, y: st.y });
+    for (const st of stations) lm.push({ k: 'station', x: st.x, y: st.y });
+    for (const n of resourceNodes) lm.push({ k: 'node', x: n.x, y: n.y });
+    matchRec = { f0: _frameCount, ship: gameState.shipType, enemy: gameState.enemyType, com: !!comDemo, lm, s: [], ev: [], prevAi: {}, prevExpo: 0 };
+}
+function matchRecEvent(kind, x, y, text) {
+    if (!matchRec || matchRec.ev.length >= REC_EVENTS_MAX) return;
+    matchRec.ev.push({ t: _frameCount - matchRec.f0, kind, x: Math.round(x), y: Math.round(y), text });
+}
+function matchRecTick() {
+    if (!matchRec || !player || (_frameCount - matchRec.f0) % 60) return;
+    const P = { x: Math.round(player.x), y: Math.round(player.y), a: +player.angle.toFixed(2), hp: Math.max(0, player.hp / player.maxHp), ex: playerExposureLevel, st: powerStance };
+    // 自艦の推定 (追跡中の信号)
+    if (lockedSignalId && _signalAnalysis[lockedSignalId] && _signalAnalysis[lockedSignalId].fix) {
+        const est = trackEstimate(_signalAnalysis[lockedSignalId], 0);
+        if (est) P.est = { x: Math.round(est.x), y: Math.round(est.y), r: Math.round(est.r) };
+    }
+    const E = [], F = [];
+    for (const e of enemies) {
+        if (e.hp <= 0 && !e._dying) continue;
+        if (e.type === 'fighter') { F.push([Math.round(e.x), Math.round(e.y)]); continue; }
+        const b = e.playerLastKnownPos;
+        E.push({ id: e.uid, x: Math.round(e.x), y: Math.round(e.y), a: +e.angle.toFixed(2), hp: Math.max(0, e.hp / e.maxHp), ai: e.aiState, fr: +(e.contactFreshness || 0).toFixed(2), bx: b ? Math.round(b.x) : null, by: b ? Math.round(b.y) : null, seen: !!e.inVision });
+        const pv = matchRec.prevAi[e.uid];
+        if (pv && pv !== e.aiState) matchRecEvent('aiE', e.x, e.y, '敵: ' + (_AI_JP[pv] || pv) + ' → ' + (_AI_JP[e.aiState] || e.aiState));
+        matchRec.prevAi[e.uid] = e.aiState;
+    }
+    if (playerExposureLevel !== matchRec.prevExpo) { matchRecEvent('expoP', player.x, player.y, '自艦: ' + _EXPO_JP[matchRec.prevExpo] + ' → ' + _EXPO_JP[playerExposureLevel]); matchRec.prevExpo = playerExposureLevel; }
+    const D = playerDrones.filter(d => d.hp > 0).map(d => [Math.round(d.x), Math.round(d.y)]);
+    matchRec.s.push({ t: _frameCount - matchRec.f0, P, E, F, D });
+}
+// ── 再生画面 ──
+let _rp = null;
+function openReplay() {
+    if (!matchRec || !matchRec.s.length) { logMessage('記録: この試合の記録がありません', 'system-msg'); return; }
+    const ov = document.getElementById('replay-overlay'); if (!ov) return;
+    ov.classList.remove('hidden');
+    const sl = document.getElementById('rp-slider');
+    sl.max = matchRec.s.length - 1; sl.value = matchRec.s.length - 1;
+    // 表示範囲: 艦の通った所が収まる正方形 (最小8000u)
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const sm of matchRec.s) { const pts = [sm.P].concat(sm.E); for (const q of pts) { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); } }
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, half = Math.max(4000, (Math.max(x1 - x0, y1 - y0) / 2) * 1.15 + 600);
+    _rp = { i: matchRec.s.length - 1, play: false, spd: 4, cx, cy, half, acc: 0, last: 0 };
+    _rpRenderEvents();
+    _rpDraw();
+}
+function closeReplay() { const ov = document.getElementById('replay-overlay'); if (ov) ov.classList.add('hidden'); if (_rp) _rp.play = false; }
+function _rpFmt(t) { const s2 = Math.floor(t / 60); return Math.floor(s2 / 60) + ':' + String(s2 % 60).padStart(2, '0'); }
+const _EV_COL = { fireP: '#5ff0ff', fireE: '#ffa040', hitP: '#ff5050', hitE: '#7dff9a', deathP: '#ff3030', killE: '#7dff9a', nodeP: '#50c8ff', nodeE: '#ff9a50', colonyP: '#50c8ff', aiE: '#ffcf88', expoP: '#ff8080', lureP: '#c48bff', lureE: '#c48bff', flashP: '#ffffff', flashE: '#ffffff', smokeE: '#9fb8ff', shield: '#88ccff', clear: '#7dff9a', supplyP: '#9fffc0', escP: '#ffe08a' };
+function _rpRenderEvents() {
+    const box = document.getElementById('rp-events'); if (!box) return;
+    box.innerHTML = '';
+    matchRec.ev.forEach((ev, k) => {
+        const d = document.createElement('div'); d.className = 'rp-ev'; d.dataset.k = k; d.dataset.t = ev.t;
+        const tm = document.createElement('b'); tm.textContent = _rpFmt(ev.t); d.appendChild(tm);
+        const tx = document.createElement('span'); tx.textContent = ' ' + ev.text; tx.style.color = _EV_COL[ev.kind] || '#cfe'; d.appendChild(tx);
+        box.appendChild(d);
+    });
+}
+function _rpSetIndex(i) { if (!_rp) return; _rp.i = Math.max(0, Math.min(matchRec.s.length - 1, i)); document.getElementById('rp-slider').value = _rp.i; _rpDraw(); }
+function _rpDraw() {
+    if (!_rp || !matchRec) return;
+    const cv = document.getElementById('rp-canvas'); if (!cv) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1), W = cv.clientWidth || 300, H = cv.clientHeight || 300;
+    if (cv.width !== Math.round(W * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.fillStyle = '#020a06'; g.fillRect(0, 0, W, H);
+    const sc = Math.min(W, H) / (2 * _rp.half), ox = W / 2 - _rp.cx * sc, oy = H / 2 - _rp.cy * sc;
+    const X = (x) => ox + x * sc, Y = (y) => oy + y * sc;
+    // 地図の縁とランドマーク
+    g.strokeStyle = 'rgba(0,255,170,0.25)'; g.lineWidth = 1; g.beginPath(); g.arc(X(MAP_CX), Y(MAP_CY), MAP_RADIUS * sc, 0, Math.PI * 2); g.stroke();
+    for (const l of matchRec.lm) {
+        g.fillStyle = l.k === 'colony' ? '#3aa8ff' : l.k === 'station' ? '#3fffa0' : l.k === 'derelict' ? '#8a8a8a' : '#c79bff';
+        const r = l.k === 'node' ? 2.5 : 4; g.fillRect(X(l.x) - r, Y(l.y) - r, r * 2, r * 2);
+    }
+    const S = matchRec.s, i = _rp.i, cur = S[i];
+    // 航跡: 全体を薄く、今までを濃く
+    const trail = (get, col) => {
+        g.strokeStyle = col; g.globalAlpha = 0.18; g.lineWidth = 1.5; g.beginPath(); let st = false;
+        for (let k = 0; k < S.length; k++) { const q = get(S[k]); if (!q) { st = false; continue; } if (!st) { g.moveTo(X(q.x), Y(q.y)); st = true; } else g.lineTo(X(q.x), Y(q.y)); }
+        g.stroke(); g.globalAlpha = 0.9; g.lineWidth = 2; g.beginPath(); st = false;
+        for (let k = 0; k <= i; k++) { const q = get(S[k]); if (!q) { st = false; continue; } if (!st) { g.moveTo(X(q.x), Y(q.y)); st = true; } else g.lineTo(X(q.x), Y(q.y)); }
+        g.stroke(); g.globalAlpha = 1;
+    };
+    trail(sm => sm.P, '#5ff0ff');
+    const eIds = new Set(); for (const sm of S) for (const e of sm.E) eIds.add(e.id);
+    for (const id of eIds) trail(sm => sm.E.find(e => e.id === id), '#ffa040');
+    // 出来事 (今の時刻までの直近20秒)
+    for (const ev of matchRec.ev) {
+        if (ev.t > cur.t || ev.t < cur.t - 1200) continue;
+        const a = 1 - (cur.t - ev.t) / 1200;
+        g.globalAlpha = 0.3 + 0.7 * a; g.strokeStyle = g.fillStyle = _EV_COL[ev.kind] || '#cfe';
+        const x = X(ev.x), y = Y(ev.y);
+        if (ev.kind === 'fireP' || ev.kind === 'fireE') { g.beginPath(); g.arc(x, y, 5, 0, Math.PI * 2); g.stroke(); }
+        else if (ev.kind === 'hitP' || ev.kind === 'hitE' || ev.kind === 'deathP' || ev.kind === 'killE') { g.lineWidth = 2; g.beginPath(); g.moveTo(x - 5, y - 5); g.lineTo(x + 5, y + 5); g.moveTo(x + 5, y - 5); g.lineTo(x - 5, y + 5); g.stroke(); g.lineWidth = 1; }
+        else { g.beginPath(); g.moveTo(x, y - 5); g.lineTo(x + 5, y); g.lineTo(x, y + 5); g.lineTo(x - 5, y); g.closePath(); g.stroke(); }
+    }
+    g.globalAlpha = 1;
+    // 艦 (今の時刻)
+    const ship = (q, col) => { g.save(); g.translate(X(q.x), Y(q.y)); g.rotate(q.a); g.fillStyle = col; g.beginPath(); g.moveTo(9, 0); g.lineTo(-6, -5); g.lineTo(-6, 5); g.closePath(); g.fill(); g.restore(); };
+    for (const f of cur.F) { g.fillStyle = '#ffb070'; g.fillRect(X(f[0]) - 1.5, Y(f[1]) - 1.5, 3, 3); }
+    for (const d of cur.D) { g.fillStyle = '#8ff'; g.fillRect(X(d[0]) - 1.5, Y(d[1]) - 1.5, 3, 3); }
+    for (const e of cur.E) {
+        // 敵が「自艦はここ」と思っている点
+        if (e.bx !== null && e.fr > 0.05) {
+            g.setLineDash([3, 3]); g.strokeStyle = 'rgba(255,160,64,' + (0.3 + 0.6 * e.fr) + ')';
+            g.beginPath(); g.moveTo(X(e.x), Y(e.y)); g.lineTo(X(e.bx), Y(e.by)); g.stroke();
+            g.beginPath(); g.arc(X(e.bx), Y(e.by), 7, 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
+        }
+        ship(e, e.hp > 0 ? '#ff8030' : '#663');
+    }
+    if (cur.P.est) { g.setLineDash([3, 3]); g.strokeStyle = 'rgba(95,240,255,0.7)'; g.beginPath(); g.arc(X(cur.P.est.x), Y(cur.P.est.y), Math.max(6, cur.P.est.r * sc), 0, Math.PI * 2); g.stroke(); g.setLineDash([]); }
+    ship(cur.P, '#5ff0ff');
+    // 状態の文
+    document.getElementById('rp-time').textContent = _rpFmt(cur.t) + ' / ' + _rpFmt(S[S.length - 1].t);
+    const lines = ['<span style="color:#5ff0ff">自艦</span> 耐久' + Math.round(cur.P.hp * 100) + '%・' + (_EXPO_JP[cur.P.ex] || '') + (cur.P.est ? '・敵を推定±' + cur.P.est.r + 'u' : '')];
+    for (const e of cur.E) {
+        const dd = Math.round(Math.hypot(e.x - cur.P.x, e.y - cur.P.y) / 100) * 100;
+        const err = e.bx !== null && e.fr > 0.05 ? '・自艦をここと推定 (ずれ' + Math.round(Math.hypot(e.bx - cur.P.x, e.by - cur.P.y) / 100) * 100 + 'u・確信' + Math.round(e.fr * 100) + '%)' : '・自艦を掴んでいない';
+        lines.push('<span style="color:#ffa040">敵</span> ' + (_AI_JP[e.ai] || e.ai) + '・耐久' + Math.round(e.hp * 100) + '%・距離' + dd + 'u' + (e.seen ? '・自艦から見えている' : '') + err);
+    }
+    document.getElementById('rp-state').innerHTML = lines.join('<br>');
+    // 出来事の一覧: 今より前を濃く、直近を枠で
+    const box = document.getElementById('rp-events');
+    let lastK = -1;
+    box.querySelectorAll('.rp-ev').forEach(d => { const t = +d.dataset.t; d.classList.toggle('past', t <= cur.t); if (t <= cur.t) lastK = +d.dataset.k; d.classList.remove('now'); });
+    if (lastK >= 0) { const el = box.querySelector('.rp-ev[data-k="' + lastK + '"]'); if (el) { el.classList.add('now'); if (_rp.play || _rp.follow !== false) el.scrollIntoView({ block: 'nearest' }); } }
+}
+function _rpLoop(ts) {
+    if (!_rp) return;
+    const ov = document.getElementById('replay-overlay');
+    if (ov && !ov.classList.contains('hidden') && _rp.play) {
+        const dt = _rp.last ? Math.min(0.1, (ts - _rp.last) / 1000) : 0;
+        _rp.acc += dt * _rp.spd; // 1サンプル=1秒 → 再生の速さ倍
+        if (_rp.acc >= 1) { const n = Math.floor(_rp.acc); _rp.acc -= n; _rpSetIndex(_rp.i + n); if (_rp.i >= matchRec.s.length - 1) { _rp.play = false; document.getElementById('rp-play').textContent = '▶'; } }
+    }
+    _rp.last = ts;
+    requestAnimationFrame(_rpLoop);
+}
+(() => {
+    const ov = document.getElementById('replay-overlay'); if (!ov) return;
+    document.getElementById('rp-close').addEventListener('click', closeReplay);
+    document.getElementById('rp-slider').addEventListener('input', (ev) => { if (_rp) { _rp.play = false; document.getElementById('rp-play').textContent = '▶'; _rpSetIndex(+ev.target.value); } });
+    document.getElementById('rp-play').addEventListener('click', () => { if (!_rp) return; if (_rp.i >= matchRec.s.length - 1) _rpSetIndex(0); _rp.play = !_rp.play; document.getElementById('rp-play').textContent = _rp.play ? '❚❚' : '▶'; });
+    document.getElementById('rp-spd').addEventListener('click', (ev) => { if (!_rp) return; const L = [1, 4, 16, 60]; _rp.spd = L[(L.indexOf(_rp.spd) + 1) % L.length]; ev.target.textContent = '×' + _rp.spd; });
+    document.getElementById('rp-events').addEventListener('click', (ev) => { const d = ev.target.closest('.rp-ev'); if (!d || !_rp) return; const t = +d.dataset.t; let k = matchRec.s.findIndex(sm => sm.t >= t); if (k < 0) k = matchRec.s.length - 1; _rp.play = false; document.getElementById('rp-play').textContent = '▶'; _rpSetIndex(k); });
+    document.getElementById('btn-replay-go')?.addEventListener('click', openReplay);
+    document.getElementById('btn-replay-db')?.addEventListener('click', openReplay);
+    requestAnimationFrame(_rpLoop);
+})();
+
+// 第22弾: 戦闘モードのバー (画面下)。ロック (完全/想定) している間だけ出す。COM対戦では自機COMの選択を表示 (押せない)
+const _CM_JP = { manual: '手動', face: '正対', flank: '回り込み', auto: '兵装', near: '近', mid: '中', far: '遠', attack: '攻撃', evade: '回避' };
+const _CMWHY_JP = { dodge: 'ミサイルを横へかわす', flank: '後方へ回り込み中', close: '間合いを詰める', open: '間合いを開く', hold: '艦首を向けて保持' };
+function syncCombatBar() {
+    const bar = document.getElementById('combat-bar');
+    if (!bar) return;
+    bar.querySelectorAll('.cb-grp').forEach(g => g.querySelectorAll('button').forEach(b => b.classList.toggle('on', combatMode[g.dataset.k] === b.dataset.v)));
+    bar.classList.toggle('com', !!comDemo);
+}
+function setCombatMode(k, v) {
+    if (comDemo || !(k in combatMode)) return;
+    combatMode[k] = v;
+    syncCombatBar();
+    if (typeof playSound === 'function') playSound('ui');
+    logMessage('操艦: 戦闘モード — ' + _CM_JP[combatMode.mode] + '・間合い' + _CM_JP[combatMode.range] + '・' + _CM_JP[combatMode.prio] + '優先' + (combatMode.mode === 'manual' ? ' (移動は自分で指示)' : ''), 'system-msg');
+}
+let _cbVis = null, _cbWhy = null;
+function updateCombatBar() {
+    const bar = document.getElementById('combat-bar');
+    if (!bar || !player) return;
+    const te = player.targetEntity, lk = te && player.hp > 0 ? playerLockInfo(te) : null;
+    const show = !!(lk && (lk.full || lk.assumed));
+    if (show !== _cbVis) { _cbVis = show; bar.classList.toggle('hidden', !show); if (show) syncCombatBar(); }
+    if (show) {
+        const why = combatMode.mode === 'manual' ? '' : (_CMWHY_JP[player._cmWhy] || '');
+        if (why !== _cbWhy) { _cbWhy = why; const st = document.getElementById('cb-state'); if (st) st.textContent = why; }
+    }
+}
+function _comCMOff() { if (combatMode.mode !== 'manual') { combatMode.mode = 'manual'; syncCombatBar(); } }
 function comPilotStep() {
     if (!comDemo || !player || player.hp <= 0 || sectorCleared || _frameCount % COM_TICK) return;
     const c = _com || (_com = comNewMemo());
@@ -9825,7 +10314,7 @@ function comPilotStep() {
     // 1) 退く
     if (hpF < retreat) {
         if (playerExposureLevel >= 2) {
-            c.mode = 'escape'; c.hideUntil = 0;
+            c.mode = 'escape'; c.hideUntil = 0; _comCMOff();
             xoEscapeStep(); _comSteered(c, 'free'); c.legF = -1e9; // 離脱は例外: 終わったらすぐ次の航路を引ける
             comThink('p', 'esc', '耐久' + _pct(hpF) + ' < 退き際' + _pct(retreat) + ' (慎重さ' + _pct(P.caution) + ')・' + _EXPO_JP[playerExposureLevel] + 'されている → 離脱手順 (閃光→ノイズ→噴射→機関停止)');
             return;
@@ -9852,6 +10341,7 @@ function comPilotStep() {
     if (playerCoasting) toggleCoast(false);
     // 2) 迫るミサイル (副長の回避・デコイ)
     if (r && r.act && (r.act.label === '回避' || r.act.label === 'デコイ')) {
+        if (r.act.label === '回避') _comCMOff();
         r.act.fn();
         if (r.act.label === '回避') { _comSteered(c, 'free'); c.legF = -1e9; } // 回避も例外
         comThink('p', 'evade' + r.act.label, '副長「' + r.text + '」→ ' + r.act.label);
@@ -9864,7 +10354,7 @@ function comPilotStep() {
         if ((cargo.ammoK <= 0 && cargo.ammoM <= 0) || (cargo.ammoM <= 0 && cargo.ammoK < loS.ammoK * AMMO_PER_SLOT.kinetic * 0.25)) {
             const rs = nearestResupply(player.x, player.y);
             if (rs) {
-                c.mode = 'supply';
+                c.mode = 'supply'; _comCMOff();
                 _comGoTo(rs.obj, RESUPPLY_R * 0.5, c);
                 comThink('p', 'supply', '弾が尽きかけ (実弾' + cargo.ammoK + '・ミサイル' + cargo.ammoM + ') → ' + (rs.kind === 'station' ? '補給所' : 'コロニー') + 'で補給 (' + _dirTxt(player.x, player.y, rs.obj.x, rs.obj.y) + ')');
                 _comStance(c, P);
@@ -9890,11 +10380,21 @@ function comPilotStep() {
             switchWeapon(wWant);
             comThinkEvent('p', '有視界 ' + Math.round(lk.dist / 100) * 100 + 'u → ' + _WPN_JP[wWant] + 'に持ち替える');
         }
-        comThink('p', 'full', '有視界で捉えた (' + Math.round(lk.dist / 100) * 100 + 'u) → 自動攻撃で撃つ');
+        // 第22弾: 見えている間は戦闘モードで操艦する (性格と相手の兵装で 正対/回り込み・優先を選び、10秒は続ける)
+        const oppW = te._lastFireType && now - (te._lastFireF || -1e9) < 1200 ? te._lastFireType : null;
+        if (!c.cm || now - c.cm.f >= CM_HOLD || c.cm.oppW !== oppW || (c.cm.hp >= 0.5) !== (hpF >= 0.5)) {
+            const ch = comChooseManeuver(P, hpF, wWant, oppW);
+            const changed = !c.cm || c.cm.mode !== ch.mode || c.cm.prio !== ch.prio;
+            c.cm = { f: now, oppW, hp: hpF, mode: ch.mode, prio: ch.prio };
+            if (changed) comThinkEvent('p', '戦闘機動 → ' + (ch.mode === 'flank' ? '回り込み (後方へ周回)' : '正対 (艦首を向けて間合いを保つ)') + '・' + (ch.prio === 'evade' ? '回避' : '攻撃') + '優先・間合いは兵装' + (oppW ? ' — 相手は' + _WPN_JP[oppW] : '') + ' (攻撃性' + _pct(P.aggression) + '・慎重さ' + _pct(P.caution) + ')');
+        }
+        if (combatMode.mode !== c.cm.mode || combatMode.prio !== c.cm.prio || combatMode.range !== 'auto') { combatMode = { mode: c.cm.mode, range: 'auto', prio: c.cm.prio }; syncCombatBar(); }
+        comThink('p', 'full', '有視界で捉えた (' + Math.round(lk.dist / 100) * 100 + 'u) → ' + (combatMode.mode === 'flank' ? '回り込み' : '正対') + 'で撃つ');
         if (contact && P.aggression >= 0.5 && now - c.lastDeploy > COM_DEPLOY_GAP) _comDeploy(c, P);
         _comStance(c, P);
         return;
     } else if (te && lk.assumed) {
+        _comCMOff(); // 推定だけの間は測量の航路を引く (戦闘モードは見えている時だけ)
         const w = currentWeapon(), sa = _signalAnalysis[enemySid(te)];
         const lm = sa && sa.misses && sa.misses[sa.misses.length - 1], lo = sa && sa.obs[sa.obs.length - 1];
         const hc = assumedHitChance(te, w, lk);
@@ -10041,6 +10541,8 @@ function _renderComCfg() {
         }
         if (rnd) h.push('<div class="com-note">ランダム: 試合ごとに' + SHIP_JP[ship] + 'の範囲で決まる (敵の通常の決め方と同じ)</div>');
         else if (pre === 'custom') h.push('<div class="com-note">カスタム (スライダーで調整)</div>');
+        // 第22弾: 積み込み (自機/敵とも編集できる)
+        h.push('<div class="com-row com-lo"><span class="com-lo-sum">積み込み: ' + loSummary(comLoadout(side, ship), ship, side === 'e') + '</span><button class="com-chip" data-act="loadout">編集</button></div>');
         box.innerHTML = h.join('');
     }
     const o = document.getElementById('com-opts');
@@ -10059,6 +10561,8 @@ function startComDemo() {
     document.querySelectorAll('.enemy-select-btn').forEach(b => b.classList.toggle('active', b.dataset.type === comCfg.enemy));
     document.querySelectorAll('.mode-card').forEach(m => m.classList.toggle('active', m.dataset.mode === comCfg.mode));
     gameState.mode = comCfg.mode;
+    // 第22弾: 自機COMの積み込み (デモは保存しないので、この試合の間だけ使う)
+    if (comCfg.lo && comCfg.lo.p && comCfg.lo.p[comCfg.ship]) gameState.loadout = Object.assign({}, gameState.loadout, { [comCfg.ship]: Object.assign({}, comCfg.lo.p[comCfg.ship]) });
     toggleThinkLog(comCfg.think);
     startGame(comCfg.ship);
     toggleHiggsView(!comCfg.higgsView);
@@ -10076,6 +10580,7 @@ function exitComDemo() { location.reload(); }
         const b = ev.target.closest('button[data-act]');
         if (!b || !comCfg) return;
         const side = b.closest('.com-side')?.dataset.side, act = b.dataset.act, v = b.dataset.v;
+        if (act === 'loadout') { openLoadout(side === 'p' ? comCfg.ship : comCfg.enemy, false, side); return; }
         if (act === 'ship') { if (side === 'p') comCfg.ship = v; else comCfg.enemy = v; }
         else if (act === 'preset') {
             if (side === 'p') comCfg.pPreset = v; else comCfg.ePreset = v;
@@ -10514,7 +11019,17 @@ let _hitStop = 0; // 奇襲命中時のヒットストップ (ロジックだけ
 function gameLoop() {
     try {
         if (_hitStop > 0) _hitStop--;
-        else if (!gamePaused && !_orientPaused) stepWorld();
+        else if (!gamePaused && !_orientPaused) {
+            // 第22弾: 倍速 = 1フレームにn回ロジックを進める。重くてフレームが詰まる時は打ち切る (固まらない)
+            _speedAcc += gameSpeed;
+            const t0 = performance.now();
+            let n = 0;
+            while (_speedAcc >= 1) {
+                stepWorld(); _speedAcc -= 1; n++;
+                if (n >= 1 && performance.now() - t0 > 24) { _speedAcc = 0; break; }
+                if (!player || player.hp <= 0 || gamePaused) { _speedAcc = 0; break; }
+            }
+        }
         renderWorld();
     } catch (err) {
         console.error("Game loop error:", err);
@@ -10537,6 +11052,7 @@ function stepWorld() {
         // 全ミスト密度を毎フレーム微増、最大0.95まで
         // 第21弾: マス目の濃さ全体に掛ける (旧: 円ごとの濃さを足していた。速さは旧と同じ ≈ 15分で+4%)
         if (player && player.hp > 0) higgsGrowth = Math.min(0.15, higgsGrowth + 0.0000008 * gameSpeedFactor);
+        matchRecTick(); // 第22弾: 1秒ごとに位置を記録
         updateHiggsClears();
 
         // ソナークールダウン更新 — 表示は秒単位で変化する時のみ更新 (毎フレームinnerHTML禁止)
@@ -10628,6 +11144,7 @@ function stepWorld() {
                         scrapDrops.push({ x: de.x + Math.cos(_sa) * _sr, y: de.y + Math.sin(_sa) * _sr, value: Math.ceil(reward / _scraps), life: 1.0 });
                     }
                     enemiesKilled++;
+                    matchRecEvent('killE', de.x, de.y, '敵艦撃沈');
                     if (gameState.career) gameState.career.kills++;
                     // 撃破残骸: fighter以外は戦場にディレリクトとして残る (EWハック可能・戦場に歴史が積もる)
                     if (de.type !== 'fighter') {
@@ -10651,6 +11168,8 @@ function stepWorld() {
 
             if (allEnemiesDown || sdWin) {
                 sectorCleared = true;
+                matchRecEvent('clear', player.x, player.y, allEnemiesDown ? 'セクター制圧 (敵艦撃沈)' : 'セクター制圧 (全コロニーをハック)');
+                if (comDemo) setTimeout(() => openReplay(), 3500); // 第22弾: COM対戦は終わったら記録を開く
                 const bonus = 100 + gameState.sector * 75 + (sdWin && !allEnemiesDown ? 50 : 0);
                 gameState.credits += bonus;
                 if (gameState.career) gameState.career.bestSector = Math.max(gameState.career.bestSector || 1, gameState.sector);
@@ -10707,10 +11226,31 @@ function stepWorld() {
         if (player && player.hp > 0) {
             player.update();
         } else if (player && !player.isDead) {
+            // 第22弾: 自艦の撃沈 — 敵と同じく3秒の漂流・誘爆 → 最終爆発 → 原因を出してからゲームオーバー
+            // (旧: その場で爆発して2.5秒後に終了画面。何にやられたか分からなかった)
             player.isDead = true;
-            createExplosion(player.x, player.y, '#00ffaa', 50);
-            logMessage(`CRITICAL: 船体崩壊。通信途絶...`, 'system-msg');
-            setTimeout(() => showGameOver(), 2500);
+            player._dying = 180;
+            player._dvx = (player.x - (player.prevX ?? player.x)) * 0.7; player._dvy = (player.y - (player.prevY ?? player.y)) * 0.7;
+            { const v = Math.hypot(player._dvx, player._dvy); if (v > 3) { player._dvx *= 3 / v; player._dvy *= 3 / v; } } // 漂流は最大3u/f
+            const last = playerHitLog[playerHitLog.length - 1];
+            player._deathCause = last ? _hitText(last) : '原因不明';
+            _hitStop = 18;
+            createExplosion(player.x, player.y, '#ffaa44', 22);
+            logMessage('CRITICAL: 被弾 — ' + player._deathCause + '。機関部誘爆、船体崩壊が始まる', 'system-msg');
+            showDeathBanner(player._deathCause);
+            { const f = document.getElementById('hud-hp-fill'), t = document.getElementById('hud-hp-text'); if (f) f.style.width = '0%'; if (t) t.textContent = '0%'; }
+            if (typeof matchRecEvent === 'function') matchRecEvent('deathP', player.x, player.y, '自艦撃沈 — ' + player._deathCause);
+            playSound('explosion');
+        } else if (player && player._dying > 0) {
+            player._dying--;
+            player.x += player._dvx; player.y += player._dvy; player._dvx *= 0.985; player._dvy *= 0.985;
+            player.angle += 0.004;
+            if (player._dying % 28 === 0) { createExplosion(player.x + (Math.random() - 0.5) * 50, player.y + (Math.random() - 0.5) * 50, '#ff8844', 14); playSound('explosion'); }
+            if (player._dying === 0) {
+                createExplosion(player.x, player.y, '#00ffaa', 50);
+                logMessage('CRITICAL: 船体崩壊。通信途絶...', 'system-msg');
+                setTimeout(() => showGameOver(), 1800);
+            }
         }
         enemies.forEach(e => e.update());
         updateDecoys();
@@ -10886,12 +11426,13 @@ function renderWorld() {
 
         projectiles.forEach(p => { if (!p.isPlayer) p.draw(ctx); }); // 敵弾は霧の下 (視界の内側なら見える)
         if (!mapMode) { emitDamageSmoke(player); for (const e of enemies) emitDamageSmoke(e); } // 第21弾: 損傷の煙・火花
+        if (_frameCount % 8 === 0) updateCombatBar(); // 第22弾
         updateDrawEffects(ctx);
         updateDrawDebrisParticles(ctx);
 
         // ── 有視界フォグ ──
         // マップモード中はフォグを抑制して全体を戦術マップとして表示(索敵済みの情報のみ可視)。
-        if (player && player.hp > 0 && !mapMode) drawFogOfWar(ctx);
+        if (player && (player.hp > 0 || player._dying > 0) && !mapMode) drawFogOfWar(ctx); // 第22弾: 撃沈の演出中も霧は残す
         if (player && player.hp > 0) drawDensityOverlay(ctx); // 第21弾: 霧の濃さと地形 (自艦の周り / ボタンで全マップ)
 
         // ── 第16弾: 「見えているもの」と「自分のもの」は霧の上に描く ──
@@ -10905,8 +11446,9 @@ function renderWorld() {
         drawNoiseMakers(ctx);
         drawLures(ctx); // 第21弾
         drawOwnOrdnanceMarkers(ctx);
-        if (player && player.hp > 0) player.draw(ctx);
+        if (player && (player.hp > 0 || player._dying > 0)) player.draw(ctx);
         drawDamagePuffs(ctx); // 第21弾: 損傷の煙・火花は艦影の上
+        updateDrawBeams(ctx); // 第22弾: ビームは霧と艦影の上
 
         // ── ソナーエフェクト(波紋/充満/境界) — ヒッグスより手前に表示 ──
         updateDrawSonarEffects(ctx);
@@ -11084,13 +11626,15 @@ function buyUpgrade(type) {
 });
 
 // ── ゲームスピードトグル ──────────────────────────────────────
+function setGameSpeed(v) {
+    gameSpeed = GAME_SPEEDS.indexOf(v) >= 0 ? v : 1; _speedAcc = 0;
+    const lb = gameSpeed === 0.5 ? '0.5x' : gameSpeed + 'x';
+    const sp = document.querySelector('#btn-game-speed span'); // ラベルだけ (旧: textContent で丸ごと置換しアイコンが消えていた)
+    if (sp) sp.textContent = 'SPD:' + lb;
+    logMessage('SYSTEM: ゲームスピード ' + lb + (gameSpeed > 1 ? ' (重い時は自動で抑える)' : ''), 'system-msg');
+}
 document.getElementById('btn-game-speed')?.addEventListener('click', () => {
-    if (gameSpeedFactor === 1.0) gameSpeedFactor = 0.5;
-    else if (gameSpeedFactor === 0.5) gameSpeedFactor = 2.0;
-    else gameSpeedFactor = 1.0;
-    const labels = { 0.5: '0.5x 低速', 1.0: '1x 通常', 2.0: '2x 高速' };
-    document.getElementById('btn-game-speed').textContent = `SPD:${labels[gameSpeedFactor]}`;
-    logMessage(`SYSTEM: ゲームスピード ${labels[gameSpeedFactor]} に変更`, 'system-msg');
+    setGameSpeed(GAME_SPEEDS[(GAME_SPEEDS.indexOf(gameSpeed) + 1) % GAME_SPEEDS.length]); // 1→2→4→8→0.5→1
 });
 // ─────────────────────────────────────────────────────────────
 

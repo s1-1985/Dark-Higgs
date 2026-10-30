@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261027a">
+    <link rel="stylesheet" href="style.css?v=20261030a">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -99,6 +99,10 @@
                     <i class="ico" style="--ico:url(assets/icons/icon_stance.png)"></i>
                     <span id="abar-silent-label">巡航</span>
                 </button>
+                <button class="hud-act" data-group="engine" id="abar-grp-engine" title="機関 — エンジンの種類 (戦闘中も切替可・切替の10秒は推力ゼロでEMが漏れる) / 配分の重点 (均等・機関・探知・兵装)">
+                    <i class="ico" style="--ico:url(assets/icons/icon_engine.png)"></i>
+                    <span id="abar-engine-label">熱核</span>
+                </button>
                 <button class="hud-act" data-group="escape" id="abar-grp-escape" title="離脱 — 閃光弾 / ノイズメーカー / 煙幕弾 / 緊急噴射(B) / 機関停止(C)">
                     <i class="ico" style="--ico:url(assets/icons/icon_escape.png)"></i>
                     <span>離脱</span>
@@ -121,6 +125,19 @@
             <div id="action-popover"></div>
             <!-- ポップオーバーで使う実ボタンの置き場 (非表示)。game.js がIDでイベントを結び付けている -->
             <div id="action-store" class="action-grid">
+                <!-- 第22弾: 機関 (旧: 上帯のGENドロワー) — エンジン4種と配分の重点4つ -->
+                <button class="act-icon-btn btn-info eng-btn" id="btn-eng-thermonuclear" data-eng="thermonuclear" title="熱核エンジン — 高出力・熱が大きい">
+                    <i class="ico" style="--ico:url(assets/icons/icon_eng_thr.png)"></i><span>熱核</span></button>
+                <button class="act-icon-btn btn-info eng-btn" id="btn-eng-pulse" data-eng="pulse" title="パルスエンジン — 速い・EMが大きい">
+                    <i class="ico" style="--ico:url(assets/icons/icon_eng_pls.png)"></i><span>パルス</span></button>
+                <button class="act-icon-btn btn-info eng-btn" id="btn-eng-higgs" data-eng="higgs" title="ヒッグスエンジン — 静か・霧の中で速い">
+                    <i class="ico" style="--ico:url(assets/icons/icon_eng_hgs.png)"></i><span>ヒッグス</span></button>
+                <button class="act-icon-btn btn-info eng-btn" id="btn-eng-photon" data-eng="photon" title="フォトンエンジン — 最も速い・光が大きい">
+                    <i class="ico" style="--ico:url(assets/icons/icon_eng_pht.png)"></i><span>フォトン</span></button>
+                <button class="act-icon-btn btn-info focus-btn active" id="btn-focus-balance" data-focus="balance" title="配分の重点: 均等"><b class="fx-mark">均</b><span>均等</span></button>
+                <button class="act-icon-btn btn-info focus-btn" id="btn-focus-engine" data-focus="engine" title="配分の重点: 機関 (速い・熱とEMが増える)"><b class="fx-mark">機</b><span>機関重視</span></button>
+                <button class="act-icon-btn btn-info focus-btn" id="btn-focus-sensor" data-focus="sensor" title="配分の重点: 探知 (遠くまで聴ける)"><b class="fx-mark">探</b><span>探知重視</span></button>
+                <button class="act-icon-btn btn-info focus-btn" id="btn-focus-weapon" data-focus="weapon" title="配分の重点: 兵装 (連射が速い)"><b class="fx-mark">兵</b><span>兵装重視</span></button>
                 <button class="act-icon-btn btn-info" id="btn-scan" title="全周囲ソナー">
                     <i class="ico" style="--ico:url(assets/icons/icon_sonar.png)"></i>
                     <span>SONAR</span>
@@ -187,7 +204,7 @@
                     <i class="ico" style="--ico:url(assets/icons/icon_buoy.png)"></i>
                     <span>ブイ</span><em class="cg-n"></em>
                 </button>
-                <button class="act-icon-btn btn-info drone-btn" id="btn-drone-barrier" data-dtype="barrier" title="ビームバリア (2枠) — 設置。周囲の敵に周期ダメージ" style="display:none">
+                <button class="act-icon-btn btn-info drone-btn" id="btn-drone-barrier" data-dtype="barrier" title="ビームバリア (2枠) — 設置。半径600uの内を通る敵のビームを1発止めて壊れる (実弾・ミサイルは防げない)" style="display:none">
                     <i class="ico" style="--ico:url(assets/icons/icon_barrier.png)"></i>
                     <span>バリア</span><em class="cg-n"></em>
                 </button>
@@ -196,7 +213,7 @@
                     <span>散布</span><em class="cg-n"></em>
                 </button>
                 <!-- 第17弾: 緊急離脱 (消耗品は積載の枠を使う / 噴射・機関停止は艦の機能) -->
-                <button class="act-icon-btn btn-info drone-btn" id="btn-item-flash" data-dtype="flash" title="閃光弾 (1枠) — 自艦の位置で炸裂。半径1500uの敵の目を5秒焼き、ミサイルの誘導を切る。その瞬間の位置は知られる" style="display:none">
+                <button class="act-icon-btn btn-info drone-btn" id="btn-item-flash" data-dtype="flash" title="閃光弾 (1枠) — 自艦の位置で炸裂。半径2500uの敵の目を5秒焼き、ミサイルの誘導を切る。その瞬間の位置は知られる" style="display:none">
                     <i class="ico" style="--ico:url(assets/icons/icon_flash.png)"></i>
                     <span>閃光弾</span><em class="cg-n"></em>
                 </button>
@@ -204,7 +221,7 @@
                     <i class="ico" style="--ico:url(assets/icons/icon_noise.png)"></i>
                     <span>ノイズ</span><em class="cg-n"></em>
                 </button>
-                <button class="act-icon-btn btn-info drone-btn" id="btn-item-smoke" data-dtype="smoke" title="煙幕弾 (1枠) — 自艦の位置に半径900uのヒッグス雲を20秒。中では敵の探信が埋もれる (自分の有視界も縮む)" style="display:none">
+                <button class="act-icon-btn btn-info drone-btn" id="btn-item-smoke" data-dtype="smoke" title="煙幕弾 (1枠) — 自艦の位置に半径900uのヒッグス雲を30秒。中では敵の探信が埋もれる (自分の有視界も縮む)" style="display:none">
                     <i class="ico" style="--ico:url(assets/icons/icon_smoke.png)"></i>
                     <span>煙幕</span><em class="cg-n"></em>
                 </button>
@@ -217,7 +234,7 @@
                     <i class="ico" style="--ico:url(assets/icons/icon_lure.png)"></i>
                     <span>偽艦影</span><em class="cg-n"></em>
                 </button>
-                <button class="act-icon-btn btn-info common-btn" id="btn-boost" onclick="useBoost()" title="緊急噴射 (B) — 4秒間 速度×2。熱が最大になり、終わると機関が8秒過熱。再使用45秒" style="display:none">
+                <button class="act-icon-btn btn-info common-btn" id="btn-boost" onclick="useBoost()" title="緊急噴射 (B) — 6秒間 速度×2。熱が最大になり、終わると機関が8秒過熱。再使用45秒" style="display:none">
                     <i class="ico" style="--ico:url(assets/icons/icon_boost.png)"></i>
                     <span>噴射</span><em class="cg-n"></em>
                 </button>
@@ -236,12 +253,19 @@
                     <span id="repair-drone-label">REGEN</span>
                 </button>
                 <!-- ゲームスピードトグル (戦闘時スロー・移動時ファスト) -->
-                <button class="act-icon-btn common-btn" id="btn-game-speed" title="ゲームスピード切替: 0.5x低速 / 1x通常 / 2x高速" style="border-color:#aaffcc;color:#ccffee;">
+                <button class="act-icon-btn common-btn" id="btn-game-speed" title="ゲームスピード切替: 1x→2x→4x→8x→0.5x" style="border-color:#aaffcc;color:#ccffee;">
                     <i class="ico" style="--ico:url(assets/icons/icon_speed.png)"></i>
                     <span>SPD:1x</span>
                 </button>
             </div>
             <button id="recenter-chip" title="自艦へ戻る (追従ON)" style="display:none">◎ 自艦</button>
+            <!-- 第22弾: 戦闘モード (ロック中だけ出る)。移動命令を出すと手動に戻る -->
+            <div id="combat-bar" class="hidden">
+                <div class="cb-grp" data-k="mode"><span class="cb-lab">機動</span><button data-v="face" title="艦首を相手に向けたまま間合いを保つ">正対</button><button data-v="flank" title="相手の後方へ大きく回り込む (後方被弾×1.5を狙う)">回り込み</button><button data-v="manual" title="自分で操艦する">手動</button></div>
+                <div class="cb-grp" data-k="range"><span class="cb-lab">間合い</span><button data-v="auto" title="今の兵装に合わせる (実弾600u・ミサイル1800u・ビーム5000u)">兵装</button><button data-v="near" title="600u">近</button><button data-v="mid" title="1800u">中</button><button data-v="far" title="5000u">遠</button></div>
+                <div class="cb-grp" data-k="prio"><span class="cb-lab">優先</span><button data-v="attack" title="射角に入れて撃ち続ける">攻撃</button><button data-v="evade" title="相手の射角から外れる・近づくミサイルを横へかわす">回避</button></div>
+                <span id="cb-state"></span>
+            </div>
             <!-- 第16弾: ズームボタン (ピンチ・ホイールに加えて。追従中は自艦中心で拡大縮小) -->
             <div id="zoom-ctl">
                 <button id="btn-density" onclick="toggleDensityView()" title="濃度表示 — 全マップの霧の濃さと地形 (岩礁・嵐・熱雲) を重ねる。OFFの時は自艦の周り3000uだけ (H)"><i class="ico" style="--ico:url(assets/icons/icon_density.png)"></i></button>
@@ -538,6 +562,7 @@
                     <div class="brief-lead" id="db-lead">敵艦撃沈 — セクター制圧</div>
                     <div id="db-report" class="db-report"></div>
                     <div class="db-btns">
+                        <button class="btn btn-small" id="btn-replay-db">試合の記録</button>
                         <button class="btn btn-info" id="btn-db-dock">補給・改修</button>
                         <button class="btn btn-primary" id="btn-db-next">次の狩りへ ▶</button>
                     </div>
@@ -575,6 +600,20 @@
                 </div>
             </div>
 
+            <!-- 第22弾: 試合の記録 (終わった後に地図と時間のスライダーで振り返る) -->
+            <div id="replay-overlay" class="hidden">
+                <div class="rp-box">
+                    <div class="rp-head"><span class="rp-title">試合の記録</span><span id="rp-time">0:00</span>
+                        <span class="rp-legend"><i style="color:#5ff0ff">▲自艦</i> <i style="color:#ffa040">▲敵</i> <i style="color:#ffa040">◯敵が思う自艦の位置</i> <i style="color:#5ff0ff">◯自艦の推定</i></span>
+                        <button id="rp-close" title="閉じる">✕</button></div>
+                    <div class="rp-main">
+                        <canvas id="rp-canvas"></canvas>
+                        <div class="rp-side"><div id="rp-state"></div><div id="rp-events"></div></div>
+                    </div>
+                    <div class="rp-ctl"><button id="rp-play">▶</button><input type="range" id="rp-slider" min="0" max="0" value="0" step="1"><button id="rp-spd">×4</button></div>
+                </div>
+            </div>
+
             <!-- Game Over Overlay -->
             <div id="game-over-overlay" class="hidden">
                 <div class="game-over-box">
@@ -585,8 +624,10 @@
                         <div>敵撃墜数: <span id="go-kills">0</span></div>
                         <div>残存クレジット: <span id="go-credits">0</span> CR</div>
                         <div id="go-report" style="margin-top:6px;font-size:11px;color:#7fd8bb;line-height:1.6;"></div>
+                        <div id="go-cause"></div>
                     </div>
                     <div class="go-note">再起動後、クレジットの50%が引き継がれます。</div>
+                    <button class="btn btn-info" id="btn-replay-go">試合の記録を見る</button>
                     <button class="btn btn-primary" id="btn-restart">緊急再起動 (RESTART)</button>
                 </div>
             </div>
@@ -647,7 +688,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261027a"></script>
+    <script src="game.js?v=20261030a"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -688,6 +729,7 @@
             nav:   ['btn-cancel', 'btn-camera-follow', 'btn-attack-toggle', 'btn-repair-drone', 'btn-game-speed'],
             drone: ['btn-drone-attack','btn-drone-mech','btn-drone-build','btn-drone-scout','btn-drone-decoy',
                     'btn-drone-buoy','btn-drone-barrier','btn-drone-higgs', 'btn-hack'],
+            engine: ['btn-eng-thermonuclear', 'btn-eng-pulse', 'btn-eng-higgs', 'btn-eng-photon', 'btn-focus-balance', 'btn-focus-engine', 'btn-focus-sensor', 'btn-focus-weapon'],
             escape: ['btn-item-flash', 'btn-item-noise', 'btn-item-smoke', 'btn-item-fsos', 'btn-item-lure', 'btn-boost', 'btn-coast'],
         };
         var _apop  = document.getElementById('action-popover');
