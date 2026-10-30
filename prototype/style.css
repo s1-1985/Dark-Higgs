@@ -2443,3 +2443,59 @@ body.in-game.com-demo.think-on #think-panel.wide { max-height: 62%; }
   -webkit-mask: var(--ico) center / contain no-repeat; mask: var(--ico) center / contain no-repeat; }
 .ro-icon .ico { width: 52px; height: 52px; }
 #btn-density .ico { width: 18px; height: 18px; }
+
+/* 第22弾: 撃沈の原因 (崩壊の演出中のバナー / 終了画面の被弾履歴) */
+#death-banner { position: fixed; left: 50%; top: 30%; transform: translate(-50%, -50%) scale(0.96); z-index: 60; pointer-events: none;
+  opacity: 0; transition: opacity 0.35s, transform 0.35s; text-align: center; padding: 10px 22px; border: 1px solid rgba(255,90,90,0.7);
+  background: rgba(30,4,4,0.82); border-radius: 6px; max-width: 80vw; }
+#death-banner.active { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+#death-banner .db-title { font-family: 'Orbitron', sans-serif; color: #ff6b6b; font-size: 18px; letter-spacing: 2px; }
+#death-banner .db-cause { color: #ffd0c0; font-size: 14px; margin-top: 4px; }
+#go-cause { margin-top: 8px; font-size: 11px; line-height: 1.6; color: #ffb4a8; text-align: left; }
+#go-cause .go-cause-head { color: #ff7b6b; font-weight: bold; font-size: 12px; }
+#game-over-overlay .game-over-box { max-height: 92vh; overflow-y: auto; } /* 第22弾: 被弾履歴が増えて低い画面ではみ出していた */
+@media (max-height: 600px) { #game-over-overlay .game-over-box { padding: 16px 22px; } #game-over-overlay .go-title { font-size: 22px; } }
+
+/* 第22弾: 機関は右列へ (上帯のGENボタンは撤去) */
+#btn-gen-open { display: none !important; }
+.eng-btn.active, .focus-btn.active { border-color: #00ffaa !important; color: #aaffdd !important; background: rgba(0,255,170,0.16) !important; }
+.eng-btn.switching { animation: engSw 0.8s infinite alternate; }
+@keyframes engSw { from { border-color: #ffaa44; } to { border-color: #00ffaa; } }
+.focus-btn .fx-mark { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: 1.5px solid currentColor; border-radius: 4px; font-size: 13px; }
+
+/* 第22弾: 戦闘モードのバー (フィールド下中央・ロック中だけ) */
+#combat-bar { position: absolute; left: calc(var(--hud-left, 130px) + 8px); right: calc(var(--hud-right, 70px) + 8px); bottom: 44px; z-index: 22;
+  display: flex; justify-content: center; align-items: center; gap: 8px; flex-wrap: wrap; pointer-events: none; }
+#combat-bar.hidden { display: none; }
+#combat-bar .cb-grp { display: flex; align-items: center; gap: 2px; background: rgba(1,10,12,0.86); border: 1px solid rgba(0,255,170,0.28); border-radius: 6px; padding: 2px 4px; pointer-events: auto; }
+#combat-bar .cb-lab { font-size: 10px; color: #7fb8a8; margin: 0 4px 0 2px; }
+#combat-bar button { font-size: 11px; color: #9fc9bb; background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 3px 7px; cursor: pointer; }
+#combat-bar button.on { color: #00ffaa; border-color: #00ffaa; background: rgba(0,255,170,0.14); }
+#combat-bar.com button { pointer-events: none; }
+#combat-bar #cb-state { font-size: 10px; color: #ffd27a; pointer-events: none; min-width: 1px; }
+
+/* 第22弾: COM対戦の積み込み */
+.com-lo { align-items: center; gap: 6px; }
+.com-lo .com-lo-sum { font-size: 10px; color: #9fc9bb; flex: 1; line-height: 1.4; }
+.lo-row.lo-note { font-size: 10px; color: #ffcf88; line-height: 1.5; }
+#loadout-overlay { z-index: 10060; } /* COM設定画面 (10050) の上に出す */
+
+/* 第22弾: 試合の記録 */
+#replay-overlay { position: fixed; inset: 0; z-index: 10070; background: rgba(0,4,3,0.92); display: flex; align-items: center; justify-content: center; }
+#replay-overlay.hidden { display: none !important; }
+.rp-box { width: min(980px, 96vw); height: min(560px, 94vh); display: flex; flex-direction: column; gap: 6px; border: 1px solid rgba(0,255,170,0.35); border-radius: 8px; background: #01100c; padding: 8px; }
+.rp-head { display: flex; align-items: center; gap: 10px; }
+.rp-title { font-family: 'Orbitron', sans-serif; color: #00ffaa; font-size: 14px; letter-spacing: 1px; }
+#rp-time { color: #cfe; font-size: 12px; }
+.rp-legend { font-size: 10px; color: #9fc9bb; flex: 1; } .rp-legend i { font-style: normal; margin-right: 6px; }
+#rp-close { background: transparent; color: #ff8080; border: 1px solid #553; border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+.rp-main { flex: 1; min-height: 0; display: flex; gap: 8px; }
+#rp-canvas { flex: 1.3; min-width: 0; height: 100%; border: 1px solid rgba(0,255,170,0.18); border-radius: 4px; }
+.rp-side { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+#rp-state { font-size: 11px; color: #cfe; line-height: 1.5; background: rgba(0,0,0,0.35); padding: 4px 6px; border-radius: 4px; }
+#rp-events { flex: 1; overflow-y: auto; font-size: 11px; line-height: 1.5; background: rgba(0,0,0,0.25); border-radius: 4px; padding: 2px 4px; }
+.rp-ev { opacity: 0.4; cursor: pointer; padding: 0 3px; border-radius: 3px; } .rp-ev b { color: #7fb8a8; font-weight: normal; }
+.rp-ev.past { opacity: 1; } .rp-ev.now { background: rgba(0,255,170,0.14); }
+.rp-ctl { display: flex; align-items: center; gap: 8px; }
+.rp-ctl input { flex: 1; }
+.rp-ctl button { min-width: 44px; background: rgba(0,255,170,0.12); color: #00ffaa; border: 1px solid #00ffaa; border-radius: 4px; padding: 4px 8px; cursor: pointer; }
