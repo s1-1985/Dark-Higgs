@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261031c">
+    <link rel="stylesheet" href="style.css?v=20261031d">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -103,7 +103,7 @@
                     <i class="ico" style="--ico:url(assets/icons/icon_engine.png)"></i>
                     <span id="abar-engine-label">熱核</span>
                 </button>
-                <button class="hud-act" data-group="escape" id="abar-grp-escape" title="離脱 — 閃光弾 / ノイズメーカー / 煙幕弾 / 緊急噴射(B) / 機関停止(C)">
+                <button class="hud-act" data-group="escape" id="abar-grp-escape" title="離脱・修理 — リペアキット / 閃光弾 / ノイズメーカー / 煙幕弾 / 囮 / 緊急噴射(B) / 機関停止(C)">
                     <i class="ico" style="--ico:url(assets/icons/icon_escape.png)"></i>
                     <span>離脱</span>
                 </button>
@@ -233,6 +233,11 @@
                 <button class="act-icon-btn btn-info drone-btn" id="btn-item-lure" data-dtype="lure" title="偽艦影ブイ (1枠) — 押してから地点をタップ。そこへ射出し、巡航中の艦なみの熱・光・EM・航跡を60秒出しながらゆっくり動く">
                     <i class="ico" style="--ico:url(assets/icons/icon_lure.png)"></i>
                     <span>偽艦影</span><em class="cg-n"></em>
+                </button>
+                <!-- 第26弾: 修理はリペアキットだけ (出撃前の積み込みでしか積めない) -->
+                <button class="act-icon-btn btn-info drone-btn" id="btn-item-repair" data-dtype="repair" title="リペアキット (1枠) — 6秒で耐久+700 (攻撃型なら5個で全回復)。出撃前の積み込みでしか積めず、補給も資材からの組み立てもできない">
+                    <i class="ico" style="--ico:url(assets/icons/icon_repair.png)"></i>
+                    <span>修理</span><em class="cg-n"></em>
                 </button>
                 <button class="act-icon-btn btn-info common-btn" id="btn-boost" onclick="useBoost()" title="緊急噴射 (B) — 6秒間 速度×2。熱が最大になり、終わると機関が8秒過熱。再使用45秒" style="display:none">
                     <i class="ico" style="--ico:url(assets/icons/icon_boost.png)"></i>
@@ -689,7 +694,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261031c"></script>
+    <script src="game.js?v=20261031d"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -727,11 +732,11 @@
         var ACTION_GROUPS = {
             scan:  ['btn-scan', 'btn-dir-sonar', 'btn-sig-panel'],
             ew:    ['btn-jam-burst', 'btn-jam-cont', 'btn-jam-pulse', 'btn-drone-decoy', 'btn-drone-scout', 'btn-hack'],
-            nav:   ['btn-cancel', 'btn-camera-follow', 'btn-attack-toggle', 'btn-repair-drone', 'btn-game-speed'],
+            nav:   ['btn-cancel', 'btn-camera-follow', 'btn-attack-toggle', 'btn-game-speed'],
             drone: ['btn-drone-attack','btn-drone-mech','btn-drone-build','btn-drone-scout','btn-drone-decoy',
                     'btn-drone-buoy','btn-drone-barrier','btn-drone-higgs', 'btn-hack'],
             engine: ['btn-eng-thermonuclear', 'btn-eng-pulse', 'btn-eng-higgs', 'btn-eng-photon', 'btn-focus-balance', 'btn-focus-engine', 'btn-focus-sensor', 'btn-focus-weapon'],
-            escape: ['btn-item-flash', 'btn-item-noise', 'btn-item-smoke', 'btn-item-fsos', 'btn-item-lure', 'btn-boost', 'btn-coast'],
+            escape: ['btn-item-repair', 'btn-item-flash', 'btn-item-noise', 'btn-item-smoke', 'btn-item-fsos', 'btn-item-lure', 'btn-boost', 'btn-coast'],
         };
         var _apop  = document.getElementById('action-popover');
         var _store = document.getElementById('action-store');
