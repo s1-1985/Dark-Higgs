@@ -3513,6 +3513,7 @@ class Ship {
                 }
             }
             // センサー制約型: 探知中のみ最終既知位置を更新。喪失後は古い予測が凍結される。
+            if (!playerSigDetected) this._ana = (this._ana || 0) * Math.pow(0.9995, gameSpeedFactor); // 第29弾: 聞こえない間は解析量が薄れる (約23秒で半分)
             if (playerSigDetected && player && player.hp > 0) {
                 // 第13弾: 敵の位置推定にも誤差を (プレイヤーの推定円と対称)。
                 // 遠く・弱い信号ほど誤差が大きく、探知が続くほど観測を重ねて真値へ収束する(平滑化)。
@@ -3520,7 +3521,10 @@ class Ship {
                 // 聞こえた音の主 (自艦 or ノイズメーカー)。敵には区別がつかない
                 const _sx = _noiseSrc ? _noiseSrc.x : player.x, _sy = _noiseSrc ? _noiseSrc.y : player.y;
                 const _srcDist = _noiseSrc ? Math.hypot(_sx - this.x, _sy - this.y) : distToPlayer;
-                const _err = (_relayErr >= 0 ? _relayErr : (1 - _q) * _srcDist * 0.25 + 50) * (_noiseSrc ? 1 : clutterErrMult(_clN));
+                // 第29弾: 敵も解析量が要る (聞こえない間は薄れる: 下の else) (自機と同じ式・演算力は敵のコロニーで上がる)。見えていれば一気に貯まる
+                this._ana = (this._ana || 0) + (_hardDetect ? 0.5 : analysisPower('enemy') * (0.5 + 0.5 * _q) / 60) * gameSpeedFactor;
+                const _err = Math.max((_relayErr >= 0 ? _relayErr : (1 - _q) * _srcDist * 0.25 + 50) * (_noiseSrc ? 1 : clutterErrMult(_clN)),
+                                      _hardDetect ? 0 : _srcDist * anaFloorFrac(this._ana) * 0.5);
                 const _ea = Math.random() * Math.PI * 2, _er = Math.sqrt(Math.random()) * _err;
                 let _lkx = _sx + Math.cos(_ea) * _er, _lky = _sy + Math.sin(_ea) * _er;
                 // §3-12残: ジャミングで相手の方位を広げる — JAM中は探知位置にノイズを加算
@@ -6475,7 +6479,7 @@ function trackEstimate(sa, ahead = 0) {
         const pxy = C[1] + dt * (C[3] + C[6]) + dt * dt * C[11];
         const tr = pxx + pyy, det = pxx * pyy - pxy * pxy;
         let r = 2 * Math.sqrt(Math.max(0, tr / 2 + Math.sqrt(Math.max(0, tr * tr / 4 - det)))) * Math.sqrt(Math.max(1, m.chi2));
-        r = Math.max(150, Math.hypot(x - player.x, y - player.y) * CV_R_FLOOR, r); // 等速の仮定そのものの誤差ぶん、静止の解(12%)より下限を高く
+        r = Math.max(150, Math.hypot(x - player.x, y - player.y) * Math.max(CV_R_FLOOR, anaFloorFrac(sa.ana)), r); // 等速の仮定そのものの誤差ぶん・第29弾: 解析量の下限
         return { x, y, r, vx: m.vx, vy: m.vy, moving: true };
     }
     const f = sa.fix;
@@ -6485,6 +6489,7 @@ function trackEstimate(sa, ahead = 0) {
     // 動いている仮定でも記録が同じくらい説明できるなら、その仮定の位置まで円を広げる (どちらか分からない、が正直な答え)
     const a = sa.alt;
     if (a && !f.fromMotion) { const ta = now - a.f + ahead; r = Math.max(r, Math.hypot(a.x + a.vx * ta - f.x, a.y + a.vy * ta - f.y) + 150); }
+    r = Math.max(r, Math.hypot(f.x - player.x, f.y - player.y) * anaFloorFrac(sa.ana)); // 第29弾: 解析量の下限
     return { x: f.x, y: f.y, r, vx: 0, vy: 0, moving: false };
 }
 // 追跡ボタンの幅表示 (±850 / ±1.2k)
@@ -6598,7 +6603,7 @@ function hackColonyByPlayer(st) {
     createClickEffect(st.x, st.y, '#00aaff');
     playSound('ui');
     const n = coloniesOwned('player');
-    logMessage('COLONY: コロニーを占有 (' + n + 'つ' + (was === 'enemy' ? '・敵から奪還' : '') + ')' + (st._usedP ? ' — ここの補給はもう使った' : ' — ここで1回だけ補給できる (弾を満タン・資材+' + COLONY_SUPPLY_MAT + ')') + '。' + _colonyIntelHint(n), 'system-msg');
+    logMessage('COLONY: コロニーを占有 (' + n + 'つ' + (was === 'enemy' ? '・敵から奪還' : '') + ')' + (st._usedP ? ' — ここの補給はもう使った' : ' — ここで1回だけ補給できる (弾を満タン・資材+' + COLONY_SUPPLY_MAT + ')') + '。演算力 ×' + (Math.round(analysisPower('player') * 100) / 100) + ' (解析と識別が速くなる)', 'system-msg');
     updateColonyIntel(true);
 }
 function _colonyIntelHint(n) {
@@ -6619,6 +6624,9 @@ function makeColonyIntel(side, observer, target) {
 }
 let playerIntel = null;
 function updateColonyIntel(now) {
+    // 第29弾 (オーナー合意): コロニーは相手の位置を教えない (囮や偽装が無意味になるため) → 演算力 (analysisPower) に
+    playerIntel = null; for (const e of enemies) e._colIntel = null;
+    return;
     if (!player || player.hp <= 0) return;
     if (!now && _frameCount % COLONY_INTEL_PERIOD) return;
     const boss = enemies.find(e => e.hp > 0 && !e._dying && e.type !== 'fighter');
@@ -6721,6 +6729,14 @@ function enemyCaptureNode(e, n) {
 //   動き (速度つきの解が出た時): 艦らしい速さ / 遅く一定 (偽艦影の漂流) / 速すぎて直進 (ノイズメーカー・艦載機)
 //   探信の反響 (ソナーの点が入った時): 艦は大きい / 囮・艦載機は小さい
 //   有視界で見えた=確定・400u以内=正体が分かる
+// ═══ 第29弾 (オーナー合意): 解析には時間と量が要る — 推定円は「解析量」で決まる下限より小さくならない ═══
+// 解析量は方位を受けるたびに貯まる。1秒あたりの演算力 (1 + コロニー1つごとに+35%・最大3つ) を受信中の信号で分け合う
+// (追跡中の信号に半分・残りを他で等分)。強い信号ほど・場所を変えて聴いた方位ほど多く貯まる (実装で決めた値)。
+// 下限 = 距離 × (12% + 88%×exp(−解析量/6))。近づくだけでは絞れない / 囮やノイズメーカーは演算力を食う。敵も同じ式
+const ANA_MIN = 0.12, ANA_TAU = 6, ANA_COLONY = 0.35, ANA_NEWPOS = 1.5;
+function analysisPower(side) { return 1 + ANA_COLONY * Math.min(3, coloniesOwned(side)); }
+function anaFloorFrac(ana) { return ANA_MIN + (1 - ANA_MIN) * Math.exp(-(ana || 0) / ANA_TAU); }
+function anaPct(ana) { return Math.round((1 - (anaFloorFrac(ana) - ANA_MIN) / (1 - ANA_MIN)) * 100); }
 const _RX_WORD = { heat: '熱源', optic: '光', em: '電磁波', higgs: '霧の乱れ' };
 const IDENT_MIN_N = 3, IDENT_WARN_P = 0.4;
 const _sigIdent = {}; // sid → { L:対数オッズ(艦影), n:手掛かりの数, why:{理由:重み}, pingF }
@@ -6734,12 +6750,12 @@ function _identAdd(id, mean, sd, w, why) {
     id.L = Math.max(-5, Math.min(5, id.L + v)); id.n++;
     if (why && mean < 0 && v < 0) id.why[why] = (id.why[why] || 0) - v;
 }
-function identStep(sid, tracked, nBands, sa) {
+function identStep(sid, tracked, nBands, sa, wOverride) {
     const truth = _identTruth(sid);
     if (!truth) return;
     const id = _sigIdent[sid] || (_sigIdent[sid] = { L: 0, n: 0, why: {}, pingF: -1, motF: -1 });
     if (id.sure) return;
-    const w = tracked ? 1 : 0.35;
+    const w = wOverride !== undefined ? wOverride : (tracked ? 1 : 0.35);
     const ship = truth === 'ship';
     if (nBands >= 2) _identAdd(id, ship ? 0.22 : truth === 'small' ? -0.08 : -0.16, 0.40, w, truth === 'small' ? null : '帯域が平坦');
     else _identAdd(id, ship ? 0.05 : -0.04, 0.2, w, null);
@@ -6856,6 +6872,13 @@ function checkPassiveDetection() {
     }
 
     let _newSig = null; // このサイクルで新たに(または10秒ぶりに)受信した信号
+    // 第29弾: 演算力を受信中の信号で分け合う (追跡中に半分・残りを等分)
+    const _anaB = analysisPower('player'), _hasLock = picks.some(c => c.sourceId === lockedSignalId);
+    const _shareOf = (sid) => _hasLock ? (sid === lockedSignalId ? (picks.length > 1 ? 0.5 : 1) : 0.5 / (picks.length - 1)) : 1 / picks.length;
+    for (const sid in _signalAnalysis) { // 記録が消えたら解析量も無し / 30秒聞こえなければ少しずつ薄れる
+        const sa0 = _signalAnalysis[sid], lo0 = sa0.obs && sa0.obs[sa0.obs.length - 1];
+        if (!lo0) sa0.ana = 0; else if (_frameCount - lo0.f > 1800) sa0.ana = (sa0.ana || 0) * 0.95;
+    }
     for (const c of picks) {
         const sc = sensorConfig[c.band], thr = sc.threshold, colorRgb = sc.r;
         const conf = Math.max(0, Math.min(1, (c.sig - thr * 0.5) / (1 - thr * 0.5)));
@@ -6878,9 +6901,12 @@ function checkPassiveDetection() {
             life: PASSIVE_BEARING_LIFE, maxLife: PASSIVE_BEARING_LIFE
         });
         // 方位の記録 (推定位置の材料)
+        const _n0 = (_signalAnalysis[c.sourceId] && _signalAnalysis[c.sourceId].obs.length) || 0;
         const sa = addBearingObs(c.sourceId, player.x, player.y, angle, sigma, c.sig, colorRgb);
+        const _share = _shareOf(c.sourceId);
+        sa.ana = (sa.ana || 0) + _anaB * _share * (0.5 + 0.5 * conf) * (sa.obs.length > _n0 ? ANA_NEWPOS : 1); // 第29弾: 解析量
         solveFix(sa); // 第26弾: 追跡していない信号も解く (地図に複数の推定円を出すため。追跡中は方位が鋭いので円も小さい)
-        identStep(c.sourceId, tracked, c.nb || 1, sa); // 第23弾: 識別の手掛かり
+        identStep(c.sourceId, tracked, c.nb || 1, sa, Math.max(0.2, Math.min(2, _anaB * _share * 2))); // 第23弾: 識別の手掛かり (第29弾: 演算力の取り分で速さが変わる)
         if (tracked) {
             const _te = enemyBySid(c.sourceId);
             if (_te && _te.hp > 0 && !_te._dying) applyTrackContact(_te, sa);
@@ -11141,7 +11167,7 @@ function xoEvaluate() {
             return { tone: 'info', text: `SIG-${no} 推定 ±${rr}u — 止まっているとも、ゆっくり動いているとも取れる。直交してもう一度聴け`, act: player.state !== 'moving' ? { label: '直交航路', fn: () => xoPerpendicularLeg(b.angle) } : null };
         if (estR > 900 && w === 'beam' && te && lk && lk.assumed && lk.dist > 2800 && omniSonarCooldown <= 0)
             return { tone: 'info', text: `SIG-${no} 推定 ±${rr}u — 遠くて方位だけでは絞れない。ソナーで点を取ればビームで狙える (聞かれる)`, act: { label: 'ソナーで測る', fn: fireOmniSonar } };
-        if (estR > 900) return { tone: 'info', text: `SIG-${no} 推定 ±${rr}u — まだ広い。止まって聴く(耳が澄む)か、角度を変えて重ねろ`, act: player.state !== 'moving' ? { label: '直交航路', fn: () => xoPerpendicularLeg(b.angle) } : null };
+        if (estR > 900) return { tone: 'info', text: `SIG-${no} 推定 ±${rr}u・解析${anaPct(sa.ana)}% — まだ広い。聴き続けるか、角度を変えて重ねろ`, act: player.state !== 'moving' ? { label: '直交航路', fn: () => xoPerpendicularLeg(b.angle) } : null };
         // 第18弾: 針路が読めていれば伝える (射撃命令は見越し点を狙う)
         if (_idn.known && _idn.low && !_idn.txt.includes('確認')) return { tone: 'info', text: `SIG-${no} 推定 ±${rr}u — 艦影らしくない。囮かもしれない — ソナーの反響で確かめるか、別の信号へ`, act: { label: 'ソナーで測る', fn: fireOmniSonar } };
         if (_idn.known && _idn.low) return { tone: 'info', text: `SIG-${no} — 囮だった。別の信号を追え`, act: { label: '次の信号', fn: trackNextSignal } };
@@ -11229,7 +11255,7 @@ function xoInfoSource() {
         const p = clampToMapCircle(player.x + Math.cos(it.ang) * 8000, player.y + Math.sin(it.ang) * 8000, 1500);
         return { x: p.x, y: p.y, d: 8000, why: 'コロニー情報 — 敵は方位' + compassDeg(it.ang) + '°±' + Math.round(it.aHW * 180 / Math.PI) + '°。2つ目のコロニーは遠い (' + Math.round(bd / 1000) + 'k u) — 方角へ寄って聴け' };
     }
-    if (best) return { x: best.x, y: best.y, d: bd, why: (best.owner === 'enemy' ? '敵のコロニーを奪え' : '手掛かりなし — コロニーを占有せよ') + ' (占有' + coloniesOwned('player') + 'つ: 1つ=敵の方角・2つ=距離・3つ=精度↑)' };
+    if (best) return { x: best.x, y: best.y, d: bd, why: (best.owner === 'enemy' ? '敵のコロニーを奪え' : '手掛かりなし — コロニーを占有せよ') + ' (占有' + coloniesOwned('player') + 'つ: 1つごとに演算力+35%・解析と識別が速くなる)' };
     for (const n of resourceNodes) { if (n.owner === 'player') continue; const d = Math.hypot(n.x - player.x, n.y - player.y); if (d < bd) { bd = d; best = n; } }
     if (best) return { x: best.x, y: best.y, d: bd, why: '手掛かりなし — ノードを取れば聴音局になる (周囲' + NODE_RELAY_RANGE + 'uを聴く)' };
     return null;
