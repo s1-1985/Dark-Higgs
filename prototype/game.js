@@ -1633,7 +1633,7 @@ canvas.addEventListener('mousedown', (e) => {
         }
 
         if (pendingLure) { const ty = pendingLure; pendingLure = null; deployDrone(ty, worldX, worldY); return; } // 第21弾: 囮の射出地点
-        { const _mcr = canvas.getBoundingClientRect(); if (tryTapBlip(e.clientX - _mcr.left, e.clientY - _mcr.top)) return; }
+        { const _mcr = canvas.getBoundingClientRect(); if (tryTapBlip(e.clientX - _mcr.left, e.clientY - _mcr.top) || tryTapCircle(e.clientX - _mcr.left, e.clientY - _mcr.top)) return; }
         // Find clicked enemy
         let clickedEnemy = enemies.find(en => en.visible && Math.hypot(en.x - worldX, en.y - worldY) < en.radius * 2);
 
@@ -1851,7 +1851,7 @@ canvas.addEventListener('touchend', (e) => {
     // 短いタップ (移動なし, 250ms未満) → 敵の上なら ターゲットロック
     if (!touch.moved && !touch.waypointFired && !touch.isPinching && elapsed < TOUCH_WAYPOINT_DELAY && player) {
         const _tcr = canvas.getBoundingClientRect();
-        if (tryTapBlip(touch.startX - _tcr.left, touch.startY - _tcr.top)) return;
+        if (tryTapBlip(touch.startX - _tcr.left, touch.startY - _tcr.top) || tryTapCircle(touch.startX - _tcr.left, touch.startY - _tcr.top)) return;
         const { x: worldX, y: worldY } = screenToWorld(touch.startX, touch.startY);
         // タッチはロックオン判定を広く取る（指で画面を押すと視認が難しいため）
         const tapRadius = en => en.radius * 6 + 20;
@@ -6991,7 +6991,9 @@ function drawIdentifiedTerrain(ctx, vpX, vpY, vpW, vpH) {
 // 低精度=赤大円 / 中=橙 / 高=緑 / 超高=シアン
 // 第26弾 (オーナー指示): 方角と距離がある程度割り出せた信号は全部「この円の中のどこか」で示す (追跡中以外も・複数同時)。
 // 円の中心に目標が居るわけではない — 中心の十字は描かない。追跡中の信号だけ針路の矢印と見越し点を足す
+const _circScreen = []; // 第27弾: 推定円のスクリーン座標 {sid, cx, cy, r} (タップで追跡)
 function drawTriangulationCircle(ctx) {
+    _circScreen.length = 0;
     for (const sid in _signalAnalysis) {
         const sa = _signalAnalysis[sid];
         if (!sa.fix) { sa.displayCenterX = null; continue; }
@@ -7015,6 +7017,7 @@ function _drawEstCircle(ctx, sid, sa, locked) {
     const col = R > 2400 ? 'rgb(255,150,40)' : R > 900 ? 'rgb(255,220,90)' : R > 350 ? 'rgb(80,255,140)' : 'rgb(100,220,255)';
     const inv = 1 / camera.zoom;
     const fade = locked ? 1 : 0.6;
+    { const sp = worldToScreen(cx, cy); _circScreen.push({ sid, cx: sp.sx, cy: sp.sy, r: R * camera.zoom }); }
     ctx.save();
     ctx.globalAlpha = 0.07 * fade;
     ctx.fillStyle = col;
@@ -7166,7 +7169,24 @@ function lpmSelectMove() {
 function lpmSelectFire() {
     hideLongPressMenu();
     if (!_lpmWorld || !player || player.hp <= 0) return;
+    // 第27弾: 射撃ボタンを撤去 — 長押しした点が推定円の内なら、その信号を追跡して射撃命令 (見越し点を狙う・実弾も撃てる)
+    let hit = null, hd = Infinity;
+    for (const sid in _signalAnalysis) {
+        const sa = _signalAnalysis[sid]; if (!sa.fix) continue;
+        const est = trackEstimate(sa, 0), d = Math.hypot(_lpmWorld.x - est.x, _lpmWorld.y - est.y);
+        if (d <= est.r && d / est.r < hd) { hd = d / est.r; hit = sid; }
+    }
+    if (hit) { if (hit !== lockedSignalId) window._lockSignal(hit); issueFireOrder(); return; }
     freeFireAt(_lpmWorld.x, _lpmWorld.y);
+}
+function lpmSelectStop() {
+    hideLongPressMenu();
+    if (!player || player.hp <= 0) return;
+    document.getElementById('btn-cancel')?.click();
+}
+function toggleAutoAttack() {
+    document.getElementById('btn-attack-toggle')?.click();
+    const m = document.getElementById('mm-autoatk'); if (m) m.textContent = '自動攻撃: ' + (autoAttackEnabled ? 'ON' : 'OFF');
 }
 // 第20弾: 座標への自由射撃 (右クリック / 長押し「射撃」共通)。ミサイル/ビームのみ・射角内のみ。
 // ビームはチャージ専用 — 2秒溜めてから、その時の向きで撃つ (溜めている間は熱/EM/ヒッグスが漏れる)
@@ -7404,6 +7424,23 @@ function updateEffectiveRadarRange() {
 // パッシブアンテナ描画 + ソナーコーン描画
 // ============================================================
 const _blipScreen = []; // { sid, sx, sy } 受信ブリップのスクリーン座標 (タップで追跡)
+// 第27弾 (オーナー指示): 推定円をタップしても追跡 — 円の縁(±22px)・上の名札・小さい円は内側。円の中ほどのタップは移動のまま
+function tryTapCircle(sx, sy) {
+    let best = null, bd = Infinity;
+    for (const c of _circScreen) {
+        const d = Math.hypot(sx - c.cx, sy - c.cy);
+        const edge = Math.abs(d - c.r), onLabel = Math.abs(sx - c.cx) < 110 && sy > c.cy - c.r - 30 && sy < c.cy - c.r + 26;
+        const hit = edge < 22 || onLabel || d < Math.min(c.r, 44);
+        const score = onLabel ? 0 : Math.min(edge, d);
+        if (hit && score < bd) { bd = score; best = c; }
+    }
+    if (!best) return false;
+    if (best.sid === lockedSignalId) return false; // 追跡中の円は移動のタップに譲る
+    window._lockSignal(best.sid);
+    playSound('ui');
+    logMessage(`TRACK: SIG-${String(_contactLabels[best.sid] || '?').padStart(2, '0')} を追跡 (${identInfo(best.sid).txt})`, 'system-msg');
+    return true;
+}
 // タップ位置の近くに受信ブリップがあればその信号を追跡する。処理したら true
 function tryTapBlip(sx, sy) {
     let best = null, bd = 30;
@@ -10982,7 +11019,7 @@ function xoEvaluate() {
     // 2) 有視界で捉えた目標
     if (te && lk.full) {
         const unaware = te.detectionState === 'unaware';
-        if (!autoAttackEnabled) return { tone: 'go', text: unaware ? '奇襲可能 ×' + (w === 'beam' ? AMBUSH_PREEMPT_BEAM_MULT : AMBUSH_PREEMPT_MULT) + ' — 敵はまだ気付いていない' : '目標を有視界に捉えた — 撃て', act: { label: '射撃', fn: issueFireOrder } };
+        if (!autoAttackEnabled) return { tone: 'go', text: unaware ? '奇襲可能 ×' + (w === 'beam' ? AMBUSH_PREEMPT_BEAM_MULT : AMBUSH_PREEMPT_MULT) + ' — 敵はまだ気付いていない' : '目標を有視界に捉えた — 長押し→射撃 (自動攻撃はメニューでOFFになっている)', act: { label: '射撃', fn: issueFireOrder } };
         return { tone: 'go', text: unaware ? '奇襲可能 ×' + (w === 'beam' ? AMBUSH_PREEMPT_BEAM_MULT : AMBUSH_PREEMPT_MULT) + ' — 自動攻撃で撃つ' : `交戦中 — 有視界・完全ロック (${Math.round(lk.dist)}u)` };
     }
 
@@ -11007,7 +11044,7 @@ function xoEvaluate() {
             return { tone: 'go', text: `射撃解あり — ${bestW === 'beam' ? 'ビーム' : 'ミサイル'}なら命中予測${Math.round(bestHc * 100)}%`, act: { label: bestW === 'beam' ? 'BEAMへ' : 'MSLへ', fn: () => switchWeapon(bestW) } };
         const fxT = saT && saT.fix;
         if (hc >= 0.5 && (!fxT || fxT.chi2 <= 3) && playerWeaponReady(player, w))
-            return { tone: 'go', text: `射撃解 ${w.toUpperCase()} 命中予測${Math.round(hc * 100)}% — 撃てば自位置も露出する`, act: { label: '射撃', fn: issueFireOrder } };
+            return { tone: 'go', text: `射撃解 ${w.toUpperCase()} 命中予測${Math.round(hc * 100)}% — 推定円を長押し→射撃 (撃てば自位置も露出する)`, act: { label: '射撃', fn: issueFireOrder } };
     }
     // 5) 追跡中の信号 — 第15弾: 「記録した方位線の交点」の状態を読み上げる (答えは言わない)
     const sigs = currentSignals();
@@ -11079,7 +11116,7 @@ function xoEvaluate() {
     if (sigList.length > 0) {
         sigList.sort((a, c) => (c.strength || 0) - (a.strength || 0));
         const b = sigList[0];
-        return { tone: 'info', text: `${BAND_JP[b.sensor] || b.sensorLabel}反応 方位${b.bearingDeg}° (${sigList.length}件) — 追跡して方位を記録しろ`, act: { label: '追跡', fn: trackNextSignal } };
+        return { tone: 'info', text: `${BAND_JP[b.sensor] || b.sensorLabel}反応 方位${b.bearingDeg}° (${sigList.length}件) — リングの点か地図の円をタップして追跡し、方位を記録しろ`, act: { label: '追跡', fn: trackNextSignal } };
     }
     // 7) 第21弾: 帯域はON/OFF (OFFの帯域は聴いていないので「別の帯域に反応」は分からない)
     const rx = rxLevels();
