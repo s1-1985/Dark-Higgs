@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261031i">
+    <link rel="stylesheet" href="style.css?v=20261031j">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -43,6 +43,7 @@
                     <span class="hud-hp-track"><span id="hud-hp-fill"></span></span>
                     <span id="hud-hp-text">100%</span>
                 </div>
+                <button id="hud-parts" title="部品 (取り付け枠)。押すと一覧 — 付け替えは自分のコロニーのドックで">部品 0/5</button>
                 <span id="hud-expo" class="expo-0" title="脅威の兆候 (観測できたものだけ): 静穏 / 受信=信号を受けた / 照射=探信・照準波を受けた / 攻撃=被弾・ミサイル・ビームのチャージ"><i></i><b id="hud-expo-text">静穏</b></span>
                 <div id="xo-bar" class="xo-idle">
                     <span id="xo-dot"></span>
@@ -381,6 +382,12 @@
 
                     <div class="dock-body">
                         <div class="service-card">
+                            <h3>部品の付け替え</h3>
+                            <p>拾った部品をここで付け替えられる (取り付け枠には限りがある・外した部品は予備に入る)。</p>
+                            <button class="btn btn-info" id="btn-dock-parts">部品を見る・付け替える</button>
+                        </div>
+
+                        <div class="service-card hidden">
                             <h3>艦体修理 (Hull Repair)</h3>
                             <p>損傷した装甲を完全に修復し、戦闘能力を回復させます。</p>
                             <button class="btn btn-primary" id="btn-repair-all">全艦修理 (0 CR)</button>
@@ -392,7 +399,7 @@
                             <button class="btn btn-info" id="btn-dock-loadout">積み込みを変更</button>
                         </div>
 
-                        <div class="service-card">
+                        <div class="service-card hidden"><!-- 第32弾: 持ち越しの強化は撤去 (スカーミッシュは結果を持ち越さない) -->
                             <h3>システムアップグレード</h3>
                             <div class="upgrade-grid">
                                 <div class="upgrade-item">
@@ -607,6 +614,26 @@
             </div>
 
             <!-- 第22弾: 試合の記録 (終わった後に地図と時間のスライダーで振り返る) -->
+            <!-- 第32弾: 部品のドラフト (3つから1つ) / 部品の一覧 -->
+            <div id="draft-overlay" class="hidden">
+                <div class="draft-box">
+                    <div class="draft-head"><span id="draft-title">部品を拾った</span></div>
+                    <div id="draft-sub" class="draft-sub"></div>
+                    <div id="draft-cards" class="draft-cards"></div>
+                    <div class="draft-foot"><button id="draft-skip" class="btn">見送る</button></div>
+                </div>
+            </div>
+            <div id="parts-overlay" class="hidden">
+                <div class="draft-box">
+                    <div class="draft-head"><span id="parts-title">部品</span><button id="parts-close" title="閉じる">✕</button></div>
+                    <div id="parts-sub" class="draft-sub"></div>
+                    <div class="parts-sec">取り付け中</div>
+                    <div id="parts-on" class="draft-cards"></div>
+                    <div class="parts-sec">予備</div>
+                    <div id="parts-spare" class="draft-cards"></div>
+                </div>
+            </div>
+
             <div id="replay-overlay" class="hidden">
                 <div class="rp-box">
                     <div class="rp-head"><span class="rp-title">試合の記録</span><span id="rp-time">0:00</span>
@@ -696,7 +723,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261031i"></script>
+    <script src="game.js?v=20261031j"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {

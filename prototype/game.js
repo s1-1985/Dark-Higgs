@@ -605,7 +605,7 @@ function incomingMissile(me, byPlayer) {
     for (const pr of projectiles) {
         if (!pr.active || pr.type !== 'missile' || pr.isPlayer !== byPlayer) continue;
         const d = Math.hypot(pr.x - me.x, pr.y - me.y);
-        if (d >= bd) continue;
+        if (d >= bd || (pr.quiet && d >= CM_MISSILE_EVADE_R * 0.5)) continue; // 第32弾: 静音推進は気付かれるのが半分の距離
         const toMe = Math.atan2(me.y - pr.y, me.x - pr.x);
         if (Math.abs(_angDiff(toMe, pr.angle)) > 0.9) continue;
         bd = d; best = pr;
@@ -716,7 +716,7 @@ const WEAPON_FIRE_ARC = { kinetic: Math.PI * 5/6, missile: Math.PI/4, beam: Math
 // 「リング内なのに当たらない/撃たない」状態を生んでいた。発射判定・表示・弾体はすべてこの値から導出する。
 const WEAPON_RANGE = { kinetic: 800, missile: 2200, beam: 8000 };
 function weaponRange(w) {
-    return (WEAPON_RANGE[w] || 800) * (WEAPONS_UPG_RANGE_MULT[gameState.upgrades.weapons] || 1.0);
+    return (WEAPON_RANGE[w] || 800) * (WEAPONS_UPG_RANGE_MULT[gameState.upgrades.weapons] || 1.0) * (w === 'kinetic' ? PM.kinRange : w === 'missile' ? PM.mslRange : 1); // 第32弾: 部品
 }
 const LOCK_PERSIST_BASE = 2.0; // ロック保持倍率 (visionRadius × N)
 // ─────────────────────────────────────────────────────────────
@@ -2171,9 +2171,10 @@ function applyStrikeBonuses(byPlayer, attacker, target, hitAng, wType) {
     while (diff > Math.PI) diff -= Math.PI * 2;
     const rear = Math.abs(diff) > Math.PI * 0.55;
     if (rear) {
-        mult *= 1.5;
+        const _rm = target === player ? PM.rear : 1.5; // 第32弾: 傾斜装甲は後ろが弱い
+        mult *= _rm;
         if (!byPlayer && target === player) {
-            effects.push({ x: target.x, y: target.y - 28, text: '後方被弾 ×1.5', life: 1.0, type: 'floatText', c: '#ff6666' });
+            effects.push({ x: target.x, y: target.y - 28, text: '後方被弾 ×' + _rm, life: 1.0, type: 'floatText', c: '#ff6666' });
         }
     }
     // ── 第13弾「撃てば自分も露出する」を双方向に: 被弾した側は射線の来た方位を知る ──
@@ -2244,9 +2245,10 @@ function applyStrikeBonuses(byPlayer, attacker, target, hitAng, wType) {
         target._critCD = SYS_CRIT_CD;
         const roll = Math.random();
         let label;
-        if (roll < 0.40)      { target._sysEngineTimer = SYS_ENGINE_DUR; label = '機関損傷'; }
-        else if (roll < 0.70) { target._sysSensorTimer = SYS_SENSOR_DUR; label = 'センサー損傷'; }
-        else                  { target._weaponJamTimer = Math.max(target._weaponJamTimer || 0, SYS_WEAPON_DUR); label = '武器系統損傷'; }
+        const _sm = target === player ? PM.subsys : 1; // 第32弾: ダメコン班
+        if (roll < 0.40)      { target._sysEngineTimer = SYS_ENGINE_DUR * _sm; label = '機関損傷'; }
+        else if (roll < 0.70) { target._sysSensorTimer = SYS_SENSOR_DUR * _sm; label = 'センサー損傷'; }
+        else                  { target._weaponJamTimer = Math.max(target._weaponJamTimer || 0, SYS_WEAPON_DUR * _sm); label = '武器系統損傷'; }
         effects.push({ x: target.x, y: target.y - 58, text: label + '!', life: 1.3, type: 'floatText', c: '#ff9500' });
         logMessage(target === player ? `WARN: サブシステム被害 — ${label}` : `TAC: 敵艦に${label} — 好機`, 'warning-msg');
         if (huntStats && target !== player) huntStats.crits++;
@@ -2265,28 +2267,29 @@ class Projectile {
         // §3-1 武装アップグレード: 射程倍率 (自機弾のみ)
         const _wRange = isPlayer ? (WEAPONS_UPG_RANGE_MULT[gameState.upgrades.weapons] || 1.0) : 1.0;
         if (type === 'kinetic') {
-            this.speed = 12; this.maxDist = WEAPON_RANGE.kinetic * 1.1 * _wRange; this.dmg = KINETIC_DMG * dmgScale; // 第20弾: 18→30 (距離で落ち・回避あり)
+            this.speed = 12; this.maxDist = WEAPON_RANGE.kinetic * 1.1 * _wRange * (isPlayer ? PM.kinRange : 1); this.dmg = KINETIC_DMG * dmgScale * (isPlayer ? PM.kinDmg * PM.dmgAll : 1); // 第20弾: 18→30 (距離で落ち・回避あり)。第32弾: 部品
             this.angle = Math.atan2(target.y - y, target.x - x);
         } else if (type === 'missile') {
             // §3-10 ミサイル2タイプ: homing=熱源誘導 / smart=AI追跡(EM強・デコイ耐性・大閃光)
             this.missileMode = isPlayer ? missileMode : 'homing';
-            this.speed = this.missileMode === 'smart' ? 7.5 : 6;
+            this.speed = (this.missileMode === 'smart' ? 7.5 : 6) * (isPlayer ? PM.mslSpeed : 1); // 第32弾: 静音推進
             // 追尾で航路が伸びるぶん飛距離は射程より長め (smartは燃焼時間が長い)
-            this.maxDist = WEAPON_RANGE.missile * (this.missileMode === 'smart' ? 1.7 : 1.35) * _wRange;
-            this.dmg = (this.missileMode === 'smart' ? MISSILE_SMART_DMG : MISSILE_DMG) * dmgScale; // 第20弾: 55/70→350/400 (攻撃型を10発前後)
+            this.maxDist = WEAPON_RANGE.missile * (this.missileMode === 'smart' ? 1.7 : 1.35) * _wRange * (isPlayer ? PM.mslRange : 1);
+            this.dmg = (this.missileMode === 'smart' ? MISSILE_SMART_DMG : MISSILE_DMG) * dmgScale * (isPlayer ? PM.mslDmg * PM.dmgAll : 1); // 第20弾: 55/70→350/400 (攻撃型を10発前後)。第32弾: 部品
+            if (isPlayer) { this.quiet = !!PM.mslQuiet; this.emp = !!PM.emp; } // 多弾頭 (this.mirv) は撃つ側で決める (弾を2発使えた時だけ)
             this.angle = Math.atan2(target.y - y, target.x - x);
         } else if (type === 'beam') {
             this.active = false;
             if (target && target.hp > 0) {
                 // ヒッグス高濃度エリアではビームダメージ大幅低下 (設計確定仕様)
                 const higgsBetween = getHiggsIntensity((x + target.x) / 2, (y + target.y) / 2);
-                const higgsBeamPenalty = 1 - higgsBetween * 0.8; // 最大80%ダメージ減衰
+                const higgsBeamPenalty = 1 - higgsBetween * 0.8 * (isPlayer ? PM.beamFog : 1); // 最大80%ダメージ減衰 (第32弾: 霧貫通で半分)
                 // §3-1 装甲: beam耐性 (敵ビームが自機に当たる時)
                 const beamArmorRes = (!isPlayer && target === player) ? ARMOR_RES_BEAM[gameState.upgrades.armor] : 0;
                 // 奇襲・後方・混乱・サブシステム損傷 (ビームこそ潜航狙撃の主役 — 旧実装は先制ボーナスが乗らなかった)
                 const _bStrike = applyStrikeBonuses(isPlayer, isPlayer ? null : _beamShooter, target, Math.atan2(y - target.y, x - target.x), 'beam');
                 addHiggsClear(x, y, target.x, target.y); // 第21弾: 命中したビームの軌跡も霧が晴れる
-                const _beamDmg = Math.floor(BEAM_DMG * higgsBeamPenalty * dmgScale * (1 - beamArmorRes) * _bStrike.mult);
+                const _beamDmg = Math.floor(BEAM_DMG * higgsBeamPenalty * dmgScale * (1 - beamArmorRes) * _bStrike.mult * (isPlayer ? PM.beamDmg * PM.dmgAll : 1));
                 target.hp -= _beamDmg;
                 if (isPlayer && target !== player && target.type !== 'fighter') matchRecEvent('hitE', target.x, target.y, '敵に命中: ビーム −' + _beamDmg + (_bStrike.preempt ? '・奇襲' : ''));
                 if (huntStats) { if (isPlayer && target !== player) huntStats.dmgDealt += _beamDmg; else if (!isPlayer && target === player) huntStats.dmgTaken += _beamDmg; }
@@ -2340,8 +2343,9 @@ class Projectile {
             if (!this._seekDone && (this.target.seek || (!this.isPlayer && this.target !== player))) {
                 if (Math.hypot(this.target.x - this.x, this.target.y - this.y) < 650) {
                     this._seekDone = true;
+                    if (this.isPlayer && this.mirv) { mirvSplit(this, this.target.x, this.target.y); return; } // 第32弾: 多弾頭
                     if (this.isPlayer) {
-                        let best = null, bd = 900;
+                        let best = null, bd = PM.seeker ? 1300 : 900; // 第32弾: 囮耐性シーカー
                         for (const e of enemies) {
                             if (e.hp <= 0 || e._dying) continue;
                             const d = Math.hypot(e.x - this.x, e.y - this.y);
@@ -2363,6 +2367,7 @@ class Projectile {
                     }
                 }
             }
+            if (this.isPlayer && this.mirv && !this.target.seek && Math.hypot(this.target.x - this.x, this.target.y - this.y) < 650) { mirvSplit(this, this.target.x, this.target.y); return; }
             // 敵ミサイルはデコイ(強EM)に誘引される: 近傍デコイがあれば本標的より優先して追尾
             let homeX = this.target.x, homeY = this.target.y;
             if (!this.isPlayer) {
@@ -2433,6 +2438,21 @@ class Projectile {
         }
 
         const hitTarget = this.isPlayer ? enemies.find(e => Math.hypot(e.x - this.x, e.y - this.y) < e.radius * 1.5) : (Math.hypot(player.x - this.x, player.y - this.y) < player.radius * 1.5 ? player : null);
+        // 第32弾: 近接信管弾 — 当たらずに150u以内を通ったら50%の威力で炸裂 (回避されない)
+        if (this.isPlayer && this.type === 'kinetic' && PM.kinProx && !hitTarget && !this._evaded) {
+            const pe = enemies.find(e => e.hp > 0 && !e._dying && Math.hypot(e.x - this.x, e.y - this.y) < 150 + (e.radius || 0));
+            if (pe) {
+                const _fallP = PM.kinNoFall ? 1 : 1 - KINETIC_FALLOFF * Math.min(1, this.distTraveled / WEAPON_RANGE.kinetic);
+                const d = Math.floor(this.dmg * 0.5 * _fallP);
+                pe.hp -= d; this.active = false;
+                createHitEffect(this.x, this.y, '#ffcc55');
+                effects.push({ x: pe.x, y: pe.y - 30, text: '近接 -' + d, life: 0.9, type: 'floatText', c: '#ffdd66' });
+                if (huntStats) huntStats.dmgDealt += d;
+                if (pe.type !== 'fighter' && pe.maxHp) matchRecEvent('hitE', pe.x, pe.y, '敵に命中: 近接信管 −' + d);
+                applyStrikeBonuses(true, null, pe, Math.atan2(this.y - pe.y, this.x - pe.x));
+                return;
+            }
+        }
 
         if (hitTarget && hitTarget.hp > 0) {
             // デブリ帯(岩礁帯): 遮蔽で実弾/ミサイルが外れやすい (ビームは貫通=Projectile生成時に即着弾でここを通らない)
@@ -2446,7 +2466,7 @@ class Projectile {
             }
             // 第20弾: 回避 — 当たっても相手の速さで避けられる (自機/敵とも同じ式・1発につき1回だけ判定)。
             // 旧: 自機だけがAI配分(回避)で敵弾を避けていた
-            if (!this._evaded && Math.random() < evadeChance(this.type, hitTarget)) {
+            if (!this._evaded && Math.random() < evadeChance(this.type, hitTarget) * (this.isPlayer && this.type === 'kinetic' && PM.kinClose && this.distTraveled < 300 ? 0.3 : 1)) {
                 this._evaded = true;
                 effects.push({ x: hitTarget.x, y: hitTarget.y - 30, text: '回避', life: 1.0, type: 'floatText', c: '#9fd8ff' });
                 if (this.type === 'missile') { nearMissBlast(this.x, this.y, this.isPlayer, this.dmg); this.active = false; } // 避けられたミサイルは近くで爆発
@@ -2465,10 +2485,13 @@ class Projectile {
                            : this.type === 'missile' ? ARMOR_RES_MISSILE[armorLv] : 0);
                 dmgMult *= (1 - res);
             }
+            // 第32弾: 傾斜装甲 — 正面±30°からの被弾 −30%
+            if (!this.isPlayer && hitTarget === player && PM.front > 0 && Math.abs(_angDiff(_hitAng, player.angle)) < Math.PI / 6) dmgMult *= 1 - PM.front;
             // 第20弾: 実弾は遠いほど威力が落ちる (射程いっぱいで半分)
-            const _fall = this.type === 'kinetic' ? 1 - KINETIC_FALLOFF * Math.min(1, this.distTraveled / WEAPON_RANGE.kinetic) : 1;
+            const _fall = this.type === 'kinetic' && !(this.isPlayer && PM.kinNoFall) ? 1 - KINETIC_FALLOFF * Math.min(1, this.distTraveled / WEAPON_RANGE.kinetic) : 1;
             const _hitDmg = Math.floor(this.dmg * dmgMult * _fall);
             hitTarget.hp -= _hitDmg;
+            if (this.isPlayer && this.emp && hitTarget !== player) applyDaze(hitTarget, 480, 'EMP弾頭'); // 第32弾
             if (this.isPlayer && hitTarget !== player && hitTarget.type !== 'fighter' && hitTarget.maxHp) matchRecEvent('hitE', hitTarget.x, hitTarget.y, '敵に命中: ' + (_HIT_JP[this.type] || this.type) + ' −' + _hitDmg + (preemptive ? '・奇襲' : ''));
             if (huntStats) { if (this.isPlayer) huntStats.dmgDealt += _hitDmg; else if (hitTarget === player) huntStats.dmgTaken += _hitDmg; }
             // 被弾方向インジケータ: どの方位から撃たれたか (自機のみ)
@@ -2628,7 +2651,7 @@ function beamRevealsShooter(ox, oy, byPlayer, shooter) {
         for (const e of enemies) {
             if (e.hp <= 0 || e._dying || e.type === 'fighter') continue;
             const d = Math.hypot(e.x - ox, e.y - oy);
-            if (d > BEAM_REVEAL_RANGE) continue;
+            if (d > BEAM_REVEAL_RANGE * PM.beamReveal) continue; // 第32弾: 霧貫通は軌跡が遠くまで知れる
             const err = 150 + d * 0.05, a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * err;
             e.playerLastKnownPos = { x: ox + Math.cos(a) * r, y: oy + Math.sin(a) * r, vx: 0, vy: 0 };
             e.contactFreshness = Math.max(e.contactFreshness || 0, 0.85);
@@ -2717,6 +2740,8 @@ function leaveBeamChannel(x0, y0, x1, y1) {
     }
 }
 
+// 第32弾: 多弾頭はもう1発使えた時だけ分裂する (1発しか無ければ普通のミサイル)
+function _armMirv(mp) { if (PM.mirv && cargo.ammoM > 0) { cargo.ammoM--; _hudCache.cargo = null; mp.mirv = true; } }
 // 1射ぶんの発砲処理 (自動攻撃・射撃命令の共通口)。撃てたら true。
 function playerFireWeapon(s, target, wType, lk) {
     const dmgScale = 1;
@@ -2733,8 +2758,11 @@ function playerFireWeapon(s, target, wType, lk) {
         const mk = (off) => { const p = new Projectile(s.x, s.y, { x: aimX, y: aimY }, true, 'kinetic', dmgScale); p.angle = base + off; p.ox = s.x; p.oy = s.y; projectiles.push(p); };
         mk(0);
         if (gameState.shipType === 'assault') { mk(-KINETIC_SPREAD); mk(KINETIC_SPREAD); } // 攻撃型: 3連装同時発射
-        if (s === player) { cargo.ammoK = Math.max(0, cargo.ammoK - 1); _hudCache.cargo = null; if (cargo.ammoK === 0) logMessage('WEP: 実弾を撃ち尽くした — 占有したコロニーで補給', 'warning-msg'); }
-        if (--s.kineticAmmo <= 0 || (s === player && cargo.ammoK <= 0)) { s.kineticReloading = cargo.ammoK > 0 || s !== player; s.kineticReloadTimer = Math.round(KINETIC_RELOAD_TIME * reloadMult); }
+        if (s === player) {
+            _kinAmmoFrac += PM.kinAmmoUse; const use = Math.floor(_kinAmmoFrac); _kinAmmoFrac -= use; // 第32弾: 高速装填は弾の消費×1.5
+            cargo.ammoK = Math.max(0, cargo.ammoK - use); _hudCache.cargo = null; if (cargo.ammoK === 0) logMessage('WEP: 実弾を撃ち尽くした — 占有したコロニーで補給', 'warning-msg');
+        }
+        if (--s.kineticAmmo <= 0 || (s === player && cargo.ammoK <= 0)) { s.kineticReloading = cargo.ammoK > 0 || s !== player; s.kineticReloadTimer = Math.round(KINETIC_RELOAD_TIME * reloadMult * (s === player ? PM.kinReload : 1)); }
         if (!lk.full) logMessage(`WEP: KINETIC 推定射撃 (命中予測${pct}%)`, 'warning-msg');
     } else if (wType === 'missile') {
         if (s === player && !useMissileAmmo()) return false;
@@ -2743,14 +2771,15 @@ function playerFireWeapon(s, target, wType, lk) {
         if (!lk.full) tgt = { x: aimX, y: aimY, hp: 1, radius: 1, seek: true };
         const _mp = new Projectile(s.x, s.y, tgt, true, 'missile', dmgScale);
         _mp.ox = s.x; _mp.oy = s.y; _mp.sid = enemySid(target);
+        if (s === player) _armMirv(_mp);
         projectiles.push(_mp);
         s.missileReloading = true;
-        s.missileReloadTimer = Math.round(MISSILE_RELOAD_TIME * reloadMult);
+        s.missileReloadTimer = Math.round(MISSILE_RELOAD_TIME * reloadMult * (s === player ? PM.mslReload : 1));
         if (!lk.full) logMessage(`WEP: MISSILE 推定座標へ発射 — 終末シーカー作動予定 (命中予測${pct}%)`, 'warning-msg');
         else if (missileMode === 'smart') logMessage('WEP: MISSILE [AI追跡] 発射 — EM強・ジャミング耐性・大閃光', 'system-msg');
     } else {
         // 第20弾: ビームはチャージ専用 — 発射前に2秒溜める。チャージ中は熱/EM/ヒッグスが漏れる=敵に読まれ回避される
-        if ((s._beamCharge || 0) < BEAM_CHARGE_DUR) {
+        if ((s._beamCharge || 0) < BEAM_CHARGE_DUR * (s === player ? PM.beamCharge : 1)) {
             s.weaponType = 'beam';
             s._beamCharge = (s._beamCharge || 0) + gameSpeedFactor;
             s._chargeFrame = _frameCount;
@@ -2765,7 +2794,7 @@ function playerFireWeapon(s, target, wType, lk) {
             const tx = target.x - s.x, ty = target.y - s.y;
             const along = tx * Math.cos(_ba) + ty * Math.sin(_ba);
             const perp = Math.abs(-tx * Math.sin(_ba) + ty * Math.cos(_ba));
-            hit = along > 0 && along < _bL && perp < BEAM_HIT_WIDTH + (target.radius || 0);
+            hit = along > 0 && along < _bL && perp < (s === player ? PM.beamWidth : BEAM_HIT_WIDTH) + (target.radius || 0);
         }
         if (hit) {
             projectiles.push(new Projectile(s.x, s.y, target, true, 'beam', dmgScale));
@@ -2774,13 +2803,13 @@ function playerFireWeapon(s, target, wType, lk) {
             leaveBeamChannel(s.x, s.y, _bex, _bey);
             logMessage('WEP: BEAM 推定射撃 — 手応えなし (その線上には居ない)', 'warning-msg');
             missRevealsShooter(s.x, s.y, _bex, _bey, true);
-            if (!lk.full) recordMiss(enemySid(target), { x: s.x, y: s.y, x2: _bex, y2: _bey, r: BEAM_HIT_WIDTH + 120 });
+            if (!lk.full) recordMiss(enemySid(target), { x: s.x, y: s.y, x2: _bex, y2: _bey, r: (s === player ? PM.beamWidth : BEAM_HIT_WIDTH) + 120 });
         }
         beamNearMiss(s.x, s.y, _bex, _bey, true, hit ? target : null); // 第20弾: 外れても線の近くの敵はセンサーが乱れる
         beamRevealsShooter(s.x, s.y, true);                                 // 第20弾: 霧の軌跡で射手の位置が知れる
         s._beamCharge = 0; s._chargeLogged = false;
         s.beamReloading = true;
-        s.beamReloadTimer = Math.round(BEAM_RELOAD_TIME * reloadMult);
+        s.beamReloadTimer = Math.round(BEAM_RELOAD_TIME * reloadMult * (s === player ? PM.beamReload : 1));
         logMessage('WEP: ビーム発射 — 次まで' + Math.round(s.beamReloadTimer / 60) + '秒 (リロード中も熱/EM/ヒッグスが漏れる・霧に軌跡が残る)', 'system-msg');
     }
     s.weaponType = wType;
@@ -3060,13 +3089,13 @@ class Ship {
             const _ff = Math.max(0, (this._fireFlash || 0)) / 90;
             if (this._fireFlash > 0) this._fireFlash -= gameSpeedFactor;
             const _ft = this._fireFlashType;
-            this.opticalSig = Math.min(1, _thrust * _es.optic * 0.5 + _ff * (_ft === 'kinetic' ? 0.6 : _ft === 'beam' ? 0.9 : 0.15)); // 第20弾: ビームの発射は強い光
+            this.opticalSig = Math.min(1, _thrust * _es.optic * 0.5 + _ff * (_ft === 'kinetic' ? 0.6 * PM.opticFire : _ft === 'beam' ? 0.9 : 0.15)); // 第20弾: ビームの発射は強い光 (第32弾: 近接信管弾は×1.5)
             // EM: 推進＋(センサー/AI処理放射)。ゲインで増幅。AI↑でEM↑(逆探知の法則)。
             // 第13弾: エンジン種別のEM倍率は推進由来の放射だけに掛ける。AI/センサーの演算放射は機関に関係なく漏れる
             // (旧: 全体に掛けていたため熱核エンジンではAI放射が×0.4に消え、完全停止した艦は至近以外で絶対に見つからなかった)
             this.emSig      = Math.min(1, _thrust * _es.em * 0.6 + (genAlloc.sensors / 100 * 0.18 + genAlloc.ai / 100 * 0.40) * COMPUTE_EM_MULT * (0.6 + (playerCoasting ? 1 : _gain) * 0.4));
             if (_ff > 0 && _ft === 'beam') this.emSig = Math.min(1, this.emSig + _ff * 0.6);   // 第20弾: ビームの発射は強いEM
-            if (_ff > 0 && _ft === 'missile') { this.heatSig = Math.min(1, this.heatSig + _ff * 0.35); this.emSig = Math.min(1, this.emSig + _ff * 0.45); } // 第20弾: ミサイル発射はEMも
+            if (_ff > 0 && _ft === 'missile') { this.heatSig = Math.min(1, this.heatSig + _ff * 0.35 * PM.mslLaunchHeat); this.emSig = Math.min(1, this.emSig + _ff * 0.45); } // 第20弾: ミサイル発射はEMも
             // 第20弾: ドローンの発進は光とEMが漏れる
             if (this._launchFlash > 0) {
                 const _lf = this._launchFlash / 60;
@@ -3105,9 +3134,10 @@ class Ship {
             }
             if (this.missileReloading) this.emSig = Math.min(1, this.emSig + 0.20);
             if ((this._beamCharge || 0) > 0) {
-                this.heatSig = Math.min(1, this.heatSig + 0.30);
-                this.emSig   = Math.min(1, this.emSig + 0.40);
-                this.higgsSig = Math.min(1, this.higgsSig + 0.30);
+                const _cl = PM.chargeLeak; // 第32弾: 集束レンズは漏れ×1.5
+                this.heatSig = Math.min(1, this.heatSig + 0.30 * _cl);
+                this.emSig   = Math.min(1, this.emSig + 0.40 * _cl);
+                this.higgsSig = Math.min(1, this.higgsSig + 0.30 * _cl);
                 // チャージが中断されたら放熱 (発射条件が30f以上満たされない場合)
                 if (_frameCount - (this._chargeFrame || 0) > 30) {
                     this._beamCharge = Math.max(0, this._beamCharge - 2 * gameSpeedFactor);
@@ -3123,6 +3153,11 @@ class Ship {
             this.opticalSig = Math.min(1, this.opticalSig + sensorLeak('optic'));
             this.emSig = Math.min(1, this.emSig + sensorLeak('em') + (engineSwitchT > 0 ? ENGINE_SWITCH_EM : 0));
             this.higgsSig = Math.min(1, this.higgsSig + sensorLeak('higgs'));
+            // 第32弾: 部品 (熱・光・電磁波の倍率と、常に漏れる分。潜航/機関停止中は漏れる分も小さい)
+            { const _qm = (silentRunning || playerCoasting) ? SILENT_SIG_MULT : 1;
+              this.heatSig = Math.min(1, this.heatSig * PM.heat + PM.heatAdd * _qm);
+              this.opticalSig = Math.min(1, this.opticalSig * PM.optic);
+              this.emSig = Math.min(1, this.emSig * PM.em + PM.emAdd * _qm); }
             // 手負い: HP20%未満で冷却材漏洩 — 熱は隠しきれない (静粛航行でも下限あり)
             if (this.hp / this.maxHp < WOUNDED_HP_FRAC) {
                 this.heatSig = Math.max(this.heatSig, WOUNDED_HEAT_FLOOR * (silentRunning ? 0.7 : 1));
@@ -3146,7 +3181,7 @@ class Ship {
             const _higgsBonusSpeed = _higgsHereEng * _engTypeP.higgsSpeedBonus;
             if (this._beamDrain > 0) this._beamDrain -= gameSpeedFactor;
             updateEngineSwitch();
-            const _baseTargetSpeed = (engineSwitchT > 0 ? 0 : 1) * (this._beamDrain > 0 ? BEAM_DRAIN_SPEED : 1) * (shipCruiseSpeed(gameState.shipType, genAlloc.engine, genGain) * _higgsSlowdown * _engTypeP.speedMult + _higgsBonusSpeed * MOVE_SPEED_MULT) * this.terrainSpeedMult() * gameSpeedFactor * (silentRunning ? SILENT_SPEED_MULT : 1) * (boostT > 0 ? BOOST_MULT : 1);
+            const _baseTargetSpeed = (engineSwitchT > 0 ? 0 : 1) * PM.speed * (this._beamDrain > 0 ? BEAM_DRAIN_SPEED : 1) * (shipCruiseSpeed(gameState.shipType, genAlloc.engine, genGain) * _higgsSlowdown * _engTypeP.speedMult + _higgsBonusSpeed * MOVE_SPEED_MULT) * this.terrainSpeedMult() * gameSpeedFactor * (silentRunning ? SILENT_SPEED_MULT : 1) * (boostT > 0 ? BOOST_MULT : 1);
             if (this.currentSpeed === undefined) this.currentSpeed = 0;
             this.speed = this.currentSpeed; // 移動ブロックで更新される
 
@@ -3214,12 +3249,12 @@ class Ship {
                 let d = targetAng - this.angle;
                 while (d < -Math.PI) d += Math.PI * 2;
                 while (d > Math.PI) d -= Math.PI * 2;
-                const tr = (PLAYER_TURN_RATES[gameState.shipType] || PLAYER_TURN_RATE) * gameSpeedFactor;
+                const tr = (PLAYER_TURN_RATES[gameState.shipType] || PLAYER_TURN_RATE) * gameSpeedFactor * PM.turn; // 第32弾: 部品
                 this.angle += Math.sign(d) * Math.min(Math.abs(d), tr);
                 if (playerCoasting) return d; // 第17弾: 機関停止中は艦首だけ回す (進路は変わらない)
                 const tm = Math.min(1, Math.abs(d) / (Math.PI * 0.12));
                 const ts = targetSpd * (1 - (SHIP_TURN_SLOW[gameState.shipType] || 0.5) * tm);
-                const ar = (SHIP_ACCEL_RATE[gameState.shipType] || 0.008) * gameSpeedFactor * (boostT > 0 ? BOOST_ACCEL : 1);
+                const ar = (SHIP_ACCEL_RATE[gameState.shipType] || 0.008) * gameSpeedFactor * (boostT > 0 ? BOOST_ACCEL : 1) * PM.accel;
                 // 第17弾: 機関が損傷・過熱している間は逆噴射も効かず、ゆっくりしか減速できない (噴射で稼いだ速度が残る)
                 const brake = (this._sysEngineTimer || 0) > 0 ? 0.25 : 2.5;
                 this.currentSpeed = this.currentSpeed < ts ? Math.min(ts, this.currentSpeed + ar) : Math.max(ts, this.currentSpeed - ar * brake);
@@ -3526,7 +3561,7 @@ class Ship {
                 const _srcDist = _noiseSrc ? Math.hypot(_sx - this.x, _sy - this.y) : distToPlayer;
                 // 第29弾: 敵も解析量が要る (聞こえない間は薄れる: 下の else) (自機と同じ式・演算力は敵のコロニーで上がる)。見えていれば一気に貯まる
                 this._ana = (this._ana || 0) + (_hardDetect ? 0.5 : analysisPower('enemy') * (0.5 + 0.5 * _q) / 60) * gameSpeedFactor;
-                const _err = Math.max((_relayErr >= 0 ? _relayErr : (1 - _q) * _srcDist * 0.25 + 50) * (_noiseSrc ? 1 : clutterErrMult(_clN)),
+                const _err = Math.max((_relayErr >= 0 ? _relayErr : (1 - _q) * _srcDist * 0.25 + 50) * (_noiseSrc ? 1 : clutterErrMult(_clN)) * (_hardDetect ? 1 : PM.ecm), // 第32弾: ECM
                                       _hardDetect ? 0 : _srcDist * anaFloorFrac(this._ana) * 0.5);
                 const _ea = Math.random() * Math.PI * 2, _er = Math.sqrt(Math.random()) * _err;
                 let _lkx = _sx + Math.cos(_ea) * _er, _lky = _sy + Math.sin(_ea) * _er;
@@ -5228,6 +5263,9 @@ function generateSector() {
     wakeRibbons = [];
     { const ca = Math.random() * Math.PI * 2, cm = 0.08 + Math.random() * 0.08; higgsCurrent = { x: Math.cos(ca) * cm, y: Math.sin(ca) * cm }; }
     resourceNodes = []; decoys = []; playerDrones = []; droneOrders = {};
+    // 第32弾: スカーミッシュは結果を持ち越さない — ドックの強化(Lv)は毎試合 初期値へ。艦の強化は試合中に拾う部品で
+    gameState.upgrades = { engine: 1, weapons: 1, armor: 1, sensor: 1 };
+    resetParts();
     resetCargo(); // 第16弾: 出撃のたびに積み込み計画どおりに積む
 
     // センサーLvによるレーダー基本範囲の反映
@@ -6187,7 +6225,7 @@ function pickEnemyEngine(p) {
     return 'thermonuclear';
 }
 // 自艦が帯域で漏らす量 (2本目以降)
-function sensorLeak(kind) { return sensorsOn[kind] && sensorOrder.indexOf(kind) > 0 ? SENSOR_LEAK[kind] : 0; }
+function sensorLeak(kind) { return sensorsOn[kind] && sensorOrder.indexOf(kind) > 0 ? SENSOR_LEAK[kind] * PM.leakMul : 0; } // 第32弾: 多帯域受信機
 ['heat', 'optic', 'em', 'higgs'].forEach(s => {
     const btn = document.getElementById(`sensor-${s}`);
     if (!btn) return;
@@ -6598,6 +6636,7 @@ function updateNodesAndColonies() {
 function captureNodeByPlayer(n) {
     n.owner = 'player'; n.capP = 0; n.emFlashTimer = 180; n.knownLost = false;
     matchRecEvent('nodeP', n.x, n.y, '自艦がノードを制圧');
+    if (!n._partP) { n._partP = true; offerDraft('node'); } // 第32弾: 初めて制圧したノードで部品 (探知・電子戦が出やすい)
     gameState.credits += NODE_SCR;
     updateTopUI();
     const got = addMaterials(NODE_MAT_GAIN);
@@ -6609,6 +6648,7 @@ function hackColonyByPlayer(st) {
     const was = st.owner;
     st.hacked = true; st.owner = 'player'; st.hackP = 0; st.eHackP = 0;
     matchRecEvent('colonyP', st.x, st.y, '自艦がコロニーを占有' + (was === 'enemy' ? ' (敵から奪還)' : ''));
+    if (!st._partP) { st._partP = true; offerDraft('colony'); } // 第32弾: 初めて占有したコロニーで部品 (機関・船体が出やすい)
     createClickEffect(st.x, st.y, '#00aaff');
     playSound('ui');
     const n = coloniesOwned('player');
@@ -6680,18 +6720,291 @@ function updateEnemyColonyCapture() {
 }
 function salvageDerelictByPlayer(st) {
     st.salvP = 0;
+    if (!st._partDone) { st._partDone = true; offerDraft('derelict'); } // 第32弾: 難破船で部品 (兵装が出やすい)
     // 空いている枠の分だけ拾う (実弾1枠→ミサイル1枠→資材2個)。何も積めなければ残しておく
-    const free = () => (HOLD_CAP[gameState.shipType] || 0) - cargoStockSlots() - Math.ceil((cargo.mat || 0) / MAT_PER_SLOT);
+    const free = () => playerHoldCap() - cargoStockSlots() - Math.ceil((cargo.mat || 0) / MAT_PER_SLOT);
     let gK = 0, gM = 0;
     if (free() >= 1) { cargo.ammoK += AMMO_PER_SLOT.kinetic; gK = AMMO_PER_SLOT.kinetic; }
     if (free() >= 1) { cargo.ammoM += AMMO_PER_SLOT.missile; gM = AMMO_PER_SLOT.missile; }
     const got = addMaterials(2);
-    if (!gK && !gM && !got) { st.salvP = -5; logMessage('SALVAGE: 難破船 — 積む場所がない (弾か資材を使ってから)', 'warning-msg'); return; }
+    if (!gK && !gM && !got) { st.salvaged = true; logMessage('SALVAGE: 難破船 — 弾と資材は積む場所がなかった', 'system-msg'); return; }
+    if (false) { st.salvP = -5; logMessage('SALVAGE: 難破船 — 積む場所がない (弾か資材を使ってから)', 'warning-msg'); return; }
     st.salvaged = true;
     matchRecEvent('salvP', st.x, st.y, '自艦が難破船から回収');
     logMessage('SALVAGE: 難破船から回収 — ' + [gK ? '実弾+' + gK : '', gM ? 'ミサイル+' + gM : '', got ? '資材+' + got + '個' : ''].filter(Boolean).join('・'), 'system-msg');
     _hudCache.cargo = null; playSound('ui');
 }
+// ═══ 第32弾 (オーナー合意 2026-10-31): 部品のドラフト式カスタマイズ ═══
+// 試合の中で拾った部品で艦を組む (結果は持ち越さない)。どの部品にも長所と代償 = 何かを伸ばすとどこかが弱くなる。
+// 拾う所: コロニーを初めて占有 / ノードを制圧 / 難破船 / 漂流コンテナ → 3つから1つ選ぶ。拾う所で出やすい種類が違う。
+// 取り付け枠: 攻撃型5・潜航型4・空母型4。枠が満杯なら予備に入る。付け替えは自分のコロニーのドックでだけ。
+const PART_SLOTS = { assault: 5, stealth: 4, carrier: 4 };
+const PART_CATS = { kin: '実弾', msl: 'ミサイル', beam: 'ビーム', fcs: '火器管制', sen: '探知', eng: '機関', hull: '船体', ew: '電子戦' };
+const PARTS = {
+    prox:      { cat: 'kin',  name: '近接信管弾',     up: '実弾が150u以内を外れても50%の威力で炸裂', down: '発砲の光+50%', f: m => { m.kinProx = 1; m.opticFire *= 1.5; } },
+    ap:        { cat: 'kin',  name: '徹甲弾',         up: '実弾の威力×1.6・距離で減衰しない', down: '弾倉 8→5斉射', f: m => { m.kinDmg *= 1.6; m.kinNoFall = 1; m.kinMag = Math.min(m.kinMag, 5); } },
+    autoload:  { cat: 'kin',  name: '高速装填機構',   up: '実弾のリロード 2→1秒', down: '熱+0.1・弾の消費×1.5', f: m => { m.kinReload *= 0.5; m.heatAdd += 0.1; m.kinAmmoUse *= 1.5; } },
+    ciws:      { cat: 'kin',  name: '迎撃管制 (CIWS)', up: 'ミサイル迎撃 450→700u・確率+15%', down: '電磁波+0.05', f: m => { m.pdRange = 700; m.pdBonus += 0.15; m.emAdd += 0.05; } },
+    shotgun:   { cat: 'kin',  name: '散弾砲身',       up: '300u以内では相手が実弾を避けにくい (回避×0.3)', down: '実弾の射程 800→550', f: m => { m.kinClose = 1; m.kinRange *= 550 / 800; } },
+    mirv:      { cat: 'msl',  name: '多弾頭',         up: '着弾点の手前で5つに分裂 (中心＋半径600uの4点・それぞれ30%の威力。推定が外れていても当たりやすい)', down: '1回で2発使う', f: m => { m.mirv = 1; } },
+    seeker:    { cat: 'msl',  name: '囮耐性シーカー', up: '終末シーカー 900→1300u・閃光で誘導を失わない (60%)', down: 'ミサイルのリロード+30%', f: m => { m.seeker = 1; m.mslReload *= 1.3; } },
+    booster:   { cat: 'msl',  name: '長射程ブースター', up: 'ミサイルの射程 2200→3500', down: '発射の熱が2倍 (遠くまで聞かれる)', f: m => { m.mslRange *= 3500 / 2200; m.mslLaunchHeat *= 2; } },
+    quietmsl:  { cat: 'msl',  name: '静音推進',       up: '相手がミサイルに気付く距離が半分', down: 'ミサイルの速さ×0.7', f: m => { m.mslQuiet = 1; m.mslSpeed *= 0.7; } },
+    emp:       { cat: 'msl',  name: 'EMP弾頭',        up: 'ミサイル命中で相手のセンサーを8秒乱す', down: 'ミサイルの威力×0.6', f: m => { m.emp = 1; m.mslDmg *= 0.6; } },
+    mine:      { cat: 'msl',  name: '機雷敷設',       up: '長押しメニューで機雷を置ける (400u以内に来た艦に350・最大4個)', down: 'ミサイルを1発使う・置く時に電磁波', f: m => { m.mine = 1; } },
+    focus:     { cat: 'beam', name: '集束レンズ',     up: 'ビームのチャージ 2→1.2秒', down: 'チャージ中の漏れ×1.5', f: m => { m.beamCharge *= 0.6; m.chargeLeak *= 1.5; } },
+    diffuse:   { cat: 'beam', name: '拡散照射',       up: 'ビームの当たり幅 140→400u', down: 'ビームの威力×0.6', f: m => { m.beamWidth = 400; m.beamDmg *= 0.6; } },
+    pierce:    { cat: 'beam', name: '霧貫通',         up: '霧によるビームの減衰が半分', down: '霧の軌跡で射手が知れる距離×1.5', f: m => { m.beamFog *= 0.5; m.beamReveal *= 1.5; } },
+    rapidcap:  { cat: 'beam', name: '速射コンデンサ', up: 'ビームのリロード 35→15秒', down: 'ビームの威力×0.5', f: m => { m.beamReload *= 15 / 35; m.beamDmg *= 0.5; } },
+    fcs:       { cat: 'fcs',  name: '火器管制強化',   up: '全兵装の威力+15%', down: '目標を掴んでいる間、照準波で18000u以内の敵に概位置が知れる', f: m => { m.dmgAll *= 1.15; m.fcsLeak = 1; } },
+    sonarx:    { cat: 'sen',  name: 'ソナー拡張',     up: '探信の範囲×1.5', down: '探信が聞かれる距離も×1.5', f: m => { m.sonarRange *= 1.5; m.sonarHeard *= 1.5; } },
+    anacore:   { cat: 'sen',  name: '解析コア',       up: '演算力+0.5', down: '電磁波+0.08', f: m => { m.ana += 0.5; m.emAdd += 0.08; } },
+    multiband: { cat: 'sen',  name: '多帯域受信機',   up: '2本目以降の帯域の漏れが半分', down: '取り付け枠を2つ使う', w: 2, f: m => { m.leakMul *= 0.5; } },
+    towed:     { cat: 'sen',  name: '曳航アレイ',     up: '動いていても耳が塞がりにくい (自艦ノイズの影響が半分)', down: '旋回×0.85', f: m => { m.noiseHear *= 0.5; m.turn *= 0.85; } },
+    vector:    { cat: 'eng',  name: 'ベクターノズル', up: '航跡×0.6・熱×0.8 (静粛)', down: '最高速×0.9', f: m => { m.wake *= 0.6; m.heat *= 0.8; m.speed *= 0.9; } },
+    thruster:  { cat: 'eng',  name: '高出力スラスタ', up: '最高速×1.2・加速×1.3', down: '熱+0.15', f: m => { m.speed *= 1.2; m.accel *= 1.3; m.heatAdd += 0.15; } },
+    rcs:       { cat: 'eng',  name: '姿勢制御強化',   up: '旋回×1.4 (回り込みやすい)', down: '電磁波+0.05', f: m => { m.turn *= 1.4; m.emAdd += 0.05; } },
+    cooling:   { cat: 'eng',  name: '冷却ジャケット', up: '熱×0.7・噴射後の過熱が半分', down: '耐久−10%', f: m => { m.heat *= 0.7; m.overheat *= 0.5; m.hp -= 0.10; } },
+    armor:     { cat: 'hull', name: '増加装甲',       up: '耐久+25%', down: '最高速×0.9・旋回×0.85', f: m => { m.hp += 0.25; m.speed *= 0.9; m.turn *= 0.85; } },
+    slope:     { cat: 'hull', name: '傾斜装甲',       up: '正面±30°からの被弾−30%', down: '後ろからの被弾 ×1.5→×2.0', f: m => { m.front = 0.3; m.rear = 2.0; } },
+    damcon:    { cat: 'hull', name: 'ダメコン班',     up: 'リペアキット×1.5・サブシステム損傷の時間が半分', down: '取り付け枠を2つ使う', w: 2, f: m => { m.kit *= 1.5; m.subsys *= 0.5; } },
+    ram:       { cat: 'hull', name: '電波吸収塗装',   up: '光・電磁波×0.75', down: '耐久−15%', f: m => { m.optic *= 0.75; m.em *= 0.75; m.hp -= 0.15; } },
+    ecm:       { cat: 'ew',   name: 'ECM',            up: '敵の推定の誤差×1.5', down: '電磁波+0.1 (ECM自体が聞こえる)', f: m => { m.ecm *= 1.5; m.emAdd += 0.1; } },
+    lurel:     { cat: 'ew',   name: '囮発射機',       up: '偽艦影ブイを資材なしで90秒ごとに出せる', down: '枠を使う (他の部品が載らない)', f: m => { m.lureFree = 1; } },
+    hangar:    { cat: 'ew',   name: '格納庫拡張',     up: '積載+3枠', down: '最高速×0.95', f: m => { m.hold += 3; m.speed *= 0.95; } },
+};
+const PM_DEF = { kinProx: 0, opticFire: 1, kinDmg: 1, kinNoFall: 0, kinMag: 8, kinReload: 1, heatAdd: 0, kinAmmoUse: 1, pdRange: 450, pdBonus: 0, emAdd: 0, kinClose: 0, kinRange: 1,
+    mirv: 0, seeker: 0, mslReload: 1, mslRange: 1, mslLaunchHeat: 1, mslQuiet: 0, mslSpeed: 1, emp: 0, mslDmg: 1, mine: 0,
+    beamCharge: 1, chargeLeak: 1, beamWidth: BEAM_HIT_WIDTH, beamDmg: 1, beamFog: 1, beamReveal: 1, beamReload: 1, dmgAll: 1, fcsLeak: 0,
+    sonarRange: 1, sonarHeard: 1, ana: 0, leakMul: 1, noiseHear: 1, turn: 1, wake: 1, heat: 1, speed: 1, accel: 1, overheat: 1,
+    hp: 0, front: 0, rear: 1.5, kit: 1, subsys: 1, optic: 1, em: 1, ecm: 1, lureFree: 0, hold: 0 };
+const DRAFT_BIAS = { colony: ['eng', 'hull'], node: ['sen', 'ew'], derelict: ['kin', 'msl', 'beam', 'fcs'], cache: null };
+const DRAFT_BIAS_W = 3, LURE_FREE_CD = 5400, MINE_MAX = 4, MINE_R = 400, MINE_ARM = 180, MINE_LIFE = 18000, FCS_LEAK_R = 18000;
+const PLAYER_HP_BASE = { assault: 3500, stealth: 700, carrier: 2500 };
+let PM = Object.assign({}, PM_DEF);
+let partsOn = [], partsSpare = [], _draft = null, _draftQ = [], _lureFreeCD = 0, mines = [], _kinAmmoFrac = 0;
+function partW(id) { return PARTS[id].w || 1; }
+function partSlotsUsed() { let n = 0; for (const id of partsOn) n += partW(id); return n; }
+function partSlotsMax() { return PART_SLOTS[gameState.shipType] || 4; }
+function playerHoldCap() { return (HOLD_CAP[gameState.shipType] || 0) + PM.hold; }
+function resetParts() { partsOn = []; partsSpare = []; _draft = null; _draftQ = []; _lureFreeCD = 0; mines = []; _kinAmmoFrac = 0; recomputeParts(); _closeDraftUI(); }
+function recomputeParts() {
+    const m = Object.assign({}, PM_DEF);
+    for (const id of partsOn) PARTS[id].f(m);
+    PM = m;
+    if (player && player.hp > 0) {
+        const nm = Math.round((PLAYER_HP_BASE[gameState.shipType] || 2000) * (1 + PM.hp));
+        const d = nm - player.maxHp;
+        player.maxHp = nm;
+        player.hp = Math.max(1, Math.min(nm, player.hp + Math.max(0, d)));
+        player.kineticMaxAmmo = PM.kinMag;
+        player.kineticAmmo = Math.min(player.kineticAmmo || 0, PM.kinMag);
+    }
+    if (typeof _hudCache !== 'undefined') _hudCache.cargo = null;
+    _updatePartsChip();
+}
+function partSummary() { return partsOn.map(id => PARTS[id].name).join('・') || 'なし'; }
+// 3つの候補 (持っていない部品から。拾う所の得意な種類は3倍出やすい)
+function draftPick3(src) {
+    const owned = new Set(partsOn.concat(partsSpare));
+    const pool = Object.keys(PARTS).filter(id => !owned.has(id));
+    const bias = DRAFT_BIAS[src], out = [];
+    while (out.length < 3 && pool.length) {
+        let tot = 0; const ws = pool.map(id => { const w = bias && bias.includes(PARTS[id].cat) ? DRAFT_BIAS_W : 1; tot += w; return w; });
+        let r = Math.random() * tot, k = 0;
+        while (k < ws.length - 1 && r > ws[k]) { r -= ws[k]; k++; }
+        out.push(pool.splice(k, 1)[0]);
+    }
+    return out;
+}
+const _SRC_JP = { colony: 'コロニー', node: 'ノード', derelict: '難破船', cache: '漂流コンテナ' };
+function offerDraft(src) {
+    const c = draftPick3(src);
+    if (!c.length) { logMessage('部品: ' + _SRC_JP[src] + ' — 新しい部品は無かった (全部持っている)', 'system-msg'); return; }
+    if (comDemo) { takePart(comPickPart(c)); return; }
+    if (_draft) { _draftQ.push({ src, c }); return; }
+    _draft = { src, c };
+    _openDraftUI();
+}
+function takePart(id) {
+    if (!id || !PARTS[id]) return;
+    const P = PARTS[id];
+    if (partSlotsUsed() + partW(id) <= partSlotsMax()) {
+        partsOn.push(id); recomputeParts();
+        logMessage('部品: ' + P.name + ' を取り付けた — ' + P.up + ' / 代償: ' + P.down + ' (枠' + partSlotsUsed() + '/' + partSlotsMax() + ')', 'system-msg');
+    } else {
+        partsSpare.push(id); _updatePartsChip();
+        logMessage('部品: ' + P.name + ' — 取り付け枠が満杯。予備に入れた (自分のコロニーのドックで付け替え)', 'warning-msg');
+    }
+    matchRecEvent('partP', player ? player.x : 0, player ? player.y : 0, '部品: ' + P.name);
+    if (comDemo) comThinkEvent('p', '部品「' + P.name + '」を選んだ (' + P.up + ' / 代償: ' + P.down + ')');
+    playSound('ui');
+}
+// 自機COMの選び方: 性格に合う種類を重く見る (攻撃性→兵装 / 隠密性→機関・電子戦・電波吸収 / 慎重さ→船体 / 貪欲さ→探知)
+function _comPartScore(id, pp) {
+    const c = PARTS[id].cat;
+    let s = c === 'kin' || c === 'msl' || c === 'beam' || c === 'fcs' ? pp.aggression : c === 'eng' || c === 'ew' ? pp.stealth : c === 'hull' ? pp.caution : pp.greed;
+    if (id === 'ram' || id === 'vector') s = Math.max(s, pp.stealth);
+    if (id === 'armor') s = Math.max(s, pp.caution);
+    if (id === 'mine' || id === 'lurel') s *= 0.7; // 自機COMは手動の道具をあまり使わない
+    return s + Math.random() * 0.25;
+}
+function comPickPart(c) {
+    const pp = (_com && _com.pp) || { aggression: 0.5, stealth: 0.3, greed: 0.4, caution: 0.4 };
+    let best = c[0], bs = -1;
+    for (const id of c) { const sc = _comPartScore(id, pp); if (sc > bs) { bs = sc; best = id; } }
+    return best;
+}
+// 付け替え (ドックの中だけ)
+function partUninstall(id) { const i = partsOn.indexOf(id); if (i < 0) return; partsOn.splice(i, 1); partsSpare.push(id); recomputeParts(); }
+function partInstall(id) {
+    const i = partsSpare.indexOf(id); if (i < 0) return false;
+    if (partSlotsUsed() + partW(id) > partSlotsMax()) { logMessage('部品: 枠が足りない — 先に何か外す', 'warning-msg'); return false; }
+    partsSpare.splice(i, 1); partsOn.push(id); recomputeParts(); return true;
+}
+function partsDocked() {
+    if (!player || player.hp <= 0) return false;
+    return structures.some(s => s.type === 'colony' && s.owner === 'player' && Math.hypot(player.x - s.x, player.y - s.y) < RESUPPLY_R);
+}
+// 毎フレーム: 囮発射機の再装填・機雷・火器管制の照準波・自機COMの付け替え
+function updateParts() {
+    if (_lureFreeCD > 0) _lureFreeCD -= gameSpeedFactor;
+    for (let i = mines.length - 1; i >= 0; i--) {
+        const mn = mines[i];
+        mn.t += gameSpeedFactor;
+        if (mn.t > MINE_LIFE) { mines.splice(i, 1); continue; }
+        if (mn.t < MINE_ARM) continue;
+        let hit = null;
+        for (const e of enemies) if (e.hp > 0 && !e._dying && e.type !== 'fighter' && Math.hypot(e.x - mn.x, e.y - mn.y) < MINE_R) { hit = e; break; }
+        if (!hit) continue;
+        mines.splice(i, 1);
+        const dmg = Math.round(MISSILE_DMG * PM.dmgAll);
+        hit.hp -= dmg;
+        createExplosion(mn.x, mn.y, '#ffcc66', 26); addShake(10); playSound('explosion');
+        effects.push({ x: hit.x, y: hit.y - 30, text: '機雷 -' + dmg, life: 1.2, type: 'floatText', c: '#ffdd66' });
+        logMessage('WEP: 機雷が炸裂 → ' + dmg + ' ダメージ (敵が触れた)', 'warning-msg');
+        matchRecEvent('hitE', mn.x, mn.y, '敵に命中: 機雷 −' + dmg);
+        if (huntStats) huntStats.dmgDealt += dmg;
+        // 触れた敵は爆発の方から撃たれたと思う (機雷の位置を知る)
+        hit._alertUntil = _frameCount + ENEMY_ALERT_MEMORY; hit.detectionState = 'alerted';
+    }
+    if (!player || player.hp <= 0) return;
+    // 火器管制強化の代償: 目標を掴んでいる間は照準波が漏れ、18000u以内の敵に概位置が知れる (2秒ごと)
+    if (PM.fcsLeak && _frameCount % 120 === 0) {
+        const te = player.targetEntity, lk = te && te.hp > 0 ? playerLockInfo(te) : null;
+        if (lk && (lk.full || lk.assumed)) for (const e of enemies) {
+            if (e.hp <= 0 || e._dying || e.type === 'fighter') continue;
+            const d = Math.hypot(e.x - player.x, e.y - player.y);
+            if (d > FCS_LEAK_R || (e.contactFreshness || 0) > 0.7) continue;
+            const err = d * 0.15 + 300, a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * err;
+            e.playerLastKnownPos = { x: player.x + Math.cos(a) * r, y: player.y + Math.sin(a) * r, vx: 0, vy: 0 };
+            e.contactFreshness = Math.max(e.contactFreshness || 0, 0.5);
+            if (comDemo && Math.random() < 0.3) comThinkEvent('e', '照準波を受けた → 自機は ' + _dirTxt(e.x, e.y, player.x, player.y) + ' (火器管制強化)', 'e' + e.uid);
+        }
+    }
+    // 自機COM: 自分のコロニーに居る時、予備の方が性格に合えば付け替える
+    if (comDemo && partsSpare.length && _frameCount % 120 === 0 && partsDocked()) {
+        const pp = (_com && _com.pp) || { aggression: 0.5, stealth: 0.3, greed: 0.4, caution: 0.4 };
+        for (const sp of partsSpare.slice()) {
+            let worst = null, ws = 9;
+            for (const id of partsOn) { const sc = _comPartScore(id, pp); if (sc < ws) { ws = sc; worst = id; } }
+            if (partSlotsUsed() + partW(sp) <= partSlotsMax()) { partInstall(sp); comThinkEvent('p', 'ドック: 予備の「' + PARTS[sp].name + '」を取り付け'); continue; }
+            if (worst && _comPartScore(sp, pp) > ws + 0.15 && partW(sp) <= partW(worst) + (partSlotsMax() - partSlotsUsed())) {
+                partUninstall(worst); if (partInstall(sp)) comThinkEvent('p', 'ドック: 「' + PARTS[worst].name + '」を外して「' + PARTS[sp].name + '」に付け替え'); else partInstall(worst);
+            }
+        }
+    }
+}
+function placeMine() {
+    if (!player || player.hp <= 0 || !PM.mine) return;
+    if (mines.length >= MINE_MAX) { logMessage('機雷: 置けるのは' + MINE_MAX + '個まで', 'warning-msg'); return; }
+    if (!useMissileAmmo()) { logMessage('機雷: ミサイルが無い (機雷はミサイルを1発使う)', 'warning-msg'); return; }
+    mines.push({ x: player.x, y: player.y, t: 0 });
+    player._launchFlash = 60; // 置く時に電磁波が漏れる
+    matchRecEvent('fireP', player.x, player.y, '自艦: 機雷を置く');
+    logMessage('機雷: 設置 — 3秒後から400u以内に来た艦に炸裂 (' + mines.length + '/' + MINE_MAX + '個)', 'system-msg');
+    playSound('ui');
+}
+function drawMines(ctx) {
+    const inv = 1 / camera.zoom;
+    for (const mn of mines) {
+        ctx.save();
+        ctx.globalAlpha = mn.t < MINE_ARM ? 0.4 : 0.85; ctx.strokeStyle = '#ffcc66'; ctx.lineWidth = 1.6 * inv;
+        const r = Math.max(30, 6 * inv);
+        ctx.beginPath(); ctx.arc(mn.x, mn.y, r, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(mn.x - r * 1.5, mn.y); ctx.lineTo(mn.x + r * 1.5, mn.y); ctx.moveTo(mn.x, mn.y - r * 1.5); ctx.lineTo(mn.x, mn.y + r * 1.5); ctx.stroke();
+        ctx.globalAlpha = 0.18; ctx.setLineDash([5 * inv, 8 * inv]); ctx.beginPath(); ctx.arc(mn.x, mn.y, MINE_R, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+        ctx.restore();
+    }
+}
+// MIRV: 着弾点の手前で5つに分裂 — 中心と、半径600uの輪の4点へ。子弾はそれぞれ900u以内 (普通のミサイルの終末シーカーと同じ) の艦を探して当たる (30%の威力)。
+// 推定点のそばに居れば最大5発 (=1.5発分)、推定が900〜1500uずれていても1〜2発は当たる (普通のミサイルは900uより外れると空振り)
+function mirvSplit(pr, cx, cy) {
+    let hits = 0;
+    const rot = Math.random() * Math.PI * 2;
+    for (let k = 0; k < 5; k++) {
+        const bx = k === 0 ? cx : cx + Math.cos(rot + k * Math.PI / 2) * 600, by = k === 0 ? cy : cy + Math.sin(rot + k * Math.PI / 2) * 600;
+        let tgt = null, td = 900; // 子弾の終末シーカーは普通のミサイルと同じ900u
+        for (const e of enemies) { if (e.hp <= 0 || e._dying) continue; const d = Math.hypot(e.x - bx, e.y - by) - (e.radius || 0); if (d < td) { td = d; tgt = e; } }
+        if (!tgt) { createExplosion(bx, by, '#ffaa55', 8); continue; }
+        const d = Math.round(pr.dmg * 0.3);
+        tgt.hp -= d; hits++;
+        createExplosion(tgt.x + (Math.random() - 0.5) * 40, tgt.y + (Math.random() - 0.5) * 40, '#ffaa55', 12);
+        effects.push({ x: tgt.x, y: tgt.y - 30 - k * 9, text: '-' + d, life: 1.0, type: 'floatText', c: '#ffdd00' });
+        if (huntStats) huntStats.dmgDealt += d;
+        if (tgt.type !== 'fighter') { matchRecEvent('hitE', tgt.x, tgt.y, '敵に命中: 多弾頭 −' + d); applyStrikeBonuses(true, null, tgt, Math.atan2(by - tgt.y, bx - tgt.x), 'missile'); }
+    }
+    logMessage(hits ? 'WEP: 多弾頭が分裂 — 子弾' + hits + '発が命中' : 'WEP: 多弾頭が分裂 — 子弾は何にも当たらなかった (推定が外れた)', hits ? 'warning-msg' : 'system-msg');
+    if (!hits) { missRevealsShooter(pr.ox ?? player.x, pr.oy ?? player.y, cx, cy, false); if (pr.sid) recordMiss(pr.sid, { x: cx, y: cy, r: 1500 }); }
+    addShake(6); playSound('explosion');
+    pr.active = false;
+}
+// ── 画面: ドラフト (3つから1つ) / 部品の一覧 (ドックでは付け替え) ──
+function _partCard(id, btnLabel, onClick, disabled) {
+    const P = PARTS[id], d = document.createElement('div');
+    d.className = 'part-card';
+    d.innerHTML = '<div class="pc-cat"></div><div class="pc-name"></div><div class="pc-up"></div><div class="pc-down"></div>';
+    d.querySelector('.pc-cat').textContent = PART_CATS[P.cat] + (partW(id) > 1 ? '・枠' + partW(id) : '');
+    d.querySelector('.pc-name').textContent = P.name;
+    d.querySelector('.pc-up').textContent = '＋ ' + P.up;
+    d.querySelector('.pc-down').textContent = '− ' + P.down;
+    if (btnLabel) { const b = document.createElement('button'); b.className = 'btn btn-info pc-btn'; b.textContent = btnLabel; b.disabled = !!disabled; b.addEventListener('click', onClick); d.appendChild(b); }
+    return d;
+}
+function _openDraftUI() {
+    const ov = document.getElementById('draft-overlay'); if (!ov || !_draft) return;
+    document.getElementById('draft-title').textContent = '部品を拾った — ' + _SRC_JP[_draft.src];
+    document.getElementById('draft-sub').textContent = '3つから1つ選ぶ (取り付け枠 ' + partSlotsUsed() + '/' + partSlotsMax() + (partsSpare.length ? '・予備' + partsSpare.length : '') + ')。枠が満杯なら予備に入り、自分のコロニーのドックで付け替えられる';
+    const box = document.getElementById('draft-cards'); box.innerHTML = '';
+    for (const id of _draft.c) box.appendChild(_partCard(id, 'これにする', () => { const d = _draft; _closeDraftUI(); takePart(id); _nextDraft(); }));
+    ov.classList.remove('hidden');
+}
+function _closeDraftUI() { const ov = document.getElementById('draft-overlay'); if (ov) ov.classList.add('hidden'); _draft = null; }
+function _nextDraft() { const q = _draftQ.shift(); if (q) { _draft = q; _openDraftUI(); } }
+function openPartsUI() {
+    const ov = document.getElementById('parts-overlay'); if (!ov) return;
+    const edit = partsDocked() && !comDemo;
+    document.getElementById('parts-title').textContent = '部品 — 取り付け枠 ' + partSlotsUsed() + '/' + partSlotsMax();
+    document.getElementById('parts-sub').textContent = edit ? 'ドック: 外すと予備へ・予備から付けられる' : '付け替えは自分のコロニーのドック (600u以内) でだけ';
+    const on = document.getElementById('parts-on'), sp = document.getElementById('parts-spare');
+    on.innerHTML = ''; sp.innerHTML = '';
+    if (!partsOn.length) on.textContent = 'なし — コロニー・ノード・難破船・漂流コンテナで拾える';
+    for (const id of partsOn) on.appendChild(_partCard(id, edit ? '外す' : null, () => { partUninstall(id); openPartsUI(); }));
+    if (!partsSpare.length) sp.textContent = 'なし';
+    for (const id of partsSpare) sp.appendChild(_partCard(id, edit ? '付ける' : null, () => { partInstall(id); openPartsUI(); }, partSlotsUsed() + partW(id) > partSlotsMax()));
+    ov.classList.remove('hidden');
+}
+function _updatePartsChip() {
+    const el = document.getElementById('hud-parts'); if (!el) return;
+    el.textContent = '部品 ' + partSlotsUsed() + '/' + partSlotsMax() + (partsSpare.length ? '+' + partsSpare.length : '');
+}
+(() => {
+    document.getElementById('parts-close')?.addEventListener('click', () => document.getElementById('parts-overlay').classList.add('hidden'));
+    document.getElementById('draft-skip')?.addEventListener('click', () => { _closeDraftUI(); logMessage('部品: 見送った', 'system-msg'); _nextDraft(); });
+    document.getElementById('hud-parts')?.addEventListener('click', openPartsUI);
+    document.getElementById('btn-dock-parts')?.addEventListener('click', openPartsUI);
+})();
+
 // ═══ 第31弾 (オーナー合意 2026-10-31): 自然の信号・お宝の信号・コロニーの聴音局・監視網の円 ═══
 // 信号の正体は 敵 / 囮 / 自然 / お宝 の4つ。見分け方は第23弾の識別と同じ (帯域の比・動き・探信の反響)。寄って見れば確定。
 // 自然 (12個): 霧のゆらぎ=霧の乱れ0.3〜0.5・霧の流れで漂い120秒で消えて別の所に出る / 嵐の放電=電磁波0.4〜0.6・3〜8秒ごとに明滅 / 熱泉=熱0.3〜0.4
@@ -6738,7 +7051,15 @@ function fieldSig(f, band) {
 function fieldMaxSig(f) { let m = 0; for (const b of BANDS) m = Math.max(m, fieldSig(f, b)); return m; }
 // お宝の回収 (自艦): 空いている枠の分だけ 実弾1枠→ミサイル1枠→資材2個 (難破船と同じ)。何も積めなければ残す
 function collectCacheByPlayer(f) {
-    const free = () => (HOLD_CAP[gameState.shipType] || 0) - cargoStockSlots() - Math.ceil((cargo.mat || 0) / MAT_PER_SLOT);
+    // 第32弾: 漂流コンテナの中身は部品 (3つから1つ・全種類から)
+    matchRecEvent('salvP', f.x, f.y, '自艦が漂流コンテナを回収');
+    logMessage('SALVAGE: 漂流コンテナを回収 — 部品が入っていた', 'system-msg');
+    offerDraft('cache');
+    _hudCache.cargo = null; playSound('ui');
+    return true;
+}
+function _collectCacheAmmoOld(f) { // 第31弾の中身 (弾・資材)。部品に置き換えたので使わない
+    const free = () => playerHoldCap() - cargoStockSlots() - Math.ceil((cargo.mat || 0) / MAT_PER_SLOT);
     let gK = 0, gM = 0;
     if (free() >= 1) { cargo.ammoK += AMMO_PER_SLOT.kinetic; gK = AMMO_PER_SLOT.kinetic; }
     if (free() >= 1) { cargo.ammoM += AMMO_PER_SLOT.missile; gM = AMMO_PER_SLOT.missile; }
@@ -6966,7 +7287,7 @@ function enemyCaptureNode(e, n) {
 // (追跡中の信号に半分・残りを他で等分)。強い信号ほど・場所を変えて聴いた方位ほど多く貯まる (実装で決めた値)。
 // 下限 = 距離 × (12% + 88%×exp(−解析量/6))。近づくだけでは絞れない / 囮やノイズメーカーは演算力を食う。敵も同じ式
 const ANA_MIN = 0.12, ANA_TAU = 6, ANA_COLONY = 0.35, ANA_NEWPOS = 1.5;
-function analysisPower(side) { return 1 + ANA_COLONY * Math.min(3, coloniesOwned(side)); }
+function analysisPower(side) { return 1 + ANA_COLONY * Math.min(3, coloniesOwned(side)) + (side === 'player' ? PM.ana : 0); } // 第32弾: 解析コア
 function anaFloorFrac(ana) { return ANA_MIN + (1 - ANA_MIN) * Math.exp(-(ana || 0) / ANA_TAU); }
 function anaPct(ana) { return Math.round((1 - (anaFloorFrac(ana) - ANA_MIN) / (1 - ANA_MIN)) * 100); }
 const _RX_WORD = { heat: '熱源', optic: '光', em: '電磁波', higgs: '霧の乱れ' };
@@ -7057,7 +7378,7 @@ function checkPassiveDetection() {
 
     relayListen(); // 第16弾: 聴音局(制圧したノード)からの方位
     const range = passiveRange();
-    const noise = playerSelfNoise();
+    const noise = playerSelfNoise() * PM.noiseHear; // 第32弾: 曳航アレイ
     const sensorPrec = 0.45 + (genAlloc.sensors / 100) * 0.55;
 
     // 第21弾: ONの帯域すべてで聴き、敵ごとに一番よく聴こえた帯域で方位を取る
@@ -7383,7 +7704,9 @@ function showLongPressMenu(sx, sy) {
                 if (!(SHIP_DRONES[gameState.shipType] || []).includes(t)) continue;
                 const n = cargo.stock[t] || 0, can = n > 0 || (!cargo.asm && cargo.mat >= DRONE_SPEC[t].mat);
                 if (can) lh.push('<button data-lure="' + t + '">' + DRONE_SPEC[t].label + (n > 0 ? '×' + n : '(資材)') + '</button>');
+                else if (t === 'lure' && PM.lureFree && _lureFreeCD <= 0) lh.push('<button data-lure="lure">' + DRONE_SPEC.lure.label + '(発射機)</button>'); // 第32弾
             }
+            if (PM.mine && cargo.ammoM > 0 && mines.length < MINE_MAX) lh.push('<button data-mine="1">機雷 (ここ=自艦の位置)</button>'); // 第32弾
             lb.innerHTML = lh.length ? '<div class="lpm-dhead">囮 → この地点</div><div class="lpm-drow">' + lh.join('') + '</div>' : '';
         }
         menu.style.width = (h.length || lh.length) ? '236px' : '108px';
@@ -7411,6 +7734,7 @@ function droneOrder(type, kind, x, y) {
 (() => {
     const lb = document.getElementById('lpm-lures');
     if (lb) lb.addEventListener('click', (ev) => {
+        if (ev.target.closest('button[data-mine]')) { hideLongPressMenu(); if (!comDemo) placeMine(); return; } // 第32弾
         const b = ev.target.closest('button[data-lure]');
         if (!b || !_lpmWorld || !player) return;
         hideLongPressMenu();
@@ -7488,12 +7812,13 @@ function freeFireAt(wx, wy) {
         if (!useMissileAmmo()) return;
         const mp = new Projectile(player.x, player.y, { x: wx, y: wy, hp: 999, radius: 1 }, true, 'missile', 1.0);
         mp.ox = player.x; mp.oy = player.y;
+        _armMirv(mp); // 第32弾
         projectiles.push(mp);
         playSound('shoot');
         cancelSilentRunning('発砲');
         player.fireCooldown = WEAPON_COOLDOWNS.missile * genF;
         player.missileReloading = true;
-        player.missileReloadTimer = Math.round(MISSILE_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0));
+        player.missileReloadTimer = Math.round(MISSILE_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0) * PM.mslReload);
         player._fireFlash = 90; player._fireFlashType = 'missile'; player._lastFireType = 'missile'; player._lastFireF = _frameCount;
         logMessage('WEP: ミサイル座標射撃 — 自位置シグネチャ露出', 'warning-msg');
         return;
@@ -7502,7 +7827,7 @@ function freeFireAt(wx, wy) {
     if (player._ffBeam) return;
     player._ffBeam = { x: wx, y: wy };
     player._beamCharge = Math.max(1, player._beamCharge || 0); player._chargeFrame = _frameCount;
-    logMessage('WEP: ビームをチャージ (2秒) — 熱/EM/ヒッグスが漏れる', 'warning-msg');
+    logMessage('WEP: ビームをチャージ (' + (Math.round(BEAM_CHARGE_DUR * PM.beamCharge / 6) / 10) + '秒) — 熱/EM/ヒッグスが漏れる', 'warning-msg');
 }
 // 座標射撃のビーム: チャージが溜まったら撃つ (毎フレーム)
 function updateFreeBeam() {
@@ -7510,7 +7835,7 @@ function updateFreeBeam() {
     if (!fb) return;
     if (player.hp <= 0 || player._weaponJamTimer > 0) { player._ffBeam = null; return; }
     player._beamCharge = (player._beamCharge || 0) + gameSpeedFactor; player._chargeFrame = _frameCount;
-    if (player._beamCharge < BEAM_CHARGE_DUR) return;
+    if (player._beamCharge < BEAM_CHARGE_DUR * PM.beamCharge) return;
     player._ffBeam = null; player._beamCharge = 0; player._chargeLogged = false;
     const ang = Math.atan2(fb.y - player.y, fb.x - player.x);
     const len = Math.min(weaponRange('beam'), Math.max(100, Math.hypot(fb.x - player.x, fb.y - player.y)));
@@ -7519,12 +7844,12 @@ function updateFreeBeam() {
     let hitE = null;
     for (const en of enemies) {
         if (en.hp <= 0 || en._dying) continue;
-        if (_segDist(en.x, en.y, player.x, player.y, ex, ey) < BEAM_HIT_WIDTH + (en.radius || 0)) { hitE = en; break; }
+        if (_segDist(en.x, en.y, player.x, player.y, ex, ey) < PM.beamWidth + (en.radius || 0)) { hitE = en; break; }
     }
     if (hitE) {
         const hb = getHiggsIntensity((player.x + hitE.x) / 2, (player.y + hitE.y) / 2);
         const st = applyStrikeBonuses(true, null, hitE, Math.atan2(player.y - hitE.y, player.x - hitE.x), 'beam');
-        const d = Math.floor(BEAM_DMG * (1 - hb * 0.8) * st.mult);
+        const d = Math.floor(BEAM_DMG * (1 - hb * 0.8 * PM.beamFog) * st.mult * PM.beamDmg * PM.dmgAll); // 第32弾: 部品
         hitE.hp -= d;
         if (huntStats) huntStats.dmgDealt += d;
         createHitEffect(hitE.x, hitE.y, '#00ffaa'); addShake(15);
@@ -7534,7 +7859,7 @@ function updateFreeBeam() {
     beamNearMiss(player.x, player.y, ex, ey, true, hitE);
     beamRevealsShooter(player.x, player.y, true);
     player.beamReloading = true;
-    player.beamReloadTimer = Math.round(BEAM_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0));
+    player.beamReloadTimer = Math.round(BEAM_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0) * PM.beamReload);
     player.fireCooldown = WEAPON_COOLDOWNS.beam * Math.max(0.3, 1.5 - (genAlloc.weapons / 100));
     player._fireFlash = 90; player._fireFlashType = 'beam'; player._lastFireType = 'beam'; player._lastFireF = _frameCount; player._beamDrain = BEAM_DRAIN_DUR;
     playSound('shoot');
@@ -7627,7 +7952,7 @@ function fireOmniSonar() {
     const sensorLv  = gameState.upgrades.sensor;
     const baseRange = OMNI_SONAR_RANGE[sensorLv];
     const stormAtPlayer = getStormIntensity(player.x, player.y);
-    const omniRange = baseRange * (genAlloc.sensors / 100) * genGain * (1 - stormAtPlayer * STORM_SONAR_DEGRADE);
+    const omniRange = baseRange * (genAlloc.sensors / 100) * genGain * (1 - stormAtPlayer * STORM_SONAR_DEGRADE) * PM.sonarRange; // 第32弾: ソナー拡張
     const sc = sensorConfig[currentSensor];
 
     playSound('ui');
@@ -7657,7 +7982,7 @@ function fireOmniSonar() {
     }
     omniSonarCooldown = 900;
     // 第15弾: 探信音は遠くまで届く — 反響が返る距離の2.2倍以内の敵は、こちらの位置をほぼ正確に掴む
-    pingHeardBy(omniRange * 2.2, null, 0);
+    pingHeardBy(omniRange * 2.2 * PM.sonarHeard, null, 0);
     const rStr = Math.round(omniRange);
     const stormSuffix = stormAtPlayer > 0.3 ? ` ⚡EM嵐による減衰 (${Math.round(stormAtPlayer * STORM_SONAR_DEGRADE * 100)}%低下)` : '';
     logMessage(detected > 0
@@ -8986,7 +9311,7 @@ function drawHUDOverlay(ctx) {
         }
         // ── チャージビーム進捗リング (自機周り) ──
         if ((player._beamCharge || 0) > 0) {
-            const _cf = Math.min(1, player._beamCharge / BEAM_CHARGE_DUR);
+            const _cf = Math.min(1, player._beamCharge / (BEAM_CHARGE_DUR * PM.beamCharge));
             ctx.globalAlpha = 0.30 + _cf * 0.55;
             ctx.strokeStyle = '#00eaff';
             ctx.lineWidth = 2 + _cf * 3;
@@ -9107,6 +9432,7 @@ function recordWake(owner, x, y, frac, hullMul = 1, exhaust = true) {
     let st = Math.pow(Math.min(1.6, frac), 0.9) * ((exhaust ? 0.55 : 0) + 0.9 * h) * hullMul;
     if (surgePhase === 'active') st *= SURGE_WAKE_MULT;
     if (silentRunning && owner === 'player') st *= 0.7;
+    if (owner === 'player') st *= PM.wake; // 第32弾: ベクターノズル
     if (st < 0.03) return;
     let rb = null;
     for (const w of wakeRibbons) if (w.owner === owner && !w.closed) { rb = w; break; }
@@ -9337,7 +9663,7 @@ function cargoStockSlots() {
     return n + Math.ceil((cargo.ammoK || 0) / AMMO_PER_SLOT.kinetic) + Math.ceil((cargo.ammoM || 0) / AMMO_PER_SLOT.missile); // 第20弾: 弾も枠を使う
 }
 // 資材は「完成品と弾が占めていない枠」までしか積めない (展開・射撃して空いた枠に補給できる)
-function cargoMatCap() { return Math.max(0, ((HOLD_CAP[gameState.shipType] || 0) - cargoStockSlots()) * MAT_PER_SLOT); }
+function cargoMatCap() { return Math.max(0, (playerHoldCap() - cargoStockSlots()) * MAT_PER_SLOT); } // 第32弾: 格納庫拡張
 function addMaterials(n) {
     const before = cargo.mat;
     cargo.mat = Math.min(cargoMatCap(), cargo.mat + n);
@@ -9356,9 +9682,16 @@ function deployDrone(type, tx, ty) {
     const ship = gameState.shipType, spec = DRONE_SPEC[type];
     if (!spec || !(SHIP_DRONES[ship] || []).includes(type)) { logMessage(`搭載: ${spec ? spec.label : type} はこの艦に積めない`, 'warning-msg'); return; }
     // 第21弾: 囮は射出する地点が要る — 地点が無ければ「次にタップした地点」へ (長押しメニューからも撃てる)
+    const _freeLure = type === 'lure' && (cargo.stock.lure || 0) <= 0 && PM.lureFree && _lureFreeCD <= 0; // 第32弾: 囮発射機
+    if (_freeLure && tx !== undefined) {
+        _lureFreeCD = LURE_FREE_CD;
+        useEscapeItem('lure', tx, ty);
+        logMessage('囮発射機: 次まで' + Math.round(LURE_FREE_CD / 60) + '秒', 'system-msg');
+        return;
+    }
     if (spec.lure && tx === undefined) {
         if (pendingLure === type) { pendingLure = null; logMessage('囮: 射出を取りやめ', 'system-msg'); return; }
-        if ((cargo.stock[type] || 0) <= 0 && (cargo.asm || cargo.mat < spec.mat)) { logMessage(`搭載: ${spec.label}の完成品が無く${cargo.asm ? '組み立て中' : '資材も足りない'}`, 'warning-msg'); return; }
+        if (!_freeLure && (cargo.stock[type] || 0) <= 0 && (cargo.asm || cargo.mat < spec.mat)) { logMessage(`搭載: ${spec.label}の完成品が無く${cargo.asm ? '組み立て中' : '資材も足りない'}`, 'warning-msg'); return; }
         pendingLure = type;
         logMessage('囮: ' + spec.label + 'を射出する地点をタップ (もう一度押すと取りやめ)', 'warning-msg');
         playSound('ui');
@@ -9429,7 +9762,7 @@ function useEscapeItem(type, tx, ty) {
     else if (type === 'repair') {
         player._kitT = REPAIR_KIT_TIME;
         matchRecEvent('repairP', player.x, player.y, '自艦: リペアキットを使う');
-        logMessage('修理: リペアキット — 6秒で耐久+' + REPAIR_KIT_HP + ' (残り' + (cargo.stock.repair || 0) + '個)', 'system-msg');
+        logMessage('修理: リペアキット — 6秒で耐久+' + Math.round(REPAIR_KIT_HP * PM.kit) + ' (残り' + (cargo.stock.repair || 0) + '個)', 'system-msg');
     }
     else if (type === 'fsos' || type === 'lure') {
         launchLure('p', type === 'fsos' ? 'sos' : 'ship', player.x, player.y, tx ?? player.x + Math.cos(player.angle) * 3000, ty ?? player.y + Math.sin(player.angle) * 3000);
@@ -9500,6 +9833,7 @@ function enemyUseFlash(e) {
     let lost = 0;
     for (const p of projectiles) {
         if (!p.isPlayer || !p.active || p.type !== 'missile' || p._blind) continue;
+        if (PM.seeker && Math.random() < 0.6) continue; // 第32弾: 囮耐性シーカー
         if (Math.hypot(p.x - e.x, p.y - e.y) < FLASH_RADIUS) { p._blind = true; lost++; }
     }
     effects.push({ x: e.x, y: e.y, r: 0, maxR: FLASH_RADIUS, a: 0.9, c: '#ffffff', type: 'circle' });
@@ -9543,7 +9877,7 @@ function toggleCoast(on) {
     if (on === playerCoasting) return;
     if (on) {
         if (repairActive || buildingTimer > 0) { logMessage('離脱: 修復・設置の最中は機関を止めて漂えない', 'warning-msg'); return; }
-        if (boostT > 0) { boostT = 0; player._sysEngineTimer = Math.max(player._sysEngineTimer || 0, BOOST_OVERHEAT); }
+        if (boostT > 0) { boostT = 0; player._sysEngineTimer = Math.max(player._sysEngineTimer || 0, BOOST_OVERHEAT * PM.overheat); }
         playerCoasting = true;
         player._coastAng = player.angle;
         logMessage('離脱: 機関停止 — ' + Math.round(player.currentSpeed * 60) + 'u/sで方位' + compassDeg(player.angle) + '°へ漂う。推力の熱と音が消える (進路は変えられない・霧の中では航跡が残る)', 'system-msg');
@@ -9597,7 +9931,7 @@ function updatePointDefense() {
     for (const p of projectiles) {
         if (!p.active || p.type !== 'missile' || p._pdTried) continue;
         let def = null;
-        if (!p.isPlayer) { if (player && Math.hypot(player.x - p.x, player.y - p.y) < PD_RANGE) def = player; }
+        if (!p.isPlayer) { if (player && Math.hypot(player.x - p.x, player.y - p.y) < PM.pdRange) def = player; } // 第32弾: 迎撃管制
         else for (const e of enemies) { if (e.hp > 0 && !e._dying && e.type !== 'fighter' && Math.hypot(e.x - p.x, e.y - p.y) < PD_RANGE) { def = e; break; } }
         if (!def) continue;
         p._pdTried = true; // 機会は1回
@@ -9605,7 +9939,7 @@ function updatePointDefense() {
         if (!_pdReady(def, isP)) continue;
         const ang = Math.atan2(p.y - def.y, p.x - def.x);
         if (Math.abs(_angDiff(ang, def.angle)) > WEAPON_FIRE_ARC.kinetic) continue; // 射角の外 (真後ろ) からは撃てない
-        let ch = PD_BASE + (Math.abs(_angDiff(ang, def.angle)) < Math.PI / 6 ? PD_HEADON : 0);
+        let ch = PD_BASE + (Math.abs(_angDiff(ang, def.angle)) < Math.PI / 6 ? PD_HEADON : 0) + (def === player ? PM.pdBonus : 0);
         if (p.missileMode === 'smart') ch *= PD_SMART_MULT;
         if ((def._daze || 0) > 0) ch *= 0.5;
         _pdSpend(def, isP);
@@ -9623,7 +9957,7 @@ function updatePointDefense() {
 function updateEscape() {
     if (_flashScreen > 0) _flashScreen--;
     // 第26弾: リペアキットの修理 (自機/敵とも同じ量・時間)
-    if (player && player.hp > 0 && player._kitT > 0) { player._kitT -= gameSpeedFactor; player.hp = Math.min(player.maxHp, player.hp + REPAIR_KIT_HP / REPAIR_KIT_TIME * gameSpeedFactor); }
+    if (player && player.hp > 0 && player._kitT > 0) { player._kitT -= gameSpeedFactor; player.hp = Math.min(player.maxHp, player.hp + REPAIR_KIT_HP * PM.kit / REPAIR_KIT_TIME * gameSpeedFactor); }
     for (const e of enemies) if (e.hp > 0 && !e._dying && e._kitT > 0) { e._kitT -= gameSpeedFactor; e.hp = Math.min(e.maxHp, e.hp + REPAIR_KIT_HP / REPAIR_KIT_TIME * gameSpeedFactor); }
     if (boostCD > 0) boostCD = Math.max(0, boostCD - gameSpeedFactor);
     if (boostT > 0) {
@@ -9631,8 +9965,8 @@ function updateEscape() {
         if (boostT <= 0) {
             boostT = 0;
             if (player && player.hp > 0) {
-                player._sysEngineTimer = Math.max(player._sysEngineTimer || 0, BOOST_OVERHEAT);
-                logMessage('離脱: 噴射終了 — 機関過熱 ' + Math.round(BOOST_OVERHEAT / 60) + '秒 (最高速×' + SYS_ENGINE_SLOW + '・熱が漏れる)', 'warning-msg');
+                player._sysEngineTimer = Math.max(player._sysEngineTimer || 0, BOOST_OVERHEAT * PM.overheat);
+                logMessage('離脱: 噴射終了 — 機関過熱 ' + Math.round(BOOST_OVERHEAT * PM.overheat / 60) + '秒 (最高速×' + SYS_ENGINE_SLOW + '・熱が漏れる)', 'warning-msg');
             }
         }
     }
@@ -10535,7 +10869,7 @@ function rxLevels(includeOff) {
     const out = { heat: 0, optic: 0, em: 0, higgs: 0 };
     if (!player || player.hp <= 0) return out;
     const range = passiveRange();
-    const mask = 1 - playerSelfNoise() * 0.5; // 自艦ノイズに埋もれる
+    const mask = 1 - playerSelfNoise() * PM.noiseHear * 0.5; // 自艦ノイズに埋もれる (第32弾: 曳航アレイ)
     for (const e of enemies) {
         if (e.hp <= 0 || e._dying) continue;
         const dist = Math.hypot(e.x - player.x, e.y - player.y);
@@ -11726,7 +12060,7 @@ let _hitStop = 0; // 奇襲命中時のヒットストップ (ロジックだけ
 function gameLoop() {
     try {
         if (_hitStop > 0) _hitStop--;
-        else if (!gamePaused && !_orientPaused) {
+        else if (!gamePaused && !_orientPaused && !_draft) { // 第32弾: 部品を選んでいる間は止める
             // 第22弾: 倍速 = 1フレームにn回ロジックを進める。重くてフレームが詰まる時は打ち切る (固まらない)
             _speedAcc += gameSpeed;
             const t0 = performance.now();
@@ -11973,6 +12307,7 @@ function stepWorld() {
         updatePointDefense(); // 第28弾: 実弾でミサイルを迎撃
         updateLures();  // 第21弾: 囮
         updateFieldSignals(); updateSigZones(); // 第31弾: 自然/お宝の信号・監視網の円
+        updateParts(); // 第32弾: 部品 (機雷・囮発射機・照準波・自機COMの付け替え)
         updateHuntTension();
         updateDistressBeacon();
         interceptEnemyComms();
@@ -12163,6 +12498,7 @@ function renderWorld() {
         drawNoiseMakers(ctx);
         drawLures(ctx); // 第21弾
         drawFieldSignals(ctx); // 第31弾
+        drawMines(ctx); // 第32弾
         drawOwnOrdnanceMarkers(ctx);
         drawColonyIntel(ctx);
         if (player && (player.hp > 0 || player._dying > 0)) player.draw(ctx);
