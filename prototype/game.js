@@ -829,6 +829,8 @@ const RESUPPLY_R = 600, RESUPPLY_TIME = 480, COLONY_RESUPPLY_CD = 3600;
 // コロニーは奪い合い (自機/敵とも600u以内に8秒で占有・相手が裏返せば占有が減る)。同時に占有している数で敵の位置が分かる:
 //   1つ=方角(幅120°) / 2つ=+距離(幅5000u) / 3つ以上=方角の幅30°・距離の幅1000u。10秒ごとに更新 (中心は真の位置から幅の内でずれる)
 //   自分のノード1つごとに幅を10%狭める (最大40%)。ノードは聴音局のまま。難破船は一度だけ弾と資材を拾える。S&Dは全コロニーの占有で勝ち (奪われれば負け)
+// 第24弾 (オーナー選択「コロニーを増やす」): 接触が少ない対策。近くにコロニーがあれば早く占有でき、情報 (方角→距離) が早く効く。双方が同じ所を取り合うので出会いも増える
+const COLONY_COUNT = { br: 8, sd: 8 };
 const COLONY_INTEL_PERIOD = 600;
 const COLONY_INTEL = [null, { ang: Math.PI / 3, dist: null }, { ang: Math.PI / 3, dist: 2500 }, { ang: Math.PI / 12, dist: 500 }]; // 半幅
 const NODE_INTEL_BUFF = 0.10, NODE_INTEL_BUFF_MAX = 0.40;
@@ -5391,7 +5393,7 @@ function generateSector() {
     intelBearing = null;
     boss.intelPos = null;
     // S&Dモード: コロニーノードを多く配置 (ハック目標)
-    const colonyCount = gameState.mode === 'sd' ? 5 : 3;
+    const colonyCount = COLONY_COUNT[gameState.mode] || COLONY_COUNT.br; // 第24弾: 3/5 → 8/8 (接触を増やす)
     // 第21弾: ランドマークは半径24500u以内・6方向に順に割り振る・間隔あり (randomLandmarkSpot)。難破船も最初から海図に載る
     const _lmPlaced = [];
     let _so = _sectorOrder();
@@ -5455,7 +5457,7 @@ function generateSector() {
     const sdFill = document.getElementById('sd-progress-fill');
     const sdText = document.getElementById('sd-progress-text');
     if (sdFill) sdFill.style.width = '0%';
-    if (sdText) sdText.textContent = `コロニー: 0/${gameState.mode === 'sd' ? 5 : 3}`;
+    if (sdText) sdText.textContent = `コロニー: 0/${COLONY_COUNT[gameState.mode] || COLONY_COUNT.br}`;
 
     centerCameraOnPlayer();
 
