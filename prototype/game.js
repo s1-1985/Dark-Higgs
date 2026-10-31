@@ -10549,6 +10549,7 @@ function openReplay() {
     _rp = { i: matchRec.s.length - 1, play: false, spd: 4, cx, cy, half, acc: 0, last: 0 };
     _rpRenderEvents();
     _rpDraw();
+    _rpStartLoop();
 }
 function closeReplay() { const ov = document.getElementById('replay-overlay'); if (ov) ov.classList.add('hidden'); if (_rp) _rp.play = false; }
 function _rpFmt(t) { const s2 = Math.floor(t / 60); return Math.floor(s2 / 60) + ':' + String(s2 % 60).padStart(2, '0'); }
@@ -10633,16 +10634,20 @@ function _rpDraw() {
     if (lastK >= 0) { const el = box.querySelector('.rp-ev[data-k="' + lastK + '"]'); if (el) { el.classList.add('now'); if (_rp.play || _rp.follow !== false) el.scrollIntoView({ block: 'nearest' }); } }
 }
 function _rpLoop(ts) {
+    // 第30弾: 開いている間だけ回す (旧: ページ読み込み時に _rp=null で即終了し、再生が二度と進まなかった)
+    _rpLoopOn = false;
     if (!_rp) return;
     const ov = document.getElementById('replay-overlay');
     if (ov && !ov.classList.contains('hidden') && _rp.play) {
-        const dt = _rp.last ? Math.min(0.1, (ts - _rp.last) / 1000) : 0;
+        const dt = _rp.last ? Math.min(0.25, (ts - _rp.last) / 1000) : 0;
         _rp.acc += dt * _rp.spd; // 1サンプル=1秒 → 再生の速さ倍
         if (_rp.acc >= 1) { const n = Math.floor(_rp.acc); _rp.acc -= n; _rpSetIndex(_rp.i + n); if (_rp.i >= matchRec.s.length - 1) { _rp.play = false; document.getElementById('rp-play').textContent = '▶'; } }
     }
     _rp.last = ts;
-    requestAnimationFrame(_rpLoop);
+    if (ov && !ov.classList.contains('hidden')) { _rpLoopOn = true; requestAnimationFrame(_rpLoop); }
 }
+let _rpLoopOn = false;
+function _rpStartLoop() { if (_rpLoopOn) return; _rpLoopOn = true; if (_rp) _rp.last = 0; requestAnimationFrame(_rpLoop); }
 (() => {
     const ov = document.getElementById('replay-overlay'); if (!ov) return;
     document.getElementById('rp-close').addEventListener('click', closeReplay);
@@ -10652,7 +10657,7 @@ function _rpLoop(ts) {
     document.getElementById('rp-events').addEventListener('click', (ev) => { const d = ev.target.closest('.rp-ev'); if (!d || !_rp) return; const t = +d.dataset.t; let k = matchRec.s.findIndex(sm => sm.t >= t); if (k < 0) k = matchRec.s.length - 1; _rp.play = false; document.getElementById('rp-play').textContent = '▶'; _rpSetIndex(k); });
     document.getElementById('btn-replay-go')?.addEventListener('click', openReplay);
     document.getElementById('btn-replay-db')?.addEventListener('click', openReplay);
-    requestAnimationFrame(_rpLoop);
+    window.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !ov.classList.contains('hidden')) { closeReplay(); ev.stopPropagation(); } }, true);
 })();
 
 // 第22弾: 戦闘モードのバー (画面下)。ロック (完全/想定) している間だけ出す。COM対戦では自機COMの選択を表示 (押せない)

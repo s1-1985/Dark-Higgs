@@ -2481,7 +2481,7 @@ body.in-game.com-demo.think-on #think-panel.wide { max-height: 62%; }
 #loadout-overlay { z-index: 10060; } /* COM設定画面 (10050) の上に出す */
 
 /* 第22弾: 試合の記録 */
-#replay-overlay { position: fixed; inset: 0; z-index: 10070; background: rgba(0,4,3,0.92); display: flex; align-items: center; justify-content: center; }
+#replay-overlay { position: fixed; inset: 0; z-index: 10070; background: rgba(0,4,3,0.92); display: flex; align-items: center; justify-content: center; pointer-events: auto; }
 #replay-overlay.hidden { display: none !important; }
 .rp-box { width: min(980px, 96vw); height: min(560px, 94vh); display: flex; flex-direction: column; gap: 6px; border: 1px solid rgba(0,255,170,0.35); border-radius: 8px; background: #01100c; padding: 8px; }
 .rp-head { display: flex; align-items: center; gap: 10px; }
