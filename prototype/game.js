@@ -804,6 +804,9 @@ let noiseMakers = []; // {x, y, vx, vy, life, _wid}
 // 第21弾: 囮 {owner:'p'|'e', kind:'sos'|'ship', x,y, tx,ty, vx,vy, phase:'fly'|'on', life, sid, wid}
 const LURE_SOS_LIFE = 5400, LURE_SHIP_LIFE = 3600, LURE_FLY_SPEED = 12, LURE_SHIP_SPEED = 0.8, LURE_SIG = 0.55, LURE_REVEAL_R = 400;
 let lures = [], _lureSeq = 0, pendingLure = null;
+// 第31弾 (オーナー合意): 自然の信号・お宝の信号 {sid:'N-n', kind, x,y, b:{帯域:強さ}, life, age, on, flip, takeP, takeE}
+// 監視網の円 (シグネチャサークル) {side:'p'|'e', x,y, r, life, sid}
+let fieldSignals = [], _fieldSeq = 0, _fieldRespawn = [], sigZones = [];
 // 煙幕弾: 自艦の位置にヒッグス雲 (半径の半分までは濃さ一定・外側は線形に薄れる)。後半で薄れる
 const SMOKE_R = 900, SMOKE_DENS = 0.6, SMOKE_LIFE = 1800, SMOKE_FADE = 600; // 第22弾: 20→30秒 (最後の10秒で薄れる)
 const HIGGS_DRONE_R = 700, HIGGS_DRONE_DENS = 0.4; // ヒッグス散布ドローン (稼働中ずっと)
@@ -3504,11 +3507,11 @@ class Ship {
             // 第16弾: 敵が制圧したノードは敵の聴音局 (自機と対称)。ノードの近くで音を立てれば、敵は遠くからでも位置を掴む
             let _relayErr = -1;
             if (!playerSigDetected && this.type !== 'fighter' && player && player.hp > 0 && (_frameCount + this.uid) % 30 === 0) {
-                for (const n of resourceNodes) {
-                    if (n.owner !== 'enemy') continue;
+                for (const post of listeningPosts('enemy')) { // 第31弾: 敵のコロニーも聴音局 (8000u)
+                    const n = post.o, RR = post.R;
                     const dn = Math.hypot(player.x - n.x, player.y - n.y);
-                    if (dn > NODE_RELAY_RANGE) continue;
-                    const s = Math.max(player.heatSig || 0, player.emSig || 0, (player.opticalSig || 0) * 0.8) * (1 - dn / NODE_RELAY_RANGE) * (1 - getHiggsIntensity((player.x + n.x) / 2, (player.y + n.y) / 2) * 0.5);
+                    if (dn > RR) continue;
+                    const s = Math.max(player.heatSig || 0, player.emSig || 0, (player.opticalSig || 0) * 0.8) * (1 - dn / RR) * (1 - getHiggsIntensity((player.x + n.x) / 2, (player.y + n.y) / 2) * 0.5);
                     if (s > 0.12) { playerSigDetected = true; detectedSigStrength = Math.max(detectedSigStrength, s * 0.6); _relayErr = dn * 0.18 + 150; break; }
                 }
             }
@@ -4031,7 +4034,7 @@ class Ship {
                 const _pers = this.personality || { aggression: 0.5, stealth: 0.3, greed: 0.4, caution: 0.4 };
                 // 残り香(contactFreshness)がある間は獲物を追って徘徊。攻撃的=速い追跡 / 隠密=低速で忍び寄る(低シグネチャ)。
                 const _hasScent = this.playerLastKnownPos && this.contactFreshness > 0.04;
-                let _bcs = null;
+                let _bcs = null, _fpick = null;
                 // 司令部情報(開戦時の概位置)へ向かう哨戒中も、残り香を追う時と同じ忍び足の速度
                 const _stalking = _hasScent || !!this.intelPos || !!this._roam;
                 if (_hasScent) this._lastScentF = _frameCount;
@@ -4069,6 +4072,11 @@ class Ship {
                         this.setTarget(_bc.x, _bc.y);
                         if (this._roam !== 'beacon' && comDemo) comThinkEvent('e', '遭難信号 → 物資を取りに向かう (' + _dirTxt(this.x, this.y, _bc.x, _bc.y) + ')', 'e' + this.uid);
                         this._roam = 'beacon';
+                    } else if (this.type !== 'fighter' && !_hasScent && (_fpick = enemyFieldPick(this, _pers))) {
+                        // 第31弾: 聞こえた漂流コンテナ (と、たまに自然の信号) を見に行く — 動けば痕跡が残る
+                        this.setTarget(_fpick.x, _fpick.y);
+                        if (comDemo) comThinkEvent('e', (_fpick.kind === 'cache' ? '弱く平坦な信号 → 漂流コンテナと見て回収に向かう' : '信号を確かめに行く') + ' (' + _dirTxt(this.x, this.y, _fpick.x, _fpick.y) + ')', 'e' + this.uid);
+                        this._roam = 'cache';
                     } else if (this.type !== 'fighter' && !_hasScent && (this.lureSOS || 0) > 0 && (_pers.caution >= 0.5 || _pers.stealth >= 0.5) && _frameCount - (this._lastScentF || 0) > ENEMY_ROAM_QUIET * (1.4 - _pers.aggression) && Math.random() < 0.01) {
                         // 第21弾: 慎重・隠密な個体は偽SOSで誘い出し、その近くの霧に潜んで待ち伏せる (自機と同じ偽SOS)
                         this.lureSOS--;
@@ -5461,6 +5469,7 @@ function generateSector() {
     distressNextTimer = 4200 + Math.floor(Math.random() * 1800);
     isBottomed = false; nearMissActive = false; _commsInterceptCD = 0;
     lures = []; pendingLure = null; // 第21弾
+    generateFieldSignals(); sigZones = []; // 第31弾
     noiseMakers = []; smokeClouds = []; playerCoasting = false; boostT = 0; boostCD = 0; _flashScreen = 0; _xoEsc = null; // 第17弾
     huntStats = { startFrame: _frameCount, firstContact: -1, ambushes: 0, crits: 0, timesEngaged: 0, dmgDealt: 0, dmgTaken: 0, pings: 0 };
     matchRecStart(); // 第22弾: 試合の記録
@@ -6683,17 +6692,240 @@ function salvageDerelictByPlayer(st) {
     logMessage('SALVAGE: 難破船から回収 — ' + [gK ? '実弾+' + gK : '', gM ? 'ミサイル+' + gM : '', got ? '資材+' + got + '個' : ''].filter(Boolean).join('・'), 'system-msg');
     _hudCache.cargo = null; playSound('ui');
 }
+// ═══ 第31弾 (オーナー合意 2026-10-31): 自然の信号・お宝の信号・コロニーの聴音局・監視網の円 ═══
+// 信号の正体は 敵 / 囮 / 自然 / お宝 の4つ。見分け方は第23弾の識別と同じ (帯域の比・動き・探信の反響)。寄って見れば確定。
+// 自然 (12個): 霧のゆらぎ=霧の乱れ0.3〜0.5・霧の流れで漂い120秒で消えて別の所に出る / 嵐の放電=電磁波0.4〜0.6・3〜8秒ごとに明滅 / 熱泉=熱0.3〜0.4
+// お宝 (8個): 漂流コンテナ=全帯域とも弱い0.15〜0.25・止まっている。400u以内に3秒で回収 (今は弾と資材・部品は次の段階)。回収されると60秒後に別の所へ出る (実装で決めた値)
+const FIELD_NATURE_N = 12, FIELD_CACHE_N = 8, FIELD_SPREAD_R = 24500;
+const FIELD_KINDS = {
+    cloud: { lbl: '霧のゆらぎ', band: 'higgs', lo: 0.30, hi: 0.50, col: '80,200,255' },
+    storm: { lbl: '嵐の放電', band: 'em', lo: 0.40, hi: 0.60, col: '180,90,255' },
+    vent:  { lbl: '熱泉', band: 'heat', lo: 0.30, hi: 0.40, col: '255,130,50' },
+    cache: { lbl: '漂流コンテナ', band: null, lo: 0.15, hi: 0.25, col: '255,225,140' },
+};
+const CLOUD_LIFE = 7200, FIELD_FADE = 300, CACHE_R = 400, CACHE_TIME = 180, CACHE_RESPAWN = 3600, FIELD_IDENT_R = 2500;
+function _fieldSpot() {
+    for (let k = 0; k < 30; k++) {
+        const a = Math.random() * Math.PI * 2, r = 3000 + Math.sqrt(Math.random()) * (FIELD_SPREAD_R - 3000);
+        const x = MAP_CX + Math.cos(a) * r, y = MAP_CY + Math.sin(a) * r;
+        if (player && Math.hypot(x - player.x, y - player.y) < 2500) continue;
+        if (fieldSignals.some(f => Math.hypot(f.x - x, f.y - y) < 2000)) continue;
+        return { x, y };
+    }
+    const a = Math.random() * Math.PI * 2; return { x: MAP_CX + Math.cos(a) * 12000, y: MAP_CY + Math.sin(a) * 12000 };
+}
+function makeFieldSignal(kind) {
+    const k = FIELD_KINDS[kind], p = _fieldSpot(), str = k.lo + Math.random() * (k.hi - k.lo);
+    const b = { heat: 0.03, optic: 0.03, em: 0.03, higgs: 0.03 };
+    if (k.band) b[k.band] = str;
+    else { for (const x of BANDS) b[x] = str * (0.85 + Math.random() * 0.3); b.optic += 0.04; }
+    const id = ++_fieldSeq;
+    return { sid: 'N-' + id, kind, x: p.x, y: p.y, b, age: 0, life: kind === 'cloud' ? CLOUD_LIFE * (0.6 + Math.random() * 0.8) : Infinity,
+             on: true, flip: kind === 'storm' ? 180 + Math.random() * 300 : 0, takeP: 0, takeE: 0, ph: Math.random() * 6.28 };
+}
+function generateFieldSignals() {
+    fieldSignals = []; _fieldRespawn = [];
+    const kinds = ['cloud', 'storm', 'vent'];
+    for (let i = 0; i < FIELD_NATURE_N; i++) fieldSignals.push(makeFieldSignal(kinds[i % 3]));
+    for (let i = 0; i < FIELD_CACHE_N; i++) fieldSignals.push(makeFieldSignal('cache'));
+}
+// その帯域でその信号が出している強さ (出現と消える時は5秒でなめらかに)
+function fieldSig(f, band) {
+    if (!f.on) return 0;
+    const fade = Math.min(1, f.age / FIELD_FADE, f.life / FIELD_FADE);
+    return (f.b[band] || 0) * fade;
+}
+function fieldMaxSig(f) { let m = 0; for (const b of BANDS) m = Math.max(m, fieldSig(f, b)); return m; }
+// お宝の回収 (自艦): 空いている枠の分だけ 実弾1枠→ミサイル1枠→資材2個 (難破船と同じ)。何も積めなければ残す
+function collectCacheByPlayer(f) {
+    const free = () => (HOLD_CAP[gameState.shipType] || 0) - cargoStockSlots() - Math.ceil((cargo.mat || 0) / MAT_PER_SLOT);
+    let gK = 0, gM = 0;
+    if (free() >= 1) { cargo.ammoK += AMMO_PER_SLOT.kinetic; gK = AMMO_PER_SLOT.kinetic; }
+    if (free() >= 1) { cargo.ammoM += AMMO_PER_SLOT.missile; gM = AMMO_PER_SLOT.missile; }
+    const got = addMaterials(2);
+    if (!gK && !gM && !got) { f.takeP = -120; logMessage('SALVAGE: 漂流コンテナ — 積む場所がない (弾か資材を使ってから)', 'warning-msg'); return false; }
+    matchRecEvent('salvP', f.x, f.y, '自艦が漂流コンテナを回収');
+    logMessage('SALVAGE: 漂流コンテナを回収 — ' + [gK ? '実弾+' + gK : '', gM ? 'ミサイル+' + gM : '', got ? '資材+' + got + '個' : ''].filter(Boolean).join('・'), 'system-msg');
+    if (comDemo) comThinkEvent('p', '漂流コンテナを回収 (実弾' + cargo.ammoK + '・ミサイル' + cargo.ammoM + ')');
+    _hudCache.cargo = null; playSound('ui');
+    return true;
+}
+function collectCacheByEnemy(e, f) {
+    if (e.ammoK !== undefined) e.ammoK = Math.min(Math.max(e._fullK || 0, e.ammoK), e.ammoK + AMMO_PER_SLOT.kinetic);
+    if (e.ammoM !== undefined) e.ammoM = Math.min(Math.max(e._fullM || 0, e.ammoM), e.ammoM + AMMO_PER_SLOT.missile);
+    matchRecEvent('salvE', f.x, f.y, '敵が漂流コンテナを回収');
+    if (comDemo) comThinkEvent('e', '漂流コンテナを回収 (実弾' + e.ammoK + '・ミサイル' + e.ammoM + ')', 'e' + e.uid);
+}
+function _fieldGone(i, respawnKind) {
+    const f = fieldSignals[i];
+    fieldSignals.splice(i, 1);
+    _fieldRespawn.push({ kind: respawnKind || f.kind, at: _frameCount + (f.kind === 'cache' ? CACHE_RESPAWN : 0) });
+}
+function updateFieldSignals() {
+    for (let i = _fieldRespawn.length - 1; i >= 0; i--) if (_frameCount >= _fieldRespawn[i].at) { fieldSignals.push(makeFieldSignal(_fieldRespawn[i].kind)); _fieldRespawn.splice(i, 1); }
+    for (let i = fieldSignals.length - 1; i >= 0; i--) {
+        const f = fieldSignals[i];
+        f.age += gameSpeedFactor;
+        if (f.kind === 'cloud') {
+            f.x += higgsCurrent.x * 1.6 * gameSpeedFactor; f.y += higgsCurrent.y * 1.6 * gameSpeedFactor; // 霧の流れに乗って漂う (〜15u/s)
+            if ((f.life -= gameSpeedFactor) <= 0 || Math.hypot(f.x - MAP_CX, f.y - MAP_CY) > MAP_RADIUS - 1000) { _fieldGone(i); continue; }
+        } else if (f.kind === 'storm') {
+            if ((f.flip -= gameSpeedFactor) <= 0) { f.on = !f.on; f.flip = 180 + Math.random() * 300; } // 3〜8秒ごとに明滅
+        }
+        // 寄って見れば正体が分かる (有視界の内・2500u以内)
+        const id = _sigIdent[f.sid];
+        if (player && player.hp > 0 && !(id && id.sure) && Math.hypot(f.x - player.x, f.y - player.y) < FIELD_IDENT_R && inPlayerVision(f.x, f.y)) {
+            identSure(f.sid, false); _sigIdent[f.sid].lbl = FIELD_KINDS[f.kind].lbl;
+            if (_contactLabels[f.sid]) logMessage('SIGNAL: SIG-' + String(_contactLabels[f.sid]).padStart(2, '0') + ' は' + FIELD_KINDS[f.kind].lbl + (f.kind === 'cache' ? ' — 近くに留まれば回収できる' : ' — 艦ではない'), 'system-msg');
+        }
+        if (f.kind !== 'cache') continue;
+        // 回収 (400u以内に3秒。双方が居る間は進まない)
+        const pNear = player && player.hp > 0 && !player._dying && Math.hypot(f.x - player.x, f.y - player.y) < CACHE_R;
+        let eNear = null;
+        for (const e of enemies) if (e.hp > 0 && !e._dying && e.type !== 'fighter' && Math.hypot(f.x - e.x, f.y - e.y) < CACHE_R) { eNear = e; break; }
+        if (pNear && !eNear) {
+            f.takeP += gameSpeedFactor;
+            if (f.takeP >= CACHE_TIME) { if (collectCacheByPlayer(f)) { identSure(f.sid, false); _fieldGone(i); continue; } }
+        } else if (f.takeP > 0) f.takeP = Math.max(0, f.takeP - gameSpeedFactor * 2);
+        else if (f.takeP < 0) f.takeP = Math.min(0, f.takeP + gameSpeedFactor);
+        if (eNear && !pNear) {
+            f.takeE += gameSpeedFactor;
+            if (f.takeE >= CACHE_TIME) { collectCacheByEnemy(eNear, f); if (eNear._roam === 'cache') { eNear._roam = null; eNear.state = 'idle'; } _fieldGone(i); continue; }
+        } else f.takeE = Math.max(0, f.takeE - gameSpeedFactor * 2);
+    }
+}
+// 敵が聞いた自然/お宝の信号へ向かうか (信号ごとに一度だけ決める)。
+// 簡略: 敵はお宝 (帯域が平坦で止まっている) と自然の信号をおおよそ見分ける — お宝へは 30%+貪欲さ×60%、自然へは 12% (実装で決めた値)
+function enemyFieldPick(e, pers) {
+    const seen = e._fdSeen || (e._fdSeen = {});
+    let best = null, bd = Infinity;
+    for (const f of fieldSignals) {
+        if (seen[f.sid]) continue;
+        const d = Math.hypot(f.x - e.x, f.y - e.y);
+        const s = fieldMaxSig(f) * Math.max(0, 1 - d / ENEMY_PASSIVE_RANGE) * (1 - getHiggsIntensity((f.x + e.x) / 2, (f.y + e.y) / 2) * 0.3);
+        if (s < 0.08) continue;
+        seen[f.sid] = true;
+        const go = Math.random() < (f.kind === 'cache' ? 0.3 + (pers.greed || 0) * 0.6 : 0.12);
+        if (go && d < bd) { bd = d; best = f; }
+    }
+    return best;
+}
+// ── 監視網の円 (シグネチャサークル): 自分のノード/コロニーから4000u以内で、相手のいちばん強い帯域が0.45以上を3秒続けたら、
+//    10秒ごとに50%の確率で「半径1500uの円のどこか」(中心は真の位置から最大900uずれる)。20秒残る。自機/敵とも同じ
+const SIGZ_R = 4000, SIGZ_TH = 0.45, SIGZ_HOLD = 180, SIGZ_PERIOD = 600, SIGZ_P = 0.5, SIGZ_RAD = 1500, SIGZ_OFF = 900, SIGZ_LIFE = 1200;
+const COLONY_RELAY_RANGE = 8000;
+function listeningPosts(side) {
+    const out = [];
+    for (const n of resourceNodes) if (n.owner === side) out.push({ o: n, x: n.x, y: n.y, R: NODE_RELAY_RANGE, lbl: 'ノード' });
+    for (const st of structures) if (st.type === 'colony' && st.owner === side) out.push({ o: st, x: st.x, y: st.y, R: COLONY_RELAY_RANGE, lbl: 'コロニー' });
+    return out;
+}
+function _maxBandSig(t) { let m = 0; for (const b of BANDS) m = Math.max(m, sensorConfig[b].sig(t) || 0); return m; }
+function _sigZoneRoll(t, posts) {
+    const near = posts.some(p => Math.hypot(t.x - p.x, t.y - p.y) < SIGZ_R);
+    if (near && _maxBandSig(t) >= SIGZ_TH) t._szT = (t._szT || 0) + gameSpeedFactor; else t._szT = 0;
+    if (t._szT < SIGZ_HOLD || _frameCount - (t._szLast || -1e9) < SIGZ_PERIOD) return null;
+    t._szLast = _frameCount;
+    if (Math.random() >= SIGZ_P) return null;
+    const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * SIGZ_OFF;
+    return { x: t.x + Math.cos(a) * r, y: t.y + Math.sin(a) * r };
+}
+function updateSigZones() {
+    for (let i = sigZones.length - 1; i >= 0; i--) if ((sigZones[i].life -= gameSpeedFactor) <= 0) sigZones.splice(i, 1);
+    if (!player || player.hp <= 0) return;
+    // 自機の監視網 → 敵艦
+    const pp = listeningPosts('player');
+    for (const e of enemies) {
+        if (e.hp <= 0 || e._dying || e.type === 'fighter') continue;
+        const c = pp.length ? _sigZoneRoll(e, pp) : (e._szT = 0, null);
+        if (!c) continue;
+        const sid = enemySid(e);
+        if (!_contactLabels[sid]) _contactLabels[sid] = _contactLabelNext++;
+        sigZones.push({ side: 'p', x: c.x, y: c.y, r: SIGZ_RAD, life: SIGZ_LIFE, sid });
+        const deg = compassDeg(Math.atan2(c.y - player.y, c.x - player.x));
+        ringMarkBearing(deg, '#ff8ce0');
+        logMessage('監視網: SIG-' + String(_contactLabels[sid]).padStart(2, '0') + ' の強いシグネチャ — 方位' + deg + '° ' + Math.round(Math.hypot(c.x - player.x, c.y - player.y) / 100) * 100 + 'u の円のどこか', 'warning-msg');
+        matchRecEvent('zoneP', c.x, c.y, '監視網の円 (敵艦)');
+        if (comDemo) comThinkEvent('p', '監視網の円 SIG-' + String(_contactLabels[sid]).padStart(2, '0') + ' (' + _dirTxt(player.x, player.y, c.x, c.y) + ')');
+    }
+    // 敵の監視網 → 自艦 (敵には円が渡り、そこへ向かう。自艦には見えない)
+    const ep = listeningPosts('enemy');
+    const c = ep.length ? _sigZoneRoll(player, ep) : (player._szT = 0, null);
+    if (c) {
+        sigZones.push({ side: 'e', x: c.x, y: c.y, r: SIGZ_RAD, life: SIGZ_LIFE, sid: null });
+        matchRecEvent('zoneE', c.x, c.y, '敵の監視網の円 (自艦)');
+        for (const e of enemies) {
+            if (e.hp <= 0 || e._dying || e.type === 'fighter') continue;
+            if (e.inVision || (e.contactFreshness || 0) > 0.6) continue; // もっと良い手掛かりがある
+            e.playerLastKnownPos = { x: c.x, y: c.y, vx: 0, vy: 0 };
+            e.contactFreshness = Math.max(e.contactFreshness || 0, 0.6);
+            if (e.aiState === 'lurking' || e.aiState === 'gathering') { e.aiState = 'hunting'; e.huntTimer = 900; }
+            if (comDemo) comThinkEvent('e', '監視網の円 — 自機は ' + _dirTxt(e.x, e.y, c.x, c.y) + ' の半径1500uのどこか', 'e' + e.uid);
+        }
+    }
+}
+function drawSigZones(ctx) {
+    const inv = 1 / camera.zoom;
+    for (const z of sigZones) {
+        if (z.side !== 'p' && !higgsViewOff) continue;
+        const a = Math.min(1, z.life / 300) * (z.side === 'p' ? 1 : 0.5);
+        ctx.save();
+        ctx.globalAlpha = 0.06 * a; ctx.fillStyle = '#ff8ce0';
+        ctx.beginPath(); ctx.arc(z.x, z.y, z.r, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 0.7 * a; ctx.strokeStyle = '#ff8ce0'; ctx.lineWidth = 1.4 * inv;
+        ctx.setLineDash([4 * inv, 7 * inv]);
+        ctx.beginPath(); ctx.arc(z.x, z.y, z.r, 0, Math.PI * 2); ctx.stroke();
+        ctx.setLineDash([]);
+        if (z.sid) {
+            ctx.font = 'bold ' + Math.round(11 * inv) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.fillStyle = '#ff8ce0';
+            ctx.fillText('SIG-' + String(_contactLabels[z.sid] || '?').padStart(2, '0') + ' 監視網', z.x, z.y - z.r - 4 * inv);
+        }
+        ctx.restore();
+    }
+}
+// 自然/お宝の信号の実体 (有視界の内か、ヒッグス表示OFFの時だけ描く)
+function drawFieldSignals(ctx) {
+    const inv = 1 / camera.zoom, t = _frameCount / 60;
+    for (const f of fieldSignals) {
+        if (!higgsViewOff && !(player && inPlayerVision(f.x, f.y))) continue;
+        const k = FIELD_KINDS[f.kind], fade = Math.min(1, f.age / FIELD_FADE, f.life / FIELD_FADE);
+        ctx.save();
+        if (f.kind === 'cloud') {
+            ctx.fillStyle = '#50c8ff';
+            for (let j = 0; j < 4; j++) { const ang = f.ph + j * 1.6 + t * 0.1; ctx.globalAlpha = 0.07 * fade; ctx.beginPath(); ctx.arc(f.x + Math.cos(ang) * 160, f.y + Math.sin(ang) * 120, 260 + j * 40, 0, Math.PI * 2); ctx.fill(); }
+        } else if (f.kind === 'storm') {
+            ctx.strokeStyle = '#c08cff'; ctx.lineWidth = 2 * inv; ctx.globalAlpha = f.on ? 0.8 : 0.15;
+            ctx.beginPath(); ctx.arc(f.x, f.y, 120, 0, Math.PI * 2); ctx.stroke();
+            if (f.on) { ctx.beginPath(); let x = f.x, y = f.y; ctx.moveTo(x, y); for (let j = 0; j < 5; j++) { x += Math.cos(f.ph + j * 2.1 + t * 7) * 90; y += Math.sin(f.ph + j * 1.3 + t * 5) * 90; ctx.lineTo(x, y); } ctx.stroke(); }
+        } else if (f.kind === 'vent') {
+            ctx.fillStyle = '#ff8232'; ctx.globalAlpha = 0.18 + 0.1 * Math.sin(t * 2 + f.ph);
+            ctx.beginPath(); ctx.arc(f.x, f.y, 180, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = 0.6; ctx.beginPath(); ctx.arc(f.x, f.y, 50, 0, Math.PI * 2); ctx.fill();
+        } else {
+            const h = Math.max(40, 9 * inv);
+            ctx.globalAlpha = 0.9; ctx.strokeStyle = '#ffe18c'; ctx.lineWidth = 2 * inv;
+            ctx.strokeRect(f.x - h, f.y - h * 0.7, h * 2, h * 1.4);
+            ctx.beginPath(); ctx.moveTo(f.x - h, f.y); ctx.lineTo(f.x + h, f.y); ctx.stroke();
+            if (f.takeP > 0) { ctx.globalAlpha = 0.9; ctx.beginPath(); ctx.arc(f.x, f.y, CACHE_R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, f.takeP / CACHE_TIME)); ctx.stroke(); }
+            ctx.globalAlpha = 0.35; ctx.setLineDash([6 * inv, 8 * inv]); ctx.beginPath(); ctx.arc(f.x, f.y, CACHE_R, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+        }
+        ctx.globalAlpha = 0.85; ctx.fillStyle = k.cs || (k.cs = 'rgb(' + k.col + ')');
+        ctx.font = Math.round(10 * inv) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        ctx.fillText(k.lbl, f.x, f.y + Math.max(70, 14 * inv));
+        ctx.restore();
+    }
+}
 // 制圧したノード = 聴音局。周囲の機動する発信源の方位を送ってくる (観測点が増える = 交点が早く締まる)
 function relayListen() {
-    for (const n of resourceNodes) {
-        if (n.owner !== 'player') continue;
+    for (const post of listeningPosts('player')) { // 第31弾: 占有したコロニーも聴音局 (8000u)
+        const n = post.o, RR = post.R;
         for (const e of enemies) {
             if (e.hp <= 0 || e._dying || e.type === 'fighter') continue;
             const d = Math.hypot(e.x - n.x, e.y - n.y);
-            if (d > NODE_RELAY_RANGE) continue;
+            if (d > RR) continue;
             let s0 = 0;
             for (const b of BANDS) s0 = Math.max(s0, sensorConfig[b].sig(e) || 0);
-            const sig = s0 * (1 - d / NODE_RELAY_RANGE) * (1 - getHiggsIntensity((e.x + n.x) / 2, (e.y + n.y) / 2) * 0.5);
+            const sig = s0 * (1 - d / RR) * (1 - getHiggsIntensity((e.x + n.x) / 2, (e.y + n.y) / 2) * 0.5);
             if (sig < 0.12) continue;
             const conf = Math.min(1, (sig - 0.12) / 0.5);
             const sigma = (0.012 + 0.03 * (1 - conf)) * clutterErrMult(clutterCount(e.x, e.y, e)); // 第18弾: 混信
@@ -6702,13 +6934,13 @@ function relayListen() {
             if (!_contactLabels[sid]) _contactLabels[sid] = _contactLabelNext++;
             const sa = addBearingObs(sid, n.x, n.y, ang, sigma, sig, '120,210,255');
             if (sid === lockedSignalId) { solveFix(sa); applyTrackContact(e, sa); } else sa.dirty = true;
-            passiveBearings.push({ ox: n.x, oy: n.y, angle: ang, halfWidth: Math.max(0.02, sigma * 2), range: NODE_RELAY_RANGE, quality: conf,
+            passiveBearings.push({ ox: n.x, oy: n.y, angle: ang, halfWidth: Math.max(0.02, sigma * 2), range: RR, quality: conf,
                 color: '120,210,255', sensor: 'higgs', strength: sig, sensorLabel: '聴音局', bearingDeg: compassDeg(ang),
                 halfWidthDeg: Math.round(sigma * 360 / Math.PI), sourceId: sid, contactNo: _contactLabels[sid],
                 life: PASSIVE_BEARING_LIFE, maxLife: PASSIVE_BEARING_LIFE, relay: true });
             if (!n._heard || _frameCount - n._heard > 1800) {
                 n._heard = _frameCount;
-                logMessage(`聴音局: ノードが SIG-${String(_contactLabels[sid]).padStart(2, '0')} を捕捉 — 追跡すると推定に方位線が加わる`, 'system-msg');
+                logMessage(`聴音局: ${post.lbl}が SIG-${String(_contactLabels[sid]).padStart(2, '0')} を捕捉 — 追跡すると推定に方位線が加わる`, 'system-msg');
             }
         }
     }
@@ -6743,7 +6975,9 @@ const _sigIdent = {}; // sid → { L:対数オッズ(艦影), n:手掛かりの�
 function _identTruth(sid) {
     if (/^e-/.test(sid)) { const e = enemyBySid(sid); return !e ? null : e.type === 'fighter' ? 'small' : 'ship'; }
     const L = lures.find(l => l.sid === sid);
-    return L ? (L.noise ? 'noise' : 'lure') : null;
+    if (L) return L.noise ? 'noise' : 'lure';
+    const F = /^N-/.test(sid) ? fieldSignals.find(f => f.sid === sid) : null; // 第31弾
+    return F ? (F.kind === 'cache' ? 'cache' : 'nature') : null;
 }
 function _identAdd(id, mean, sd, w, why) {
     const v = (mean + _gauss() * sd) * w;
@@ -6757,7 +6991,8 @@ function identStep(sid, tracked, nBands, sa, wOverride) {
     if (id.sure) return;
     const w = wOverride !== undefined ? wOverride : (tracked ? 1 : 0.35);
     const ship = truth === 'ship';
-    if (nBands >= 2) _identAdd(id, ship ? 0.22 : truth === 'small' ? -0.08 : -0.16, 0.40, w, truth === 'small' ? null : '帯域が平坦');
+    if (nBands >= 2) _identAdd(id, ship ? 0.22 : truth === 'small' ? -0.08 : truth === 'nature' ? -0.2 : -0.16, 0.40, w, truth === 'small' ? null : '帯域が平坦');
+    else if (truth === 'nature' && sensorOrder.length >= 2) _identAdd(id, -0.3, 0.3, w, '1つの帯域だけ'); // 第31弾: 自然の信号は1つの帯域に偏る
     else _identAdd(id, ship ? 0.05 : -0.04, 0.2, w, null);
     if (sa && sa.motion && sa.motion.stable && _frameCount - id.motF > 300) {
         id.motF = _frameCount;
@@ -6765,7 +7000,7 @@ function identStep(sid, tracked, nBands, sa, wOverride) {
     }
     if (sa && sa.ping && sa.ping.f !== id.pingF && _frameCount - sa.ping.f < 180) {
         id.pingF = sa.ping.f;
-        _identAdd(id, ship ? 1.6 : truth === 'small' ? -1.2 : -1.6, 0.6, 1, '探信の反響が小さい');
+        _identAdd(id, ship ? 1.6 : truth === 'small' || truth === 'cache' ? -1.2 : -1.6, 0.6, 1, '探信の反響が小さい');
     }
 }
 function identSure(sid, isShip) { const id = _sigIdent[sid] || (_sigIdent[sid] = { L: 0, n: 0, why: {}, pingF: -1, motF: -1 }); id.L = isShip ? 6 : -6; id.n = 99; id.sure = true; }
@@ -6774,7 +7009,7 @@ function identInfo(sid) {
     const id = _sigIdent[sid];
     if (!id || id.n < IDENT_MIN_N) return { p: 0.5, txt: '不明', short: '不明', low: true, known: false };
     const p = 1 / (1 + Math.exp(-id.L));
-    if (id.sure) return { p, txt: p > 0.5 ? '艦影 (確認)' : '囮 (確認)', short: p > 0.5 ? '艦影' : '囮', low: p <= 0.5, known: true };
+    if (id.sure) return { p, txt: p > 0.5 ? '艦影 (確認)' : (id.lbl || '囮') + ' (確認)', short: p > 0.5 ? '艦影' : (id.lbl || '囮'), low: p <= 0.5, known: true };
     let why = '', wb = 0; for (const k in id.why) if (id.why[k] > wb) { wb = id.why[k]; why = k; }
     const pc = Math.round(p * 100);
     return { p, txt: '艦影' + pc + '%' + (p < IDENT_WARN_P && why ? ' (' + why + ')' : ''), short: '艦' + pc + '%', low: p < IDENT_WARN_P, known: true };
@@ -6861,11 +7096,25 @@ function checkPassiveDetection() {
         }
         if (best) allContacts.push({ x: L.x, y: L.y, sig: best.sig, band: best.band, nb, angle: Math.atan2(L.y - player.y, L.x - player.x), sourceId: L.sid, clN: 0 });
     }
+    // 第31弾: 自然の信号・お宝の信号も同じ物理で聴こえる (ONの帯域だけ方位が取れる)
+    for (const f of fieldSignals) {
+        const dist = Math.hypot(f.x - player.x, f.y - player.y);
+        if (dist >= range) continue;
+        const hPath = getHiggsIntensity((f.x + player.x) / 2, (f.y + player.y) / 2);
+        let best = null, bestQ = 0, nb = 0;
+        for (const b of sensorOrder) {
+            const sc = sensorConfig[b];
+            const sig = fieldSig(f, b) * (1 - dist / range) * (1 - hPath * sc.higgsMod) * (1 - noise * 0.5);
+            if (sig > sc.threshold * 0.5) nb++;
+            if (sig > sc.threshold * 0.5 && sig / sc.threshold > bestQ) { bestQ = sig / sc.threshold; best = { band: b, sig }; }
+        }
+        if (best) allContacts.push({ x: f.x, y: f.y, sig: best.sig, band: best.band, nb, angle: Math.atan2(f.y - player.y, f.x - player.x), sourceId: f.sid, clN: 0 });
+    }
     if (allContacts.length === 0) return;
 
-    // 強い順に最大3件 + 追跡中の信号
+    // 強い順に最大4件 + 追跡中の信号 (第31弾: 自然/お宝の信号が増えたので3→4)
     allContacts.sort((a, b) => b.sig - a.sig);
-    const picks = allContacts.slice(0, 3);
+    const picks = allContacts.slice(0, 4);
     if (lockedSignalId && !picks.some(c => c.sourceId === lockedSignalId)) {
         const _lc = allContacts.find(c => c.sourceId === lockedSignalId);
         if (_lc) picks.push(_lc);
@@ -7393,6 +7642,19 @@ function fireOmniSonar() {
         pingContact(e, acc, dist);
         detected++;
     });
+    // 第31弾: 嵐の放電・熱泉・漂流コンテナも小さく反響する (霧のゆらぎは反響しない)
+    for (const f of fieldSignals) {
+        if (f.kind === 'cloud') continue;
+        const dist = Math.hypot(f.x - player.x, f.y - player.y);
+        if (dist > omniRange) continue;
+        const acc = calcAccuracy(dist, omniRange, 0.6, getHiggsIntensity((f.x + player.x) / 2, (f.y + player.y) / 2));
+        const r = Math.max(120, (1 - acc) * 500 + dist * 0.02), a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * r * 0.5;
+        if (!_signalAnalysis[f.sid]) _signalAnalysis[f.sid] = _newSignalAnalysis();
+        const sa = _signalAnalysis[f.sid];
+        sa.ping = { x: f.x + Math.cos(a) * d, y: f.y + Math.sin(a) * d, r: r * 0.5, f: _frameCount };
+        if (!_contactLabels[f.sid]) _contactLabels[f.sid] = _contactLabelNext++;
+        solveFix(sa); identStep(f.sid, f.sid === lockedSignalId, 1, sa);
+    }
     omniSonarCooldown = 900;
     // 第15弾: 探信音は遠くまで届く — 反響が返る距離の2.2倍以内の敵は、こちらの位置をほぼ正確に掴む
     pingHeardBy(omniRange * 2.2, null, 0);
@@ -10268,7 +10530,8 @@ function passiveRange() {
 }
 // 帯域ごとの受信レベル(敵艦のみ)。0.5 = その帯域に同調すれば方位が取れる閾値、1.0 = 閾値の2倍。
 // 「どの帯域に何かが居るか」は常に分かるが、「どの方位か」は同調しないと分からない = じゃんけんの核
-function rxLevels() {
+// 第31弾 (オーナー): includeOff=true なら OFF の帯域も受信レベルだけは出す (左のバーが増減する)。方位はONの帯域でしか取れない
+function rxLevels(includeOff) {
     const out = { heat: 0, optic: 0, em: 0, higgs: 0 };
     if (!player || player.hp <= 0) return out;
     const range = passiveRange();
@@ -10280,9 +10543,19 @@ function rxLevels() {
         const hPath = getHiggsIntensity((e.x + player.x) / 2, (e.y + player.y) / 2);
         const da = 1 - dist / range;
         for (const b of BANDS) {
-            if (!sensorsOn[b]) continue; // 第21弾: OFFの帯域は聴いていない
+            if (!sensorsOn[b] && !includeOff) continue; // 第21弾: OFFの帯域は聴いていない (方位は取れない)
             const sc = sensorConfig[b];
             const lvl = sc.sig(e) * da * (1 - hPath * sc.higgsMod) * mask / sc.threshold;
+            if (lvl > out[b]) out[b] = lvl;
+        }
+    }
+    for (const f of fieldSignals) { // 第31弾: 自然/お宝の信号
+        const dist = Math.hypot(f.x - player.x, f.y - player.y);
+        if (dist >= range) continue;
+        const hPath = getHiggsIntensity((f.x + player.x) / 2, (f.y + player.y) / 2), da = 1 - dist / range;
+        for (const b of BANDS) {
+            if (!sensorsOn[b] && !includeOff) continue;
+            const sc = sensorConfig[b], lvl = fieldSig(f, b) * da * (1 - hPath * sc.higgsMod) * mask / sc.threshold;
             if (lvl > out[b]) out[b] = lvl;
         }
     }
@@ -10291,10 +10564,10 @@ function rxLevels() {
         const dist = Math.hypot(L.x - player.x, L.y - player.y);
         if (dist >= range) continue;
         const hPath = getHiggsIntensity((L.x + player.x) / 2, (L.y + player.y) / 2);
-        for (const b of BANDS) { if (!sensorsOn[b]) continue; const sc = sensorConfig[b]; const lvl = LURE_SIG * (1 - dist / range) * (1 - hPath * sc.higgsMod) * mask / sc.threshold; if (lvl > out[b]) out[b] = lvl; }
+        for (const b of BANDS) { if (!sensorsOn[b] && !includeOff) continue; const sc = sensorConfig[b]; const lvl = LURE_SIG * (1 - dist / range) * (1 - hPath * sc.higgsMod) * mask / sc.threshold; if (lvl > out[b]) out[b] = lvl; }
     }
     const readR = range * 0.55;
-    if (sensorsOn.higgs) for (const rb of wakeRibbons) {
+    if (sensorsOn.higgs || includeOff) for (const rb of wakeRibbons) {
         if (!rb.owner.startsWith('e-')) continue;
         const pts = rb.pts;
         for (let i = pts.length - 1; i >= 0; i -= 3) {
@@ -10553,7 +10826,7 @@ function openReplay() {
 }
 function closeReplay() { const ov = document.getElementById('replay-overlay'); if (ov) ov.classList.add('hidden'); if (_rp) _rp.play = false; }
 function _rpFmt(t) { const s2 = Math.floor(t / 60); return Math.floor(s2 / 60) + ':' + String(s2 % 60).padStart(2, '0'); }
-const _EV_COL = { fireP: '#5ff0ff', fireE: '#ffa040', hitP: '#ff5050', hitE: '#7dff9a', deathP: '#ff3030', killE: '#7dff9a', nodeP: '#50c8ff', nodeE: '#ff9a50', colonyP: '#50c8ff', colonyE: '#ff9a50', salvP: '#9fffc0', aiE: '#ffcf88', expoP: '#ff8080', lureP: '#c48bff', lureE: '#c48bff', flashP: '#ffffff', flashE: '#ffffff', smokeE: '#9fb8ff', shield: '#88ccff', clear: '#7dff9a', supplyP: '#9fffc0', escP: '#ffe08a' };
+const _EV_COL = { fireP: '#5ff0ff', fireE: '#ffa040', hitP: '#ff5050', hitE: '#7dff9a', deathP: '#ff3030', killE: '#7dff9a', nodeP: '#50c8ff', nodeE: '#ff9a50', colonyP: '#50c8ff', colonyE: '#ff9a50', salvP: '#9fffc0', aiE: '#ffcf88', expoP: '#ff8080', lureP: '#c48bff', lureE: '#c48bff', flashP: '#ffffff', flashE: '#ffffff', smokeE: '#9fb8ff', shield: '#88ccff', clear: '#7dff9a', supplyP: '#9fffc0', escP: '#ffe08a', salvE: '#ffcf88', zoneP: '#ff8ce0', zoneE: '#ff8ce0' };
 function _rpRenderEvents() {
     const box = document.getElementById('rp-events'); if (!box) return;
     box.innerHTML = '';
@@ -11208,6 +11481,12 @@ function xoEvaluate() {
         if (threatObs.kind === 'ping' && !silentRunning) return { tone: 'bad', text: dg + 'から敵の探信を受けた — 反響で位置が知れた。潜航し、霧の濃い所(50%以上)へ', act: { label: '潜航', fn: () => setStance('silent') } };
     }
     if (surgePhase === 'warn') return { tone: 'info', text: 'ヒッグスサージ接近 — 通過中は互いに盲目。動けば航跡が濃く残る' };
+    // 第31弾: 監視網の円 (自分のノード/コロニーの近くで強いシグネチャ)
+    { let z = null; for (const q of sigZones) if (q.side === 'p' && (!z || q.life > z.life)) z = q;
+      if (z) return { tone: 'go', text: '監視網の円 SIG-' + String(_contactLabels[z.sid] || '?').padStart(2, '0') + ' (方位' + compassDeg(Math.atan2(z.y - player.y, z.x - player.x)) + '° ' + Math.round(Math.hypot(z.x - player.x, z.y - player.y) / 100) * 100 + 'u) — 円の中のどこかで強いシグネチャ' }; }
+    // 第31弾 (オーナー): OFFの帯域に反応 → ONにすれば方位が取れる
+    { const rxa = rxLevels(true); let ob = null; for (const b of BANDS) if (!sensorsOn[b] && rxa[b] >= 0.5 && (!ob || rxa[b] > rxa[ob])) ob = b;
+      if (ob) return { tone: 'info', text: 'OFFの' + (BAND_JP[ob] || ob) + '帯に反応 — ONにすれば方位が取れる (2本目以降は自艦も漏れる)' }; }
     // 9) 第20弾: 手掛かりが無い → 情報の取れる所を勧める (司令部情報は撤去)
     const src = xoInfoSource();
     if (src) {
@@ -11229,10 +11508,14 @@ function xoEvaluate() {
 // 第20弾: 手掛かりが無い時に情報の取れる所 — 遭難信号 (敵も来る) / 未ハックのコロニー (敵艦の方位線が1本入る) / 自分のものでないノード (聴音局)
 function xoInfoSource() {
     if (!player) return null;
+    // 第31弾: 監視網の円 (新しいもの) — その円の中のどこかで強いシグネチャ
+    { let z = null; for (const q of sigZones) if (q.side === 'p' && (!z || q.life > z.life)) z = q;
+      if (z) { const d = Math.hypot(z.x - player.x, z.y - player.y); if (d > z.r) return { x: z.x, y: z.y, d, why: '監視網の円 — 強いシグネチャがこの円のどこか。寄って聴け' }; } }
     // 記録に残っている敵の方位線 (コロニー・聴音局・以前の自艦の観測。90秒以内) → 推定位置か、線上の観測点から10000u先へ寄って自艦で聴く
     let lastO = null, lastSa = null;
     for (const sid in _signalAnalysis) {
-        if (!/^e-/.test(sid)) continue;
+        // 第31弾: 内部IDで艦を選ばない (旧: 'e-' で敵艦の記録だけを選んでいた)。正体が艦でないと分かった信号は除く
+        const _id = _sigIdent[sid]; if (_id && _id.sure && _id.L < 0) continue;
         const sa = _signalAnalysis[sid], o = sa.obs[sa.obs.length - 1];
         if (o && _frameCount - o.f < TMA_KEEP && (!lastO || o.f > lastO.f)) { lastO = o; lastSa = sa; }
     }
@@ -11240,8 +11523,12 @@ function xoInfoSource() {
         const est = lastSa.fix ? trackEstimate(lastSa, 0) : null;
         const p = est ? { x: est.x, y: est.y } : clampToMapCircle(lastO.ox + Math.cos(lastO.ang) * 10000, lastO.oy + Math.sin(lastO.ang) * 10000, 1500);
         const d = Math.hypot(p.x - player.x, p.y - player.y);
-        if (d > 1500) return { x: p.x, y: p.y, d, why: '記録の方位線 (' + Math.round((_frameCount - lastO.f) / 60) + '秒前) — 敵艦は' + (est ? '推定位置' : '方位' + compassDeg(lastO.ang) + '°の線上') + '。寄って自艦で聴け' };
+        if (d > 1500) return { x: p.x, y: p.y, d, why: '記録の方位線 (' + Math.round((_frameCount - lastO.f) / 60) + '秒前) — 信号は' + (est ? '推定位置' : '方位' + compassDeg(lastO.ang) + '°の線上') + '。寄って自艦で聴け' };
     }
+    // 第31弾: 正体を確かめた漂流コンテナ (回収すれば弾・資材)
+    { let bc = null, bdc = Infinity;
+      for (const f of fieldSignals) { if (f.kind !== 'cache' || !(_sigIdent[f.sid] && _sigIdent[f.sid].sure)) continue; const d = Math.hypot(f.x - player.x, f.y - player.y); if (d < bdc) { bdc = d; bc = f; } }
+      if (bc && bdc > CACHE_R) return { x: bc.x, y: bc.y, d: bdc, why: '漂流コンテナ — 400u以内に3秒で回収 (弾・資材)' }; }
     // 遭難信号: 消える前に着けるなら (信号は60秒)
     for (const bc of beaconsFor('p')) { // 第21弾: 敵の偽SOSも見分けはつかない
         const d = Math.hypot(bc.x - player.x, bc.y - player.y);
@@ -11284,7 +11571,7 @@ function updateTacStrip() {
     if (!player) return;
     // 4帯域ミキサー: 太=受信レベル (0.5の刻み=同調すれば方位が取れる) / 細=自艦の放射
     // 自艦側は「受信機の半分の距離にいる敵が、その帯域で方位を取れるか」を同じ0.5基準で表す (対称)
-    const rx = rxLevels();
+    const rx = rxLevels(true); // 第31弾: OFFの帯域もバーは動く
     const nz = Math.round(playerSelfNoise() * 50); // 自艦ノイズ: 受信バーの底から最大で刻み(50%)まで
     for (const b of BANDS) {
         let el = _bandEls[b];
@@ -11685,6 +11972,7 @@ function stepWorld() {
         updateEscape(); // 第17弾: ノイズメーカー・煙幕・噴射
         updatePointDefense(); // 第28弾: 実弾でミサイルを迎撃
         updateLures();  // 第21弾: 囮
+        updateFieldSignals(); updateSigZones(); // 第31弾: 自然/お宝の信号・監視網の円
         updateHuntTension();
         updateDistressBeacon();
         interceptEnemyComms();
@@ -11874,6 +12162,7 @@ function renderWorld() {
         projectiles.forEach(p => { if (p.isPlayer) p.draw(ctx); });
         drawNoiseMakers(ctx);
         drawLures(ctx); // 第21弾
+        drawFieldSignals(ctx); // 第31弾
         drawOwnOrdnanceMarkers(ctx);
         drawColonyIntel(ctx);
         if (player && (player.hp > 0 || player._dying > 0)) player.draw(ctx);
@@ -11934,7 +12223,7 @@ function renderWorld() {
         // ── パッシブ方位ウェッジ (ワールド空間・三角測量用) ──
         if (player && player.hp > 0) drawPassiveBearings(ctx);
         // §4-4: 三角測量精度円描画 (手動TRIボタンで実行した結果を表示)
-        if (player && player.hp > 0) drawTriangulationCircle(ctx);
+        if (player && player.hp > 0) { drawTriangulationCircle(ctx); drawSigZones(ctx); }
         if (player && player.hp > 0) drawWeaponRange(ctx); // 第20弾: 今の兵装の射程 (霧の上)
 
         ctx.restore();
