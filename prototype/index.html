@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261030a">
+    <link rel="stylesheet" href="style.css?v=20261031a">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -43,7 +43,7 @@
                     <span class="hud-hp-track"><span id="hud-hp-fill"></span></span>
                     <span id="hud-hp-text">100%</span>
                 </div>
-                <span id="hud-expo" class="expo-0" title="被探知状態 (敵があなたをどれだけ掴んでいるか)"><i></i><b id="hud-expo-text">隠密</b></span>
+                <span id="hud-expo" class="expo-0" title="脅威の兆候 (観測できたものだけ): 静穏 / 受信=信号を受けた / 照射=探信・照準波を受けた / 攻撃=被弾・ミサイル・ビームのチャージ"><i></i><b id="hud-expo-text">静穏</b></span>
                 <div id="xo-bar" class="xo-idle">
                     <span id="xo-dot"></span>
                     <span id="xo-label">副長</span>
@@ -290,19 +290,19 @@
                 <div class="isel-section" id="engine-isel-section">
                     <span class="isel-label">ENGINE</span>
                     <div class="isel-group" id="engine-icon-group">
-                        <button class="isel-btn active" data-val="thermonuclear" title="熱核エンジン — 高出力・熱源大">
+                        <button class="isel-btn active" data-val="thermonuclear" title="熱核エンジン — 推進の信号は熱">
                             <i class="ico" style="--ico:url(assets/icons/icon_eng_thr.png)"></i>
                             <span>THR</span>
                         </button>
-                        <button class="isel-btn" data-val="pulse" title="パルスエンジン — EM高・機動性重視">
+                        <button class="isel-btn" data-val="pulse" title="パルスエンジン — 推進の信号はEM">
                             <i class="ico" style="--ico:url(assets/icons/icon_eng_pls.png)"></i>
                             <span>PLS</span>
                         </button>
-                        <button class="isel-btn" data-val="higgs" title="ヒッグスエンジン — 低シグネチャ・隠密">
+                        <button class="isel-btn" data-val="higgs" title="ヒッグスエンジン — 推進の信号は霧の乱れ (航跡)・遅め">
                             <i class="ico" style="--ico:url(assets/icons/icon_eng_hgs.png)"></i>
                             <span>HGS</span>
                         </button>
-                        <button class="isel-btn" data-val="photon" title="フォトンエンジン — 光学大・EM低">
+                        <button class="isel-btn" data-val="photon" title="フォトンエンジン — 推進の信号は光・最速">
                             <i class="ico" style="--ico:url(assets/icons/icon_eng_pht.png)"></i>
                             <span>PHT</span>
                         </button>
@@ -688,7 +688,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261030a"></script>
+    <script src="game.js?v=20261031a"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
