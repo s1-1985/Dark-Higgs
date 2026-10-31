@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261031b">
+    <link rel="stylesheet" href="style.css?v=20261031c">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -268,6 +268,7 @@
             </div>
             <!-- 第16弾: ズームボタン (ピンチ・ホイールに加えて。追従中は自艦中心で拡大縮小) -->
             <div id="zoom-ctl">
+                <button id="btn-speed-fixed" title="倍速 — 1x→2x→4x→8x→0.5x (1フレームにn回進める・シグネチャは変わらない)">1x</button>
                 <button id="btn-density" onclick="toggleDensityView()" title="濃度表示 — 全マップの霧の濃さと地形 (岩礁・嵐・熱雲) を重ねる。OFFの時は自艦の周り3000uだけ (H)"><i class="ico" style="--ico:url(assets/icons/icon_density.png)"></i></button>
                 <button id="zoom-in" onclick="zoomStep(1.6)" title="拡大 (+)">＋</button>
                 <button id="zoom-out" onclick="zoomStep(1 / 1.6)" title="縮小 (−)">－</button>
@@ -360,7 +361,7 @@
             <div id="dock-prompt">
                 <div class="prompt-content">
                     <div class="pulse-icon"></div>
-                    <span>補給ステーションの通信圏内です</span>
+                    <span>占有したコロニーの通信圏内です (改修・積み込み計画)</span>
                     <button class="btn btn-primary" id="btn-dock">ドッキング開始</button>
                 </div>
             </div>
@@ -688,7 +689,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261031b"></script>
+    <script src="game.js?v=20261031c"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {

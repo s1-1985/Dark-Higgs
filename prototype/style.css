@@ -2508,3 +2508,6 @@ body.in-game.com-demo.think-on #think-panel.wide { max-height: 62%; }
     .com-box .brief-lead { display: none; }
     .com-box { padding-top: 10px; padding-bottom: 6px; }
 }
+/* 第25弾: 倍速ボタンを画面端 (ズームの上) に常時表示 */
+body.in-game #zoom-ctl #btn-speed-fixed { font-size: 12px; font-weight: bold; font-family: Orbitron, sans-serif; }
+body.in-game #zoom-ctl #btn-speed-fixed.on { background: rgba(80,60,0,0.85); color: #ffe08a; border-color: #ffcc55; }
