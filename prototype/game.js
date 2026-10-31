@@ -1985,7 +1985,8 @@ class Structure {
         const _lColor = this.type === 'colony' ? (this.hacked ? '#00ffcc' : this.owner === 'enemy' ? '#ff9955' : '#6699ff') : (this.salvaged ? '#00ffcc' : '#bb9966');
         // 第18弾: 引いた時は短い名前だけ・アイコンのすぐ上に (旧: 長い説明文を画面上60px上に大きく出していた)
         const _far = camera.zoom < LABEL_FAR_ZOOM;
-        const _lText  = this.type === 'colony' ? (this.hacked ? (_far ? '自コロニー' : (this._usedP ? 'コロニー (占有・補給済み)' : 'コロニー (占有・補給1回)')) : this.owner === 'enemy' ? (_far ? '敵コロニー' : 'コロニー (敵が占有 — 留まって奪う)') : (_far ? 'コロニー' : 'コロニー — 近くに留まって占有')) : (this.salvaged ? '難破船 (回収済)' : (_far ? '難破船' : '難破船 — 近くで弾と資材を回収'));
+        // 第28弾: 説明書きは消して名前だけ (オーナー)
+        const _lText  = this.type === 'colony' ? (this.hacked ? (this._usedP ? '自コロニー (補給済)' : '自コロニー') : this.owner === 'enemy' ? '敵コロニー' : 'コロニー') : (this.salvaged ? '難破船 (回収済)' : '難破船');
         const _iconPx = Math.max(this.radius * 2.6 * camera.zoom, STRUCT_MIN_PX);
         ctx.fillStyle = _lColor;
         ctx.font = 'bold ' + Math.round(_far ? 9 : 11) / camera.zoom + 'px Orbitron, monospace';
@@ -5021,6 +5022,14 @@ function updateDrawEffects(ctx) {
             ctx.restore();
             ctx.globalAlpha = 1;
             if (ef.life <= 0) effects.splice(i, 1);
+        } else if (ef.type === 'pdtracer') {
+            // 第28弾: 実弾の迎撃の曳光 (艦→ミサイル)
+            ef.life -= 1;
+            if (ef.life <= 0) { effects.splice(i, 1); continue; }
+            ctx.globalAlpha = ef.life / 10; ctx.strokeStyle = ef.c; ctx.lineWidth = 2 / camera.zoom;
+            ctx.setLineDash([10 / camera.zoom, 14 / camera.zoom]);
+            ctx.beginPath(); ctx.moveTo(ef.x, ef.y); ctx.lineTo(ef.x2, ef.y2); ctx.stroke();
+            ctx.setLineDash([]); ctx.globalAlpha = 1;
         } else if (ef.type === 'beam') {
             continue; // 第22弾: ビームは霧の上に描く (updateDrawBeams)。旧: 霧の下で、視界の外のビームは見えなかった
         } else if (ef.type === 'sonar' || ef.type === 'sonar-fill' || ef.type === 'sonar-boundary') {
@@ -7033,9 +7042,7 @@ function _drawEstCircle(ctx, sid, sa, locked) {
         const fs = Math.round(11 * inv), idn = identInfo(sid);
         ctx.font = 'bold ' + fs + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
         ctx.globalAlpha = 0.9 * fade; ctx.fillStyle = col;
-        ctx.fillText('SIG-' + String(_contactLabels[sid] || '?').padStart(2, '0') + ' はこの円のどこか', cx, cy - R - 4 * inv);
-        ctx.font = Math.round(10 * inv) + 'px sans-serif'; ctx.textBaseline = 'top';
-        ctx.fillText('±' + Math.round(R / 100) * 100 + 'u・' + idn.txt, cx, cy - R + 4 * inv);
+        ctx.fillText('SIG-' + String(_contactLabels[sid] || '?').padStart(2, '0') + (idn.known ? ' ' + idn.short : ''), cx, cy - R - 4 * inv); // 第28弾: 説明書きは消す (オーナー)
     }
     if (!locked) { ctx.restore(); return; }
     ctx.globalAlpha = 0.85;
@@ -9275,6 +9282,56 @@ function useBoost() {
     logMessage('離脱: 緊急噴射 — ' + Math.round(BOOST_DUR / 60) + '秒間 速度×' + BOOST_MULT + '。熱が最大になり、終わると機関が' + Math.round(BOOST_OVERHEAT / 60) + '秒過熱する', 'warning-msg');
     _updateEscapeBtns();
 }
+// ═══ 第28弾 (オーナー指示): 実弾を選んでいる時、飛んでくるミサイルを確率で撃ち落とす (自機/敵とも同じ) ═══
+// 撃ち落としすぎないための要素 (実装で決めた値): ミサイル1発につき機会は1回だけ (450u以内に入った時) / 射角(±150°)の内だけ /
+// 弾倉から2斉射ぶん使う (弾も減る・リロード中や弾切れは撃てない) / 撃った瞬間は砲口の閃光で位置が見える / 0.5秒は艦への射撃ができない /
+// 確率 = 25% (正面±30°から来るミサイルは+10%) × AI誘導ミサイルは0.6 × センサー撹乱中は0.5
+const PD_RANGE = 450, PD_BASE = 0.25, PD_HEADON = 0.10, PD_SMART_MULT = 0.6, PD_COST = 2, PD_COOLDOWN = 30;
+function _pdReady(s, isPlayer) {
+    if (!s || s.hp <= 0 || s._dying || (s._weaponJamTimer || 0) > 0) return false;
+    if (isPlayer) return currentWeapon() === 'kinetic' && !s.kineticReloading && s.kineticAmmo > 0 && cargo.ammoK > 0;
+    return s.type !== 'fighter' && s.weaponType === 'kinetic' && !(s._kReload > 0) && (s._kMag ?? KINETIC_MAG) > 0 && (s.ammoK ?? 1) > 0;
+}
+function _pdSpend(s, isPlayer) {
+    if (isPlayer) {
+        const n = Math.min(PD_COST, s.kineticAmmo, cargo.ammoK);
+        s.kineticAmmo -= n; cargo.ammoK -= n; _hudCache.cargo = null;
+        if (s.kineticAmmo <= 0 && cargo.ammoK > 0) { s.kineticReloading = true; s.kineticReloadTimer = KINETIC_RELOAD_TIME; }
+    } else {
+        const n = Math.min(PD_COST, s._kMag ?? KINETIC_MAG, s.ammoK ?? PD_COST);
+        s._kMag = (s._kMag ?? KINETIC_MAG) - n; if (s.ammoK !== undefined) s.ammoK -= n;
+        if (s._kMag <= 0) s._kReload = KINETIC_RELOAD_TIME;
+    }
+    s.fireCooldown = Math.max(s.fireCooldown || 0, PD_COOLDOWN);
+    s.fireFlashTimer = Math.max(s.fireFlashTimer || 0, 40); // 砲口の閃光 (光学で見える)
+}
+function updatePointDefense() {
+    for (const p of projectiles) {
+        if (!p.active || p.type !== 'missile' || p._pdTried) continue;
+        let def = null;
+        if (!p.isPlayer) { if (player && Math.hypot(player.x - p.x, player.y - p.y) < PD_RANGE) def = player; }
+        else for (const e of enemies) { if (e.hp > 0 && !e._dying && e.type !== 'fighter' && Math.hypot(e.x - p.x, e.y - p.y) < PD_RANGE) { def = e; break; } }
+        if (!def) continue;
+        p._pdTried = true; // 機会は1回
+        const isP = def === player;
+        if (!_pdReady(def, isP)) continue;
+        const ang = Math.atan2(p.y - def.y, p.x - def.x);
+        if (Math.abs(_angDiff(ang, def.angle)) > WEAPON_FIRE_ARC.kinetic) continue; // 射角の外 (真後ろ) からは撃てない
+        let ch = PD_BASE + (Math.abs(_angDiff(ang, def.angle)) < Math.PI / 6 ? PD_HEADON : 0);
+        if (p.missileMode === 'smart') ch *= PD_SMART_MULT;
+        if ((def._daze || 0) > 0) ch *= 0.5;
+        _pdSpend(def, isP);
+        effects.push({ x: def.x, y: def.y, x2: p.x, y2: p.y, a: 0.9, c: isP ? '#ffe08a' : '#ff9a50', type: 'pdtracer', life: 10 });
+        if (Math.random() < ch) {
+            p.active = false;
+            createExplosion(p.x, p.y, '#ffcc66', 8);
+            matchRecEvent(isP ? 'pdP' : 'pdE', p.x, p.y, (isP ? '自艦' : '敵') + 'が実弾でミサイルを撃ち落とした');
+            if (isP) logMessage('迎撃: 実弾でミサイルを撃ち落とした (見込み' + Math.round(ch * 100) + '%)', 'system-msg');
+            else if (def.inVision || def.contactLife > 0) logMessage('迎撃: 敵艦がミサイルを撃ち落とした', 'warning-msg');
+            if (comDemo) comThinkEvent(isP ? 'p' : 'e', '迎撃成功 — 実弾でミサイルを撃ち落とす (見込み' + Math.round(ch * 100) + '%)', isP ? undefined : 'e' + def.uid);
+        } else if (isP) logMessage('迎撃: 実弾で撃ったが外れた (見込み' + Math.round(ch * 100) + '%)', 'warning-msg');
+    }
+}
 function updateEscape() {
     if (_flashScreen > 0) _flashScreen--;
     // 第26弾: リペアキットの修理 (自機/敵とも同じ量・時間)
@@ -9843,24 +9900,7 @@ function drawColonyIntel(ctx) {
     ctx.globalAlpha = 0.55;
     ctx.strokeStyle = '#7fc8ff'; ctx.lineWidth = 1.5 / camera.zoom;
     ctx.setLineDash([12 / camera.zoom, 8 / camera.zoom]); ctx.stroke(); ctx.setLineDash([]);
-    // 第25弾 (オーナー指摘「意味が分かりづらい」): 「敵はこの範囲のどこか」と、何から分かったか (占有数と精度) を2行で
-    {
-        const lr = it.dist || Math.min(r1, 9000);
-        const lx = ic ? ic.x : it.ox + Math.cos(it.ang) * lr, ly = ic ? ic.y - ic.r * 0.55 : it.oy + Math.sin(it.ang) * lr;
-        const fs = 13 / camera.zoom;
-        const l2 = 'コロニー' + it.n + 'つ占有 → ' + (ic ? '半径' + Math.round(ic.r / 100) * 100 + 'u' : '方角±' + Math.round(it.aHW * 180 / Math.PI) + '°・距離は不明 (2つで分かる)') + ' / ' + Math.max(0, Math.ceil((COLONY_INTEL_PERIOD - (_frameCount - it.f)) / 60)) + '秒で更新';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.font = (fs * 0.8) + 'px sans-serif';
-        const bw = Math.max(ctx.measureText(l2).width, fs * 10) + fs;
-        ctx.globalAlpha = 0.72; ctx.fillStyle = '#04121c'; // 地図の上でも読めるように下地
-        ctx.fillRect(lx - bw / 2, ly - fs * 1.45, bw, fs * 2.8);
-        ctx.globalAlpha = 0.95; ctx.fillStyle = '#d8f0ff';
-        ctx.font = 'bold ' + fs + 'px sans-serif';
-        ctx.fillText(ic ? '敵はこの円の中のどこか' : '敵はこの範囲のどこか', lx, ly - fs * 0.7);
-        ctx.globalAlpha = 0.85; ctx.fillStyle = '#9fd0f0';
-        ctx.font = (fs * 0.8) + 'px sans-serif';
-        ctx.fillText(l2, lx, ly + fs * 0.6);
-    }
+    // 第28弾 (オーナー): 説明書きは消す (旧 第25弾の2行のラベル)
     ctx.restore();
 }
 function drawOwnOrdnanceMarkers(ctx) {
@@ -11612,6 +11652,7 @@ function stepWorld() {
         updatePlayerDrones();
         updateCargo();
         updateEscape(); // 第17弾: ノイズメーカー・煙幕・噴射
+        updatePointDefense(); // 第28弾: 実弾でミサイルを迎撃
         updateLures();  // 第21弾: 囮
         updateHuntTension();
         updateDistressBeacon();
