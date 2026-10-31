@@ -2499,3 +2499,12 @@ body.in-game.com-demo.think-on #think-panel.wide { max-height: 62%; }
 .rp-ctl { display: flex; align-items: center; gap: 8px; }
 .rp-ctl input { flex: 1; }
 .rp-ctl button { min-width: 44px; background: rgba(0,255,170,0.12); color: #00ffaa; border: 1px solid #00ffaa; border-radius: 4px; padding: 4px 8px; cursor: pointer; }
+
+/* 第23弾: メニューが低い画面で見切れていた → 枠の中でスクロール */
+.mm-box { max-height: 92vh; overflow-y: auto; }
+/* 第23弾: COM対戦の設定画面 — 低い画面でも「戻る/開始」が見切れない (下に固定・説明文は隠す) */
+.com-box .db-btns { position: sticky; bottom: -1px; background: inherit; background-color: #050b10; padding-top: 6px; z-index: 2; }
+@media (max-height: 430px) {
+    .com-box .brief-lead { display: none; }
+    .com-box { padding-top: 10px; padding-bottom: 6px; }
+}

@@ -140,6 +140,15 @@ const ENGINE_TYPES = {
     higgs:         { speedMult: 0.85, heatMult: 0.08, optMult: 0.1,  emMult: 0.2,  higgsSpeedBonus: 0.6 },
     photon:        { speedMult: 1.4,  heatMult: 0.0,  optMult: 3.0,  emMult: 0.2,  higgsSpeedBonus: 0.0 }
 };
+// 第23弾 (オーナー合意): 推進から出る信号はエンジンごとに主な1種類 (他はわずか)。熱核=熱 / パルス=EM / ヒッグス=航跡(霧の乱れ) / フォトン=光
+// (旧: heatMult などの倍率が混ざり、ヒッグスエンジンでもEMや熱が目立っていた)。演算のEM (センサー・AIへの配分) はエンジンと別に残すが半分にした
+const ENGINE_SIG = {
+    thermonuclear: { heat: 1.0,  optic: 0.1,  em: 0.1,  higgs: 0.1 },
+    pulse:         { heat: 0.1,  optic: 0.1,  em: 1.0,  higgs: 0.1 },
+    higgs:         { heat: 0.05, optic: 0.05, em: 0.05, higgs: 1.0 },
+    photon:        { heat: 0.1,  optic: 1.0,  em: 0.1,  higgs: 0.1 },
+};
+const COMPUTE_EM_MULT = 0.5;
 
 // エンジン種別 → 噴射(スラスター)炎の色。core=中心の高温色, mid=外周色, a=全体アルファ。
 // ヒッグスは低アルファ=ほぼ不可視(目立たない推進)。MEMORY.md「エンジン噴射エフェクト色」準拠。
@@ -816,6 +825,14 @@ const COLONY_HACK_R = 600, COLONY_HACK_TIME = 480;
 // 第20弾: 補給 (オーナー合意 2026-10-26) — 補給所=全部 / ハック済みコロニー=弾だけ・60秒に1回。600u以内に8秒留まる (その間EMが漏れる)。
 // 敵も同じ弾数制限で、撃ち尽くしたら補給所か自機がハックしていないコロニーへ行く
 const RESUPPLY_R = 600, RESUPPLY_TIME = 480, COLONY_RESUPPLY_CD = 3600;
+// ═══ 第23弾 (オーナー合意): ランドマークの整理 — 補給所は廃止、補給と修理はコロニーに集約 ═══
+// コロニーは奪い合い (自機/敵とも600u以内に8秒で占有・相手が裏返せば占有が減る)。同時に占有している数で敵の位置が分かる:
+//   1つ=方角(幅120°) / 2つ=+距離(幅5000u) / 3つ以上=方角の幅30°・距離の幅1000u。10秒ごとに更新 (中心は真の位置から幅の内でずれる)
+//   自分のノード1つごとに幅を10%狭める (最大40%)。ノードは聴音局のまま。難破船は一度だけ弾と資材を拾える。S&Dは全コロニーの占有で勝ち (奪われれば負け)
+const COLONY_INTEL_PERIOD = 600;
+const COLONY_INTEL = [null, { ang: Math.PI / 3, dist: null }, { ang: Math.PI / 3, dist: 2500 }, { ang: Math.PI / 12, dist: 500 }]; // 半幅
+const NODE_INTEL_BUFF = 0.10, NODE_INTEL_BUFF_MAX = 0.40;
+const DERELICT_SALVAGE_R = 500, DERELICT_SALVAGE_TIME = 180;
 let _resupply = null; // 自機が今補給している所 { obj, kind:'station'|'colony', p }
 
 // ── 潜航型デコイ (強EM放射のダミー → 敵ミサイルを誘引・索敵妨害) ──
@@ -1120,6 +1137,7 @@ function updateVisionLockOn() {
         // 第21弾: 縁は視線で決まる (周りの濃い霧の向こうは見えない)。ドローンの目で見えている敵も見える (通信が強い時)
         if (dist <= visionReachAt(Math.atan2(e.y - player.y, e.x - player.x)) || droneSeesStrong(e)) {
             e.inVision = true;
+            if (!(_sigIdent[enemySid(e)] && _sigIdent[enemySid(e)].sure)) identSure(enemySid(e), true); // 第23弾: 見えた=識別確定
             applyContact(e, 1.0, 90); // life=90 = 1.5秒 (更新されない間は維持)
             e.displayX = e.x;
             e.displayY = e.y;
@@ -1848,6 +1866,7 @@ class Structure {
         this.x = x; this.y = y; this.type = type; // 'colony' or 'derelict'
         this.radius = type === 'colony' ? 60 : 30;
         this.hacked = false;
+        this.owner = null; // 第23弾: null / 'player' / 'enemy' (hacked = owner==='player')
         this.discovered = false;
         this.identified = false;
         this.color = type === 'colony' ? 'rgba(34, 68, 170, 0.5)' : 'rgba(85, 85, 85, 0.5)';
@@ -1861,7 +1880,7 @@ class Structure {
     }
     draw(ctx) {
         const t = Date.now();
-        const hColor = this.hacked ? '#00aaff' : null;
+        const hColor = this.hacked ? '#00aaff' : (this.owner === 'enemy' ? '#ff8844' : null);
 
         // アイコンスケール: 最低20px画面サイズを保証（Stationと同様の視認性）
         const _iconS = Math.max(20, Math.min(28, camera.zoom * 28)) / (camera.zoom * 28);
@@ -1954,10 +1973,10 @@ class Structure {
         // ランドマークラベル: Station スタイルで最低9px確保
         ctx.save();
         ctx.translate(this.x, this.y);
-        const _lColor = this.type === 'colony' ? (this.hacked ? '#00ffcc' : '#6699ff') : (this.hacked ? '#00ffcc' : '#bb9966');
+        const _lColor = this.type === 'colony' ? (this.hacked ? '#00ffcc' : this.owner === 'enemy' ? '#ff9955' : '#6699ff') : (this.salvaged ? '#00ffcc' : '#bb9966');
         // 第18弾: 引いた時は短い名前だけ・アイコンのすぐ上に (旧: 長い説明文を画面上60px上に大きく出していた)
         const _far = camera.zoom < LABEL_FAR_ZOOM;
-        const _lText  = this.type === 'colony' ? (this.hacked ? (_far ? 'コロニー済' : 'コロニー (ハック済)') : (_far ? 'コロニー' : 'コロニー — 近くに留まってハック')) : (this.hacked ? '難破船 (済)' : '難破船');
+        const _lText  = this.type === 'colony' ? (this.hacked ? (_far ? '自コロニー' : 'コロニー (占有・補給と修理)') : this.owner === 'enemy' ? (_far ? '敵コロニー' : 'コロニー (敵が占有 — 留まって奪う)') : (_far ? 'コロニー' : 'コロニー — 近くに留まって占有')) : (this.salvaged ? '難破船 (回収済)' : (_far ? '難破船' : '難破船 — 近くで弾と資材を回収'));
         const _iconPx = Math.max(this.radius * 2.6 * camera.zoom, STRUCT_MIN_PX);
         ctx.fillStyle = _lColor;
         ctx.font = 'bold ' + Math.round(_far ? 9 : 11) / camera.zoom + 'px Orbitron, monospace';
@@ -2701,7 +2720,7 @@ function playerFireWeapon(s, target, wType, lk) {
         const mk = (off) => { const p = new Projectile(s.x, s.y, { x: aimX, y: aimY }, true, 'kinetic', dmgScale); p.angle = base + off; p.ox = s.x; p.oy = s.y; projectiles.push(p); };
         mk(0);
         if (gameState.shipType === 'assault') { mk(-KINETIC_SPREAD); mk(KINETIC_SPREAD); } // 攻撃型: 3連装同時発射
-        if (s === player) { cargo.ammoK = Math.max(0, cargo.ammoK - 1); _hudCache.cargo = null; if (cargo.ammoK === 0) logMessage('WEP: 実弾を撃ち尽くした — 補給所かハック済みのコロニーで補給', 'warning-msg'); }
+        if (s === player) { cargo.ammoK = Math.max(0, cargo.ammoK - 1); _hudCache.cargo = null; if (cargo.ammoK === 0) logMessage('WEP: 実弾を撃ち尽くした — 占有したコロニーで補給', 'warning-msg'); }
         if (--s.kineticAmmo <= 0 || (s === player && cargo.ammoK <= 0)) { s.kineticReloading = cargo.ammoK > 0 || s !== player; s.kineticReloadTimer = Math.round(KINETIC_RELOAD_TIME * reloadMult); }
         if (!lk.full) logMessage(`WEP: KINETIC 推定射撃 (命中予測${pct}%)`, 'warning-msg');
     } else if (wType === 'missile') {
@@ -2781,7 +2800,18 @@ function issueFireOrder() {
     if (!player || player.hp <= 0) return;
     if (player._weaponJamTimer > 0) { logMessage('WEP: 火器管制ダウン — 復旧まで発砲不能', 'warning-msg'); return; }
     const w = currentWeapon();
+    // 第23弾: 追跡中の信号が艦でない (偽艦影・ノイズ) 場合も、プレイヤーには区別がつかないので推定点へ撃つ
+    if (lockedSignalId && !/^e-/.test(lockedSignalId)) {
+        const sa = _signalAnalysis[lockedSignalId];
+        if (!sa || !sa.fix) { logMessage('WEP: 射撃解なし — 目標の推定位置が無い。信号を追跡して解析を進めろ', 'warning-msg'); return; }
+        const est = trackEstimate(sa, 0), idn = identInfo(lockedSignalId);
+        if (idn.low) logMessage('WEP: 注意 — SIG-' + String(_contactLabels[lockedSignalId] || '?').padStart(2, '0') + ' は' + idn.txt + '。外れれば位置を教える', 'warning-msg');
+        if (w !== 'missile' && w !== 'beam') { logMessage('WEP: 推定点への射撃はミサイル/ビームのみ', 'warning-msg'); return; }
+        freeFireAt(est.x, est.y);
+        return;
+    }
     const te = bestFireTarget();
+    if (te && !te.inVision) { const idn = identInfo(enemySid(te)); if (idn.low) logMessage('WEP: 注意 — SIG-' + String(_contactLabels[enemySid(te)] || '?').padStart(2, '0') + ' は' + idn.txt + '。外れれば位置を教える', 'warning-msg'); }
     if (!te) { logMessage('WEP: 射撃解なし — 目標の推定位置が無い。信号を追跡して解析を進めろ', 'warning-msg'); return; }
     if (!playerWeaponReady(player, w)) { logMessage(`WEP: ${w.toUpperCase()} リロード中`, 'warning-msg'); return; }
     const lk = playerLockInfo(te);
@@ -3009,18 +3039,19 @@ class Ship {
             // 各シグネチャ = 推進強度 × エンジン種別倍率。エンジンごとに支配的シグネチャが変わる。
             // §3-1 エンジンアップグレード: 熱効率改善でheatSig低下
             // 電力(genAlloc.ai)↑ → 処理熱放射も増大
-            this.heatSig    = Math.min(1, _thrust * _engType.heatMult * 0.55 * (1 - ENGINE_UPG_HEAT_REDUCE[gameState.upgrades.engine]) + genAlloc.ai / 100 * 0.10);
+            const _es = ENGINE_SIG[gameState.engineType] || ENGINE_SIG.thermonuclear;
+            this.heatSig    = Math.min(1, _thrust * _es.heat * 0.6 * (1 - ENGINE_UPG_HEAT_REDUCE[gameState.upgrades.engine]) + genAlloc.ai / 100 * 0.05);
             // 機関損傷: 冷却系破損で熱漏洩 (自機も対称に狩られやすくなる)
             if (this._sysEngineTimer > 0) this.heatSig = Math.min(1, this.heatSig + 0.35);
             // 発砲閃光: 撃った瞬間だけ強く光り1.5秒で減衰 (旧: 一度ビームを撃つと光学+0.5が永久に残っていた)
             const _ff = Math.max(0, (this._fireFlash || 0)) / 90;
             if (this._fireFlash > 0) this._fireFlash -= gameSpeedFactor;
             const _ft = this._fireFlashType;
-            this.opticalSig = Math.min(1, _thrust * _engType.optMult * 0.45 + _ff * (_ft === 'kinetic' ? 0.6 : _ft === 'beam' ? 0.9 : 0.15)); // 第20弾: ビームの発射は強い光
+            this.opticalSig = Math.min(1, _thrust * _es.optic * 0.5 + _ff * (_ft === 'kinetic' ? 0.6 : _ft === 'beam' ? 0.9 : 0.15)); // 第20弾: ビームの発射は強い光
             // EM: 推進＋(センサー/AI処理放射)。ゲインで増幅。AI↑でEM↑(逆探知の法則)。
             // 第13弾: エンジン種別のEM倍率は推進由来の放射だけに掛ける。AI/センサーの演算放射は機関に関係なく漏れる
             // (旧: 全体に掛けていたため熱核エンジンではAI放射が×0.4に消え、完全停止した艦は至近以外で絶対に見つからなかった)
-            this.emSig      = Math.min(1, (_thrust * 0.35 * _engType.emMult + genAlloc.sensors / 100 * 0.18 + genAlloc.ai / 100 * 0.40) * (0.6 + (playerCoasting ? 1 : _gain) * 0.4));
+            this.emSig      = Math.min(1, _thrust * _es.em * 0.6 + (genAlloc.sensors / 100 * 0.18 + genAlloc.ai / 100 * 0.40) * COMPUTE_EM_MULT * (0.6 + (playerCoasting ? 1 : _gain) * 0.4));
             if (_ff > 0 && _ft === 'beam') this.emSig = Math.min(1, this.emSig + _ff * 0.6);   // 第20弾: ビームの発射は強いEM
             if (_ff > 0 && _ft === 'missile') { this.heatSig = Math.min(1, this.heatSig + _ff * 0.35); this.emSig = Math.min(1, this.emSig + _ff * 0.45); } // 第20弾: ミサイル発射はEMも
             // 第20弾: ドローンの発進は光とEMが漏れる
@@ -3035,7 +3066,7 @@ class Ship {
             // 熱雲: 環境熱ノイズが熱署名を埋もれさせる → HEATセンサーから隠れやすい (§3-13 Phase3)
             this.heatSig   *= (1 - getThermalIntensity(this.x, this.y) * THERMAL_HEAT_MASK);
             // ヒッグス: ヒッグス雲内を動くほどウェイク乱流。ヒッグスエンジンは特に顕著。
-            this.higgsSig   = Math.min(1, _thrust * _hHere * 1.6 + (_engType.higgsSpeedBonus > 0 ? _thrust * _engType.higgsSpeedBonus * 0.7 : _thrust * 0.08));
+            this.higgsSig   = Math.min(1, _thrust * _hHere * 1.6 + _thrust * _es.higgs * 0.5); // 霧の中を動けば乱れる＋ヒッグスエンジンは推進そのものが霧を乱す
             // 第17弾: 漂っていても霧の中を動けば霧が乱れる (推力の分は無い)
             if (playerCoasting) this.higgsSig = Math.min(1, _spdN * _hHere * 0.8);
             // 静粛航行: 全シグネチャ抑制 (速度も落ちる。発砲/ソナーで自動解除)。機関停止中も同じ
@@ -3659,7 +3690,6 @@ class Ship {
                 const _needS = (this.ammoK <= 0 && this.ammoM <= 0) || (this.ammoM <= 0 && (_profS.weaponEarly !== 'kinetic' || this.ammoK < (this._fullK || 1) * 0.25));
                 if (_needS && !this._supply) {
                     let best = null, bd = Infinity, kind = '';
-                    for (const st of stations) { const d = Math.hypot(st.x - this.x, st.y - this.y); if (d < bd) { bd = d; best = st; kind = '補給所'; } }
                     for (const c of structures) { if (c.type !== 'colony' || c.hacked) continue; const d = Math.hypot(c.x - this.x, c.y - this.y); if (d < bd) { bd = d; best = c; kind = 'コロニー'; } }
                     if (best) {
                         this._supply = { x: best.x, y: best.y, t: 0 };
@@ -4032,7 +4062,16 @@ class Ship {
                     } else if (this.type !== 'fighter' && !_hasScent && _frameCount - (this._lastScentF || 0) > ENEMY_ROAM_QUIET * (1.4 - _pers.aggression) && Math.random() < 0.02) {
                         // 第20弾: 長く何も聞こえない → 隠れ場所伝いに区間ごとに哨戒へ (行き先: 自分のものでないノード / コロニー / マップ中央)
                         let g = this._roamGoal;
-                        if (!g || Math.hypot(g.x - this.x, g.y - this.y) < 2500) {
+                        if (!g || (g.col ? g.col.owner === 'enemy' : Math.hypot(g.x - this.x, g.y - this.y) < 2500)) {
+                            // 第23弾: コロニーを占有すれば自機の位置の手掛かり (方角・距離) が入る → 自分のでないコロニーを優先して取りに行く
+                            let col = null, cd = Infinity;
+                            for (const st of structures) { if (st.type !== 'colony' || st.owner === 'enemy') continue; const d = Math.hypot(st.x - this.x, st.y - this.y); if (d < cd) { cd = d; col = st; } }
+                            if (col && Math.random() < 0.4 + _pers.greed * 0.5) {
+                                g = this._roamGoal = { x: col.x, y: col.y, lbl: col.owner === 'player' ? '自機のコロニー (奪う)' : 'コロニー (占有する)', col };
+                                if (comDemo) comThinkEvent('e', '気配なし → ' + g.lbl + ' (' + _dirTxt(this.x, this.y, g.x, g.y) + ')。占有すれば自機の方角が分かる', 'e' + this.uid);
+                            }
+                        }
+                        if (!g || (!g.col && Math.hypot(g.x - this.x, g.y - this.y) < 2500)) {
                             const cands = [{ x: MAP_CX, y: MAP_CY, lbl: 'マップ中央' }];
                             for (const n of resourceNodes) if (n.owner !== 'enemy') cands.push({ x: n.x, y: n.y, lbl: 'ノード' });
                             for (const st of structures) if (st.type === 'colony') cands.push({ x: st.x, y: st.y, lbl: 'コロニー' });
@@ -4041,8 +4080,8 @@ class Ship {
                             if (comDemo) comThinkEvent('e', '長く気配なし (攻撃性' + _pct(_pers.aggression) + ') → ' + g.lbl + 'の方へ哨戒に出る (' + _dirTxt(this.x, this.y, g.x, g.y) + ')', 'e' + this.uid);
                         }
                         const dG = Math.hypot(g.x - this.x, g.y - this.y), aG = Math.atan2(g.y - this.y, g.x - this.x), leg = Math.min(dG, 3500 + Math.random() * 1500);
-                        const spot = findHidingSpot(this.x + Math.cos(aG) * leg, this.y + Math.sin(aG) * leg, 1500);
-                        this.setTarget(spot.x, spot.y);
+                        if (g.col && dG < 3000) this.setTarget(g.x + Math.cos(aG + Math.PI) * 200, g.y + Math.sin(aG + Math.PI) * 200); // 最後はコロニーへ直接 (600u以内に8秒)
+                        else { const spot = findHidingSpot(this.x + Math.cos(aG) * leg, this.y + Math.sin(aG) * leg, 1500); this.setTarget(spot.x, spot.y); }
                         this._roam = 'patrol';
                     } else if (activeNodes.length > 0 && Math.random() < (0.0012 + _pers.greed * 0.012)) {
                         // 貪欲な個体ほど積極的にノードを奪取しに行く (性格による行動分岐)
@@ -4169,7 +4208,7 @@ class Ship {
                 this.emSig = Math.min(1.0, this.emSig + 0.02); // 薬莢微弱EM
             } else if (this.lurking && this.postFireCooldown === 0) {
                 // 潜伏中の受動EM漏洩 (ゆらぎあり)
-                const target = 0.5 + Math.sin(Date.now() * 0.0015 + this.x * 0.001) * 0.1;
+                const target = (0.5 + Math.sin(Date.now() * 0.0015 + this.x * 0.001) * 0.1) * COMPUTE_EM_MULT; // 第23弾: 演算のEMは自機と同じく半分
                 this.emSig += (target - this.emSig) * 0.03;
             } else if (this.postFireCooldown > 0) {
                 // 再配置中: 無線封鎖 (熱源は上がるがEMは下がる)
@@ -4192,9 +4231,11 @@ class Ship {
                 const _eg = ENGINE_TYPES[this.engine] || ENGINE_TYPES.thermonuclear;
                 if (spd > 0.15) {
                     const _sn = Math.min(1, spd / 2);
-                    this.heatSig = Math.min(1, this.heatSig * _eg.heatMult / 2);
-                    this.opticalSig = Math.min(1, this.opticalSig + _sn * 0.12 * _eg.optMult);
-                    this.emSig = Math.min(1, this.emSig + _sn * 0.10 * _eg.emMult);
+                    const _ees = ENGINE_SIG[this.engine] || ENGINE_SIG.thermonuclear; // 第23弾: 自機と同じ表
+                    this.heatSig = Math.min(1, this.heatSig * _ees.heat);
+                    this.opticalSig = Math.min(1, this.opticalSig + _sn * 0.5 * _ees.optic);
+                    this.emSig = Math.min(1, this.emSig + _sn * 0.6 * _ees.em);
+                    this.higgsSig = Math.min(1, this.higgsSig + _sn * 0.5 * _ees.higgs);
                 }
                 const _bd = enemyBands(this);
                 for (let bi = 1; bi < _bd.length; bi++) {
@@ -5148,7 +5189,7 @@ function generateSector() {
     player = new Ship(MAP_CX, MAP_CY, true);
     player.generatorOutput = genAlloc.engine;
     enemies = []; structures = []; projectiles = []; effects = []; damagePuffs = []; particles = []; debris = []; scrapDrops = [];
-    stations = []; higgsWakes = []; heatTrails = []; opticTrails = []; emTrails = [];
+    stations = []; playerIntel = null; higgsWakes = []; heatTrails = []; opticTrails = []; emTrails = [];
     wakeRibbons = [];
     { const ca = Math.random() * Math.PI * 2, cm = 0.08 + Math.random() * 0.08; higgsCurrent = { x: Math.cos(ca) * cm, y: Math.sin(ca) * cm }; }
     resourceNodes = []; decoys = []; playerDrones = []; droneOrders = {};
@@ -5370,7 +5411,7 @@ function generateSector() {
     _so = _sectorOrder();
     for (let i = 0; i < 3; i++) {
         const lp = randomLandmarkSpot(_lmPlaced, _so[i % 6]);
-        stations.push(new Station(lp.x, lp.y));
+        // 第23弾: 補給所は廃止 (補給と修理はコロニー)
     }
 
     // リソースノード: 5〜8個。第21弾: 6方向へ順に・互いに3000u以上・他のランドマークから2000u以上
@@ -6462,25 +6503,24 @@ function cargoBelowPlan() {
 }
 function nearestResupply(x, y) {
     let best = null, bd = Infinity, kind = '';
-    for (const st of stations) { const d = Math.hypot(st.x - x, st.y - y); if (d < bd) { bd = d; best = st; kind = 'station'; } }
     for (const c of structures) { if (c.type !== 'colony' || !c.hacked || _frameCount < (c._supplyCD || 0)) continue; const d = Math.hypot(c.x - x, c.y - y); if (d < bd) { bd = d; best = c; kind = 'colony'; } }
     return best ? { obj: best, kind, d: bd } : null;
 }
 function updateResupply() {
     if (!player || player.hp <= 0 || dockingOpen) { _resupply = null; return; }
     let best = null, bd = RESUPPLY_R, kind = '';
-    for (const st of stations) { const d = Math.hypot(st.x - player.x, st.y - player.y); if (d < bd && cargoBelowPlan()) { bd = d; best = st; kind = 'station'; } }
     for (const c of structures) {
         if (c.type !== 'colony' || !c.hacked || _frameCount < (c._supplyCD || 0)) continue;
         const d = Math.hypot(c.x - player.x, c.y - player.y);
-        if (d < bd && ammoBelowPlan()) { bd = d; best = c; kind = 'colony'; }
+        if (d < bd && (cargoBelowPlan() || player.hp < player.maxHp * 0.95)) { bd = d; best = c; kind = 'colony'; }
     }
     if (!best) { _resupply = null; return; }
     if (!_resupply || _resupply.obj !== best) _resupply = { obj: best, kind, p: 0 };
     _resupply.p += gameSpeedFactor / RESUPPLY_TIME;
     if (_resupply.p < 1) return;
-    if (kind === 'station') { resetCargo(); logMessage('補給: 補給所で積み込み計画どおりに補充 — ' + cargoSummaryNow(), 'system-msg'); }
-    else { const got = refillAmmo(); best._supplyCD = _frameCount + COLONY_RESUPPLY_CD; logMessage('補給: コロニーで弾を補充 (+' + got + ') — 次にここで補給できるのは60秒後', 'system-msg'); }
+    // 第23弾: 占有したコロニーで 積み込み計画どおりに補充＋耐久25%修理 (60秒に1回)
+    { resetCargo(); const heal = Math.floor(player.maxHp * 0.25); player.hp = Math.min(player.maxHp, player.hp + heal); best._supplyCD = _frameCount + COLONY_RESUPPLY_CD;
+      logMessage('補給: コロニーで補充と修理 (耐久+' + heal + ') — ' + cargoSummaryNow() + '。次にここで補給できるのは60秒後', 'system-msg'); }
     if (comDemo) comThinkEvent('p', '補給完了 (実弾' + cargo.ammoK + '・ミサイル' + cargo.ammoM + ')');
     _resupply = null;
     playSound('ui');
@@ -6500,9 +6540,17 @@ function updateNodesAndColonies() {
         } else if (n.capP > 0) n.capP = Math.max(0, n.capP - 0.004);
     }
     for (const st of structures) {
+        if (st.type === 'derelict' && !st.salvaged && Math.hypot(player.x - st.x, player.y - st.y) < DERELICT_SALVAGE_R) { // 第23弾: 難破船から一度だけ拾う
+            st.salvP = (st.salvP || 0) + gameSpeedFactor / DERELICT_SALVAGE_TIME;
+            if (st.salvP >= 0) _capturing = { kind: 'derelict', obj: st, p: st.salvP }; // 負=積む場所がなかった後の待ち
+            if (st.salvP >= 1) salvageDerelictByPlayer(st);
+            continue;
+        }
         if (st.type !== 'colony' || st.hacked) continue;
         const d = Math.hypot(player.x - st.x, player.y - st.y);
-        if (d < COLONY_HACK_R) {
+        if (d < COLONY_HACK_R && enemies.some(e => e.hp > 0 && !e._dying && e.type !== 'fighter' && Math.hypot(e.x - st.x, e.y - st.y) < COLONY_HACK_R)) {
+            _capturing = { kind: 'colony', obj: st, p: st.hackP || 0, contested: true }; // 第23弾: 双方が居る間は進まない
+        } else if (d < COLONY_HACK_R) {
             st.hackP = (st.hackP || 0) + gameSpeedFactor / COLONY_HACK_TIME;
             _capturing = { kind: 'colony', obj: st, p: st.hackP };
             if (st.hackP >= 1) hackColonyByPlayer(st);
@@ -6520,28 +6568,89 @@ function captureNodeByPlayer(n) {
     logMessage(`NODE: ノードを制圧 — +${NODE_SCR} SCR・${got > 0 ? '資材+' + got + '個' : '資材は満載 (展開して空いた枠にだけ積める)'}。以後この結晶が聴音局になり、周囲${NODE_RELAY_RANGE}uの方位を送ってくる`, 'system-msg');
 }
 function hackColonyByPlayer(st) {
-    st.hacked = true; st.hackP = 0;
-    matchRecEvent('colonyP', st.x, st.y, '自艦がコロニーをハック');
-    const heal = Math.floor(player.maxHp * 0.25);
-    player.hp = Math.min(player.maxHp, player.hp + heal);
+    const was = st.owner;
+    st.hacked = true; st.owner = 'player'; st.hackP = 0; st.eHackP = 0;
+    matchRecEvent('colonyP', st.x, st.y, '自艦がコロニーを占有' + (was === 'enemy' ? ' (敵から奪還)' : ''));
     const got = addMaterials(999);
     createClickEffect(st.x, st.y, '#00aaff');
     playSound('ui');
-    let intel = '';
+    const n = coloniesOwned('player');
+    logMessage('COLONY: コロニーを占有 (' + n + 'つ' + (was === 'enemy' ? '・敵から奪還' : '') + ') — 資材+' + got + '個。ここで補給と修理ができる。' + _colonyIntelHint(n), 'system-msg');
+    updateColonyIntel(true);
+}
+function _colonyIntelHint(n) {
+    return n >= 3 ? 'コロニー情報: 敵の方角±15°と距離±500u' : n === 2 ? 'コロニー情報: 敵の方角±60°と距離±2500u (3つで精度が上がる)' : n === 1 ? 'コロニー情報: 敵のおよその方角 (±60°)。2つで距離も分かる' : '';
+}
+function coloniesOwned(side) { let n = 0; for (const st of structures) if (st.type === 'colony' && st.owner === side) n++; return n; }
+function nodesOwned(side) { let n = 0; for (const nd of resourceNodes) if (nd.owner === side) n++; return n; }
+// 第23弾: コロニー情報 — 占有数で敵の方角・距離の範囲が分かる。observer=自艦/敵艦、target=相手。返す範囲の中に真の位置がある
+function makeColonyIntel(side, observer, target) {
+    const n = Math.min(3, coloniesOwned(side));
+    if (!n || !observer || !target) return null;
+    const k = 1 - Math.min(NODE_INTEL_BUFF_MAX, NODE_INTEL_BUFF * nodesOwned(side));
+    const spec = COLONY_INTEL[n];
+    const ang0 = Math.atan2(target.y - observer.y, target.x - observer.x), d0 = Math.hypot(target.x - observer.x, target.y - observer.y);
+    const aHW = spec.ang * k, dHW = spec.dist ? spec.dist * k : null;
+    return { f: _frameCount, n, nodes: nodesOwned(side), ang: ang0 + (Math.random() * 2 - 1) * aHW * 0.6, aHW,
+        dist: dHW ? Math.max(dHW, d0 + (Math.random() * 2 - 1) * dHW * 0.6) : null, dHW, ox: observer.x, oy: observer.y };
+}
+let playerIntel = null;
+function updateColonyIntel(now) {
+    if (!player || player.hp <= 0) return;
+    if (!now && _frameCount % COLONY_INTEL_PERIOD) return;
     const boss = enemies.find(e => e.hp > 0 && !e._dying && e.type !== 'fighter');
-    if (boss) {
-        // コロニーの観測網が記録していた敵艦の方角 (誤差あり)。コロニーを起点とする方位線として推定に入る
-        const sid = enemySid(boss);
-        if (!_contactLabels[sid]) _contactLabels[sid] = _contactLabelNext++;
-        const ang = Math.atan2(boss.y - st.y, boss.x - st.x) + _gauss() * 0.03;
-        const sa = addBearingObs(sid, st.x, st.y, ang, 0.03, 0.5, '150,200,255');
-        if (sid === lockedSignalId) { solveFix(sa); applyTrackContact(boss, sa); } else sa.dirty = true;
-        passiveBearings.push({ ox: st.x, oy: st.y, angle: ang, halfWidth: 0.06, range: 30000, quality: 0.6, color: '150,200,255',
-            sensor: 'em', strength: 0.5, sensorLabel: 'コロニー', bearingDeg: compassDeg(ang), halfWidthDeg: 3,
-            sourceId: sid, contactNo: _contactLabels[sid], life: PASSIVE_BEARING_LIFE * 3, maxLife: PASSIVE_BEARING_LIFE * 3, relay: true });
-        intel = ` コロニーの観測記録から SIG-${String(_contactLabels[sid]).padStart(2, '0')} の方位線を1本取得`;
+    const prev = playerIntel;
+    playerIntel = makeColonyIntel('player', player, boss);
+    if (playerIntel && (!prev || prev.n !== playerIntel.n)) {
+        ringMarkBearing(compassDeg(playerIntel.ang), '#7fc8ff');
+        logMessage('コロニー情報: 敵は方位' + compassDeg(playerIntel.ang) + '°±' + Math.round(playerIntel.aHW * 180 / Math.PI) + '°' + (playerIntel.dist ? '・距離' + Math.round(playerIntel.dist / 100) * 100 + 'u±' + Math.round(playerIntel.dHW / 100) * 100 + 'u' : '') + (playerIntel.nodes ? ' (ノード' + playerIntel.nodes + 'つで精度+' + Math.round(Math.min(NODE_INTEL_BUFF_MAX, NODE_INTEL_BUFF * playerIntel.nodes) * 100) + '%)' : ''), 'system-msg');
     }
-    logMessage(`COLONY: ハッキング完了 — 耐久+${heal}・資材+${got}個。${intel}`, 'system-msg');
+    // 敵も同じ: 敵が占有しているコロニーの数で自艦の範囲を得る → 手掛かりが無ければその範囲へ向かう
+    for (const e of enemies) {
+        if (e.hp <= 0 || e._dying || e.type === 'fighter') continue;
+        const it = makeColonyIntel('enemy', e, player);
+        e._colIntel = it;
+        if (it && (e.contactFreshness || 0) < 0.2 && !e._supply && !e._hiding && e.aiState !== 'combat') {
+            const d = it.dist || 9000;
+            const tx = e.x + Math.cos(it.ang) * d, ty = e.y + Math.sin(it.ang) * d;
+            e.huntTarget = clampToMapCircle(tx, ty, 1500); e.aiState = 'hunting'; e.huntTimer = Math.max(e.huntTimer || 0, 600); e.lurking = false;
+            if (comDemo && (!e._colIntelLog || _frameCount - e._colIntelLog > 1800)) { e._colIntelLog = _frameCount; comThinkEvent('e', 'コロニー情報 (' + it.n + 'つ占有) → 自機は' + _dirTxt(e.x, e.y, tx, ty) + 'の辺り。向かう', 'e' + e.uid); }
+        }
+    }
+}
+// 敵のコロニー占有 (自機と同じ600u・8秒)。自機のコロニーなら裏返る
+function updateEnemyColonyCapture() {
+    for (const st of structures) {
+        if (st.type !== 'colony' || st.owner === 'enemy') continue;
+        let near = null;
+        for (const e of enemies) { if (e.hp > 0 && !e._dying && e.type !== 'fighter' && Math.hypot(e.x - st.x, e.y - st.y) < COLONY_HACK_R) { near = e; break; } }
+        if (!near) { if (st.eHackP > 0) st.eHackP = Math.max(0, st.eHackP - 0.003); continue; }
+        if (player && player.hp > 0 && Math.hypot(player.x - st.x, player.y - st.y) < COLONY_HACK_R) continue; // 双方が居る間は進まない
+        st.eHackP = (st.eHackP || 0) + gameSpeedFactor / COLONY_HACK_TIME;
+        near.emSig = Math.max(near.emSig || 0, 0.45);
+        if (st.eHackP >= 1) {
+            const was = st.owner;
+            st.owner = 'enemy'; st.hacked = false; st.eHackP = 0; st.hackP = 0;
+            near.hp = Math.min(near.maxHp, near.hp + near.maxHp * 0.25); near.ammoK = near._fullK ?? near.ammoK; near.ammoM = near._fullM ?? near.ammoM; // 敵も補給と修理
+            matchRecEvent('colonyE', st.x, st.y, '敵がコロニーを占有' + (was === 'player' ? ' (自艦のを奪った)' : ''));
+            if (was === 'player') { logMessage('COLONY: コロニーとの通信途絶 — 敵に奪われた (占有' + coloniesOwned('player') + 'つ)', 'warning-msg'); playSound('alert'); updateColonyIntel(true); }
+            if (comDemo) comThinkEvent('e', 'コロニーを占有 (' + coloniesOwned('enemy') + 'つ) — 補給と修理', 'e' + near.uid);
+        }
+    }
+}
+function salvageDerelictByPlayer(st) {
+    st.salvP = 0;
+    // 空いている枠の分だけ拾う (実弾1枠→ミサイル1枠→資材2個)。何も積めなければ残しておく
+    const free = () => (HOLD_CAP[gameState.shipType] || 0) - cargoStockSlots() - Math.ceil((cargo.mat || 0) / MAT_PER_SLOT);
+    let gK = 0, gM = 0;
+    if (free() >= 1) { cargo.ammoK += AMMO_PER_SLOT.kinetic; gK = AMMO_PER_SLOT.kinetic; }
+    if (free() >= 1) { cargo.ammoM += AMMO_PER_SLOT.missile; gM = AMMO_PER_SLOT.missile; }
+    const got = addMaterials(2);
+    if (!gK && !gM && !got) { st.salvP = -5; logMessage('SALVAGE: 難破船 — 積む場所がない (弾か資材を使ってから)', 'warning-msg'); return; }
+    st.salvaged = true;
+    matchRecEvent('salvP', st.x, st.y, '自艦が難破船から回収');
+    logMessage('SALVAGE: 難破船から回収 — ' + [gK ? '実弾+' + gK : '', gM ? 'ミサイル+' + gM : '', got ? '資材+' + got + '個' : ''].filter(Boolean).join('・'), 'system-msg');
+    _hudCache.cargo = null; playSound('ui');
 }
 // 制圧したノード = 聴音局。周囲の機動する発信源の方位を送ってくる (観測点が増える = 交点が早く締まる)
 function relayListen() {
@@ -6583,6 +6692,54 @@ function enemyCaptureNode(e, n) {
 
 // 方位の記録を1本足す。同じ場所(180u・4秒以内)の再観測は1本にまとめて誤差を√nで縮める。
 // 第16弾: 自艦と聴音局(ノード)の記録が交互に入るので、直前の1本だけでなく最近の数本から同じ場所のものを探す
+// ═══ 第23弾 (オーナー合意): 信号の識別 — 受信した信号は最初「不明」。追跡すると手掛かりが溜まって「艦影n%」になる ═══
+// 手掛かり (どれも観測から。ゆらぎがあるので必ず見破れるとは限らない):
+//   帯域の比 (2帯域以上で聴いた時): 艦は帯域ごとにむらがある / 偽艦影・ノイズは4帯域が平坦
+//   動き (速度つきの解が出た時): 艦らしい速さ / 遅く一定 (偽艦影の漂流) / 速すぎて直進 (ノイズメーカー・艦載機)
+//   探信の反響 (ソナーの点が入った時): 艦は大きい / 囮・艦載機は小さい
+//   有視界で見えた=確定・400u以内=正体が分かる
+const _RX_WORD = { heat: '熱源', optic: '光', em: '電磁波', higgs: '霧の乱れ' };
+const IDENT_MIN_N = 3, IDENT_WARN_P = 0.4;
+const _sigIdent = {}; // sid → { L:対数オッズ(艦影), n:手掛かりの数, why:{理由:重み}, pingF }
+function _identTruth(sid) {
+    if (/^e-/.test(sid)) { const e = enemyBySid(sid); return !e ? null : e.type === 'fighter' ? 'small' : 'ship'; }
+    const L = lures.find(l => l.sid === sid);
+    return L ? (L.noise ? 'noise' : 'lure') : null;
+}
+function _identAdd(id, mean, sd, w, why) {
+    const v = (mean + _gauss() * sd) * w;
+    id.L = Math.max(-5, Math.min(5, id.L + v)); id.n++;
+    if (why && mean < 0 && v < 0) id.why[why] = (id.why[why] || 0) - v;
+}
+function identStep(sid, tracked, nBands, sa) {
+    const truth = _identTruth(sid);
+    if (!truth) return;
+    const id = _sigIdent[sid] || (_sigIdent[sid] = { L: 0, n: 0, why: {}, pingF: -1, motF: -1 });
+    if (id.sure) return;
+    const w = tracked ? 1 : 0.35;
+    const ship = truth === 'ship';
+    if (nBands >= 2) _identAdd(id, ship ? 0.22 : truth === 'small' ? -0.08 : -0.16, 0.40, w, truth === 'small' ? null : '帯域が平坦');
+    else _identAdd(id, ship ? 0.05 : -0.04, 0.2, w, null);
+    if (sa && sa.motion && sa.motion.stable && _frameCount - id.motF > 300) {
+        id.motF = _frameCount;
+        _identAdd(id, ship ? 0.5 : -0.6, 0.5, 1, truth === 'lure' ? '遅く一定の動き' : truth === 'noise' ? '速すぎてまっすぐ' : truth === 'small' ? '速すぎる' : null);
+    }
+    if (sa && sa.ping && sa.ping.f !== id.pingF && _frameCount - sa.ping.f < 180) {
+        id.pingF = sa.ping.f;
+        _identAdd(id, ship ? 1.6 : truth === 'small' ? -1.2 : -1.6, 0.6, 1, '探信の反響が小さい');
+    }
+}
+function identSure(sid, isShip) { const id = _sigIdent[sid] || (_sigIdent[sid] = { L: 0, n: 0, why: {}, pingF: -1, motF: -1 }); id.L = isShip ? 6 : -6; id.n = 99; id.sure = true; }
+// 表示: {p, txt:'不明'|'艦影70%'|'囮/小型? 理由', low}
+function identInfo(sid) {
+    const id = _sigIdent[sid];
+    if (!id || id.n < IDENT_MIN_N) return { p: 0.5, txt: '不明', short: '不明', low: true, known: false };
+    const p = 1 / (1 + Math.exp(-id.L));
+    if (id.sure) return { p, txt: p > 0.5 ? '艦影 (確認)' : '囮 (確認)', short: p > 0.5 ? '艦影' : '囮', low: p <= 0.5, known: true };
+    let why = '', wb = 0; for (const k in id.why) if (id.why[k] > wb) { wb = id.why[k]; why = k; }
+    const pc = Math.round(p * 100);
+    return { p, txt: '艦影' + pc + '%' + (p < IDENT_WARN_P && why ? ' (' + why + ')' : ''), short: '艦' + pc + '%', low: p < IDENT_WARN_P, known: true };
+}
 function addBearingObs(sid, ox, oy, angle, sigma, strength, colorRgb) {
     if (!_signalAnalysis[sid]) _signalAnalysis[sid] = _newSignalAnalysis();
     const sa = _signalAnalysis[sid];
@@ -6637,15 +6794,16 @@ function checkPassiveDetection() {
         if (e.type === 'fighter' && dist > 2500) continue; // 艦載機は小さく静か — 近くでないと聴こえない (方位で追う相手ではない)
         const hPath = getHiggsIntensity((e.x + player.x) / 2, (e.y + player.y) / 2);
         const distAtten = Math.max(0, 1 - dist / range);
-        let best = null, bestQ = 0;
+        let best = null, bestQ = 0, nb = 0;
         for (const b of sensorOrder) {
             const sc = sensorConfig[b];
             const sig = sc.sig(e) * distAtten * (1 - hPath * sc.higgsMod) * (1 - noise * 0.5);
             const q = sig / sc.threshold;
+            if (sig > sc.threshold * 0.5) nb++;
             if (sig > sc.threshold * 0.5 && q > bestQ) { bestQ = q; best = { band: b, sig }; }
         }
         if (best) {
-            allContacts.push({ x: e.x, y: e.y, sig: best.sig, band: best.band, angle: Math.atan2(e.y - player.y, e.x - player.x), sourceId: enemySid(e), clN: e.type === 'fighter' ? 0 : clutterCount(e.x, e.y, e) });
+            allContacts.push({ x: e.x, y: e.y, sig: best.sig, band: best.band, nb, angle: Math.atan2(e.y - player.y, e.x - player.x), sourceId: enemySid(e), clN: e.type === 'fighter' ? 0 : clutterCount(e.x, e.y, e) });
             if (huntStats && huntStats.firstContact < 0) huntStats.firstContact = _frameCount - huntStats.startFrame; // 戦闘詳報: 初接触
         }
     }
@@ -6655,13 +6813,14 @@ function checkPassiveDetection() {
         const dist = Math.hypot(L.x - player.x, L.y - player.y);
         if (dist >= range) continue;
         const hPath = getHiggsIntensity((L.x + player.x) / 2, (L.y + player.y) / 2);
-        let best = null, bestQ = 0;
+        let best = null, bestQ = 0, nb = 0;
         for (const b of sensorOrder) {
             const sc = sensorConfig[b];
             const sig = LURE_SIG * Math.min(1, L.life / 60) * (1 - dist / range) * (1 - hPath * sc.higgsMod) * (1 - noise * 0.5);
+            if (sig > sc.threshold * 0.5) nb++;
             if (sig > sc.threshold * 0.5 && sig / sc.threshold > bestQ) { bestQ = sig / sc.threshold; best = { band: b, sig }; }
         }
-        if (best) allContacts.push({ x: L.x, y: L.y, sig: best.sig, band: best.band, angle: Math.atan2(L.y - player.y, L.x - player.x), sourceId: L.sid, clN: 0 });
+        if (best) allContacts.push({ x: L.x, y: L.y, sig: best.sig, band: best.band, nb, angle: Math.atan2(L.y - player.y, L.x - player.x), sourceId: L.sid, clN: 0 });
     }
     if (allContacts.length === 0) return;
 
@@ -6698,20 +6857,21 @@ function checkPassiveDetection() {
         // 方位の記録 (推定位置の材料)
         const sa = addBearingObs(c.sourceId, player.x, player.y, angle, sigma, c.sig, colorRgb);
         if (tracked) solveFix(sa); else sa.dirty = true;
+        identStep(c.sourceId, tracked, c.nb || 1, sa); // 第23弾: 識別の手掛かり
         if (tracked) {
             const _te = enemyBySid(c.sourceId);
             if (_te && _te.hp > 0 && !_te._dying) applyTrackContact(_te, sa);
         }
         const _last = _passiveLastSeen[c.sourceId];
         if ((_last === undefined || _frameCount - _last > 600) && (!_newSig || c.sig > _newSig.sig))
-            _newSig = { sig: c.sig, sid: c.sourceId, deg: compassDeg, label: sc.label };
+            _newSig = { sig: c.sig, sid: c.sourceId, deg: compassDeg, label: sc.label, band: c.band };
         _passiveLastSeen[c.sourceId] = _frameCount;
     }
     while (passiveBearings.length > PASSIVE_BEARING_MAX) passiveBearings.shift();
 
     passiveAlertTimer = 180;
     if (_newSig) {
-        logMessage(`RX: 新規信号 SIG-${String(_contactLabels[_newSig.sid]).padStart(2, '0')} [${_newSig.label}] 方位${_newSig.deg}°`, 'warning-msg');
+        logMessage(`RX: 方位${_newSig.deg}° ${_RX_WORD[_newSig.band] || '信号'}感知 — SIG-${String(_contactLabels[_newSig.sid]).padStart(2, '0')} (${identInfo(_newSig.sid).txt})`, 'warning-msg');
         const ind = document.getElementById('passive-indicator');
         if (ind) { ind.classList.add('alert'); setTimeout(() => ind.classList.remove('alert'), 3000); }
     }
@@ -7244,19 +7404,13 @@ function drawShipRing(ctx) {
     const { sx: cx, sy: cy } = worldToScreen(player.x, player.y);
     const R = RING_R;
     const t = Date.now(), tSec = t * 0.001;
-    // ── 気配: 敵が自艦を捉えている強さを、その敵の方角に波として出す (見られていなければ静か)
+    // ── 第23弾: 「気配」(敵の内部状態を読んでいた) は撤去。観測した兆候 (探信・照準波・ビームのチャージ・ミサイル) の方角だけ波打つ
     const gazes = [];
     let maxGaze = 0;
-    for (const e of enemies) {
-        if (e.hp <= 0 || e._dying) continue;
-        const dx = e.x - player.x, dy = e.y - player.y;
-        if (dx * dx + dy * dy > 18000 * 18000) continue;
-        const stateW = e.aiState === 'combat' ? 1.0 : e.aiState === 'hunting' ? 0.85 : 0.5;
-        const gaze = Math.min(1, (e.contactFreshness || 0) * stateW);
-        if (gaze < 0.06) continue;
-        gazes.push({ ang: Math.atan2(dy, dx), gaze });
-        if (gaze > maxGaze) maxGaze = gaze;
-    }
+    if (playerExposureLevel >= 2 && threatObs.ang !== null) {
+        maxGaze = playerExposureLevel >= 3 ? 1 : 0.6;
+        gazes.push({ ang: threatObs.ang, gaze: maxGaze });
+    } else if (playerExposureLevel >= 2) maxGaze = playerExposureLevel >= 3 ? 1 : 0.6;
     const gazeAt = (ang) => {
         let r = R;
         for (const g of gazes) {
@@ -7288,7 +7442,7 @@ function drawShipRing(ctx) {
         ctx.globalAlpha = 0.75;
         ctx.fillText(String(deg), cx + Math.cos(a) * (R + (deg % 180 ? 24 : 19)), cy + Math.sin(a) * (R + 19));
     }
-    // (2) 気配リング本体
+    // (2) リング本体 (色=脅威の段階: 静穏/受信=緑・照射=橙・攻撃=赤)
     ctx.globalAlpha = 0.28 + maxGaze * 0.5;
     ctx.strokeStyle = ringCol;
     ctx.lineWidth = 1.2 + maxGaze * 1.6;
@@ -7361,10 +7515,18 @@ function drawShipRing(ctx) {
         ctx.lineWidth = isLocked ? 2.4 : 1.5;
         ctx.beginPath(); ctx.moveTo(cx + c * (rr + 2), cy + s2 * (rr + 2)); ctx.lineTo(cx + c * tip, cy + s2 * tip); ctx.stroke();
         ctx.beginPath(); ctx.arc(cx + c * tip, cy + s2 * tip, isLocked ? 3.6 : 2.4, 0, Math.PI * 2); ctx.fill();
+        if (!isLocked) { // 第23弾: 「方位n° 熱源感知」— 何を感じたかを帯域の言葉で
+            ctx.font = '8px Orbitron, monospace';
+            ctx.fillText(_RX_WORD[bl.sensor] || '', cx + c * (tip + 16), cy + s2 * (tip + 16));
+            ctx.font = 'bold 9px Orbitron, monospace';
+        }
         if (isLocked) {
             ctx.lineWidth = 1.3;
             ctx.beginPath(); ctx.arc(cx + c * tip, cy + s2 * tip, 7, 0, Math.PI * 2); ctx.stroke();
             ctx.fillText('SIG-' + String(_contactLabels[sid] || '?').padStart(2, '0'), cx + c * (tip + 22), cy + s2 * (tip + 22));
+            const _idn = identInfo(sid); // 第23弾: 識別
+            ctx.fillStyle = _idn.low ? '#ffcc66' : '#cfe8e0';
+            ctx.fillText(_idn.txt, cx + c * (tip + 22), cy + s2 * (tip + 22) + 11);
         }
     }
     // (6) 測量ガイド: 追跡中の方位線に直交する2方向 (そちらへ動くと交点が締まる)。推定が十分に絞れたら消える
@@ -8301,6 +8463,7 @@ function showGameOver() {
     gameState.wreckSalvage = Math.max(100, Math.floor(gameState.credits * 0.35));
     saveGame();
     document.getElementById('game-over-overlay').classList.remove('hidden');
+    setTimeout(() => openReplay(), 400); // 第23弾: 試合が終わったら記録を開く (閉じると終了画面)
 }
 
 function showSectorClear(bonus) {
@@ -8370,6 +8533,21 @@ function _roundRect(ctx, x, y, w, h, r) {
     ctx.arcTo(x, y, x + w, y, r);
     ctx.closePath();
 }
+// 第23弾: 縮尺定規 (地図アプリのように、今のズームで画面上60〜150pxになる切りのよい距離)。フィールドの左下・ログの上
+const SCALE_STEPS = [50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000];
+function drawScaleBar(ctx) {
+    const z = camera.zoom; let d = SCALE_STEPS[0];
+    for (const v of SCALE_STEPS) { d = v; if (v * z >= 60) break; }
+    const px = d * z, ins = uiInsets();
+    const x0 = ins.left + 14, y0 = cssH - 58;
+    ctx.save();
+    ctx.globalAlpha = 0.85; ctx.strokeStyle = '#bfeee0'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x0, y0 - 5); ctx.lineTo(x0, y0); ctx.lineTo(x0 + px, y0); ctx.lineTo(x0 + px, y0 - 5); ctx.stroke();
+    ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x0 + px / 2, y0); ctx.lineTo(x0 + px / 2, y0 - 3); ctx.stroke();
+    ctx.fillStyle = '#bfeee0'; ctx.font = 'bold 10px Orbitron, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+    ctx.fillText(d >= 1000 ? (d / 1000) + ',000u' : d + 'u', x0 + 4, y0 - 6);
+    ctx.restore();
+}
 function drawHUDOverlay(ctx) {
     if (!player || player.hp <= 0) return;
     const { sx: psx, sy: psy } = worldToScreen(player.x, player.y);
@@ -8382,6 +8560,7 @@ function drawHUDOverlay(ctx) {
     }
     // 第14弾: 被探知状態は上帯のDOMチップ(#hud-expo)へ移設。ここではフィールド内の演出と方向指示だけを描く
     drawShipRing(ctx);
+    drawScaleBar(ctx); // 第23弾: 縮尺定規
     {
         const exL = playerExposureLevel;
         const _ins = uiInsets();
@@ -8389,7 +8568,7 @@ function drawHUDOverlay(ctx) {
         const _fCX = _fL + _fW / 2;
         const chipY = _ins.top + 4;
         ctx.save();
-        // 捕捉中: フィールドの縁を赤くパルス (狩られている感)
+        // 攻撃を受けている (第23弾: 被弾・ミサイル・ビームのチャージ反応): フィールドの縁を赤くパルス
         if (exL === 3) {
             ctx.globalAlpha = 0.10 + Math.sin(t * 0.02) * 0.07;
             ctx.strokeStyle = '#ff2233'; ctx.lineWidth = 10;
@@ -8783,9 +8962,9 @@ function ammoBelowPlan() {
 }
 // ミサイルを1発使う (無ければ撃てない)
 function useMissileAmmo() {
-    if ((cargo.ammoM || 0) <= 0) { logMessage('WEP: ミサイル切れ — 補給所かハック済みのコロニーで補給', 'warning-msg'); return false; }
+    if ((cargo.ammoM || 0) <= 0) { logMessage('WEP: ミサイル切れ — 占有したコロニーで補給', 'warning-msg'); return false; }
     cargo.ammoM--; _hudCache.cargo = null;
-    if (cargo.ammoM === 0) logMessage('WEP: ミサイルを撃ち尽くした — 補給所かハック済みのコロニーで補給', 'warning-msg');
+    if (cargo.ammoM === 0) logMessage('WEP: ミサイルを撃ち尽くした — 占有したコロニーで補給', 'warning-msg');
     return true;
 }
 function cargoStockSlots() {
@@ -9087,6 +9266,11 @@ function updateLures() {
             recordWake(L.wid, L.x, L.y, 0.6, 1);
         }
         if ((L.life -= gameSpeedFactor) <= 0 || Math.hypot(L.x - MAP_CX, L.y - MAP_CY) > MAP_RADIUS) { lures.splice(i, 1); continue; }
+        // 第23弾: 敵の偽艦影/ノイズが有視界に入れば正体が分かる
+        if (L.kind === 'ship' && L.owner === 'e' && L.phase === 'on' && player && player.hp > 0 && !(_sigIdent[L.sid] && _sigIdent[L.sid].sure) && inPlayerVision(L.x, L.y)) {
+            identSure(L.sid, false);
+            if (_contactLabels[L.sid]) logMessage('SIGNAL: SIG-' + String(_contactLabels[L.sid]).padStart(2, '0') + ' は' + (L.noise ? 'ノイズメーカー' : '偽艦影ブイ') + ' — 囮だった', 'warning-msg');
+        }
         // 偽SOSに相手がたどり着くと「何も無い」と分かる
         if (L.kind === 'sos') {
             if (L.owner === 'e' && player && player.hp > 0 && Math.hypot(player.x - L.x, player.y - L.y) < LURE_REVEAL_R) {
@@ -9553,6 +9737,28 @@ function _drawHoldProgress(ctx, x, y, r, p, col, label, zc, fontPx) {
     ctx.fillText(label + ' ' + Math.round(Math.min(1, p) * 100) + '%', x, y + r + 12 * zc);
 }
 // 第16弾: 自分のミサイルは霧の中でもどこを飛んでいるか分かるように、画面上で一定の大きさの印を付ける
+// 第23弾: コロニー情報の範囲 (霧の上) — 方角だけ=扇 / 距離つき=扇形の帯
+function drawColonyIntel(ctx) {
+    const it = playerIntel;
+    if (!it || !player) return;
+    const age = (_frameCount - it.f) / COLONY_INTEL_PERIOD; // 次の更新で差し替わる
+    const a0 = it.ang - it.aHW, a1 = it.ang + it.aHW;
+    const r0 = it.dist ? Math.max(0, it.dist - it.dHW) : 1500, r1 = it.dist ? it.dist + it.dHW : 30000;
+    ctx.save();
+    ctx.globalAlpha = 0.10 + 0.06 * Math.max(0, 1 - age);
+    ctx.fillStyle = '#7fc8ff';
+    ctx.beginPath(); ctx.arc(it.ox, it.oy, r1, a0, a1); ctx.arc(it.ox, it.oy, r0, a1, a0, true); ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 0.55;
+    ctx.strokeStyle = '#7fc8ff'; ctx.lineWidth = 1.5 / camera.zoom;
+    ctx.setLineDash([12 / camera.zoom, 8 / camera.zoom]); ctx.stroke(); ctx.setLineDash([]);
+    if (camera.zoom > 0.008) {
+        const lr = it.dist || Math.min(r1, 9000);
+        ctx.globalAlpha = 0.85; ctx.fillStyle = '#bfe4ff';
+        ctx.font = (12 / camera.zoom) + 'px Orbitron, sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('コロニー情報 (' + it.n + ')', it.ox + Math.cos(it.ang) * lr, it.oy + Math.sin(it.ang) * lr);
+    }
+    ctx.restore();
+}
 function drawOwnOrdnanceMarkers(ctx) {
     const zc = 1 / camera.zoom;
     const pulse = 0.7 + Math.sin(Date.now() * 0.012) * 0.3;
@@ -9736,6 +9942,7 @@ function firePingFromEnemy(e) {
     });
     while (passiveBearings.length > PASSIVE_BEARING_MAX) passiveBearings.shift();
     logMessage(`SONAR: 敵アクティブソナー探信音！ — 方位 ${compassDeg}° (敵は接触を失っている。方位は正確だ)`, 'warning-msg');
+    threatObs.pingF = _frameCount; threatObs.pingAng = ang; // 第23弾: 観測できる兆候
     if (huntStats) huntStats.pings++;
     // 敵への情報: 反射エコー。デコイが近くにあれば偽エコーで誤誘導。
     let echo = null, echoDist = ENEMY_PING_RANGE;
@@ -9774,6 +9981,8 @@ function firePingFromEnemy(e) {
 // ═══ 露出度メーター + ヒッグスサージ進行 (毎フレーム・軽量) ═══
 // 露出度 = 敵が自機をどれだけ掴んでいるか。潜水艦ゲームの核心「今、隠れられているのか?」に
 // 常時フィードバックを与える。エスカレーション時は警告音、追跡中は心音が鳴る。
+const FC_ILLUM_RANGE = 12000; // 第23弾: 火器管制の照準波が届く (感知できる) 距離 — 実装で決めた値
+const threatObs = { kind: '', ang: null, deg: null, pingF: -1e9, pingAng: 0, lastKind: '' };
 function updateHuntTension() {
     if (!player || player.hp <= 0) return;
     // ── デブリ擬態判定: 岩礁帯(デブリ帯)で完全停止+静粛 → 漂う岩塊に艦影が紛れる ──
@@ -9782,27 +9991,39 @@ function updateHuntTension() {
                  getDebrisIntensity(player.x, player.y) > BOTTOM_DEBRIS_MIN;
     if (isBottomed && !_wasBottomed) logMessage('TAC: デブリ擬態 — 機関完全停止。岩礁帯の岩塊に艦影が紛れる。至近でも探知されにくい', 'system-msg');
     else if (!isBottomed && _wasBottomed) logMessage('TAC: 擬態解除 — 岩礁帯の擬装を解いた', 'system-msg');
+    // ═══ 第23弾 (オーナー合意): 「観測できる兆候」だけで脅威の段階を決める (旧: 敵の内部状態=追跡/交戦を読んでいた=情報漏れ) ═══
+    //   0 静穏 / 1 受信 = 何かの信号を10秒以内に受けた / 2 照射 = 敵の探信を受けた(15秒)・火器管制の照準波(EM)を受けている
+    //   3 攻撃 = 被弾8秒以内・ミサイルの高速推進波・ビームのチャージ反応
+    const T = threatObs;
+    T.kind = ''; T.ang = null;
     let lvl = 0;
+    for (const b of passiveBearings) if (b.life > PASSIVE_BEARING_LIFE - 600 && !b.relay && !b.intel) { lvl = 1; T.kind = 'rx'; T.ang = b.angle; break; }
+    if (_frameCount - T.pingF < 900) { lvl = 2; T.kind = 'ping'; T.ang = T.pingAng; }
+    let fc = null, bc = null;
     for (const e of enemies) {
-        if (e.hp <= 0) continue;
-        // 第17弾: ノイズメーカーを追っている敵は、こちらを掴んでいない (痕跡止まり)
-        if (e._noiseLk && e._noiseLk === e.playerLastKnownPos) { if (lvl < 1) lvl = 1; continue; }
-        if (e.aiState === 'combat') { lvl = 3; break; }
-        const f = e.contactFreshness || 0;
-        if (e.aiState === 'hunting' || f > 0.4) { if (lvl < 2) lvl = 2; }
-        else if (f > 0.05) { if (lvl < 1) lvl = 1; }
+        if (e.hp <= 0 || e._dying || e.type === 'fighter') continue;
+        const d = Math.hypot(e.x - player.x, e.y - player.y);
+        // 火器管制の照準波: 交戦中で自艦を掴んでいる敵は照準のEMを当ててくる → 方位が分かる (照射元)
+        if (e.aiState === 'combat' && (e.contactFreshness || 0) > 0.4 && d < FC_ILLUM_RANGE && !(e._noiseLk && e._noiseLk === e.playerLastKnownPos)) fc = e;
+        if ((e._beamCharge || 0) > 0 && d < passiveRange()) bc = e;
     }
-    if (lvl > playerExposureLevel) {
-        playSound('alert');
-        if (lvl === 1)      logMessage('WARN: 敵が痕跡を掴んだ — シグネチャ管理を', 'warning-msg');
-        else if (lvl === 2) logMessage('WARN: 敵艦が追跡行動 — 進路と出力を変えろ', 'warning-msg');
-        else {
-            logMessage('CRITICAL: 捕捉された — 交戦か離脱か', 'warning-msg');
-            if (huntStats) huntStats.timesEngaged++;
-        }
-    } else if (lvl === 0 && playerExposureLevel > 0) {
-        logMessage('TAC: 追跡を振り切った — 隠密状態に復帰', 'system-msg');
+    if (fc) { lvl = 2; T.kind = 'fc'; T.ang = Math.atan2(fc.y - player.y, fc.x - player.x) + (Math.random() - 0.5) * 0.12; }
+    const hit = playerHitLog[playerHitLog.length - 1];
+    const msl = projectiles.find(p => p.active && !p.isPlayer && p.type === 'missile' && p._torpAlerted);
+    if (hit && _frameCount - hit.f < 480 && !hit.byFighter) { lvl = 3; T.kind = 'hit'; T.ang = null; T.deg = hit.deg; }
+    if (bc) { lvl = 3; T.kind = 'beam'; T.ang = Math.atan2(bc.y - player.y, bc.x - player.x) + (Math.random() - 0.5) * 0.1; }
+    if (msl) { lvl = 3; T.kind = 'msl'; T.ang = Math.atan2(msl.y - player.y, msl.x - player.x); }
+    if (T.ang !== null && T.kind !== 'hit') T.deg = compassDeg(T.ang);
+    if (lvl > playerExposureLevel || (lvl >= 2 && T.kind !== T.lastKind)) {
+        if (lvl > playerExposureLevel) playSound('alert');
+        const dg = T.deg !== undefined && T.deg !== null ? '方位' + T.deg + '° ' : '';
+        if (T.kind === 'fc') logMessage('WARN: ' + dg + '火器管制の照準波を感知 — 撃たれる。射線から外れろ', 'warning-msg');
+        else if (T.kind === 'beam') logMessage('WARN: ' + dg + 'ビームのチャージ反応 — 射線から外れろ', 'warning-msg');
+        else if (T.kind === 'hit' && lvl > playerExposureLevel) { logMessage('CRITICAL: 攻撃を受けている — 交戦か離脱か', 'warning-msg'); if (huntStats) huntStats.timesEngaged++; }
+    } else if (lvl === 0 && playerExposureLevel >= 2) {
+        logMessage('TAC: 照射も攻撃も止んだ', 'system-msg');
     }
+    T.lastKind = T.kind;
     if (lvl !== playerExposureLevel) { playerExposureLevel = lvl; updateAmbient(); }
     playerExposureLevel = lvl;
     // 環境音: 遠くの空間の唸り (25〜50s毎のランダムな環境フレーバー)
@@ -10088,7 +10309,7 @@ function toggleThinkLog(on) {
     const b = document.getElementById('btn-think-log');
     if (b) b.textContent = thinkLogOn ? '思考ログ: ON' : '思考ログ: OFF';
 }
-const _EXPO_JP = ['隠密', '痕跡', '追跡', '捕捉'];
+const _EXPO_JP = ['静穏', '受信', '照射', '攻撃']; // 第23弾: 観測できる兆候 (旧: 隠密/痕跡/追跡/捕捉=敵の内部状態)
 const _WPN_JP = { kinetic: '実弾', missile: 'ミサイル', beam: 'ビーム' };
 const _pct = (v) => Math.round(v * 100) + '%';
 const _dirTxt = (fx, fy, tx, ty) => '方位' + compassDeg(Math.atan2(ty - fy, tx - fx)) + '° ' + Math.round(Math.hypot(tx - fx, ty - fy) / 100) * 100 + 'u';
@@ -10163,7 +10384,7 @@ function openReplay() {
 }
 function closeReplay() { const ov = document.getElementById('replay-overlay'); if (ov) ov.classList.add('hidden'); if (_rp) _rp.play = false; }
 function _rpFmt(t) { const s2 = Math.floor(t / 60); return Math.floor(s2 / 60) + ':' + String(s2 % 60).padStart(2, '0'); }
-const _EV_COL = { fireP: '#5ff0ff', fireE: '#ffa040', hitP: '#ff5050', hitE: '#7dff9a', deathP: '#ff3030', killE: '#7dff9a', nodeP: '#50c8ff', nodeE: '#ff9a50', colonyP: '#50c8ff', aiE: '#ffcf88', expoP: '#ff8080', lureP: '#c48bff', lureE: '#c48bff', flashP: '#ffffff', flashE: '#ffffff', smokeE: '#9fb8ff', shield: '#88ccff', clear: '#7dff9a', supplyP: '#9fffc0', escP: '#ffe08a' };
+const _EV_COL = { fireP: '#5ff0ff', fireE: '#ffa040', hitP: '#ff5050', hitE: '#7dff9a', deathP: '#ff3030', killE: '#7dff9a', nodeP: '#50c8ff', nodeE: '#ff9a50', colonyP: '#50c8ff', colonyE: '#ff9a50', salvP: '#9fffc0', aiE: '#ffcf88', expoP: '#ff8080', lureP: '#c48bff', lureE: '#c48bff', flashP: '#ffffff', flashE: '#ffffff', smokeE: '#9fb8ff', shield: '#88ccff', clear: '#7dff9a', supplyP: '#9fffc0', escP: '#ffe08a' };
 function _rpRenderEvents() {
     const box = document.getElementById('rp-events'); if (!box) return;
     box.innerHTML = '';
@@ -10303,7 +10524,12 @@ function comPilotStep() {
     const retreat = 0.12 + P.caution * 0.43;
     const fireThr = 0.65 - 0.35 * P.aggression;
     const sigs = currentSignals();
-    const contact = Object.keys(sigs).some(k => /^e-/.test(k)) || enemies.some(e => e.hp > 0 && !e._dying && e.inVision);
+    // 第23弾: 内部IDで艦か囮かを見分けない (旧: 'e-' で始まる信号=敵艦と分かっていた)。囮と識別した信号だけ除く
+    const contact = Object.keys(sigs).some(k => { const d = identInfo(k); return !(d.known && d.low && d.txt.includes('確認')); }) || enemies.some(e => e.hp > 0 && !e._dying && e.inVision);
+    if (lockedSignalId && sigs[lockedSignalId]) {
+        const d = identInfo(lockedSignalId);
+        if (d.known && d.p < 0.25 && Object.keys(sigs).length > 1) { comThinkEvent('p', 'SIG-' + String(_contactLabels[lockedSignalId] || '?').padStart(2, '0') + ' は' + d.txt + ' — 囮と見て別の信号へ'); trackNextSignal(); }
+    }
     const r = xoEvaluate();
     c.mode = '';
     // 第21弾: 状況適応の性格 (自機COM) — 相手を掴んでいる=受信中の敵信号か有視界
@@ -10676,7 +10902,7 @@ function xoEvaluate() {
     if (_resupply) return { tone: 'info', text: (_resupply.kind === 'station' ? '補給所' : 'コロニー') + 'で補給中 ' + Math.round(Math.min(1, _resupply.p) * 100) + '% — EMが漏れる。離れると中断' };
     if (cargo.ammoK <= 0 && cargo.ammoM <= 0) {
         const rs = nearestResupply(player.x, player.y);
-        return { tone: 'bad', text: '実弾もミサイルも尽きた — ' + (rs ? '離脱して' + (rs.kind === 'station' ? '補給所' : 'コロニー') + 'へ (方位' + compassDeg(Math.atan2(rs.obj.y - player.y, rs.obj.x - player.x)) + '° ' + Math.round(rs.d / 100) * 100 + 'u)。ビームは撃てる' : 'ビームしか撃てない (ハック済みのコロニーか補給所で補給)'),
+        return { tone: 'bad', text: '実弾もミサイルも尽きた — ' + (rs ? '離脱して' + (rs.kind === 'station' ? '補給所' : 'コロニー') + 'へ (方位' + compassDeg(Math.atan2(rs.obj.y - player.y, rs.obj.x - player.x)) + '° ' + Math.round(rs.d / 100) * 100 + 'u)。ビームは撃てる' : 'ビームしか撃てない (コロニーを占有すれば補給できる)'),
                  act: rs ? { label: '補給へ', fn: () => { player.setTarget(rs.obj.x, rs.obj.y); } } : null };
     }
     // 第16弾: ノード制圧・コロニーハック中 (留まっている間EMが漏れる)
@@ -10684,7 +10910,9 @@ function xoEvaluate() {
         const pc = Math.round(Math.min(1, _capturing.p) * 100);
         return { tone: 'info', text: _capturing.kind === 'node'
             ? `ノード制圧中 ${pc}% — EMが漏れる。離れると中断 (制圧すると資材と聴音局が手に入る)`
-            : `コロニーをハック中 ${pc}% — EMが漏れる。離れると中断 (修理・資材・敵の方位線)` };
+            : _capturing.kind === 'derelict' ? `難破船を回収中 ${pc}% — 弾と資材`
+            : _capturing.contested ? `コロニーに敵艦が居る — 占有が進まない (追い払うか、待つか)`
+            : `コロニーを占有中 ${pc}% — EMが漏れる。離れると中断 (補給と修理・敵の位置の手掛かり)` };
     }
 
     const te = bestFireTarget();
@@ -10729,7 +10957,8 @@ function xoEvaluate() {
         const sa = _signalAnalysis[lockedSignalId] || { obs: [] };
         delete sa.lostSince;
         const b = sigs[lockedSignalId];
-        const no = String(_contactLabels[lockedSignalId] || '?').padStart(2, '0');
+        const _idn = identInfo(lockedSignalId); // 第23弾: 識別を添える
+        const no = String(_contactLabels[lockedSignalId] || '?').padStart(2, '0') + '〔' + _idn.txt + '〕';
         if (!b) return { tone: 'info', text: `SIG-${no} の音が途絶えた — 止まったか霧に入った。HIGGS帯で航跡を探すか、他の信号へ`, act: { label: '次の信号', fn: trackNextSignal } };
         if (b.relay && !sa.fix) return { tone: 'info', text: `SIG-${no} は${b.sensorLabel}の方位線だけ — 自艦でも聴ける所まで寄るか、別の聴音局で交差させろ` };
         const fx = sa.fix;
@@ -10775,6 +11004,8 @@ function xoEvaluate() {
             return { tone: 'info', text: `SIG-${no} 推定 ±${rr}u — 遠くて方位だけでは絞れない。ソナーで点を取ればビームで狙える (聞かれる)`, act: { label: 'ソナーで測る', fn: fireOmniSonar } };
         if (estR > 900) return { tone: 'info', text: `SIG-${no} 推定 ±${rr}u — まだ広い。止まって聴く(耳が澄む)か、角度を変えて重ねろ`, act: player.state !== 'moving' ? { label: '直交航路', fn: () => xoPerpendicularLeg(b.angle) } : null };
         // 第18弾: 針路が読めていれば伝える (射撃命令は見越し点を狙う)
+        if (_idn.known && _idn.low && !_idn.txt.includes('確認')) return { tone: 'info', text: `SIG-${no} 推定 ±${rr}u — 艦影らしくない。囮かもしれない — ソナーの反響で確かめるか、別の信号へ`, act: { label: 'ソナーで測る', fn: fireOmniSonar } };
+        if (_idn.known && _idn.low) return { tone: 'info', text: `SIG-${no} — 囮だった。別の信号を追え`, act: { label: '次の信号', fn: trackNextSignal } };
         if (sa.motion) return { tone: 'go', text: `SIG-${no} 推定 ±${rr}u・針路${compassDeg(Math.atan2(sa.motion.vy, sa.motion.vx))}° 約${Math.round(Math.hypot(sa.motion.vx, sa.motion.vy) * 60)}u/s — 見越して撃てる。外せば自位置を教える` };
         return { tone: 'go', text: `SIG-${no} 推定 ±${rr}u — 撃てる幅だ。外せば自位置を教える` };
     }
@@ -10796,8 +11027,12 @@ function xoEvaluate() {
         if (rs) return { tone: 'info', text: 'ミサイル切れ — ' + (rs.kind === 'station' ? '補給所' : 'コロニー') + 'で補給できる (方位' + compassDeg(Math.atan2(rs.obj.y - player.y, rs.obj.x - player.x)) + '° ' + Math.round(rs.d / 100) * 100 + 'u)。実弾とビームは撃てる', act: { label: '補給へ', fn: () => { player.setTarget(rs.obj.x, rs.obj.y); } } };
     }
     // 8) 追われている
-    if (playerExposureLevel >= 2 && !silentRunning)
-        return { tone: 'bad', text: '敵に追跡されている — 潜航に落として気配を消せ (止まれば耳も澄む)', act: { label: '潜航', fn: () => setStance('silent') } };
+    // 第23弾: 観測した兆候を根拠に言う (旧: 「追跡されている」=敵の内部状態を読んでいた)
+    if (playerExposureLevel >= 2) {
+        const dg = threatObs.deg !== null && threatObs.deg !== undefined ? '方位' + threatObs.deg + '°' : '';
+        if (threatObs.kind === 'fc') return { tone: 'bad', text: dg + 'から火器管制の照準波 — 撃たれる。射線から外れろ' + (silentRunning ? '' : ' (潜航で気配も消せ)'), act: silentRunning ? null : { label: '潜航', fn: () => setStance('silent') } };
+        if (threatObs.kind === 'ping' && !silentRunning) return { tone: 'bad', text: dg + 'から敵の探信を受けた — 反響で位置が知れた。潜航し、霧の濃い所(50%以上)へ', act: { label: '潜航', fn: () => setStance('silent') } };
+    }
     if (surgePhase === 'warn') return { tone: 'info', text: 'ヒッグスサージ接近 — 通過中は互いに盲目。動けば航跡が濃く残る' };
     // 9) 第20弾: 手掛かりが無い → 情報の取れる所を勧める (司令部情報は撤去)
     const src = xoInfoSource();
@@ -10838,9 +11073,20 @@ function xoInfoSource() {
         const d = Math.hypot(bc.x - player.x, bc.y - player.y);
         if (d / Math.max(0.8, player.currentSpeed || 0) < bc.life) return { x: bc.x, y: bc.y, d, why: '手掛かりなし — 遭難信号へ。敵も同じ信号を聞いている (先に着くか、待ち伏せるか)' };
     }
+    // 第23弾: コロニー情報 — 距離まで分かっていればその範囲へ。方角だけならまずコロニーを増やす (無ければ方角へ)
+    const it = playerIntel;
+    if (it && it.dist) {
+        const p = clampToMapCircle(it.ox + Math.cos(it.ang) * it.dist, it.oy + Math.sin(it.ang) * it.dist, 1500);
+        const d = Math.hypot(p.x - player.x, p.y - player.y);
+        if (d > 2000) return { x: p.x, y: p.y, d, why: 'コロニー情報 (' + it.n + 'つ占有) — 敵は方位' + compassDeg(it.ang) + '°±' + Math.round(it.aHW * 180 / Math.PI) + '°・' + Math.round(it.dist / 100) * 100 + 'u±' + Math.round(it.dHW / 100) * 100 + 'u の辺り。寄って聴け' };
+    }
     let best = null, bd = Infinity;
     for (const st of structures) { if (st.type !== 'colony' || st.hacked) continue; const d = Math.hypot(st.x - player.x, st.y - player.y); if (d < bd) { bd = d; best = st; } }
-    if (best) return { x: best.x, y: best.y, d: bd, why: '手掛かりなし — コロニーをハックすれば敵艦の方位線が1本入る' };
+    if (best && it && !it.dist && bd > 12000) {
+        const p = clampToMapCircle(player.x + Math.cos(it.ang) * 8000, player.y + Math.sin(it.ang) * 8000, 1500);
+        return { x: p.x, y: p.y, d: 8000, why: 'コロニー情報 — 敵は方位' + compassDeg(it.ang) + '°±' + Math.round(it.aHW * 180 / Math.PI) + '°。2つ目のコロニーは遠い (' + Math.round(bd / 1000) + 'k u) — 方角へ寄って聴け' };
+    }
+    if (best) return { x: best.x, y: best.y, d: bd, why: (best.owner === 'enemy' ? '敵のコロニーを奪え' : '手掛かりなし — コロニーを占有せよ') + ' (占有' + coloniesOwned('player') + 'つ: 1つ=敵の方角・2つ=距離・3つ=精度↑)' };
     for (const n of resourceNodes) { if (n.owner === 'player') continue; const d = Math.hypot(n.x - player.x, n.y - player.y); if (d < bd) { bd = d; best = n; } }
     if (best) return { x: best.x, y: best.y, d: bd, why: '手掛かりなし — ノードを取れば聴音局になる (周囲' + NODE_RELAY_RANGE + 'uを聴く)' };
     return null;
@@ -10852,7 +11098,7 @@ const _bandEls = {};
 // 被探知状態 (上帯チップ)。静粛/デブリ擬態は同じチップに併記 (旧: フィールド上の文字列)
 function _updateExpoChip() {
     const exL = playerExposureLevel;
-    const exTxt = (exL === 0 ? '隠密' : exL === 1 ? '痕跡' : exL === 2 ? '追跡' : '捕捉') + (isBottomed ? '・擬態' : playerCoasting ? '・機関停止' : boostT > 0 ? '・噴射' : silentRunning ? '・潜航' : powerStance === 'flank' ? '・全速' : '')
+    const exTxt = _EXPO_JP[exL] + (isBottomed ? '・擬態' : playerCoasting ? '・機関停止' : boostT > 0 ? '・噴射' : silentRunning ? '・潜航' : powerStance === 'flank' ? '・全速' : '')
         + (player && player.hp > 0 && playerClutter() > 0 ? '・混信' : ''); // 第18弾: 周りの発信源・地形に紛れている
     if (exTxt + exL === _hudCache.expo) return;
     _hudCache.expo = exTxt + exL;
@@ -10920,7 +11166,7 @@ function updateTacStrip() {
     if (tb) {
         const sa = lockedSignalId ? _signalAnalysis[lockedSignalId] : null;
         // 第18弾: 2行に分けてボタン幅に収める (旧: 「SIG-01 方位16」がボタンからはみ出していた)
-        const tl = sa ? 'SIG-' + String(_contactLabels[lockedSignalId] || '?').padStart(2, '0') + '\n' + (sa.fix ? _fmtR(trackEstimate(sa, 0).r) + (sa.motion ? '・動' : '') : '線' + (sa.obs ? sa.obs.length : 0)) : '追跡';
+        const tl = sa ? 'SIG-' + String(_contactLabels[lockedSignalId] || '?').padStart(2, '0') + '\n' + identInfo(lockedSignalId).short + ' ' + (sa.fix ? _fmtR(trackEstimate(sa, 0).r) + (sa.motion ? '・動' : '') : '線' + (sa.obs ? sa.obs.length : 0)) : '追跡';
         if (tb._lbl !== tl) { tb._lbl = tl; const l = document.getElementById('abar-track-label'); if (l) l.textContent = tl; tb.classList.toggle('on', !!sa); }
     }
     const rc = document.getElementById('recenter-chip');
@@ -11163,13 +11409,18 @@ function stepWorld() {
             // 勝利条件チェック
             const allEnemiesDown = enemies.length === 0;
             const colonyNodes = structures.filter(s => s.type === 'colony');
-            const allNodesHacked = colonyNodes.length > 0 && colonyNodes.every(s => s.hacked);
+            const allNodesHacked = colonyNodes.length > 0 && colonyNodes.every(s => s.owner === 'player');
+            // 第23弾: S&D は敵が全コロニーを占有したら負け
+            if (gameState.mode === 'sd' && colonyNodes.length > 0 && colonyNodes.every(s => s.owner === 'enemy') && player && player.hp > 0 && !player._defeat) {
+                player._defeat = 'サーチ&デストロイ: 全コロニーを敵に占有された'; player.hp = 0;
+            }
             const sdWin = gameState.mode === 'sd' && allNodesHacked;
 
             if (allEnemiesDown || sdWin) {
                 sectorCleared = true;
                 matchRecEvent('clear', player.x, player.y, allEnemiesDown ? 'セクター制圧 (敵艦撃沈)' : 'セクター制圧 (全コロニーをハック)');
-                if (comDemo) setTimeout(() => openReplay(), 3500); // 第22弾: COM対戦は終わったら記録を開く
+                // 第23弾: スカーミッシュ — 勝敗が付いたら試合終了。作戦報告を出し、その上に試合の記録を開く (COM対戦も通常も)
+                setTimeout(() => { if (!comDemo && typeof openDebrief === 'function') openDebrief(); openReplay(); }, 3500);
                 const bonus = 100 + gameState.sector * 75 + (sdWin && !allEnemiesDown ? 50 : 0);
                 gameState.credits += bonus;
                 if (gameState.career) gameState.career.bestSector = Math.max(gameState.career.bestSector || 1, gameState.sector);
@@ -11233,7 +11484,7 @@ function stepWorld() {
             player._dvx = (player.x - (player.prevX ?? player.x)) * 0.7; player._dvy = (player.y - (player.prevY ?? player.y)) * 0.7;
             { const v = Math.hypot(player._dvx, player._dvy); if (v > 3) { player._dvx *= 3 / v; player._dvy *= 3 / v; } } // 漂流は最大3u/f
             const last = playerHitLog[playerHitLog.length - 1];
-            player._deathCause = last ? _hitText(last) : '原因不明';
+            player._deathCause = player._defeat || (last ? _hitText(last) : '原因不明');
             _hitStop = 18;
             createExplosion(player.x, player.y, '#ffaa44', 22);
             logMessage('CRITICAL: 被弾 — ' + player._deathCause + '。機関部誘爆、船体崩壊が始まる', 'system-msg');
@@ -11317,6 +11568,7 @@ function stepWorld() {
 
         // 第16弾: ノード制圧 / コロニーハック (近くに留まる)
         updateNodesAndColonies();
+        updateEnemyColonyCapture(); updateColonyIntel(false); // 第23弾
         updateResupply(); // 第20弾
 
         // 構造物・ステーションの発見チェック (有視界距離内に入ると発見)
@@ -11330,7 +11582,9 @@ function stepWorld() {
 
         // Docking Detection
         if (player && player.hp > 0 && !dockingOpen) {
-            let nearStation = stations.find(s => Math.hypot(player.x - s.x, player.y - s.y) < s.radius + 50);
+            // 第23弾: 補給所は廃止 → 占有したコロニーでドック (改修・積み込み計画)。補充はコロニーの補給 (60秒に1回) で行う
+            let nearStation = stations.find(s => Math.hypot(player.x - s.x, player.y - s.y) < s.radius + 50)
+                || (!comDemo && structures.find(s => s.type === 'colony' && s.owner === 'player' && Math.hypot(player.x - s.x, player.y - s.y) < RESUPPLY_R));
             const prompt = document.getElementById('dock-prompt');
             if (nearStation) {
                 prompt.classList.add('active');
@@ -11446,6 +11700,7 @@ function renderWorld() {
         drawNoiseMakers(ctx);
         drawLures(ctx); // 第21弾
         drawOwnOrdnanceMarkers(ctx);
+        drawColonyIntel(ctx);
         if (player && (player.hp > 0 || player._dying > 0)) player.draw(ctx);
         drawDamagePuffs(ctx); // 第21弾: 損傷の煙・火花は艦影の上
         updateDrawBeams(ctx); // 第22弾: ビームは霧と艦影の上
@@ -11540,9 +11795,11 @@ const btnLeave = document.getElementById('btn-leave-dock');
 btnDock.addEventListener('click', () => {
     if (!player || player.hp <= 0) return;
     dockingOpen = true;
-    // 第16弾: 補給ステーションでは積み荷を計画どおりに補充する (資材・完成品)
-    resetCargo();
-    logMessage('補給: 積み荷を積み込み計画どおりに補充 — ' + cargoSummaryNow(), 'system-msg');
+    // 第16弾: 補給ステーションでは積み荷を計画どおりに補充する (資材・完成品)。第23弾: コロニーのドックは補充しない (補給は60秒に1回の方)
+    if (stations.some(s => Math.hypot(player.x - s.x, player.y - s.y) < s.radius + 50)) {
+        resetCargo();
+        logMessage('補給: 積み荷を積み込み計画どおりに補充 — ' + cargoSummaryNow(), 'system-msg');
+    }
     refreshLoadoutSummaries();
     dockPrompt.classList.remove('active');
     dockingMenu.classList.remove('hidden');
