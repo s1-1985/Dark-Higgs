@@ -689,7 +689,7 @@ function applyEnemyUpgrade(ship) {
     ship.enemyUpgLv = (ship.enemyUpgLv || 0) + 1;
     let label;
     if (pick === 'weapon')      { ship.upgFireCD = Math.max(0.45, ship.upgFireCD * 0.86); ship.upgDmg = Math.min(2.2, ship.upgDmg * 1.13); label = '武装'; }
-    else if (pick === 'armor')  { ship.maxHp = Math.min(5000, ship.maxHp * 1.20); ship.hp = Math.min(ship.maxHp, ship.hp + ship.maxHp * 0.15); label = '装甲'; }
+    else if (pick === 'armor')  { const _r = ship.hp / ship.maxHp; ship.maxHp = Math.min(5000, ship.maxHp * 1.20); ship.hp = ship.maxHp * _r; label = '装甲'; } // 第26弾: 回復はしない (割合はそのまま)
     else if (pick === 'engine') { ship.upgSpeed = Math.min(1.8, ship.upgSpeed * 1.12); label = '機関'; }
     else                        { ship.upgDetect = Math.min(2.5, ship.upgDetect * 1.18); label = '索敵'; }
     logMessage(`SENSOR: 敵艦がノードを奪取し【${label}】を強化 (強化Lv${ship.enemyUpgLv})。`, 'warning-msg');
@@ -775,17 +775,24 @@ const DRONE_SPEC = {
     // 第21弾: 囮 (オーナー合意) — 長押し地点へ射出。偽SOS=本物と同じ遭難信号を90秒 / 偽艦影ブイ=熱・光・EM・航跡を巡航中の艦なみに60秒 (ゆっくり動く)
     fsos:    { label: '偽SOS',         w: 1, mat: 1, build: 480, item: true, lure: true },
     lure:    { label: '偽艦影ブイ',     w: 1, mat: 1, build: 480, item: true, lure: true },
+    // 第26弾 (オーナー指示): 修理はリペアキットだけ。出撃前の積み込みでしか積めない (資材から作れない・補給できない)
+    repair:  { label: 'リペアキット',   w: 1, mat: 0, build: 0, item: true, noBuild: true },
 };
+// 1個で耐久+700を6秒かけて (攻撃型3500が5個で全回復 — オーナーの目安)。量は艦種によらず同じ (実装で決めた値)
+const REPAIR_KIT_HP = 700, REPAIR_KIT_TIME = 360;
+// 第26弾 (オーナー指示): コロニーの補給は1つのコロニーで1回だけ — 弾は積み込み計画まで満タン・資材は+3個まで・完成品とキットは補給できない
+const COLONY_SUPPLY_MAT = 3;
 const SHIP_DRONES = {
-    carrier: ['attack', 'mech', 'build', 'scout', 'decoy', 'buoy', 'barrier', 'higgs', 'flash', 'noise', 'smoke', 'fsos', 'lure'],
-    assault: ['attack', 'build', 'flash', 'noise', 'smoke', 'fsos', 'lure'],
-    stealth: ['decoy', 'scout', 'flash', 'noise', 'smoke', 'fsos', 'lure'],
+    carrier: ['attack', 'mech', 'build', 'scout', 'decoy', 'buoy', 'barrier', 'higgs', 'flash', 'noise', 'smoke', 'fsos', 'lure', 'repair'],
+    assault: ['attack', 'build', 'flash', 'noise', 'smoke', 'fsos', 'lure', 'repair'],
+    stealth: ['decoy', 'scout', 'flash', 'noise', 'smoke', 'fsos', 'lure', 'repair'],
 };
 // 第17弾: 既定の積み方に離脱用の消耗品を入れる (オーナー合意 2026-10-25)。第20弾: 弾(ammoK=実弾の枠/ammoM=ミサイルの枠)を加える
 const DEFAULT_LOADOUT = {
-    carrier: { ammoK: 1, ammoM: 3, attack: 2, build: 1, scout: 1, flash: 1, smoke: 1, mat: 5 },
-    assault: { ammoK: 3, ammoM: 4, attack: 1, flash: 1, smoke: 1, mat: 0 },
-    stealth: { ammoK: 1, ammoM: 2, decoy: 1, noise: 1, flash: 1, mat: 0 },
+    // 第26弾: リペアキットを各1個 (空母は資材を1枠・攻撃型はミサイルを1枠・潜航型はミサイルを1枠減らして入れる — 実装で決めた既定)
+    carrier: { ammoK: 1, ammoM: 3, attack: 2, build: 1, scout: 1, flash: 1, smoke: 1, mat: 4, repair: 1 },
+    assault: { ammoK: 3, ammoM: 3, attack: 1, flash: 1, smoke: 1, mat: 0, repair: 1 },
+    stealth: { ammoK: 1, ammoM: 1, decoy: 1, noise: 1, flash: 1, mat: 0, repair: 1 },
 };
 let cargo = { stock: {}, mat: 0, asm: null, ammoK: 0, ammoM: 0 }; // asm = { type, t, total, ready } / ammoK=実弾の残り(斉射) / ammoM=ミサイルの残り(発)
 // ═══ 第17弾: 緊急離脱 (オーナー合意 2026-10-25) ═══
@@ -830,7 +837,7 @@ const RESUPPLY_R = 600, RESUPPLY_TIME = 480, COLONY_RESUPPLY_CD = 3600;
 //   1つ=方角(幅120°) / 2つ=+距離(幅5000u) / 3つ以上=方角の幅30°・距離の幅1000u。10秒ごとに更新 (中心は真の位置から幅の内でずれる)
 //   自分のノード1つごとに幅を10%狭める (最大40%)。ノードは聴音局のまま。難破船は一度だけ弾と資材を拾える。S&Dは全コロニーの占有で勝ち (奪われれば負け)
 // 第24弾 (オーナー選択「コロニーを増やす」): 接触が少ない対策。近くにコロニーがあれば早く占有でき、情報 (方角→距離) が早く効く。双方が同じ所を取り合うので出会いも増える
-const COLONY_COUNT = { br: 8, sd: 8 };
+const COLONY_COUNT = { br: 5, sd: 5 }; // 第26弾: 8→5 (倍速で試合時間を縮められるので、密集させない — オーナー)
 const COLONY_INTEL_PERIOD = 600;
 const COLONY_INTEL = [null, { ang: Math.PI / 3, dist: null }, { ang: Math.PI / 3, dist: 2500 }, { ang: Math.PI / 12, dist: 500 }]; // 半幅
 const NODE_INTEL_BUFF = 0.10, NODE_INTEL_BUFF_MAX = 0.40;
@@ -1978,7 +1985,7 @@ class Structure {
         const _lColor = this.type === 'colony' ? (this.hacked ? '#00ffcc' : this.owner === 'enemy' ? '#ff9955' : '#6699ff') : (this.salvaged ? '#00ffcc' : '#bb9966');
         // 第18弾: 引いた時は短い名前だけ・アイコンのすぐ上に (旧: 長い説明文を画面上60px上に大きく出していた)
         const _far = camera.zoom < LABEL_FAR_ZOOM;
-        const _lText  = this.type === 'colony' ? (this.hacked ? (_far ? '自コロニー' : 'コロニー (占有・補給と修理)') : this.owner === 'enemy' ? (_far ? '敵コロニー' : 'コロニー (敵が占有 — 留まって奪う)') : (_far ? 'コロニー' : 'コロニー — 近くに留まって占有')) : (this.salvaged ? '難破船 (回収済)' : (_far ? '難破船' : '難破船 — 近くで弾と資材を回収'));
+        const _lText  = this.type === 'colony' ? (this.hacked ? (_far ? '自コロニー' : (this._usedP ? 'コロニー (占有・補給済み)' : 'コロニー (占有・補給1回)')) : this.owner === 'enemy' ? (_far ? '敵コロニー' : 'コロニー (敵が占有 — 留まって奪う)') : (_far ? 'コロニー' : 'コロニー — 近くに留まって占有')) : (this.salvaged ? '難破船 (回収済)' : (_far ? '難破船' : '難破船 — 近くで弾と資材を回収'));
         const _iconPx = Math.max(this.radius * 2.6 * camera.zoom, STRUCT_MIN_PX);
         ctx.fillStyle = _lColor;
         ctx.font = 'bold ' + Math.round(_far ? 9 : 11) / camera.zoom + 'px Orbitron, monospace';
@@ -3673,7 +3680,12 @@ class Ship {
                     } else {
                         if (!this._hiding && (this.inVision || this.contactLife > 0)) logMessage('SENSOR: 敵艦が' + (hs.kind === 'fog' ? '濃い霧' : '岩礁帯') + 'で機関を止めた — 潜んで修復している', 'system-msg');
                         this._hiding = true;
-                        this.hp = Math.min(this.maxHp, this.hp + this.maxHp * ENEMY_HIDE_HEAL * gameSpeedFactor);
+                        // 第26弾: 修理はリペアキットだけ (旧: 潜伏中に毎秒0.5%回復)
+                        if ((this.itemRepair || 0) > 0 && !(this._kitT > 0) && this.hp < this.maxHp - REPAIR_KIT_HP * 0.8) {
+                            this.itemRepair--; this._kitT = REPAIR_KIT_TIME;
+                            matchRecEvent('repairE', this.x, this.y, '敵: リペアキットを使う');
+                            if (comDemo) comThinkEvent('e', '潜伏中 → リペアキットで修理 (残り' + this.itemRepair + '個)', 'e' + this.uid);
+                        }
                         this._hideT -= gameSpeedFactor;
                     }
                     if (this._hideT <= 0) {
@@ -3692,9 +3704,9 @@ class Ship {
                 const _needS = (this.ammoK <= 0 && this.ammoM <= 0) || (this.ammoM <= 0 && (_profS.weaponEarly !== 'kinetic' || this.ammoK < (this._fullK || 1) * 0.25));
                 if (_needS && !this._supply) {
                     let best = null, bd = Infinity, kind = '';
-                    for (const c of structures) { if (c.type !== 'colony' || c.hacked) continue; const d = Math.hypot(c.x - this.x, c.y - this.y); if (d < bd) { bd = d; best = c; kind = 'コロニー'; } }
+                    for (const c of structures) { if (c.type !== 'colony' || c.hacked || c._usedE) continue; const d = Math.hypot(c.x - this.x, c.y - this.y); if (d < bd) { bd = d; best = c; kind = 'コロニー'; } }
                     if (best) {
-                        this._supply = { x: best.x, y: best.y, t: 0 };
+                        this._supply = { x: best.x, y: best.y, t: 0, col: best };
                         if (comDemo) comThinkEvent('e', '弾が尽きた (実弾' + this.ammoK + '・ミサイル' + this.ammoM + ') → 交戦を離れて' + kind + 'で補給 (' + _dirTxt(this.x, this.y, best.x, best.y) + ')', 'e' + this.uid);
                     }
                 }
@@ -3705,7 +3717,9 @@ class Ship {
                         const ang = Math.atan2(sp.y - this.y, sp.x - this.x);
                         const _msS = this._maxSpeeds();
                         this._moveHeading(ang, _msS ? _msS.cruise : 1.2); // 第22弾: 補給へは巡航
+                    } else if (sp.col && sp.col._usedE) { this._supply = null; // 第26弾: 1つのコロニーで1回だけ
                     } else if ((sp.t += gameSpeedFactor) >= RESUPPLY_TIME) {
+                        if (sp.col) sp.col._usedE = true;
                         this.ammoK = this._fullK; this.ammoM = this._fullM; this._kMag = KINETIC_MAG; this._kReload = 0; this._mReload = 0;
                         this._supply = null;
                         this.aiState = 'hunting'; this.huntTimer = 900; this.lurking = false;
@@ -3782,8 +3796,7 @@ class Ship {
                         if (Math.hypot(n.x - this.x, n.y - this.y) < this.radius + 70) {
                             if (n.owner !== 'enemy') enemyCaptureNode(this, n);
                             n.eHeal = _frameCount;
-                            this.hp = Math.min(this.maxHp, this.hp + this.maxHp * 0.30);
-                            if (this.inVision || this.contactLife > 0) logMessage('SENSOR: 敵艦がノードで損傷を修復した。', 'warning-msg');
+                            // 第26弾: ノードでの修復は撤去 (修理はリペアキットだけ)
                             break;
                         }
                     }
@@ -4001,8 +4014,7 @@ class Ship {
                         enemyCaptureNode(this, this.gatherTarget);
                         this.resourcePoints++;
                         // ノード1個ごとに小回復。2個ごとに性格重み付けで自己強化 (放置すると相手が育つ)。
-                        this.hp = Math.min(this.maxHp, this.hp + this.maxHp * 0.06);
-                        if (this.resourcePoints % 2 === 0) applyEnemyUpgrade(this);
+                        if (this.resourcePoints % 2 === 0) applyEnemyUpgrade(this); // 第26弾: ノードでの小回復は撤去
                         this.gatherTarget = null; this._capT = 0;
                         this.aiState = 'lurking'; this.lurking = true;
                     }
@@ -5370,7 +5382,7 @@ function generateSector() {
       boss._fullK = (lo.ammoK || 0) * AMMO_PER_SLOT.kinetic; boss._fullM = (lo.ammoM || 0) * AMMO_PER_SLOT.missile;
       boss.ammoK = boss._fullK; boss.ammoM = boss._fullM; boss._kMag = KINETIC_MAG;
       // 第22弾: 離脱の消耗品も積み込みどおり (旧: 敵は使わなかった)。空母の艦載機の数は COM対戦では積み込みの戦闘機の数
-      boss.itemFlash = lo.flash || 0; boss.itemNoise = lo.noise || 0; boss.itemSmoke = lo.smoke || 0;
+      boss.itemFlash = lo.flash || 0; boss.itemNoise = lo.noise || 0; boss.itemSmoke = lo.smoke || 0; boss.itemRepair = lo.repair || 0; boss._kitT = 0;
       boss._eLo = _comLo ? { fsos: lo.fsos, lure: lo.lure, attack: lo.attack } : null; }
     boss.lurking = true;
     enemies.push(boss);
@@ -5567,7 +5579,7 @@ function cargoSummaryNow() {
     return parts.join('・');
 }
 // 第22弾: 敵COMが使える搭載物 (それ以外は積んでも使わないので敵の積み込みには出さない)
-const ENEMY_USES = ['flash', 'noise', 'smoke', 'fsos', 'lure'];
+const ENEMY_USES = ['flash', 'noise', 'smoke', 'fsos', 'lure', 'repair'];
 function comLoadout(side, ship) {
     const st = comCfg && comCfg.lo && comCfg.lo[side] && comCfg.lo[side][ship];
     const lo = Object.assign({ mat: 0 }, st || DEFAULT_LOADOUT[ship]);
@@ -6505,24 +6517,25 @@ function cargoBelowPlan() {
 }
 function nearestResupply(x, y) {
     let best = null, bd = Infinity, kind = '';
-    for (const c of structures) { if (c.type !== 'colony' || !c.hacked || _frameCount < (c._supplyCD || 0)) continue; const d = Math.hypot(c.x - x, c.y - y); if (d < bd) { bd = d; best = c; kind = 'colony'; } }
+    for (const c of structures) { if (c.type !== 'colony' || !c.hacked || c._usedP) continue; const d = Math.hypot(c.x - x, c.y - y); if (d < bd) { bd = d; best = c; kind = 'colony'; } }
     return best ? { obj: best, kind, d: bd } : null;
 }
 function updateResupply() {
     if (!player || player.hp <= 0 || dockingOpen) { _resupply = null; return; }
     let best = null, bd = RESUPPLY_R, kind = '';
     for (const c of structures) {
-        if (c.type !== 'colony' || !c.hacked || _frameCount < (c._supplyCD || 0)) continue;
+        if (c.type !== 'colony' || !c.hacked || c._usedP) continue;
         const d = Math.hypot(c.x - player.x, c.y - player.y);
-        if (d < bd && (cargoBelowPlan() || player.hp < player.maxHp * 0.95)) { bd = d; best = c; kind = 'colony'; }
+        if (d < bd && (ammoBelowPlan() || cargo.mat < Math.min(COLONY_SUPPLY_MAT, cargoMatCap()))) { bd = d; best = c; kind = 'colony'; }
     }
     if (!best) { _resupply = null; return; }
     if (!_resupply || _resupply.obj !== best) _resupply = { obj: best, kind, p: 0 };
     _resupply.p += gameSpeedFactor / RESUPPLY_TIME;
     if (_resupply.p < 1) return;
-    // 第23弾: 占有したコロニーで 積み込み計画どおりに補充＋耐久25%修理 (60秒に1回)
-    { resetCargo(); const heal = Math.floor(player.maxHp * 0.25); player.hp = Math.min(player.maxHp, player.hp + heal); best._supplyCD = _frameCount + COLONY_RESUPPLY_CD;
-      logMessage('補給: コロニーで補充と修理 (耐久+' + heal + ') — ' + cargoSummaryNow() + '。次にここで補給できるのは60秒後', 'system-msg'); }
+    // 第26弾 (オーナー指示): 1つのコロニーで1回だけ — 弾は積み込み計画まで満タン・資材は+3個まで。完成品・リペアキット・修理は無し
+    { const gotA = refillAmmo(); const gotM = addMaterials(COLONY_SUPPLY_MAT); best._usedP = true;
+      matchRecEvent('supplyP', best.x, best.y, '自艦: コロニーで補給');
+      logMessage('補給: コロニーで弾を満タン' + (gotA ? ' (+' + gotA + ')' : '') + (gotM ? '・資材+' + gotM + '個' : '') + ' — ' + cargoSummaryNow() + '。このコロニーでの補給はこれで終わり', 'system-msg'); }
     if (comDemo) comThinkEvent('p', '補給完了 (実弾' + cargo.ammoK + '・ミサイル' + cargo.ammoM + ')');
     _resupply = null;
     playSound('ui');
@@ -6573,11 +6586,10 @@ function hackColonyByPlayer(st) {
     const was = st.owner;
     st.hacked = true; st.owner = 'player'; st.hackP = 0; st.eHackP = 0;
     matchRecEvent('colonyP', st.x, st.y, '自艦がコロニーを占有' + (was === 'enemy' ? ' (敵から奪還)' : ''));
-    const got = addMaterials(999);
     createClickEffect(st.x, st.y, '#00aaff');
     playSound('ui');
     const n = coloniesOwned('player');
-    logMessage('COLONY: コロニーを占有 (' + n + 'つ' + (was === 'enemy' ? '・敵から奪還' : '') + ') — 資材+' + got + '個。ここで補給と修理ができる。' + _colonyIntelHint(n), 'system-msg');
+    logMessage('COLONY: コロニーを占有 (' + n + 'つ' + (was === 'enemy' ? '・敵から奪還' : '') + ')' + (st._usedP ? ' — ここの補給はもう使った' : ' — ここで1回だけ補給できる (弾を満タン・資材+' + COLONY_SUPPLY_MAT + ')') + '。' + _colonyIntelHint(n), 'system-msg');
     updateColonyIntel(true);
 }
 function _colonyIntelHint(n) {
@@ -6633,10 +6645,10 @@ function updateEnemyColonyCapture() {
         if (st.eHackP >= 1) {
             const was = st.owner;
             st.owner = 'enemy'; st.hacked = false; st.eHackP = 0; st.hackP = 0;
-            near.hp = Math.min(near.maxHp, near.hp + near.maxHp * 0.25); near.ammoK = near._fullK ?? near.ammoK; near.ammoM = near._fullM ?? near.ammoM; // 敵も補給と修理
+            // 第26弾: 占有しただけでは回復も補給もしない (補給は _supply の流れで1つのコロニーにつき1回)
             matchRecEvent('colonyE', st.x, st.y, '敵がコロニーを占有' + (was === 'player' ? ' (自艦のを奪った)' : ''));
             if (was === 'player') { logMessage('COLONY: コロニーとの通信途絶 — 敵に奪われた (占有' + coloniesOwned('player') + 'つ)', 'warning-msg'); playSound('alert'); updateColonyIntel(true); }
-            if (comDemo) comThinkEvent('e', 'コロニーを占有 (' + coloniesOwned('enemy') + 'つ) — 補給と修理', 'e' + near.uid);
+            if (comDemo) comThinkEvent('e', 'コロニーを占有 (' + coloniesOwned('enemy') + 'つ) — 自機の位置の手掛かりが増える', 'e' + near.uid);
         }
     }
 }
@@ -6858,7 +6870,7 @@ function checkPassiveDetection() {
         });
         // 方位の記録 (推定位置の材料)
         const sa = addBearingObs(c.sourceId, player.x, player.y, angle, sigma, c.sig, colorRgb);
-        if (tracked) solveFix(sa); else sa.dirty = true;
+        solveFix(sa); // 第26弾: 追跡していない信号も解く (地図に複数の推定円を出すため。追跡中は方位が鋭いので円も小さい)
         identStep(c.sourceId, tracked, c.nb || 1, sa); // 第23弾: 識別の手掛かり
         if (tracked) {
             const _te = enemyBySid(c.sourceId);
@@ -6977,10 +6989,19 @@ function drawIdentifiedTerrain(ctx, vpX, vpY, vpW, vpH) {
 // ============================================================
 // §4-4: 三角測量精度円描画 (ワールド空間)
 // 低精度=赤大円 / 中=橙 / 高=緑 / 超高=シアン
+// 第26弾 (オーナー指示): 方角と距離がある程度割り出せた信号は全部「この円の中のどこか」で示す (追跡中以外も・複数同時)。
+// 円の中心に目標が居るわけではない — 中心の十字は描かない。追跡中の信号だけ針路の矢印と見越し点を足す
 function drawTriangulationCircle(ctx) {
+    for (const sid in _signalAnalysis) {
+        const sa = _signalAnalysis[sid];
+        if (!sa.fix) { sa.displayCenterX = null; continue; }
+        const lo = sa.obs && sa.obs[sa.obs.length - 1];
+        if (sid !== lockedSignalId && (!lo || _frameCount - lo.f > TMA_KEEP)) continue; // 古い記録の円は出さない
+        _drawEstCircle(ctx, sid, sa, sid === lockedSignalId);
+    }
+}
+function _drawEstCircle(ctx, sid, sa, locked) {
     // 第15弾: 記録した方位線の交点 (solveFix) をそのまま描く。真の位置とは無関係 — 外れていることもある
-    if (!lockedSignalId || !_signalAnalysis[lockedSignalId]) return;
-    const sa = _signalAnalysis[lockedSignalId];
     // 第18弾: 運動解があれば推定位置は針路に沿って進む (円もそれに付いていく)
     const est = sa.fix ? trackEstimate(sa, 0) : null;
     if (!est) { sa.displayCenterX = null; return; }
@@ -6993,19 +7014,28 @@ function drawTriangulationCircle(ctx) {
     // 幅で色分け: 広い=橙 / 撃てる幅(ミサイルの終末シーカーに収まる)=緑 / 精密=シアン
     const col = R > 2400 ? 'rgb(255,150,40)' : R > 900 ? 'rgb(255,220,90)' : R > 350 ? 'rgb(80,255,140)' : 'rgb(100,220,255)';
     const inv = 1 / camera.zoom;
+    const fade = locked ? 1 : 0.6;
     ctx.save();
-    ctx.globalAlpha = 0.07;
+    ctx.globalAlpha = 0.07 * fade;
     ctx.fillStyle = col;
     ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
-    ctx.globalAlpha = 0.5;
+    ctx.globalAlpha = 0.5 * fade;
     ctx.strokeStyle = col;
-    ctx.lineWidth = 1.6 * inv;
+    ctx.lineWidth = (locked ? 1.6 : 1.1) * inv;
     ctx.setLineDash([12 * inv, 8 * inv]);
     ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
     ctx.setLineDash([]);
+    // 円の縁 (上) に「SIG-xx はこの円のどこか・艦影n%」— 中心に居るとは限らない
+    {
+        const fs = Math.round(11 * inv), idn = identInfo(sid);
+        ctx.font = 'bold ' + fs + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        ctx.globalAlpha = 0.9 * fade; ctx.fillStyle = col;
+        ctx.fillText('SIG-' + String(_contactLabels[sid] || '?').padStart(2, '0') + ' はこの円のどこか', cx, cy - R - 4 * inv);
+        ctx.font = Math.round(10 * inv) + 'px sans-serif'; ctx.textBaseline = 'top';
+        ctx.fillText('±' + Math.round(R / 100) * 100 + 'u・' + idn.txt, cx, cy - R + 4 * inv);
+    }
+    if (!locked) { ctx.restore(); return; }
     ctx.globalAlpha = 0.85;
-    const m = 14 * inv;
-    ctx.beginPath(); ctx.moveTo(cx - m, cy); ctx.lineTo(cx + m, cy); ctx.moveTo(cx, cy - m); ctx.lineTo(cx, cy + m); ctx.stroke();
     ctx.font = 'bold ' + Math.round(11 * inv) + 'px Orbitron, monospace';
     ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
     // 第18弾: 推定した針路と速さ (10秒ぶんの矢印)。方位の記録だけから解いたもの — 外れていることもある
@@ -7026,7 +7056,7 @@ function drawTriangulationCircle(ctx) {
     }
     // 第18弾: 見越し点 — 今の兵装で撃つと、弾が届く時刻にここに居るはず (射撃命令はここを狙う)
     const w = currentWeapon();
-    const te = enemyBySid(lockedSignalId);
+    const te = enemyBySid(sid);
     if (w !== 'beam' && te && !te.inVision) {
         const lp = leadPoint(sa, w);
         if (lp && Math.hypot(lp.x - cx, lp.y - cy) > 40 * inv) {
@@ -9002,6 +9032,11 @@ function deployDrone(type, tx, ty) {
         playSound('ui');
         return;
     }
+    if (type === 'repair') { // 第26弾: リペアキット — 完成品だけ (資材から作れない)
+        if ((cargo.stock.repair || 0) <= 0) { logMessage('修理: リペアキットが無い — 出撃前の積み込みでしか積めない (補給もできない)', 'warning-msg'); return; }
+        if (player._kitT > 0) { logMessage('修理: リペアキットを使っている最中 (残り' + Math.ceil(player._kitT / 60) + '秒)', 'warning-msg'); return; }
+        if (player.hp >= player.maxHp) { logMessage('修理: 損傷なし — キットは取っておく', 'system-msg'); return; }
+    }
     if ((cargo.stock[type] || 0) > 0) {
         if (!spec.item && activeDeployCount() >= CARGO_CAP[ship]) { logMessage(`搭載: 同時に出しておけるのは${CARGO_CAP[ship]}機まで`, 'warning-msg'); return; }
         cargo.stock[type]--;
@@ -9009,6 +9044,7 @@ function deployDrone(type, tx, ty) {
         _spawnDrone(type, tx, ty);
         return;
     }
+    if (spec.noBuild) return;
     if (cargo.asm) { logMessage(`搭載: ${DRONE_SPEC[cargo.asm.type].label}を組み立て中 (残り${Math.max(0, Math.ceil(cargo.asm.t / 60))}秒)`, 'warning-msg'); return; }
     if (cargo.mat < spec.mat) { logMessage(`搭載: ${spec.label}の完成品が無く資材も足りない (必要${spec.mat}個・残り${cargo.mat}個) — ノードを制圧すると補給できる`, 'warning-msg'); return; }
     cargo.mat -= spec.mat;
@@ -9058,6 +9094,11 @@ function useEscapeItem(type, tx, ty) {
     if (type === 'flash') useFlash();
     else if (type === 'noise') useNoise();
     else if (type === 'smoke') useSmoke();
+    else if (type === 'repair') {
+        player._kitT = REPAIR_KIT_TIME;
+        matchRecEvent('repairP', player.x, player.y, '自艦: リペアキットを使う');
+        logMessage('修理: リペアキット — 6秒で耐久+' + REPAIR_KIT_HP + ' (残り' + (cargo.stock.repair || 0) + '個)', 'system-msg');
+    }
     else if (type === 'fsos' || type === 'lure') {
         launchLure('p', type === 'fsos' ? 'sos' : 'ship', player.x, player.y, tx ?? player.x + Math.cos(player.angle) * 3000, ty ?? player.y + Math.sin(player.angle) * 3000);
         logMessage('囮: ' + DRONE_SPEC[type].label + 'を射出 — ' + _dirTxt(player.x, player.y, tx ?? player.x, ty ?? player.y) + (type === 'fsos' ? '。着いたら本物と同じ遭難信号を90秒出す' : '。着いたら巡航中の艦なみの熱・光・EM・航跡を60秒出す'), 'system-msg');
@@ -9199,6 +9240,9 @@ function useBoost() {
 }
 function updateEscape() {
     if (_flashScreen > 0) _flashScreen--;
+    // 第26弾: リペアキットの修理 (自機/敵とも同じ量・時間)
+    if (player && player.hp > 0 && player._kitT > 0) { player._kitT -= gameSpeedFactor; player.hp = Math.min(player.maxHp, player.hp + REPAIR_KIT_HP / REPAIR_KIT_TIME * gameSpeedFactor); }
+    for (const e of enemies) if (e.hp > 0 && !e._dying && e._kitT > 0) { e._kitT -= gameSpeedFactor; e.hp = Math.min(e.maxHp, e.hp + REPAIR_KIT_HP / REPAIR_KIT_TIME * gameSpeedFactor); }
     if (boostCD > 0) boostCD = Math.max(0, boostCD - gameSpeedFactor);
     if (boostT > 0) {
         boostT -= gameSpeedFactor;
@@ -9740,25 +9784,34 @@ function _drawHoldProgress(ctx, x, y, r, p, col, label, zc, fontPx) {
 }
 // 第16弾: 自分のミサイルは霧の中でもどこを飛んでいるか分かるように、画面上で一定の大きさの印を付ける
 // 第23弾: コロニー情報の範囲 (霧の上) — 方角だけ=扇 / 距離つき=扇形の帯
+// 方角±aHW・距離±dHW の扇形の帯を覆う円。中心は makeColonyIntel で真の位置から幅の0.6倍までずらしてあるので、真の位置は必ずこの円の内
+function colonyIntelCircle(it) {
+    if (!it || !it.dist) return null;
+    return { x: it.ox + Math.cos(it.ang) * it.dist, y: it.oy + Math.sin(it.ang) * it.dist, r: Math.max(it.dHW, it.dist * Math.sin(Math.min(it.aHW, Math.PI / 2))) };
+}
 function drawColonyIntel(ctx) {
     const it = playerIntel;
     if (!it || !player) return;
     const age = (_frameCount - it.f) / COLONY_INTEL_PERIOD; // 次の更新で差し替わる
     const a0 = it.ang - it.aHW, a1 = it.ang + it.aHW;
     const r0 = it.dist ? Math.max(0, it.dist - it.dHW) : 1500, r1 = it.dist ? it.dist + it.dHW : 30000;
+    const ic = colonyIntelCircle(it); // 第26弾: 距離まで分かれば円「この中のどこか」(中心に居るとは限らない)
     ctx.save();
     ctx.globalAlpha = 0.10 + 0.06 * Math.max(0, 1 - age);
     ctx.fillStyle = '#7fc8ff';
-    ctx.beginPath(); ctx.arc(it.ox, it.oy, r1, a0, a1); ctx.arc(it.ox, it.oy, r0, a1, a0, true); ctx.closePath(); ctx.fill();
+    ctx.beginPath();
+    if (ic) ctx.arc(ic.x, ic.y, ic.r, 0, Math.PI * 2);
+    else { ctx.arc(it.ox, it.oy, r1, a0, a1); ctx.arc(it.ox, it.oy, r0, a1, a0, true); ctx.closePath(); }
+    ctx.fill();
     ctx.globalAlpha = 0.55;
     ctx.strokeStyle = '#7fc8ff'; ctx.lineWidth = 1.5 / camera.zoom;
     ctx.setLineDash([12 / camera.zoom, 8 / camera.zoom]); ctx.stroke(); ctx.setLineDash([]);
     // 第25弾 (オーナー指摘「意味が分かりづらい」): 「敵はこの範囲のどこか」と、何から分かったか (占有数と精度) を2行で
     {
         const lr = it.dist || Math.min(r1, 9000);
-        const lx = it.ox + Math.cos(it.ang) * lr, ly = it.oy + Math.sin(it.ang) * lr;
+        const lx = ic ? ic.x : it.ox + Math.cos(it.ang) * lr, ly = ic ? ic.y - ic.r * 0.55 : it.oy + Math.sin(it.ang) * lr;
         const fs = 13 / camera.zoom;
-        const l2 = 'コロニー' + it.n + 'つ占有 → 方角±' + Math.round(it.aHW * 180 / Math.PI) + '°' + (it.dist ? '・距離±' + Math.round(it.dHW / 100) * 100 + 'u' : '・距離は不明 (2つで分かる)') + ' / ' + Math.max(0, Math.ceil((COLONY_INTEL_PERIOD - (_frameCount - it.f)) / 60)) + '秒で更新';
+        const l2 = 'コロニー' + it.n + 'つ占有 → ' + (ic ? '半径' + Math.round(ic.r / 100) * 100 + 'u' : '方角±' + Math.round(it.aHW * 180 / Math.PI) + '°・距離は不明 (2つで分かる)') + ' / ' + Math.max(0, Math.ceil((COLONY_INTEL_PERIOD - (_frameCount - it.f)) / 60)) + '秒で更新';
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.font = (fs * 0.8) + 'px sans-serif';
         const bw = Math.max(ctx.measureText(l2).width, fs * 10) + fs;
@@ -9766,7 +9819,7 @@ function drawColonyIntel(ctx) {
         ctx.fillRect(lx - bw / 2, ly - fs * 1.45, bw, fs * 2.8);
         ctx.globalAlpha = 0.95; ctx.fillStyle = '#d8f0ff';
         ctx.font = 'bold ' + fs + 'px sans-serif';
-        ctx.fillText('敵はこの範囲のどこか', lx, ly - fs * 0.7);
+        ctx.fillText(ic ? '敵はこの円の中のどこか' : '敵はこの範囲のどこか', lx, ly - fs * 0.7);
         ctx.globalAlpha = 0.85; ctx.fillStyle = '#9fd0f0';
         ctx.font = (fs * 0.8) + 'px sans-serif';
         ctx.fillText(l2, lx, ly + fs * 0.6);
@@ -9903,12 +9956,11 @@ function updateDistressBeacon() {
     }
     // プレイヤー回収
     if (Math.hypot(player.x - distressBeacon.x, player.y - distressBeacon.y) < 400) {
-        player.hp = Math.min(player.maxHp, player.hp + player.maxHp * 0.15);
-        gameState.credits += 300;
+        gameState.credits += 300; // 第26弾: 船体の回復は撤去 (修理はリペアキットだけ)
         updateTopUI();
         playSound('ui');
         effects.push({ x: distressBeacon.x, y: distressBeacon.y, r: 0, maxR: 700, a: 1, c: '#00e5ff', type: 'circle' });
-        logMessage('SIGNAL: 遭難物資を回収 (+300 SCR / 船体+15%)。ここは敵も知っている — 長居は無用', 'system-msg');
+        { const got = addMaterials(2); logMessage('SIGNAL: 遭難物資を回収 (+300 SCR' + (got ? '・資材+' + got + '個' : '') + ')。ここは敵も知っている — 長居は無用', 'system-msg'); }
         distressBeacon = null;
         distressNextTimer = DISTRESS_INTERVAL_MIN + Math.random() * DISTRESS_INTERVAL_VAR;
         return;
@@ -9917,8 +9969,7 @@ function updateDistressBeacon() {
     for (const e of enemies) {
         if (e.hp <= 0 || e.type === 'fighter') continue;
         if (Math.hypot(e.x - distressBeacon.x, e.y - distressBeacon.y) < 400) {
-            e.hp = Math.min(e.maxHp, e.hp + e.maxHp * 0.15);
-            applyEnemyUpgrade(e);
+            applyEnemyUpgrade(e); // 第26弾: 回復は撤去
             effects.push({ x: distressBeacon.x, y: distressBeacon.y, r: 0, maxR: 700, a: 1, c: '#ff6644', type: 'circle' });
             logMessage('SIGNAL: 敵艦が遭難物資を回収 — 敵性能が向上した', 'warning-msg');
             distressBeacon = null;
@@ -10559,13 +10610,10 @@ function comPilotStep() {
             comThink('p', 'esc', '耐久' + _pct(hpF) + ' < 退き際' + _pct(retreat) + ' (慎重さ' + _pct(P.caution) + ')・' + _EXPO_JP[playerExposureLevel] + 'されている → 離脱手順 (閃光→ノイズ→噴射→機関停止)');
             return;
         }
-        const col = _comNearest(false, true);
-        if (col) {
-            c.mode = 'repair';
-            _comGoTo(col, COLONY_HACK_R * 0.6, c);
-            comThink('p', 'repair', '耐久' + _pct(hpF) + ' < 退き際' + _pct(retreat) + '・振り切った → コロニーをハックして修理 (' + _dirTxt(player.x, player.y, col.x, col.y) + ')');
-            _comStance(c, P);
-            return;
+        // 第26弾: 修理はリペアキットだけ (旧: コロニーへ修理しに行った)
+        if ((cargo.stock.repair || 0) > 0 && !(player._kitT > 0)) {
+            deployDrone('repair');
+            comThinkEvent('p', '耐久' + _pct(hpF) + ' < 退き際' + _pct(retreat) + '・振り切った → リペアキットで修理 (残り' + (cargo.stock.repair || 0) + '個)');
         }
         if (!c.hideUntil) c.hideUntil = now + COM_HIDE_TIME;
         if (now < c.hideUntil) {
@@ -10573,7 +10621,7 @@ function comPilotStep() {
             if (playerCoasting) toggleCoast(false);
             player.setTarget(player.x, player.y);
             if (powerStance !== 'silent') setStance('silent', true);
-            comThink('p', 'hide', '耐久' + _pct(hpF) + '・振り切った・修理できるコロニーが無い → 止まって潜む (残り' + Math.ceil((c.hideUntil - now) / 60) + '秒)');
+            comThink('p', 'hide', '耐久' + _pct(hpF) + '・振り切った → 止まって潜む (残り' + Math.ceil((c.hideUntil - now) / 60) + '秒)');
             return;
         }
         comThink('p', 'hide-end', '潜伏を終える — 耐久' + _pct(hpF) + 'のまま狩りへ戻る (また追われたら退く)');
@@ -10926,7 +10974,7 @@ function xoEvaluate() {
             ? `ノード制圧中 ${pc}% — EMが漏れる。離れると中断 (制圧すると資材と聴音局が手に入る)`
             : _capturing.kind === 'derelict' ? `難破船を回収中 ${pc}% — 弾と資材`
             : _capturing.contested ? `コロニーに敵艦が居る — 占有が進まない (追い払うか、待つか)`
-            : `コロニーを占有中 ${pc}% — EMが漏れる。離れると中断 (補給と修理・敵の位置の手掛かり)` };
+            : `コロニーを占有中 ${pc}% — EMが漏れる。離れると中断 (1回の補給・敵の位置の手掛かり)` };
     }
 
     const te = bestFireTarget();
@@ -11041,6 +11089,10 @@ function xoEvaluate() {
         if (rs) return { tone: 'info', text: 'ミサイル切れ — ' + (rs.kind === 'station' ? '補給所' : 'コロニー') + 'で補給できる (方位' + compassDeg(Math.atan2(rs.obj.y - player.y, rs.obj.x - player.x)) + '° ' + Math.round(rs.d / 100) * 100 + 'u)。実弾とビームは撃てる', act: { label: '補給へ', fn: () => { player.setTarget(rs.obj.x, rs.obj.y); } } };
     }
     // 8) 追われている
+    // 第26弾: 修理はリペアキットだけ — 攻撃を受けていない時に、損傷がキット1個分を超えていれば勧める
+    if (playerExposureLevel <= 1 && (cargo.stock.repair || 0) > 0 && !(player._kitT > 0) && player.maxHp - player.hp >= REPAIR_KIT_HP * 0.8)
+        return { tone: 'info', text: '耐久' + Math.round(player.hp / player.maxHp * 100) + '% — 今のうちにリペアキットで修理 (6秒で+' + REPAIR_KIT_HP + '・残り' + cargo.stock.repair + '個。補給はできない)', act: { label: '修理', fn: () => deployDrone('repair') } };
+    if (player._kitT > 0) return { tone: 'info', text: '修理中 — あと' + Math.ceil(player._kitT / 60) + '秒 (耐久' + Math.round(player.hp / player.maxHp * 100) + '%)' };
     // 第23弾: 観測した兆候を根拠に言う (旧: 「追跡されている」=敵の内部状態を読んでいた)
     if (playerExposureLevel >= 2) {
         const dg = threatObs.deg !== null && threatObs.deg !== undefined ? '方位' + threatObs.deg + '°' : '';
@@ -11837,8 +11889,9 @@ function updateDockingUI() {
     const missingHp = player.maxHp - player.hp;
     const repairCost = Math.ceil(missingHp / 2);
     const btnRepair = document.getElementById('btn-repair-all');
-    btnRepair.textContent = `全艦修理 (${repairCost} SCR)`;
-    btnRepair.disabled = gameState.credits < repairCost || repairCost === 0;
+    // 第26弾: 試合中の修理はリペアキットだけ (ドックの有料修理は使えない)
+    btnRepair.textContent = '修理はリペアキットだけ';
+    btnRepair.disabled = true;
 
     ['engine', 'weapons', 'armor', 'sensor'].forEach(type => {
         const lv   = gameState.upgrades[type];
