@@ -807,6 +807,8 @@ let lures = [], _lureSeq = 0, pendingLure = null;
 // 第31弾 (オーナー合意): 自然の信号・お宝の信号 {sid:'N-n', kind, x,y, b:{帯域:強さ}, life, age, on, flip, takeP, takeE}
 // 監視網の円 (シグネチャサークル) {side:'p'|'e', x,y, r, life, sid}
 let fieldSignals = [], _fieldSeq = 0, _fieldRespawn = [], sigZones = [];
+// 第34弾: 空き巣の跡 {x,y,f:開けた時刻,by:'p'|'e',kind,seenP,estF:自艦が見積もった時刻} / 輸送船 {sid,x,y,vx,vy,hp,maxHp,boardP,boardE,...}
+let lootTraces = [], convoys = [], _convoySeq = 0, convoyNext = 0, _xoLullSp = null;
 // 煙幕弾: 自艦の位置にヒッグス雲 (半径の半分までは濃さ一定・外側は線形に薄れる)。後半で薄れる
 const SMOKE_R = 900, SMOKE_DENS = 0.6, SMOKE_LIFE = 1800, SMOKE_FADE = 600; // 第22弾: 20→30秒 (最後の10秒で薄れる)
 const HIGGS_DRONE_R = 700, HIGGS_DRONE_DENS = 0.4; // ヒッグス散布ドローン (稼働中ずっと)
@@ -937,6 +939,9 @@ let _exposureHeartbeatTimer = 0;
 let surgePhase = 'none';           // 'none' | 'warn' | 'active' | 'after'
 let surgePhaseTimer = 0;
 let surgeNextTimer = 7200;
+// 第34弾 (オーナー採用・数値は委任): 凪 — 数分おきに霧が一瞬晴れる。'none' | 'warn' | 'active'。lullK = 晴れ具合 0..1
+let lullPhase = 'none', lullT = 0, lullNext = 15000, lullK = 0;
+const LULL_MIN = 14400, LULL_VAR = 7200, LULL_WARN = 900, LULL_DUR = 600, LULL_RAMP = 120, LULL_FOG = 0.85, LULL_VIS = 5000;
 const SURGE_INTERVAL_MIN = 5400;   // 次サージまで最短 90s
 const SURGE_INTERVAL_VAR = 3600;   // +0〜60s のランダム
 const SURGE_WARN_DUR   = 480;      // 予兆 8s (行動を決める猶予)
@@ -1010,6 +1015,7 @@ function computeVisionRadius() {
 }
 // 第21弾: 有視界の最大半径 (その艦の居る場所の濃度で決まる。自機/敵/ドローン共通の式)
 function visionRadiusAt(s, x, y, base = BASE_VISION_RADIUS) {
+    if (lullK > 0 && base === BASE_VISION_RADIUS) base += (LULL_VIS - BASE_VISION_RADIUS) * lullK; // 第34弾: 凪の間は有視界が5000uまで
     const h = getHiggsIntensity(x, y); // 0..1
     let factor = 1 - h * (1 - MIN_VISION_FACTOR);
     if (factor < MIN_VISION_FACTOR) factor = MIN_VISION_FACTOR;
@@ -1129,7 +1135,7 @@ function drawFogOfWar(ctx) {
         ctx.beginPath(); _amoebaPath(ctx, pts);
         ctx.clip();
         ctx.globalCompositeOperation = 'lighter';
-        ctx.globalAlpha = 0.5;
+        ctx.globalAlpha = 0.5 * (1 - LULL_FOG * lullK); // 第34弾: 凪で霧が晴れる
         ctx.imageSmoothingEnabled = true;
         ctx.drawImage(higgsCloudCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
         ctx.restore();
@@ -1147,7 +1153,7 @@ function updateVisionLockOn() {
         const dist = Math.hypot(e.x - player.x, e.y - player.y);
         // 第16弾: 描いているアメーバの縁と同じ形で判定。内側=完全に見える (完全ロック・位置ずれ無し)
         // 第21弾: 縁は視線で決まる (周りの濃い霧の向こうは見えない)。ドローンの目で見えている敵も見える (通信が強い時)
-        if (dist <= visionReachAt(Math.atan2(e.y - player.y, e.x - player.x)) || droneSeesStrong(e)) {
+        if ((dist <= visionReachAt(Math.atan2(e.y - player.y, e.x - player.x)) && !(lullSheltered(e) && dist > BASE_VISION_RADIUS)) || droneSeesStrong(e)) { // 第34弾: 凪でも隠れ場所の艦は1800uより遠くから見えない
             e.inVision = true;
             if (!(_sigIdent[enemySid(e)] && _sigIdent[enemySid(e)].sure)) identSure(enemySid(e), true); // 第23弾: 見えた=識別確定
             applyContact(e, 1.0, 90); // life=90 = 1.5秒 (更新されない間は維持)
@@ -1221,6 +1227,7 @@ function generateSpaceBackground() {
 function getHiggsIntensity(x, y) {
     let total = higgsBaseAt(x, y);
     if (higgsGrowth > 0 && total > 0) total *= 1 + higgsGrowth;
+    if (lullK > 0) total *= 1 - LULL_FOG * lullK; // 第34弾: 凪 (霧×0.15。煙幕は晴れない)
     // 第17弾: 煙幕弾・ヒッグス散布ドローンの雲 (半径の半分までは濃さ一定)
     for (let i = 0; i < smokeClouds.length; i++) {
         const s = smokeClouds[i];
@@ -1409,6 +1416,7 @@ function clutterCount(x, y, self) {
     for (const m of noiseMakers) if (near(m)) n++;
     for (const e of enemies) if (e.type === 'fighter' && e.hp > 0 && !e._dying && near(e)) n++;
     if (getStormIntensity(x, y) > CLUTTER_TERRAIN || getThermalIntensity(x, y) > CLUTTER_TERRAIN || getDebrisIntensity(x, y) > CLUTTER_TERRAIN) n++;
+    for (const cv of convoys) if ((cv.x - x) * (cv.x - x) + (cv.y - y) * (cv.y - y) < CONVOY_CLUTTER_R * CONVOY_CLUTTER_R) n += 2; // 第34弾: 輸送船の音に紛れる (誤差×2)
     return n;
 }
 function clutterErrMult(n) { return Math.min(CLUTTER_MAX, 1 + CLUTTER_ERR * n); }
@@ -2351,6 +2359,7 @@ class Projectile {
                             const d = Math.hypot(e.x - this.x, e.y - this.y);
                             if (d < bd) { bd = d; best = e; }
                         }
+                        for (const cv of convoys) { const d = Math.hypot(cv.x - this.x, cv.y - this.y); if (d < bd) { bd = d; best = cv; } } // 第34弾: 輸送船も
                         if (best) this.target = best;
                         else {
                             // 第15弾: 推定点に何も居ない = 推理が外れた。自爆して「そこには居ない」ことを知らせる。
@@ -2438,6 +2447,11 @@ class Projectile {
         }
 
         const hitTarget = this.isPlayer ? enemies.find(e => Math.hypot(e.x - this.x, e.y - this.y) < e.radius * 1.5) : (Math.hypot(player.x - this.x, player.y - this.y) < player.radius * 1.5 ? player : null);
+        // 第34弾: 自艦の弾が輸送船に当たる
+        if (this.isPlayer && !hitTarget && this.type !== 'beam' && convoys.length) {
+            const cvh = convoyAt(this.x, this.y, 10);
+            if (cvh) { damageConvoy(cvh, this.dmg, true); createHitEffect(this.x, this.y, '#ffaa00'); this.active = false; return; }
+        }
         // 第32弾: 近接信管弾 — 当たらずに150u以内を通ったら50%の威力で炸裂 (回避されない)
         if (this.isPlayer && this.type === 'kinetic' && PM.kinProx && !hitTarget && !this._evaded) {
             const pe = enemies.find(e => e.hp > 0 && !e._dying && Math.hypot(e.x - this.x, e.y - this.y) < 150 + (e.radius || 0));
@@ -3477,7 +3491,7 @@ class Ship {
             const _clN = playerClutter(); // 第18弾: 混信 — 周りに発信源が多いほど自艦を見分けにくい
             // 第21弾: 至近の直接探知 = 自機の有視界と同じ式 (居る場所の濃度で最大半径・視線の先の霧で遮られる)。
             // 旧: 1100×(1−濃さ×0.55) の円で、濃い霧では自機の有視界 (1200×(1−濃さ×0.95)) より広く「敵だけ見える」場面があった
-            let myDetectRange = BASE_VISION_RADIUS * Math.max(MIN_VISION_FACTOR, 1 - higgsHereDetect * (1 - MIN_VISION_FACTOR)) * (1 + gameState.sector * 0.05) * playerEmBoost * (1 - jamDegrade) * (this.upgDetect || 1) / (1 + CLUTTER_HARD * _clN);
+            let myDetectRange = (BASE_VISION_RADIUS + (LULL_VIS - BASE_VISION_RADIUS) * lullK) * Math.max(MIN_VISION_FACTOR, 1 - higgsHereDetect * (1 - MIN_VISION_FACTOR)) * (1 + gameState.sector * 0.05) * playerEmBoost * (1 - jamDegrade) * (this.upgDetect || 1) / (1 + CLUTTER_HARD * _clN);
             let sigRange = ENEMY_PASSIVE_RANGE * (1 - higgsHereDetect * 0.3) * (1 + gameState.sector * 0.03) * (1 - jamDegrade) * (this.upgDetect || 1);
             // ヒッグスサージ: 敵の探知も対称に縮退/ブースト (プレイヤーと同じ物理法則)
             if (surgePhase === 'active') { myDetectRange *= SURGE_DETECT_MULT; sigRange *= SURGE_DETECT_MULT; }
@@ -3512,7 +3526,7 @@ class Ship {
                     if (attenuated > domVal) { domVal = attenuated; domSig = sName; }
                 });
                 // 接近探知 (デブリ擬態中は岩塊に紛れて至近でも掴めない — 至近を通過されてもやり過ごせる)
-                if (!isBottomed && distToPlayer < Math.max(VIS_CLOSE, myDetectRange) && losReach(this.x, this.y, Math.atan2(player.y - this.y, player.x - this.x), Math.max(VIS_CLOSE, myDetectRange)) >= distToPlayer) { // 第22弾: 自機と同じ視線ルール (300u以内は必ず)
+                if (!isBottomed && !(lullSheltered(player) && distToPlayer > BASE_VISION_RADIUS) && distToPlayer < Math.max(VIS_CLOSE, myDetectRange) && losReach(this.x, this.y, Math.atan2(player.y - this.y, player.x - this.x), Math.max(VIS_CLOSE, myDetectRange)) >= distToPlayer) { // 第22弾: 自機と同じ視線ルール (300u以内は必ず)
                     this.detectionTimer++;
                     if (this.detectionTimer > 60) { playerSigDetected = true; _hardDetect = true; }
                 } else {
@@ -4073,11 +4087,12 @@ class Ship {
                 const _pers = this.personality || { aggression: 0.5, stealth: 0.3, greed: 0.4, caution: 0.4 };
                 // 残り香(contactFreshness)がある間は獲物を追って徘徊。攻撃的=速い追跡 / 隠密=低速で忍び寄る(低シグネチャ)。
                 const _hasScent = this.playerLastKnownPos && this.contactFreshness > 0.04;
-                let _bcs = null, _fpick = null;
+                let _bcs = null, _fpick = null, _cpick = null;
                 // 司令部情報(開戦時の概位置)へ向かう哨戒中も、残り香を追う時と同じ忍び足の速度
                 const _stalking = _hasScent || !!this.intelPos || !!this._roam;
                 if (_hasScent) this._lastScentF = _frameCount;
                 this.speed = (_stalking ? ENEMY_STALK_SPEED * (0.6 + _pers.aggression * 0.6) * (1 - _pers.stealth * 0.4) : 0.08) * MOVE_SPEED_MULT;
+                if (this._roam === 'convoy' && convoys.some(c => c.sid === this._cvT)) this.speed = Math.max(this.speed, CONVOY_SPEED * 1.6); // 第34弾: 輸送船に追いつける速さ (忍び足0.75u/fでは追いつけなかった)
                 const activeNodes = resourceNodes.filter(n => n.owner !== 'enemy');
                 // 第21弾: 潜伏中のゆっくりした移動 (隠れ場所へ0.08u/f) の途中でも4秒ごとに考え直す。
                 // 旧: 着くまで (数分) 次の判断をせず、遭難信号・哨戒・ノードに反応できなかった
@@ -4111,6 +4126,10 @@ class Ship {
                         this.setTarget(_bc.x, _bc.y);
                         if (this._roam !== 'beacon' && comDemo) comThinkEvent('e', '遭難信号 → 物資を取りに向かう (' + _dirTxt(this.x, this.y, _bc.x, _bc.y) + ')', 'e' + this.uid);
                         this._roam = 'beacon';
+                    } else if (this.type !== 'fighter' && !_hasScent && (_cpick = enemyConvoyPick(this, _pers))) {
+                        // 第34弾: 聞こえた輸送船へ (拿捕して部品) — 追いつくまで updateConvoys が先回りの点へ向け直す
+                        this._cvT = _cpick.sid; this.setTarget(_cpick.x + _cpick.vx * 600, _cpick.y + _cpick.vy * 600); this._roam = 'convoy';
+                        if (comDemo) comThinkEvent('e', 'うるさい信号 → 輸送船と見て拿捕しに行く (' + _dirTxt(this.x, this.y, _cpick.x, _cpick.y) + ')', 'e' + this.uid);
                     } else if (this.type !== 'fighter' && !_hasScent && (_fpick = enemyFieldPick(this, _pers))) {
                         // 第31弾: 聞こえた漂流コンテナ (と、たまに自然の信号) を見に行く — 動けば痕跡が残る
                         this.setTarget(_fpick.x, _fpick.y);
@@ -5529,6 +5548,7 @@ function generateSector() {
     playerExposureLevel = 0; _exposureHeartbeatTimer = 0;
     surgePhase = 'none'; surgePhaseTimer = 0;
     surgeNextTimer = SURGE_INTERVAL_MIN + Math.floor(Math.random() * SURGE_INTERVAL_VAR);
+    lullPhase = 'none'; lullT = 0; lullK = 0; lullNext = LULL_MIN + Math.floor(Math.random() * LULL_VAR); // 第34弾
     _logDedup = {};
     setStance('cruise', true);
     distressBeacon = null;
@@ -5536,6 +5556,7 @@ function generateSector() {
     isBottomed = false; nearMissActive = false; _commsInterceptCD = 0;
     lures = []; pendingLure = null; // 第21弾
     generateFieldSignals(); sigZones = []; // 第31弾
+    lootTraces = []; convoys = []; convoyNext = 7200 + Math.floor(Math.random() * 7200); // 第34弾: 最初の輸送船は2〜4分後
     noiseMakers = []; smokeClouds = []; playerCoasting = false; boostT = 0; boostCD = 0; _flashScreen = 0; _xoEsc = null; // 第17弾
     huntStats = { startFrame: _frameCount, firstContact: -1, ambushes: 0, crits: 0, timesEngaged: 0, dmgDealt: 0, dmgTaken: 0, pings: 0 };
     matchRecStart(); // 第22弾: 試合の記録
@@ -6664,7 +6685,7 @@ function updateNodesAndColonies() {
 function captureNodeByPlayer(n) {
     n.owner = 'player'; n.capP = 0; n.emFlashTimer = 180; n.knownLost = false;
     matchRecEvent('nodeP', n.x, n.y, '自艦がノードを制圧');
-    if (!n._partP) { n._partP = true; offerDraft('node'); } // 第32弾: 初めて制圧したノードで部品 (探知・電子戦が出やすい)
+    if (!n._partP) { n._partP = true; offerDraft('node'); addLootTrace(n.x, n.y, 'p', 'node'); } // 第32弾: 初めて制圧したノードで部品 (探知・電子戦が出やすい)
     gameState.credits += NODE_SCR;
     updateTopUI();
     const got = addMaterials(NODE_MAT_GAIN);
@@ -6676,7 +6697,7 @@ function hackColonyByPlayer(st) {
     const was = st.owner;
     st.hacked = true; st.owner = 'player'; st.hackP = 0; st.eHackP = 0;
     matchRecEvent('colonyP', st.x, st.y, '自艦がコロニーを占有' + (was === 'enemy' ? ' (敵から奪還)' : ''));
-    if (!st._partP) { st._partP = true; offerDraft('colony'); } // 第32弾: 初めて占有したコロニーで部品 (機関・船体が出やすい)
+    if (!st._partP) { st._partP = true; offerDraft('colony'); addLootTrace(st.x, st.y, 'p', 'colony'); } // 第32弾: 初めて占有したコロニーで部品 (機関・船体が出やすい)
     createClickEffect(st.x, st.y, '#00aaff');
     playSound('ui');
     const n = coloniesOwned('player');
@@ -6749,7 +6770,7 @@ function updateEnemyColonyCapture() {
 }
 function salvageDerelictByPlayer(st) {
     st.salvP = 0;
-    if (!st._partDone) { st._partDone = true; offerDraft('derelict'); } // 第32弾: 難破船で部品 (兵装が出やすい)
+    if (!st._partDone) { st._partDone = true; offerDraft('derelict'); addLootTrace(st.x, st.y, 'p', 'derelict'); } // 第32弾: 難破船で部品 (兵装が出やすい)
     // 空いている枠の分だけ拾う (実弾1枠→ミサイル1枠→資材2個)。何も積めなければ残しておく
     const free = () => playerHoldCap() - cargoStockSlots() - Math.ceil((cargo.mat || 0) / MAT_PER_SLOT);
     let gK = 0, gM = 0;
@@ -7026,6 +7047,7 @@ function enemyOfferDraft(e, src, x, y) {
     if (enemySlotsUsed(e) + partW(best) <= enemySlotsMax(e)) { e.parts.push(best); recomputeEnemyParts(e); }
     else e.partsSpare.push(best);
     matchRecEvent('partE', x ?? e.x, y ?? e.y, '敵が部品: ' + PARTS[best].name);
+    addLootTrace(x ?? e.x, y ?? e.y, 'e', src); // 第34弾: 空き巣の跡
     if (comDemo) comThinkEvent('e', _SRC_JP[src] + 'で部品 → 「' + PARTS[best].name + '」を選んだ (' + c.map(id => PARTS[id].name).join('/') + 'から・' + PARTS[best].up + ')', 'e' + e.uid);
 }
 // 敵の付け替え: 自分のコロニーに居る時、予備の方が性格に合えば付け替える
@@ -7056,6 +7078,225 @@ function updateEnemyDerelictSalvage() {
         st.salvaged = true; st._partDone = true; st.eSalvP = 0;
         matchRecEvent('salvE', st.x, st.y, '敵が難破船を回収');
         enemyOfferDraft(near, 'derelict', st.x, st.y);
+    }
+}
+
+// ═══ 第34弾 (オーナー採用・数値は委任 2026-10-31): 凪・空き巣の跡・輸送船 ═══
+// ── 1) 凪: 4〜6分おき (サージと重ならない)。予兆15秒 → 10秒 (前後2秒で薄れて戻る)。霧×0.15・有視界の上限1800→5000u (自機/敵とも)。
+//    岩礁帯 (0.3超)・難破船の500u以内・煙幕の中に居れば、凪の間も1800uより遠くからは見えない
+function lullSheltered(t) {
+    if (!t || lullK <= 0) return false;
+    if (getDebrisIntensity(t.x, t.y) > 0.3) return true;
+    for (const st of structures) if (st.type === 'derelict' && Math.hypot(st.x - t.x, st.y - t.y) < 500) return true;
+    for (const c of smokeClouds) if (Math.hypot(c.x - t.x, c.y - t.y) < c.r * 0.6) return true;
+    return false;
+}
+// 凪の隠れ場所 (いちばん近い難破船の陰 or 岩礁帯)
+function lullShelterSpot(x, y, R) {
+    let best = null, bd = R;
+    for (const st of structures) { if (st.type !== 'derelict') continue; const d = Math.hypot(st.x - x, st.y - y); if (d < bd) { bd = d; best = { x: st.x + 200, y: st.y, d, lbl: '難破船の陰' }; } }
+    for (let k = 0; k < 24; k++) {
+        const a = k / 24 * Math.PI * 2;
+        for (const r of [1500, 3000, 4500]) {
+            const px = x + Math.cos(a) * r, py = y + Math.sin(a) * r;
+            if (r < bd && getDebrisIntensity(px, py) > 0.35) { bd = r; best = { x: px, y: py, d: r, lbl: '岩礁帯' }; }
+        }
+    }
+    return best;
+}
+function updateLull() {
+    if (lullPhase === 'none') {
+        if ((lullNext -= gameSpeedFactor) > 0) return;
+        if (surgePhase !== 'none') { lullNext = 1200; return; } // サージと重ねない
+        lullPhase = 'warn'; lullT = LULL_WARN;
+        logMessage('SENSOR: 霧の流れが止まる — あと' + Math.round(LULL_WARN / 60) + '秒で凪 (霧が晴れ、遠くまで見える・見られる)。岩礁帯・難破船の陰・煙幕なら隠れられる', 'warning-msg');
+        playSound('alert');
+        matchRecEvent('lull', player ? player.x : 0, player ? player.y : 0, '凪の予兆');
+        // 敵: 慎重・隠密なら隠れ場所へ / 攻撃的なら見張る
+        for (const e of enemies) {
+            if (e.hp <= 0 || e._dying || e.type === 'fighter' || e.aiState === 'combat') continue;
+            const pp = _enemyPersonality(e);
+            if (pp.caution + pp.stealth >= 0.8) {
+                const sp = lullShelterSpot(e.x, e.y, 6000);
+                if (sp) { e.setTarget(sp.x, sp.y); if (comDemo) comThinkEvent('e', '凪の予兆 → ' + sp.lbl + 'へ隠れる (' + _dirTxt(e.x, e.y, sp.x, sp.y) + ')', 'e' + e.uid); }
+            } else if (comDemo) comThinkEvent('e', '凪の予兆 → 止まって見張る (晴れたら遠くまで見える)', 'e' + e.uid);
+        }
+        if (comDemo && _com && _com.pp && _com.pp.stealth + _com.pp.caution >= 0.8 && player) {
+            const sp = lullShelterSpot(player.x, player.y, 6000);
+            if (sp) { player.setTarget(sp.x, sp.y); comThinkEvent('p', '凪の予兆 → ' + sp.lbl + 'へ隠れる (' + _dirTxt(player.x, player.y, sp.x, sp.y) + ')'); }
+        }
+        return;
+    }
+    lullT -= gameSpeedFactor;
+    if (lullPhase === 'warn') {
+        if (lullT <= 0) { lullPhase = 'active'; lullT = LULL_DUR; logMessage('SENSOR: 凪 — 霧が晴れた (' + Math.round(LULL_DUR / 60) + '秒)', 'warning-msg'); matchRecEvent('lull', player ? player.x : 0, player ? player.y : 0, '凪 (霧が晴れた)'); }
+        return;
+    }
+    const el = LULL_DUR - lullT;
+    lullK = Math.max(0, Math.min(1, el / LULL_RAMP, lullT / LULL_RAMP));
+    if (lullT <= 0) { lullPhase = 'none'; lullK = 0; lullNext = LULL_MIN + Math.floor(Math.random() * LULL_VAR); logMessage('SENSOR: 凪が終わる — 霧が戻った', 'system-msg'); }
+}
+
+// ── 3) 空き巣の跡: 部品を拾った所 (コンテナ・難破船・ノード・コロニー) に5分残る。
+//    相手の跡は、有視界に入るか2500u以内に寄ると「開けた跡・約n分前」(±30秒の誤差) と分かる。敵は自艦の跡を見つけると、そこから次の拾える所へ探しに来る
+const TRACE_LIFE = 18000, TRACE_SEE_R = 2500, TRACE_ERR = 1800;
+function addLootTrace(x, y, by, kind) { lootTraces.push({ x, y, f: _frameCount, by, kind, seenP: false, estF: 0 }); }
+function _nextPartSourceFrom(x, y, forEnemy) {
+    let best = null, bd = 16000;
+    for (const st of structures) {
+        const ok = st.type === 'derelict' ? !st.salvaged : st.type === 'colony' ? (forEnemy ? !st._partP : !st._partE) : false;
+        if (!ok) continue; const d = Math.hypot(st.x - x, st.y - y); if (d > 600 && d < bd) { bd = d; best = st; }
+    }
+    for (const n of resourceNodes) { if (forEnemy ? n._partP : n._partE) continue; const d = Math.hypot(n.x - x, n.y - y); if (d > 600 && d < bd) { bd = d; best = n; } }
+    for (const f of fieldSignals) { if (f.kind !== 'cache') continue; const d = Math.hypot(f.x - x, f.y - y); if (d > 600 && d < bd) { bd = d; best = f; } }
+    return best;
+}
+function updateLootTraces() {
+    for (let i = lootTraces.length - 1; i >= 0; i--) {
+        const t = lootTraces[i];
+        if (_frameCount - t.f > TRACE_LIFE) { lootTraces.splice(i, 1); continue; }
+        if (t.by === 'e' && !t.seenP && player && player.hp > 0) {
+            const d = Math.hypot(t.x - player.x, t.y - player.y);
+            if (d < TRACE_SEE_R || inPlayerVision(t.x, t.y)) {
+                t.seenP = true; t.estF = t.f + (Math.random() * 2 - 1) * TRACE_ERR;
+                const ago = Math.max(0, Math.round((_frameCount - t.estF) / 3600 * 2) / 2);
+                logMessage('痕跡: 開けた跡 — 約' + (ago < 0.5 ? '1分以内' : ago + '分前') + ' (方位' + compassDeg(Math.atan2(t.y - player.y, t.x - player.x)) + '°)。誰かが部品を取って行った', 'warning-msg');
+                ringMarkBearing(compassDeg(Math.atan2(t.y - player.y, t.x - player.x)), '#ffcf88');
+                matchRecEvent('traceP', t.x, t.y, '敵が開けた跡を見つけた');
+                if (comDemo) comThinkEvent('p', '開けた跡 (約' + ago + '分前) — 敵はこの辺りを回っている');
+            }
+        }
+        if (t.by === 'p' && !t._seenE) {
+            for (const e of enemies) {
+                if (e.hp <= 0 || e._dying || e.type === 'fighter') continue;
+                if (Math.hypot(t.x - e.x, t.y - e.y) > TRACE_SEE_R) continue;
+                t._seenE = true;
+                const nx = _nextPartSourceFrom(t.x, t.y, true);
+                if (nx && !(e.contactFreshness > 0.3)) {
+                    e._roamGoal = { x: nx.x, y: nx.y, lbl: '跡の先 (自機が次に寄りそうな所)' }; e._roam = 'patrol'; e.state = 'idle';
+                    e.playerLastKnownPos = { x: nx.x, y: nx.y, vx: 0, vy: 0 }; e.contactFreshness = Math.max(e.contactFreshness || 0, 0.25);
+                    if (comDemo) comThinkEvent('e', '自機が開けた跡を見つけた (約' + Math.round((_frameCount - t.f) / 3600) + '分前) → 次に寄りそうな所へ (' + _dirTxt(e.x, e.y, nx.x, nx.y) + ')', 'e' + e.uid);
+                }
+                break;
+            }
+        }
+    }
+}
+function drawLootTraces(ctx) {
+    const inv = 1 / camera.zoom;
+    for (const t of lootTraces) {
+        if (!(t.by === 'e' ? t.seenP : true) && !higgsViewOff) continue;
+        const mine = t.by === 'p';
+        ctx.save();
+        ctx.globalAlpha = mine ? 0.35 : 0.85;
+        ctx.strokeStyle = mine ? '#7fd6ff' : '#ffcf88'; ctx.lineWidth = 1.5 * inv;
+        const h = Math.max(36, 8 * inv);
+        ctx.setLineDash([4 * inv, 4 * inv]); ctx.strokeRect(t.x - h, t.y - h * 0.6, h * 2, h * 1.2); ctx.setLineDash([]);
+        if (!mine) {
+            const ago = Math.max(0, Math.round((_frameCount - t.estF) / 3600 * 2) / 2);
+            ctx.fillStyle = '#ffcf88'; ctx.font = Math.round(10 * inv) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+            ctx.fillText('開けた跡 ' + (ago < 0.5 ? '<1分' : '約' + ago + '分前'), t.x, t.y - h * 0.6 - 3 * inv);
+        }
+        ctx.restore();
+    }
+}
+
+// ── 4) 輸送船: 4〜6分おきに1隻 (同時に1隻)。霧の奥 (中心から18000u) から現れ、中心から8000u以内を通って反対側の18000uで消える。60u/s。
+//    全帯域0.6でうるさい (識別は艦影寄り)・耐久1500・撃ち返さない。沈めるか、500u以内に5秒寄り添って拿捕すると漂流コンテナを2個落とす。
+//    1500u以内に居る艦は輸送船の音に紛れて推定の誤差×2 (混信+2)。敵は拿捕だけ (撃つ判断は入れていない)
+const CONVOY_MIN = 14400, CONVOY_VAR = 7200, CONVOY_R0 = 18000, CONVOY_OFF = 8000, CONVOY_SPEED = 1.0, CONVOY_HP = 1500, CONVOY_SIG = 0.6, CONVOY_CLUTTER_R = 1500, CONVOY_BOARD_R = 500, CONVOY_BOARD_T = 300;
+function spawnConvoy() {
+    const th = Math.random() * Math.PI * 2, off = (Math.random() * 2 - 1) * CONVOY_OFF;
+    const ux = Math.cos(th), uy = Math.sin(th), nx = -uy, ny = ux;
+    const along = Math.sqrt(Math.max(0, CONVOY_R0 * CONVOY_R0 - off * off));
+    const cv = { sid: 'C-' + (++_convoySeq), x: MAP_CX + nx * off - ux * along, y: MAP_CY + ny * off - uy * along, vx: ux * CONVOY_SPEED, vy: uy * CONVOY_SPEED,
+                 left: along * 2 / CONVOY_SPEED, hp: CONVOY_HP, maxHp: CONVOY_HP, radius: 60, boardP: 0, boardE: 0, age: 0, angle: th };
+    convoys.push(cv);
+    matchRecEvent('convoy', cv.x, cv.y, '輸送船が現れた');
+}
+function _convoyDrop(cv, by) {
+    for (let k = 0; k < 2; k++) {
+        const f = makeFieldSignal('cache');
+        f.x = cv.x + (k ? 250 : -250) * Math.cos(cv.angle + Math.PI / 2); f.y = cv.y + (k ? 250 : -250) * Math.sin(cv.angle + Math.PI / 2);
+        fieldSignals.push(f);
+    }
+    createExplosion(cv.x, cv.y, '#ffbb66', by === 'kill' ? 40 : 14);
+    if (by === 'kill') { addShake(8); playSound('explosion'); }
+}
+function convoyAt(x, y, r) { for (const cv of convoys) if (Math.hypot(cv.x - x, cv.y - y) < r + cv.radius) return cv; return null; }
+function damageConvoy(cv, dmg, byPlayer) {
+    if (!cv || cv.hp <= 0) return;
+    cv.hp -= dmg;
+    effects.push({ x: cv.x, y: cv.y - 40, text: '-' + Math.round(dmg), life: 1.0, type: 'floatText', c: '#ffcc66' });
+    if (cv.hp > 0) return;
+    _convoyDrop(cv, 'kill');
+    convoys.splice(convoys.indexOf(cv), 1);
+    convoyNext = CONVOY_MIN + Math.floor(Math.random() * CONVOY_VAR);
+    logMessage('輸送船: ' + (byPlayer ? '撃沈 — 漂流コンテナが2つ落ちた' : '沈んだ'), 'warning-msg');
+    matchRecEvent(byPlayer ? 'convoyP' : 'convoyE', cv.x, cv.y, '輸送船を撃沈' + (byPlayer ? ' (自艦)' : ''));
+}
+function updateConvoys() {
+    if (!convoys.length) { if ((convoyNext -= gameSpeedFactor) <= 0) { spawnConvoy(); } }
+    for (let i = convoys.length - 1; i >= 0; i--) {
+        const cv = convoys[i];
+        cv.x += cv.vx * gameSpeedFactor; cv.y += cv.vy * gameSpeedFactor; cv.age += gameSpeedFactor;
+        if ((cv.left -= gameSpeedFactor) <= 0) { convoys.splice(i, 1); convoyNext = CONVOY_MIN + Math.floor(Math.random() * CONVOY_VAR); continue; }
+        // 追っている敵は先回りの点へ向け直す (2秒ごと)
+        if (_frameCount % 120 === 0) for (const e of enemies) {
+            if (e._cvT !== cv.sid || e.hp <= 0 || e._dying || (e.contactFreshness || 0) > 0.4) continue;
+            const d = Math.hypot(cv.x - e.x, cv.y - e.y), lead = Math.min(900, d / 1.5);
+            e.setTarget(cv.x + cv.vx * lead, cv.y + cv.vy * lead);
+        }
+        // 正体: 有視界で見えたら確定
+        const id = _sigIdent[cv.sid];
+        if (player && !(id && id.sure) && inPlayerVision(cv.x, cv.y)) {
+            identSure(cv.sid, false); _sigIdent[cv.sid].lbl = '輸送船';
+            if (_contactLabels[cv.sid]) logMessage('SIGNAL: SIG-' + String(_contactLabels[cv.sid]).padStart(2, '0') + ' は輸送船 — 沈めるか寄り添って拿捕すれば部品', 'system-msg');
+        }
+        // 拿捕 (500u以内に5秒・双方が居る間は進まない)
+        const pN = player && player.hp > 0 && Math.hypot(player.x - cv.x, player.y - cv.y) < CONVOY_BOARD_R;
+        let eN = null; for (const e of enemies) if (e.hp > 0 && !e._dying && e.type !== 'fighter' && Math.hypot(e.x - cv.x, e.y - cv.y) < CONVOY_BOARD_R) { eN = e; break; }
+        cv.boardP = pN && !eN ? cv.boardP + gameSpeedFactor : Math.max(0, cv.boardP - gameSpeedFactor);
+        cv.boardE = eN && !pN ? cv.boardE + gameSpeedFactor : Math.max(0, cv.boardE - gameSpeedFactor);
+        if (cv.boardP >= CONVOY_BOARD_T || cv.boardE >= CONVOY_BOARD_T) {
+            const byP = cv.boardP >= CONVOY_BOARD_T;
+            _convoyDrop(cv, 'board');
+            convoys.splice(i, 1); convoyNext = CONVOY_MIN + Math.floor(Math.random() * CONVOY_VAR);
+            logMessage(byP ? '輸送船: 拿捕 — 積み荷 (漂流コンテナ2つ) を落として逃げた' : '輸送船: 何者かに拿捕された', byP ? 'system-msg' : 'warning-msg');
+            matchRecEvent(byP ? 'convoyP' : 'convoyE', cv.x, cv.y, '輸送船を拿捕' + (byP ? ' (自艦)' : ' (敵)'));
+            if (!byP && comDemo) comThinkEvent('e', '輸送船を拿捕 → 積み荷が落ちた', 'e' + eN.uid);
+            continue;
+        }
+    }
+}
+// 敵: 聞こえた輸送船へ向かうか (輸送船ごとに一度だけ決める・貪欲/攻撃的ほど)。行き先は少し先回り
+function enemyConvoyPick(e, pers) {
+    const seen = e._cvSeen || (e._cvSeen = {});
+    for (const cv of convoys) {
+        if (seen[cv.sid]) continue;
+        const d = Math.hypot(cv.x - e.x, cv.y - e.y);
+        if (CONVOY_SIG * Math.max(0, 1 - d / ENEMY_PASSIVE_RANGE) < 0.1) continue;
+        seen[cv.sid] = true;
+        if (Math.random() < 0.3 + pers.greed * 0.4 + pers.aggression * 0.2) return cv;
+    }
+    return null;
+}
+function drawConvoys(ctx) {
+    const inv = 1 / camera.zoom;
+    for (const cv of convoys) {
+        if (!higgsViewOff && !(player && inPlayerVision(cv.x, cv.y))) continue;
+        ctx.save(); ctx.translate(cv.x, cv.y); ctx.rotate(cv.angle);
+        ctx.globalAlpha = 0.95; ctx.fillStyle = '#5a4a32'; ctx.strokeStyle = '#ffcf88'; ctx.lineWidth = 2 * inv;
+        ctx.fillRect(-110, -32, 220, 64); ctx.strokeRect(-110, -32, 220, 64);
+        ctx.fillStyle = '#806a46'; for (let k = 0; k < 4; k++) ctx.fillRect(-95 + k * 48, -24, 38, 48);
+        ctx.fillStyle = '#ffaa55'; ctx.globalAlpha = 0.6 + 0.3 * Math.sin(_frameCount * 0.2); ctx.fillRect(-125, -14, 15, 28);
+        ctx.restore();
+        ctx.save();
+        ctx.globalAlpha = 0.9; ctx.fillStyle = '#331a00'; ctx.fillRect(cv.x - 80, cv.y - 70, 160, 6 * Math.max(1, inv * 0.5));
+        ctx.fillStyle = '#ffcc66'; ctx.fillRect(cv.x - 80, cv.y - 70, 160 * Math.max(0, cv.hp / cv.maxHp), 6 * Math.max(1, inv * 0.5));
+        ctx.font = Math.round(10 * inv) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.fillText('輸送船', cv.x, cv.y - 74);
+        if (cv.boardP > 0) { ctx.strokeStyle = '#7dff9a'; ctx.lineWidth = 2 * inv; ctx.beginPath(); ctx.arc(cv.x, cv.y, CONVOY_BOARD_R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * cv.boardP / CONVOY_BOARD_T); ctx.stroke(); }
+        ctx.restore();
     }
 }
 
@@ -7154,7 +7395,7 @@ function collectCacheByPlayer(f) {
     // 第32弾: 漂流コンテナの中身は部品 (3つから1つ・全種類から)
     matchRecEvent('salvP', f.x, f.y, '自艦が漂流コンテナを回収');
     logMessage('SALVAGE: 漂流コンテナを回収 — 部品が入っていた', 'system-msg');
-    offerDraft('cache');
+    offerDraft('cache'); addLootTrace(f.x, f.y, 'p', 'cache');
     _hudCache.cargo = null; playSound('ui');
     return true;
 }
@@ -7396,6 +7637,7 @@ function _identTruth(sid) {
     if (/^e-/.test(sid)) { const e = enemyBySid(sid); return !e ? null : e.type === 'fighter' ? 'small' : 'ship'; }
     const L = lures.find(l => l.sid === sid);
     if (L) return L.noise ? 'noise' : 'lure';
+    if (/^C-/.test(sid)) return convoys.some(c => c.sid === sid) ? 'ship' : null; // 第34弾: 輸送船は艦影寄りに聞こえる
     const F = /^N-/.test(sid) ? fieldSignals.find(f => f.sid === sid) : null; // 第31弾
     return F ? (F.kind === 'cache' ? 'cache' : 'nature') : null;
 }
@@ -7515,6 +7757,19 @@ function checkPassiveDetection() {
             if (sig > sc.threshold * 0.5 && sig / sc.threshold > bestQ) { bestQ = sig / sc.threshold; best = { band: b, sig }; }
         }
         if (best) allContacts.push({ x: L.x, y: L.y, sig: best.sig, band: best.band, nb, angle: Math.atan2(L.y - player.y, L.x - player.x), sourceId: L.sid, clN: 0 });
+    }
+    // 第34弾: 輸送船 (全帯域0.6)
+    for (const cv of convoys) {
+        const dist = Math.hypot(cv.x - player.x, cv.y - player.y);
+        if (dist >= range) continue;
+        const hPath = getHiggsIntensity((cv.x + player.x) / 2, (cv.y + player.y) / 2);
+        let best = null, bestQ = 0, nb = 0;
+        for (const b of sensorOrder) {
+            const sc = sensorConfig[b], sig = CONVOY_SIG * (1 - dist / range) * (1 - hPath * sc.higgsMod) * (1 - noise * 0.5);
+            if (sig > sc.threshold * 0.5) nb++;
+            if (sig > sc.threshold * 0.5 && sig / sc.threshold > bestQ) { bestQ = sig / sc.threshold; best = { band: b, sig }; }
+        }
+        if (best) allContacts.push({ x: cv.x, y: cv.y, sig: best.sig, band: best.band, nb, angle: Math.atan2(cv.y - player.y, cv.x - player.x), sourceId: cv.sid, clN: 0 });
     }
     // 第31弾: 自然の信号・お宝の信号も同じ物理で聴こえる (ONの帯域だけ方位が取れる)
     for (const f of fieldSignals) {
@@ -7945,6 +8200,7 @@ function updateFreeBeam() {
         if (en.hp <= 0 || en._dying) continue;
         if (_segDist(en.x, en.y, player.x, player.y, ex, ey) < PM.beamWidth + (en.radius || 0)) { hitE = en; break; }
     }
+    if (!hitE) for (const cv of convoys) if (_segDist(cv.x, cv.y, player.x, player.y, ex, ey) < PM.beamWidth + cv.radius) { damageConvoy(cv, BEAM_DMG * PM.beamDmg * PM.dmgAll, true); break; } // 第34弾
     if (hitE) {
         const hb = getHiggsIntensity((player.x + hitE.x) / 2, (player.y + hitE.y) / 2);
         const st = applyStrikeBonuses(true, null, hitE, Math.atan2(player.y - hitE.y, player.x - hitE.x), 'beam');
@@ -9120,7 +9376,7 @@ function drawBackground(ctx) {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     if (bgMistCanvas) {
-        ctx.globalAlpha = (!mapMode || sensorsOn.higgs) ? 1.0 : _mapFade;
+        ctx.globalAlpha = ((!mapMode || sensorsOn.higgs) ? 1.0 : _mapFade) * (1 - 0.8 * lullK); // 第34弾: 凪
         ctx.drawImage(bgMistCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
         ctx.globalAlpha = 1;
     }
@@ -10944,6 +11200,7 @@ function updateHuntTension() {
             updateAmbient(); // サージ位相で音像を変える
         }
     }
+    updateLull(); // 第34弾
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -10982,6 +11239,12 @@ function rxLevels(includeOff) {
             const lvl = sc.sig(e) * da * (1 - hPath * sc.higgsMod) * mask / sc.threshold;
             if (lvl > out[b]) out[b] = lvl;
         }
+    }
+    for (const cv of convoys) { // 第34弾: 輸送船
+        const dist = Math.hypot(cv.x - player.x, cv.y - player.y);
+        if (dist >= range) continue;
+        const hPath = getHiggsIntensity((cv.x + player.x) / 2, (cv.y + player.y) / 2), da = 1 - dist / range;
+        for (const b of BANDS) { if (!sensorsOn[b] && !includeOff) continue; const sc = sensorConfig[b], lvl = CONVOY_SIG * da * (1 - hPath * sc.higgsMod) * mask / sc.threshold; if (lvl > out[b]) out[b] = lvl; }
     }
     for (const f of fieldSignals) { // 第31弾: 自然/お宝の信号
         const dist = Math.hypot(f.x - player.x, f.y - player.y);
@@ -11260,7 +11523,7 @@ function openReplay() {
 }
 function closeReplay() { const ov = document.getElementById('replay-overlay'); if (ov) ov.classList.add('hidden'); if (_rp) _rp.play = false; }
 function _rpFmt(t) { const s2 = Math.floor(t / 60); return Math.floor(s2 / 60) + ':' + String(s2 % 60).padStart(2, '0'); }
-const _EV_COL = { fireP: '#5ff0ff', fireE: '#ffa040', hitP: '#ff5050', hitE: '#7dff9a', deathP: '#ff3030', killE: '#7dff9a', nodeP: '#50c8ff', nodeE: '#ff9a50', colonyP: '#50c8ff', colonyE: '#ff9a50', salvP: '#9fffc0', aiE: '#ffcf88', expoP: '#ff8080', lureP: '#c48bff', lureE: '#c48bff', flashP: '#ffffff', flashE: '#ffffff', smokeE: '#9fb8ff', shield: '#88ccff', clear: '#7dff9a', supplyP: '#9fffc0', escP: '#ffe08a', salvE: '#ffcf88', zoneP: '#ff8ce0', zoneE: '#ff8ce0' };
+const _EV_COL = { lull: '#bfe9ff', traceP: '#ffcf88', convoy: '#ffcf88', convoyP: '#7dff9a', convoyE: '#ffa040', partE: '#ffcf88', fireP: '#5ff0ff', fireE: '#ffa040', hitP: '#ff5050', hitE: '#7dff9a', deathP: '#ff3030', killE: '#7dff9a', nodeP: '#50c8ff', nodeE: '#ff9a50', colonyP: '#50c8ff', colonyE: '#ff9a50', salvP: '#9fffc0', aiE: '#ffcf88', expoP: '#ff8080', lureP: '#c48bff', lureE: '#c48bff', flashP: '#ffffff', flashE: '#ffffff', smokeE: '#9fb8ff', shield: '#88ccff', clear: '#7dff9a', supplyP: '#9fffc0', escP: '#ffe08a', salvE: '#ffcf88', zoneP: '#ff8ce0', zoneE: '#ff8ce0' };
 function _rpRenderEvents() {
     const box = document.getElementById('rp-events'); if (!box) return;
     box.innerHTML = '';
@@ -11517,6 +11780,26 @@ function comPilotStep() {
     }
     // 4) 出す
     if (contact && P.aggression >= 0.5 && now - c.lastDeploy > COM_DEPLOY_GAP) _comDeploy(c, P);
+    // 5a) 第34弾: 正体の分かった輸送船 (または艦影らしいうるさい信号) を追って拿捕 — 止まらずに少し先へ向け直し続ける
+    if (!contact) {
+        let cvT = null, cvD = 15000;
+        // 見えている間は実体を、見えなくなったら推定 (方位の記録から解いた位置・針路) を追う (真の位置は使わない)
+        for (const cv of convoys) {
+            if (!(_sigIdent[cv.sid] && _sigIdent[cv.sid].sure)) continue;
+            let p = null;
+            if (inPlayerVision(cv.x, cv.y)) p = { x: cv.x, y: cv.y, vx: cv.vx, vy: cv.vy };
+            else { const sa = _signalAnalysis[cv.sid], est = sa && sa.fix ? trackEstimate(sa, 0) : null; if (est) p = { x: est.x, y: est.y, vx: est.moving ? est.vx : 0, vy: est.moving ? est.vy : 0 }; }
+            if (!p) continue;
+            const d = Math.hypot(p.x - player.x, p.y - player.y); if (d < cvD) { cvD = d; cvT = p; }
+        }
+        if (cvT && P.greed + P.aggression >= 0.6) {
+            const lead = Math.min(600, cvD / 2);
+            player.setTarget(cvT.x + cvT.vx * lead, cvT.y + cvT.vy * lead); _comSteered(c, 'convoy');
+            comThink('p', 'convoy', '輸送船を追って拿捕する (' + _dirTxt(player.x, player.y, cvT.x, cvT.y) + '・' + Math.round(cvD / 100) * 100 + 'u)');
+            if (powerStance === 'silent') setStance('cruise');
+            return;
+        }
+    }
     // 5) 取る — 第33弾: 部品の枠が空いていれば、貪欲さ0.25以上で部品の取れる所 (難破船・確かめた漂流コンテナ・部品をまだ取っていないノード/コロニー) へ寄り道する
     if (!contact && P.greed >= 0.25 && partSlotsUsed() < partSlotsMax()) {
         let ps = null, pd = COM_GOAL_RANGE * 1.5;
@@ -11776,6 +12059,8 @@ function xoEvaluate() {
     if (player.hp <= 0) return { tone: 'bad', text: '艦体崩壊 — 通信途絶' };
     if (sectorCleared) return { tone: 'good', text: '敵艦撃沈 — セクター制圧。帰投して補給・改修へ', act: { label: '帰投', fn: () => openDebrief() } };
 
+    // 第34弾: 凪の予兆は最優先 (15秒しかない)
+    if (lullPhase === 'warn' && !(player.targetEntity && player.targetEntity.inVision)) { const sp = (_frameCount % 30 === 0 || !_xoLullSp) ? (_xoLullSp = lullShelterSpot(player.x, player.y, 6000) || 0) : _xoLullSp; return { tone: 'go', text: 'あと' + Math.ceil(lullT / 60) + '秒で凪 — 霧が晴れて遠くまで見える/見られる。' + (lullSheltered(player) ? 'ここは隠れ場所' : sp ? sp.lbl + 'が方位' + compassDeg(Math.atan2(sp.y - player.y, sp.x - player.x)) + '° ' + Math.round(sp.d / 100) * 100 + 'u' : '近くに隠れ場所は無い — 見張るか') }; }
     const w = currentWeapon();
     // 0) 第17弾: 捕捉され耐久が半分を切ったら、目の前のミサイルを避けるより離脱 (閃光でミサイルの誘導も切れる)
     if (playerExposureLevel >= 3 && player.hp / player.maxHp < XO_ESCAPE_HP)
@@ -11932,6 +12217,8 @@ function xoEvaluate() {
         if (threatObs.kind === 'ping' && !silentRunning) return { tone: 'bad', text: dg + 'から敵の探信を受けた — 反響で位置が知れた。潜航し、霧の濃い所(50%以上)へ', act: { label: '潜航', fn: () => setStance('silent') } };
     }
     if (surgePhase === 'warn') return { tone: 'info', text: 'ヒッグスサージ接近 — 通過中は互いに盲目。動けば航跡が濃く残る' };
+    // 第34弾: 凪
+    if (lullPhase === 'active') return { tone: 'go', text: '凪 — 霧が晴れている (あと' + Math.ceil(lullT / 60) + '秒)。' + (lullSheltered(player) ? '隠れ場所にいる' : '遠くからも見える') };
     // 第31弾: 監視網の円 (自分のノード/コロニーの近くで強いシグネチャ)
     { let z = null; for (const q of sigZones) if (q.side === 'p' && (!z || q.life > z.life)) z = q;
       if (z) return { tone: 'go', text: '監視網の円 SIG-' + String(_contactLabels[z.sid] || '?').padStart(2, '0') + ' (方位' + compassDeg(Math.atan2(z.y - player.y, z.x - player.x)) + '° ' + Math.round(Math.hypot(z.x - player.x, z.y - player.y) / 100) * 100 + 'u) — 円の中のどこかで強いシグネチャ' }; }
@@ -11975,6 +12262,15 @@ function xoInfoSource() {
         const p = est ? { x: est.x, y: est.y } : clampToMapCircle(lastO.ox + Math.cos(lastO.ang) * 10000, lastO.oy + Math.sin(lastO.ang) * 10000, 1500);
         const d = Math.hypot(p.x - player.x, p.y - player.y);
         if (d > 1500) return { x: p.x, y: p.y, d, why: '記録の方位線 (' + Math.round((_frameCount - lastO.f) / 60) + '秒前) — 信号は' + (est ? '推定位置' : '方位' + compassDeg(lastO.ang) + '°の線上') + '。寄って自艦で聴け' };
+    }
+    // 第34弾: 正体を確かめた輸送船 (沈めるか寄り添って拿捕)
+    for (const cv of convoys) {
+        if (!(_sigIdent[cv.sid] && _sigIdent[cv.sid].sure)) continue;
+        let lx, ly; // 見えている間は実体、見えなければ推定 (真の位置は使わない)
+        if (inPlayerVision(cv.x, cv.y)) { lx = cv.x + cv.vx * 300; ly = cv.y + cv.vy * 300; }
+        else { const sa = _signalAnalysis[cv.sid], est = sa && sa.fix ? trackEstimate(sa, 300) : null; if (!est) continue; lx = est.x; ly = est.y; }
+        const d = Math.hypot(lx - player.x, ly - player.y);
+        if (d > CONVOY_BOARD_R * 0.6) return { x: lx, y: ly, d, why: '輸送船 — 沈めるか500u以内に5秒寄り添って拿捕すれば漂流コンテナ2つ' };
     }
     // 第31弾: 正体を確かめた漂流コンテナ (回収すれば弾・資材)
     { let bc = null, bdc = Infinity;
@@ -12425,6 +12721,7 @@ function stepWorld() {
         updateLures();  // 第21弾: 囮
         updateFieldSignals(); updateSigZones(); // 第31弾: 自然/お宝の信号・監視網の円
         updateParts(); // 第32弾: 部品 (機雷・囮発射機・照準波・自機COMの付け替え)
+        updateLootTraces(); updateConvoys(); // 第34弾: 空き巣の跡・輸送船
         updateHuntTension();
         updateDistressBeacon();
         interceptEnemyComms();
@@ -12616,6 +12913,7 @@ function renderWorld() {
         drawLures(ctx); // 第21弾
         drawFieldSignals(ctx); // 第31弾
         drawMines(ctx); // 第32弾
+        drawLootTraces(ctx); drawConvoys(ctx); // 第34弾
         drawOwnOrdnanceMarkers(ctx);
         drawColonyIntel(ctx);
         if (player && (player.hp > 0 || player._dying > 0)) player.draw(ctx);
