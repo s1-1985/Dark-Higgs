@@ -875,7 +875,7 @@ const REPAIR_SIG_MULT = 2.4; // 停止中シグネチャ増大倍率
 // ============================================================
 // 有視界システム — アメーバ形状視野 + ヒッグス連続濃度連動
 // ============================================================
-const BASE_VISION_RADIUS = 1200; // 0%ヒッグス時の基準視野半径 (ワールド単位)
+const BASE_VISION_RADIUS = 1800; // 0%ヒッグス時の基準視野半径 (ワールド単位)。第25弾 (オーナー指示「有視界をもう少し広げて」): 1200→1800
 let playerVisionRadius = BASE_VISION_RADIUS;
 
 const MIN_VISION_FACTOR = 0.05; // 100%ヒッグスでも最低限の視認性を残す
@@ -1013,7 +1013,7 @@ function visionRadiusAt(s, x, y, base = BASE_VISION_RADIUS) {
 // ═══ 第22弾 (オーナー合意): 視線 — 最大半径は居る場所 (直下) の濃度で決まる。300uより先で、直下より30ポイント以上
 // 濃い所に視線が入るとそこで止まり、その奥 (影) も見えない → 周りの濃度に応じて歪な形になる。300u以内は必ず見える。
 // 自機/敵/ドローンで同じ関数を使う。旧 (第21弾): 濃さを積み重ねて 100%なら400u進むと遮る (薄い霧でも遠くは欠けた)
-const VIS_RAYS = 96, VIS_STEP = 30, VIS_CLOSE = 300, VIS_STEP_UP = 0.30;
+const VIS_RAYS = 96, VIS_STEP = 30, VIS_CLOSE = 450, VIS_STEP_UP = 0.40; // 第25弾: 至近300→450u・止まる段差+30→+40ポイント
 let _visRays = new Float32Array(VIS_RAYS), _visRaysF = -1;
 function losReach(x, y, ang, maxR, h0) {
     if (maxR <= VIS_CLOSE) return maxR;
@@ -9753,11 +9753,23 @@ function drawColonyIntel(ctx) {
     ctx.globalAlpha = 0.55;
     ctx.strokeStyle = '#7fc8ff'; ctx.lineWidth = 1.5 / camera.zoom;
     ctx.setLineDash([12 / camera.zoom, 8 / camera.zoom]); ctx.stroke(); ctx.setLineDash([]);
-    if (camera.zoom > 0.008) {
+    // 第25弾 (オーナー指摘「意味が分かりづらい」): 「敵はこの範囲のどこか」と、何から分かったか (占有数と精度) を2行で
+    {
         const lr = it.dist || Math.min(r1, 9000);
-        ctx.globalAlpha = 0.85; ctx.fillStyle = '#bfe4ff';
-        ctx.font = (12 / camera.zoom) + 'px Orbitron, sans-serif'; ctx.textAlign = 'center';
-        ctx.fillText('コロニー情報 (' + it.n + ')', it.ox + Math.cos(it.ang) * lr, it.oy + Math.sin(it.ang) * lr);
+        const lx = it.ox + Math.cos(it.ang) * lr, ly = it.oy + Math.sin(it.ang) * lr;
+        const fs = 13 / camera.zoom;
+        const l2 = 'コロニー' + it.n + 'つ占有 → 方角±' + Math.round(it.aHW * 180 / Math.PI) + '°' + (it.dist ? '・距離±' + Math.round(it.dHW / 100) * 100 + 'u' : '・距離は不明 (2つで分かる)') + ' / ' + Math.max(0, Math.ceil((COLONY_INTEL_PERIOD - (_frameCount - it.f)) / 60)) + '秒で更新';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.font = (fs * 0.8) + 'px sans-serif';
+        const bw = Math.max(ctx.measureText(l2).width, fs * 10) + fs;
+        ctx.globalAlpha = 0.72; ctx.fillStyle = '#04121c'; // 地図の上でも読めるように下地
+        ctx.fillRect(lx - bw / 2, ly - fs * 1.45, bw, fs * 2.8);
+        ctx.globalAlpha = 0.95; ctx.fillStyle = '#d8f0ff';
+        ctx.font = 'bold ' + fs + 'px sans-serif';
+        ctx.fillText('敵はこの範囲のどこか', lx, ly - fs * 0.7);
+        ctx.globalAlpha = 0.85; ctx.fillStyle = '#9fd0f0';
+        ctx.font = (fs * 0.8) + 'px sans-serif';
+        ctx.fillText(l2, lx, ly + fs * 0.6);
     }
     ctx.restore();
 }
@@ -11890,8 +11902,12 @@ function setGameSpeed(v) {
     const lb = gameSpeed === 0.5 ? '0.5x' : gameSpeed + 'x';
     const sp = document.querySelector('#btn-game-speed span'); // ラベルだけ (旧: textContent で丸ごと置換しアイコンが消えていた)
     if (sp) sp.textContent = 'SPD:' + lb;
+    const fx = document.getElementById('btn-speed-fixed'); // 第25弾: 画面端に常時表示する倍速ボタン
+    if (fx) { fx.textContent = lb; fx.classList.toggle('on', gameSpeed !== 1); }
     logMessage('SYSTEM: ゲームスピード ' + lb + (gameSpeed > 1 ? ' (重い時は自動で抑える)' : ''), 'system-msg');
 }
+function cycleGameSpeed() { setGameSpeed(GAME_SPEEDS[(GAME_SPEEDS.indexOf(gameSpeed) + 1) % GAME_SPEEDS.length]); }
+document.getElementById('btn-speed-fixed')?.addEventListener('click', cycleGameSpeed);
 document.getElementById('btn-game-speed')?.addEventListener('click', () => {
     setGameSpeed(GAME_SPEEDS[(GAME_SPEEDS.indexOf(gameSpeed) + 1) % GAME_SPEEDS.length]); // 1→2→4→8→0.5→1
 });
