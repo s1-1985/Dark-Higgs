@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261031d">
+    <link rel="stylesheet" href="style.css?v=20261031e">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -81,9 +81,9 @@
                 <div id="band-legend"><span class="bl-rx">受信</span><span class="bl-tx">自艦</span><span class="bl-nz">雑音</span></div>
             </div>
 
-            <!-- 右列: 行動 (親指の届く下ほど重要: 射撃 > 追跡 > 兵装 > 静粛 > 索敵 > 電子戦/ドローン > 航法) -->
+            <!-- 右列: 行動 (第27弾: 航法・追跡・射撃は撤去 — 追跡=リング/推定円をタップ・射撃=地図を長押し) -->
             <div id="hud-right">
-                <button class="hud-act" data-group="nav" title="航法 — 停止 / 追従 / 自動攻撃 / 修復 / 速度">
+                <button class="hud-act" data-group="nav" title="航法 (第27弾で撤去: 停止は長押しメニュー・追従は「◎ 自艦」・自動攻撃はメニュー・倍速は右下)" style="display:none">
                     <img src="assets/icon_nav.png" alt="" class="abar-icon"><span>航法</span>
                 </button>
                 <button class="hud-act" data-group="ew" id="abar-grp-ew" title="電子戦 — ジャム / ハック / デコイ・哨戒機 (潜航型)" style="display:none">
@@ -112,11 +112,11 @@
                     <span id="abar-wep-label">KIN</span>
                     <em id="abar-wep-ammo">8/8</em>
                 </button>
-                <button class="hud-act" id="abar-track" onclick="trackNextSignal()" title="追跡 — 受信中の信号を順にロック (T)">
+                <button class="hud-act" id="abar-track" onclick="trackNextSignal()" title="追跡 (第27弾で撤去: リングの点か地図の推定円をタップ / キーT)" style="display:none">
                     <i class="ico" style="--ico:url(assets/icons/icon_track.png)"></i>
                     <span id="abar-track-label">追跡</span>
                 </button>
-                <button class="hud-act hud-fire" id="abar-fire" onclick="issueFireOrder()" title="射撃命令 — 推定位置へ艦首を向けて1射 (撃てば自位置も露出) (F)">
+                <button class="hud-act hud-fire" id="abar-fire" onclick="issueFireOrder()" title="射撃 (第27弾で撤去: 地図を長押し→射撃 / キーF)" style="display:none">
                     <img src="assets/icon_atk.png" alt="" class="abar-icon">
                     <span id="abar-fire-label">射撃</span>
                 </button>
@@ -552,8 +552,8 @@
                     <div class="brief-lead">霧の中に敵艦が1隻。互いに見えない。<b>先に見つけて撃った方が勝つ。</b>答えは誰も教えてくれない — 聴いた方位から自分で推理する。</div>
                     <ol class="brief-steps">
                         <li><b class="bs-1">聴く</b>左の受信機: 太いバー=受信、刻みを超えた帯域に<em>同調</em>すると方位が取れる。細いバー=<em>自艦の放射</em>、斜線=<em>自艦の雑音</em>(速く動くほど耳が塞がる)。</li>
-                        <li><b class="bs-2">測る</b>右の<em>追跡</em>で方位を記録。<em>場所を変えて</em>聴くと方位線が交わり推定円が出る。交わらない=相手が動いている。止まって聴くと方位が鋭くなる。</li>
-                        <li><b class="bs-3">撃つ</b>推定円が小さいほど当たる (右下の<em>射撃</em>に見込み%)。針路が読めると推定円に<em>矢印</em>が出て、射撃は弾が届く時の<em>見越し点</em>を狙う。外れれば「そこには居ない」と分かるが、<em>撃った位置を教える</em>。ソナーは正確だが遠くまで聞かれる。</li>
+                        <li><b class="bs-2">測る</b>自艦リングの点か地図の推定円を<em>タップして追跡</em>し、方位を記録。<em>場所を変えて</em>聴くと方位線が交わり推定円が出る。交わらない=相手が動いている。止まって聴くと方位が鋭くなる。</li>
+                        <li><b class="bs-3">撃つ</b>推定円を<em>長押し→射撃</em>。円が小さいほど当たる (見込み%は副長が言う)。針路が読めると推定円に<em>矢印</em>が出て、射撃は弾が届く時の<em>見越し点</em>を狙う。外れれば「そこには居ない」と分かるが、<em>撃った位置を教える</em>。ソナーは正確だが遠くまで聞かれる。</li>
                         <li><b class="bs-4">消える</b>出力を<em>潜航</em>へ。ヒッグスの霧は音を隠すが、動けば<em>航跡が90秒残り</em>、敵はそれを辿ってくる (HIGGS帯で相手の航跡も見える)。見つかったら右列の<em>離脱</em>: 閃光で目を潰す→噴射で距離を取る→<em>機関停止</em>で音を消して漂う。ドローンや艦載機が飛び交う所・嵐・熱雲・岩礁に紛れると見分けにくい (<em>混信</em>)。</li>
                     </ol>
                     <div class="brief-tip">自艦の周りのリング: 0°=上・時計回り。ログや副長が言った方位はリング上で光る。青緑の縁(有視界)の内側に入った敵ははっきり見える — 縁の大きさは自艦の居る場所のヒッグス濃度で変わる。<br>ノードの近くに5秒留まると制圧 (資材+聴音局)、コロニーは8秒でハック (修理・資材・敵の方位線)。右列の「搭載」で戦闘機・砲台・人型など — 完成品はすぐ出せ、資材は組み立てに時間とEMがかかる。<br>副長は状況を読み上げるだけ — 決めるのはあなた。移動はフィールドを長押し →「移動」。ドラッグで見回し、ピンチか右下の＋−で拡大縮小。</div>
@@ -651,6 +651,7 @@
                 <div class="mm-btns">
                     <button class="btn btn-small" id="mm-briefing" onclick="showBriefing(true)">作戦要領 (遊び方)</button>
                     <button class="btn btn-small" id="btn-higgs-view" onclick="toggleHiggsView()">ヒッグス表示: ON</button>
+                    <button class="btn btn-small" id="mm-autoatk" onclick="toggleAutoAttack()" title="有視界に入った敵を自動で撃つ">自動攻撃: ON</button>
                     <button class="btn btn-small com-only" id="btn-think-log" onclick="toggleThinkLog()">思考ログ: ON</button>
                     <button class="btn btn-small com-only" id="btn-com-exit" onclick="exitComDemo()">COM対戦を終えてロビーへ</button>
                     <button class="btn btn-small" id="mm-fullscreen" onclick="toggleFullscreen()">全画面 切替</button>
@@ -688,13 +689,14 @@
     <div id="long-press-menu" style="display:none; position:fixed; z-index:800; pointer-events:auto; user-select:none; width:108px; background:rgba(0,8,18,0.96); border:1px solid rgba(0,255,170,0.5); border-radius:6px; padding:6px; font-family:'Orbitron',monospace; font-size:9px; box-shadow:0 0 14px rgba(0,255,170,0.12);">
         <button onclick="lpmSelectMove()" style="display:block; width:100%; background:#001a0e; border:1px solid #00ffaa; color:#00ffaa; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">▶ 移動</button>
         <button onclick="lpmSelectFire()" style="display:block; width:100%; background:#1a0008; border:1px solid #ff4466; color:#ff4466; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">⊕ 射撃</button>
+        <button onclick="lpmSelectStop()" style="display:block; width:100%; background:#140a00; border:1px solid #ffaa44; color:#ffbb66; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">■ 停止</button>
         <div id="lpm-drones"></div>
         <div id="lpm-lures"></div>
         <button onclick="hideLongPressMenu()" style="display:block; width:100%; background:#0a0a0a; border:1px solid #446655; color:#668877; padding:5px 4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">× キャンセル</button>
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261031d"></script>
+    <script src="game.js?v=20261031e"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
