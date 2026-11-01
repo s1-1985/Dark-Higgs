@@ -225,6 +225,14 @@ const SPRITE_FILES = {
     icon_drone:  'assets/icon_drone.png',
     icon_sup:    'assets/icon_sup.png',
     icon_atk:    'assets/icon_atk.png',
+    // 第35弾 (Higgsfield gpt_image_2_5): 漂流コンテナ・輸送船・機雷・開けた跡 (透過) / 嵐の放電・霧のゆらぎ・熱泉 (黒地・加算で描く)
+    field_cache:  'assets/field_cache.png',
+    field_convoy: 'assets/field_convoy.png',
+    field_mine:   'assets/field_mine.png',
+    field_looted: 'assets/field_looted.png',
+    fx_field_storm: 'assets/fx_field_storm.png',
+    fx_field_cloud: 'assets/fx_field_cloud.png',
+    fx_field_vent:  'assets/fx_field_vent.png',
 };
 const SPRITES = {};
 for (const k in SPRITE_FILES) {
@@ -6983,8 +6991,11 @@ function drawMines(ctx) {
         ctx.save();
         ctx.globalAlpha = mn.t < MINE_ARM ? 0.4 : 0.85; ctx.strokeStyle = '#ffcc66'; ctx.lineWidth = 1.6 * inv;
         const r = Math.max(30, 6 * inv);
-        ctx.beginPath(); ctx.arc(mn.x, mn.y, r, 0, Math.PI * 2); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(mn.x - r * 1.5, mn.y); ctx.lineTo(mn.x + r * 1.5, mn.y); ctx.moveTo(mn.x, mn.y - r * 1.5); ctx.lineTo(mn.x, mn.y + r * 1.5); ctx.stroke();
+        if (spriteReady(SPRITES.field_mine)) ctx.drawImage(SPRITES.field_mine, mn.x - r * 1.6, mn.y - r * 1.6, r * 3.2, r * 3.2); // 第35弾
+        else {
+            ctx.beginPath(); ctx.arc(mn.x, mn.y, r, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(mn.x - r * 1.5, mn.y); ctx.lineTo(mn.x + r * 1.5, mn.y); ctx.moveTo(mn.x, mn.y - r * 1.5); ctx.lineTo(mn.x, mn.y + r * 1.5); ctx.stroke();
+        }
         ctx.globalAlpha = 0.18; ctx.setLineDash([5 * inv, 8 * inv]); ctx.beginPath(); ctx.arc(mn.x, mn.y, MINE_R, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
         ctx.restore();
     }
@@ -7191,7 +7202,8 @@ function drawLootTraces(ctx) {
         ctx.globalAlpha = mine ? 0.35 : 0.85;
         ctx.strokeStyle = mine ? '#7fd6ff' : '#ffcf88'; ctx.lineWidth = 1.5 * inv;
         const h = Math.max(36, 8 * inv);
-        ctx.setLineDash([4 * inv, 4 * inv]); ctx.strokeRect(t.x - h, t.y - h * 0.6, h * 2, h * 1.2); ctx.setLineDash([]);
+        if (spriteReady(SPRITES.field_looted)) ctx.drawImage(SPRITES.field_looted, t.x - h * 1.4, t.y - h * 1.4, h * 2.8, h * 2.8); // 第35弾: こじ開けたコンテナ
+        else { ctx.setLineDash([4 * inv, 4 * inv]); ctx.strokeRect(t.x - h, t.y - h * 0.6, h * 2, h * 1.2); ctx.setLineDash([]); }
         if (!mine) {
             const ago = Math.max(0, Math.round((_frameCount - t.estF) / 3600 * 2) / 2);
             ctx.fillStyle = '#ffcf88'; ctx.font = Math.round(10 * inv) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
@@ -7286,10 +7298,14 @@ function drawConvoys(ctx) {
     for (const cv of convoys) {
         if (!higgsViewOff && !(player && inPlayerVision(cv.x, cv.y))) continue;
         ctx.save(); ctx.translate(cv.x, cv.y); ctx.rotate(cv.angle);
-        ctx.globalAlpha = 0.95; ctx.fillStyle = '#5a4a32'; ctx.strokeStyle = '#ffcf88'; ctx.lineWidth = 2 * inv;
-        ctx.fillRect(-110, -32, 220, 64); ctx.strokeRect(-110, -32, 220, 64);
-        ctx.fillStyle = '#806a46'; for (let k = 0; k < 4; k++) ctx.fillRect(-95 + k * 48, -24, 38, 48);
-        ctx.fillStyle = '#ffaa55'; ctx.globalAlpha = 0.6 + 0.3 * Math.sin(_frameCount * 0.2); ctx.fillRect(-125, -14, 15, 28);
+        const _cvImg = SPRITES.field_convoy;
+        if (spriteReady(_cvImg)) { ctx.globalAlpha = 1; ctx.drawImage(_cvImg, -150, -150, 300, 300); } // 第35弾: 艦首が右を向いた横長の絵 (正方形の中央の帯)
+        else {
+            ctx.globalAlpha = 0.95; ctx.fillStyle = '#5a4a32'; ctx.strokeStyle = '#ffcf88'; ctx.lineWidth = 2 * inv;
+            ctx.fillRect(-110, -32, 220, 64); ctx.strokeRect(-110, -32, 220, 64);
+            ctx.fillStyle = '#806a46'; for (let k = 0; k < 4; k++) ctx.fillRect(-95 + k * 48, -24, 38, 48);
+        }
+        ctx.fillStyle = '#ffaa55'; ctx.globalAlpha = 0.5 + 0.3 * Math.sin(_frameCount * 0.2); ctx.fillRect(-160, -10, 12, 20);
         ctx.restore();
         ctx.save();
         ctx.globalAlpha = 0.9; ctx.fillStyle = '#331a00'; ctx.fillRect(cv.x - 80, cv.y - 70, 160, 6 * Math.max(1, inv * 0.5));
@@ -7304,7 +7320,8 @@ function drawConvoys(ctx) {
 function _partCard(id, btnLabel, onClick, disabled) {
     const P = PARTS[id], d = document.createElement('div');
     d.className = 'part-card';
-    d.innerHTML = '<div class="pc-cat"></div><div class="pc-name"></div><div class="pc-up"></div><div class="pc-down"></div>';
+    d.innerHTML = '<div class="pc-top"><i class="ico pc-ico"></i><div><div class="pc-cat"></div><div class="pc-name"></div></div></div><div class="pc-up"></div><div class="pc-down"></div>';
+    d.querySelector('.pc-ico').style.setProperty('--ico', 'url(assets/icons/part_' + id + '.png)'); // 第35弾: 部品ごとのアイコン
     d.querySelector('.pc-cat').textContent = PART_CATS[P.cat] + (partW(id) > 1 ? '・枠' + partW(id) : '');
     d.querySelector('.pc-name').textContent = P.name;
     d.querySelector('.pc-up').textContent = '＋ ' + P.up;
@@ -7550,7 +7567,21 @@ function drawFieldSignals(ctx) {
         if (!higgsViewOff && !(player && inPlayerVision(f.x, f.y))) continue;
         const k = FIELD_KINDS[f.kind], fade = Math.min(1, f.age / FIELD_FADE, f.life / FIELD_FADE);
         ctx.save();
-        if (f.kind === 'cloud') {
+        const _fxImg = SPRITES[f.kind === 'cache' ? 'field_cache' : 'fx_field_' + f.kind];
+        if (spriteReady(_fxImg)) { // 第35弾: 生成したスプライト (自然の信号は黒地を加算で重ねる)
+            if (f.kind === 'cache') {
+                const L = Math.max(150, 30 * inv);
+                ctx.save(); ctx.globalAlpha = 0.95; ctx.translate(f.x, f.y); ctx.rotate(f.ph); ctx.drawImage(_fxImg, -L / 2, -L / 2, L, L); ctx.restore();
+            } else {
+                const L = f.kind === 'cloud' ? 900 : f.kind === 'storm' ? 520 : 460;
+                ctx.save(); ctx.globalCompositeOperation = 'lighter';
+                ctx.globalAlpha = fade * (f.kind === 'cloud' ? 0.45 : f.kind === 'storm' ? (f.on ? 0.9 : 0.15) : 0.7 + 0.2 * Math.sin(t * 2 + f.ph));
+                ctx.translate(f.x, f.y); ctx.rotate(f.ph + (f.kind === 'cloud' ? t * 0.05 : 0)); ctx.drawImage(_fxImg, -L / 2, -L / 2, L, L);
+                ctx.restore();
+            }
+            if (f.kind === 'cache' && f.takeP > 0) { ctx.globalAlpha = 0.9; ctx.strokeStyle = '#ffe18c'; ctx.lineWidth = 2 * inv; ctx.beginPath(); ctx.arc(f.x, f.y, CACHE_R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, f.takeP / CACHE_TIME)); ctx.stroke(); }
+            if (f.kind === 'cache') { ctx.globalAlpha = 0.3; ctx.strokeStyle = '#ffe18c'; ctx.lineWidth = 1.5 * inv; ctx.setLineDash([6 * inv, 8 * inv]); ctx.beginPath(); ctx.arc(f.x, f.y, CACHE_R, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
+        } else if (f.kind === 'cloud') {
             ctx.fillStyle = '#50c8ff';
             for (let j = 0; j < 4; j++) { const ang = f.ph + j * 1.6 + t * 0.1; ctx.globalAlpha = 0.07 * fade; ctx.beginPath(); ctx.arc(f.x + Math.cos(ang) * 160, f.y + Math.sin(ang) * 120, 260 + j * 40, 0, Math.PI * 2); ctx.fill(); }
         } else if (f.kind === 'storm') {
@@ -11541,7 +11572,7 @@ function _rpDraw() {
     const dpr = Math.min(2, window.devicePixelRatio || 1), W = cv.clientWidth || 300, H = cv.clientHeight || 300;
     if (cv.width !== Math.round(W * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
     const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.fillStyle = '#020a06'; g.fillRect(0, 0, W, H);
+    g.clearRect(0, 0, W, H); g.fillStyle = 'rgba(2,10,6,0.55)'; g.fillRect(0, 0, W, H); // 第35弾: 背景の画像が透けるように
     const sc = Math.min(W, H) / (2 * _rp.half), ox = W / 2 - _rp.cx * sc, oy = H / 2 - _rp.cy * sc;
     const X = (x) => ox + x * sc, Y = (y) => oy + y * sc;
     // 地図の縁とランドマーク

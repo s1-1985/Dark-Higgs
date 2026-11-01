@@ -2531,3 +2531,13 @@ body.in-game #zoom-ctl #btn-speed-fixed.on { background: rgba(80,60,0,0.85); col
 .parts-sec { font-size: 11px; color: #00ffaa; border-bottom: 1px solid rgba(0,255,170,0.25); padding-bottom: 2px; margin-top: 4px; }
 .draft-foot { display: flex; justify-content: flex-end; }
 @media (max-height: 460px) { .part-card { padding: 6px 8px; gap: 3px; } .pc-name { font-size: 13px; } .pc-up, .pc-down { font-size: 11px; } .draft-box { padding: 8px 10px; gap: 5px; } }
+
+/* ═══ 第35弾: 部品アイコン・記録画面とドックの背景 (Higgsfield) ═══ */
+.pc-top { display: flex; align-items: center; gap: 8px; }
+.pc-ico { width: 40px; height: 40px; color: #7fd6ff; }
+.rp-box { background: #01100c url(assets/bg_replay.jpg) center / cover no-repeat; }
+.rp-box > * { position: relative; }
+#rp-canvas { background: rgba(0,8,12,0.55); }
+.rp-side { background: rgba(1,16,12,0.72); border-radius: 4px; }
+.dock-window { background-image: linear-gradient(rgba(2,10,14,0.72), rgba(2,10,14,0.86)), url(assets/bg_dock.jpg) !important; background-size: cover !important; background-position: center !important; }
+@media (max-height: 460px) { .pc-ico { width: 30px; height: 30px; } }
