@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261101a">
+    <link rel="stylesheet" href="style.css?v=20261101b">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -74,12 +74,12 @@
                     </div>
                 </div>
                 <div id="band-tuner" title="受信機: 太いバー=受信レベル (刻み=方位が取れるライン) / 細いバー=自艦の放射">
-                    <button class="band-btn tuned" data-band="heat" title="熱帯域に同調 (1)"><span class="bt-label">HEAT</span><span class="bt-meter"><span class="bt-bar"><span class="bt-noise"></span><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
-                    <button class="band-btn" data-band="optic" title="光学帯域に同調 (2)"><span class="bt-label">OPT</span><span class="bt-meter"><span class="bt-bar"><span class="bt-noise"></span><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
-                    <button class="band-btn" data-band="em" title="電磁波帯域に同調 (3)"><span class="bt-label">EM</span><span class="bt-meter"><span class="bt-bar"><span class="bt-noise"></span><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
-                    <button class="band-btn" data-band="higgs" title="ヒッグス帯域に同調 (4)"><span class="bt-label">HGS</span><span class="bt-meter"><span class="bt-bar"><span class="bt-noise"></span><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
+                    <button class="band-btn tuned" data-band="heat" title="熱帯域に同調 (1)"><span class="bt-label">HEAT</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
+                    <button class="band-btn" data-band="optic" title="光学帯域に同調 (2)"><span class="bt-label">OPT</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
+                    <button class="band-btn" data-band="em" title="電磁波帯域に同調 (3)"><span class="bt-label">EM</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
+                    <button class="band-btn" data-band="higgs" title="ヒッグス帯域に同調 (4)"><span class="bt-label">HGS</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
                 </div>
-                <div id="band-legend"><span class="bl-rx">受信</span><span class="bl-tx">自艦</span><span class="bl-nz">雑音</span></div>
+                <div id="band-legend"><span class="bl-rx">受信</span><span class="bl-tx">自艦</span></div>
             </div>
 
             <!-- 右列: 行動 (第27弾: 航法・追跡・射撃は撤去 — 追跡=リング/推定円をタップ・射撃=地図を長押し) -->
@@ -90,13 +90,13 @@
                 <button class="hud-act" data-group="ew" id="abar-grp-ew" title="電子戦 — ジャム / ハック / デコイ・哨戒機 (潜航型)" style="display:none">
                     <img src="assets/icon_ew.png" alt="" class="abar-icon"><span>電子戦</span><em class="abar-cargo"></em>
                 </button>
-                <button class="hud-act" data-group="drone" id="abar-grp-drone" title="搭載 — 戦闘機・砲台・人型など (完成品はすぐ出せる / 資材は組み立て)">
+                <button class="hud-act" data-group="drone" id="abar-grp-drone" title="搭載 — 戦闘機・砲台・Techなど (完成品はすぐ出せる / 資材は組み立て)">
                     <img src="assets/icon_drone.png" alt="" class="abar-icon"><span>搭載</span><em class="abar-cargo"></em>
                 </button>
                 <button class="hud-act" data-group="scan" title="索敵 — ソナー / 指向ソナー / 信号一覧">
                     <img src="assets/icon_scan.png" alt="" class="abar-icon"><span>索敵</span>
                 </button>
-                <button class="hud-act" id="abar-silent" onclick="cycleStance()" title="出力 — 潜航(静か・耳が澄む) / 巡航 / 全速(速い・うるさい・耳が塞がる) (S)">
+                <button class="hud-act" id="abar-silent" onclick="cycleStance()" title="出力 — 潜航(静か) / 巡航 / 全速(速い・うるさい) (S)">
                     <i class="ico" style="--ico:url(assets/icons/icon_stance.png)"></i>
                     <span id="abar-silent-label">巡航</span>
                 </button>
@@ -139,6 +139,7 @@
                 <button class="act-icon-btn btn-info focus-btn" id="btn-focus-engine" data-focus="engine" title="配分の重点: 機関 (速い・熱とEMが増える)"><b class="fx-mark">機</b><span>機関重視</span></button>
                 <button class="act-icon-btn btn-info focus-btn" id="btn-focus-sensor" data-focus="sensor" title="配分の重点: 探知 (遠くまで聴ける)"><b class="fx-mark">探</b><span>探知重視</span></button>
                 <button class="act-icon-btn btn-info focus-btn" id="btn-focus-weapon" data-focus="weapon" title="配分の重点: 兵装 (連射が速い)"><b class="fx-mark">兵</b><span>兵装重視</span></button>
+                <button class="act-icon-btn btn-info" id="btn-focus-mt" title="詳細 (MT) — 機関・兵装・探知・AIのゲインを0〜200%で個別に。上限の合計はない。100%を超えた分はその系統のシグネチャが2乗で増える"><b class="fx-mark">MT</b><span>詳細</span></button>
                 <button class="act-icon-btn btn-info" id="btn-scan" title="全周囲ソナー">
                     <i class="ico" style="--ico:url(assets/icons/icon_sonar.png)"></i>
                     <span>SONAR</span>
@@ -185,9 +186,9 @@
                     <i class="ico" style="--ico:url(assets/icons/icon_fighter.png)"></i>
                     <span>戦闘機</span><em class="cg-n"></em>
                 </button>
-                <button class="act-icon-btn btn-info drone-btn" id="btn-drone-mech" data-dtype="mech" title="人型 (4枠) — 重装・低速。重砲と格闘で自艦を守る" style="display:none">
+                <button class="act-icon-btn btn-info drone-btn" id="btn-drone-mech" data-dtype="mech" title="Tech (4枠) — 人型兵器。小銃・肩のミサイル・ビームサーベルで戦う" style="display:none">
                     <i class="ico" style="--ico:url(assets/icons/icon_mech.png)"></i>
-                    <span>人型</span><em class="cg-n"></em>
+                    <span>Tech</span><em class="cg-n"></em>
                 </button>
                 <button class="act-icon-btn btn-info drone-btn" id="btn-drone-build" data-dtype="build" title="砲台 (2枠) — 設置・移動不可。近づく敵を撃つ" style="display:none">
                     <i class="ico" style="--ico:url(assets/icons/icon_turret.png)"></i>
@@ -272,10 +273,21 @@
                 <div class="cb-grp" data-k="prio"><span class="cb-lab">優先</span><button data-v="attack" title="射角に入れて撃ち続ける">攻撃</button><button data-v="evade" title="相手の射角から外れる・近づくミサイルを横へかわす">回避</button></div>
                 <span id="cb-state"></span>
             </div>
+            <!-- 第36弾: GENの詳細設定 (MT) — 各ゲイン0〜200%・合計の上限なし -->
+            <div id="mt-panel" class="hidden">
+                <div class="mt-head"><span>GEN 詳細 (MT) <small>100%=均等 / 超えた分はシグネチャ×ゲイン²</small></span><button id="mt-close" title="閉じる">✕</button></div>
+                <div class="mt-row" data-k="engine"><span class="mt-lab">機関</span><input type="range" min="0" max="200" step="5" value="100"><b class="mt-val">100%</b><small class="mt-eff">速さ</small></div>
+                <div class="mt-row" data-k="weapons"><span class="mt-lab">兵装</span><input type="range" min="0" max="200" step="5" value="100"><b class="mt-val">100%</b><small class="mt-eff">連射</small></div>
+                <div class="mt-row" data-k="sensors"><span class="mt-lab">探知</span><input type="range" min="0" max="200" step="5" value="100"><b class="mt-val">100%</b><small class="mt-eff">探信・方位の精度</small></div>
+                <div class="mt-row" data-k="ai"><span class="mt-lab">AI</span><input type="range" min="0" max="200" step="5" value="100"><b class="mt-val">100%</b><small class="mt-eff">命中・回避・解析</small></div>
+                <div class="mt-sig" id="mt-sig"></div>
+                <div class="mt-foot"><button id="mt-maxall">全部200%</button><button id="mt-reset">全部100%</button><button id="mt-at">AT (均等) に戻す</button></div>
+            </div>
+            <div id="pause-ind" class="hidden">一時停止中 — ▶ か P で再開</div>
             <!-- 第16弾: ズームボタン (ピンチ・ホイールに加えて。追従中は自艦中心で拡大縮小) -->
             <div id="zoom-ctl">
                 <button id="btn-speed-fixed" title="倍速 — 1x→2x→4x→8x→0.5x (1フレームにn回進める・シグネチャは変わらない)">1x</button>
-                <button id="btn-density" onclick="toggleDensityView()" title="濃度表示 — 全マップの霧の濃さと地形 (岩礁・嵐・熱雲) を重ねる。OFFの時は自艦の周り3000uだけ (H)"><i class="ico" style="--ico:url(assets/icons/icon_density.png)"></i></button>
+                <button id="btn-pause" title="一時停止 (P) — 止めている間も地図を見て指示を出せる">Ⅱ</button>
                 <button id="zoom-in" onclick="zoomStep(1.6)" title="拡大 (+)">＋</button>
                 <button id="zoom-out" onclick="zoomStep(1 / 1.6)" title="縮小 (−)">－</button>
             </div>
@@ -539,7 +551,7 @@
                                 <div class="stat-row"><span>火力</span><div class="stat-bar"><div class="stat-fill" style="width:60%"></div></div></div>
                                 <div class="stat-row"><span>隠密</span><div class="stat-bar"><div class="stat-fill" style="width:30%"></div></div></div>
                             </div>
-                            <div class="ship-ability">特殊: 戦闘機・砲台・人型など8種を積める</div>
+                            <div class="ship-ability">特殊: 戦闘機・砲台・Techなど8種を積める</div>
                             <div class="ship-cargo" data-type="carrier"></div>
                             <button class="btn btn-small loadout-btn" data-type="carrier">積み込みを変更</button>
                             <button class="btn btn-primary ship-select-btn" data-type="carrier">選択して出撃</button>
@@ -558,12 +570,12 @@
                     <div class="brief-title">作戦要領 <span>HOW TO HUNT</span></div>
                     <div class="brief-lead">霧の中に敵艦が1隻。互いに見えない。<b>先に見つけて撃った方が勝つ。</b>答えは誰も教えてくれない — 聴いた方位から自分で推理する。</div>
                     <ol class="brief-steps">
-                        <li><b class="bs-1">聴く</b>左の受信機: 太いバー=受信、刻みを超えた帯域に<em>同調</em>すると方位が取れる。細いバー=<em>自艦の放射</em>、斜線=<em>自艦の雑音</em>(速く動くほど耳が塞がる)。</li>
+                        <li><b class="bs-1">聴く</b>左の受信機: 太いバー=受信、刻みを超えた帯域に<em>同調</em>すると方位が取れる。細いバー=<em>自艦の放射</em>。</li>
                         <li><b class="bs-2">測る</b>自艦リングの点か地図の推定円を<em>タップして追跡</em>し、方位を記録。<em>場所を変えて</em>聴くと方位線が交わり推定円が出る。交わらない=相手が動いている。止まって聴くと方位が鋭くなる。</li>
                         <li><b class="bs-3">撃つ</b>推定円を<em>長押し→射撃</em>。円が小さいほど当たる (見込み%は副長が言う)。針路が読めると推定円に<em>矢印</em>が出て、射撃は弾が届く時の<em>見越し点</em>を狙う。外れれば「そこには居ない」と分かるが、<em>撃った位置を教える</em>。ソナーは正確だが遠くまで聞かれる。</li>
                         <li><b class="bs-4">消える</b>出力を<em>潜航</em>へ。ヒッグスの霧は音を隠すが、動けば<em>航跡が90秒残り</em>、敵はそれを辿ってくる (HIGGS帯で相手の航跡も見える)。見つかったら右列の<em>離脱</em>: 閃光で目を潰す→噴射で距離を取る→<em>機関停止</em>で音を消して漂う。ドローンや艦載機が飛び交う所・嵐・熱雲・岩礁に紛れると見分けにくい (<em>混信</em>)。</li>
                     </ol>
-                    <div class="brief-tip">自艦の周りのリング: 0°=上・時計回り。ログや副長が言った方位はリング上で光る。青緑の縁(有視界)の内側に入った敵ははっきり見える — 縁の大きさは自艦の居る場所のヒッグス濃度で変わる。<br>ノードの近くに5秒留まると制圧 (資材+聴音局)、コロニーは8秒でハック (修理・資材・敵の方位線)。右列の「搭載」で戦闘機・砲台・人型など — 完成品はすぐ出せ、資材は組み立てに時間とEMがかかる。<br>副長は状況を読み上げるだけ — 決めるのはあなた。移動はフィールドを長押し →「移動」。ドラッグで見回し、ピンチか右下の＋−で拡大縮小。</div>
+                    <div class="brief-tip">自艦の周りのリング: 0°=上・時計回り。ログや副長が言った方位はリング上で光る。青緑の縁(有視界)の内側に入った敵ははっきり見える — 縁の大きさは自艦の居る場所のヒッグス濃度で変わる。<br>ノードの近くに5秒留まると制圧 (資材+聴音局)、コロニーは8秒でハック (修理・資材・敵の方位線)。右列の「搭載」で戦闘機・砲台・Techなど — 完成品はすぐ出せ、資材は組み立てに時間とEMがかかる。<br>副長は状況を読み上げるだけ — 決めるのはあなた。移動はフィールドを長押し →「移動」。ドラッグで見回し、ピンチか右下の＋−で拡大縮小。</div>
                     <button class="btn btn-primary" id="btn-brief-ok">了解 — 出撃</button>
                 </div>
             </div>
@@ -723,7 +735,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261101a"></script>
+    <script src="game.js?v=20261101b"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -764,7 +776,7 @@
             nav:   ['btn-cancel', 'btn-camera-follow', 'btn-attack-toggle', 'btn-game-speed'],
             drone: ['btn-drone-attack','btn-drone-mech','btn-drone-build','btn-drone-scout','btn-drone-decoy',
                     'btn-drone-buoy','btn-drone-barrier','btn-drone-higgs', 'btn-hack'],
-            engine: ['btn-eng-thermonuclear', 'btn-eng-pulse', 'btn-eng-higgs', 'btn-eng-photon', 'btn-focus-balance', 'btn-focus-engine', 'btn-focus-sensor', 'btn-focus-weapon'],
+            engine: ['btn-eng-thermonuclear', 'btn-eng-pulse', 'btn-eng-higgs', 'btn-eng-photon', 'btn-focus-balance', 'btn-focus-engine', 'btn-focus-sensor', 'btn-focus-weapon', 'btn-focus-mt'],
             escape: ['btn-item-repair', 'btn-item-flash', 'btn-item-noise', 'btn-item-smoke', 'btn-item-fsos', 'btn-item-lure', 'btn-boost', 'btn-coast'],
         };
         var _apop  = document.getElementById('action-popover');
