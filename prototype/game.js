@@ -210,6 +210,7 @@ const SPRITE_FILES = {
     drone_decoy:        'assets/drone_decoy.png',
     drone_turret:       'assets/drone_turret.png',
     drone_buoy:         'assets/drone_buoy.png',
+    bg_space: 'assets/bg_space.jpg', bg_gas: 'assets/bg_gas.jpg', // 第38弾: 背景
     fx_saber_slash:     'assets/fx_saber_slash.png', fx_saber_blade: 'assets/fx_saber_blade.png', fx_saber_hit: 'assets/fx_saber_hit.png', // 第36弾
     drone_mech:         'assets/drone_mech.png', // 第20弾: 人型 (Higgsfield生成・透過256px)
     drone_barrier:      'assets/drone_barrier.png',      // 第22弾: ビームの盾 (Higgsfield生成・透過256px)
@@ -4973,41 +4974,36 @@ class Ship {
     // センサー痕跡(不確実性サークル + AIロックオン候補) — フォグ/ヒッグスの「手前」に描く専用パス
     drawSensorTrace(ctx) {
         if (this.isPlayer || this.hp <= 0) return;
-        if (!(this.contactLife > 0)) return;
-        let dispX = this.displayX, dispY = this.displayY;
-        // 追跡(解析)由来: 推定円と同じ補間中心に描く (円とゴーストがずれないように)
-        if (this.trackR) {
-            const sa = _signalAnalysis[enemySid(this)];
-            if (sa && sa.displayCenterX != null) { dispX = sa.displayCenterX; dispY = sa.displayCenterY; }
+        // 第38弾 (オーナー: 推定円の中で仮想艦影が激しく現れたり消えたりする): 反応の印は
+        //  ① 推定円で示している (追跡由来の) 相手には描かない — 円そのものが不確かさの表示
+        //  ② 位置は反応のたびに飛ばさず、なめらかに寄せる / 消える時もゆっくり薄れる
+        //  ③ 向きは描かない (音だけで艦首の向きは分からない — 旧: 真の向きで三角形を回していた)
+        const live = this.contactLife > 0 && !this.inVision && !this.trackR;
+        const tgtA = live ? Math.min(1, this.contactLife / 90) * (0.35 + this.contactAccuracy * 0.5) : 0;
+        this._ghA = (this._ghA || 0) + (tgtA - (this._ghA || 0)) * (tgtA > (this._ghA || 0) ? 0.08 : 0.03);
+        if (live) {
+            if (this._gx === undefined || Math.hypot(this.displayX - this._gx, this.displayY - this._gy) > 3000) { this._gx = this.displayX; this._gy = this.displayY; }
+            else { this._gx += (this.displayX - this._gx) * 0.04; this._gy += (this.displayY - this._gy) * 0.04; }
         }
+        if (this._ghA > 0.02 && this._gx !== undefined) {
+            const _gz = 1 / camera.zoom, acc = this.contactAccuracy;
+            const col = acc > 0.7 ? '0,255,170' : (acc > 0.4 ? '255,170,0' : '255,77,77');
+            const _gr = Math.max(this.radius * 1.6, 10 * _gz), ph = (_frameCount % 120) / 120;
+            ctx.save();
+            ctx.translate(this._gx, this._gy);
+            ctx.globalAlpha = this._ghA;
+            ctx.strokeStyle = 'rgb(' + col + ')'; ctx.fillStyle = 'rgba(' + col + ',0.25)'; ctx.lineWidth = 1.5 * _gz;
+            ctx.beginPath(); ctx.moveTo(0, -_gr); ctx.lineTo(_gr, 0); ctx.lineTo(0, _gr); ctx.lineTo(-_gr, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
+            ctx.globalAlpha = this._ghA * (1 - ph) * 0.7;
+            ctx.beginPath(); ctx.arc(0, 0, _gr * (1.2 + ph * 1.8), 0, Math.PI * 2); ctx.stroke();
+            ctx.restore();
+        }
+        if (!live) return;
+        let dispX = this._gx, dispY = this._gy;
         const uncertaintyR = Math.max(20, (1 - this.contactAccuracy) * 400);
         const acc = this.contactAccuracy;
         const col = acc > 0.7 ? '0,255,170' : (acc > 0.4 ? '255,170,0' : '255,77,77');
         const lifeA = Math.min(1, this.contactLife / 60) * 0.4;
-
-        // ソナーエコー・ゴースト: コンタクト中の反応点をヒッグス雲の手前に描く。
-        // 有視界(inVision)なら実スプライトが見えているので重ねない。雲越しの反応を「見える成果」にする。
-        if (!this.inVision) {
-            const _gz = 1 / camera.zoom;
-            const _ga = Math.min(1, this.contactLife / 90) * (0.35 + acc * 0.55);
-            ctx.save();
-            ctx.translate(dispX, dispY);
-            ctx.rotate(this.angle);
-            ctx.globalAlpha = _ga;
-            ctx.strokeStyle = 'rgb(' + col + ')';
-            ctx.fillStyle = 'rgba(' + col + ',0.30)';
-            ctx.lineWidth = 1.5 * _gz;
-            const _gr = Math.max(this.radius * 1.6, 10 * _gz);
-            ctx.beginPath();
-            ctx.moveTo(_gr, 0);
-            ctx.lineTo(-_gr * 0.7, -_gr * 0.6);
-            ctx.lineTo(-_gr * 0.4, 0);
-            ctx.lineTo(-_gr * 0.7, _gr * 0.6);
-            ctx.closePath();
-            ctx.fill(); ctx.stroke();
-            ctx.restore();
-            ctx.globalAlpha = 1;
-        }
 
         if (!(acc < 0.95)) return; // 高精度コンタクトは不確実性サークル省略 (ゴーストのみ)
         if (this.trackR) return;   // 追跡由来は推定円(drawTriangulationCircle)が不確実性を表す
@@ -7728,6 +7724,83 @@ function drawSigZones(ctx) {
     }
 }
 // 自然/お宝の信号の実体 (有視界の内か、ヒッグス表示OFFの時だけ描く)
+// ═══ 第38弾 (オーナー): 自然の信号を「その場で起きている現象」に — 1枚の絵を置くのをやめ、同じ絵を何層も回し・揺らし・明滅させ、
+// 嵐は手続きの稲妻、熱泉は広がる熱の輪と立ちのぼる陽炎を重ねる (どれも加算合成・縁は柔らかく消える)
+function _fxGlow(ctx, r, c0, a) {
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+    g.addColorStop(0, 'rgba(' + c0 + ',' + a + ')'); g.addColorStop(1, 'rgba(' + c0 + ',0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+}
+function _makeBolt(len, seg, jit) {
+    const pts = [[0, 0]]; let x = 0, y = 0;
+    const a0 = Math.random() * Math.PI * 2;
+    for (let i = 1; i <= seg; i++) {
+        const a = a0 + (Math.random() - 0.5) * 1.1;
+        x += Math.cos(a) * len / seg; y += Math.sin(a) * len / seg;
+        pts.push([x + (Math.random() - 0.5) * jit, y + (Math.random() - 0.5) * jit]);
+    }
+    return pts;
+}
+function _strokeBolt(ctx, pts, w) { ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]); ctx.stroke(); }
+function drawFieldFx(ctx, f, img, fade, t) {
+    ctx.save();
+    ctx.translate(f.x, f.y);
+    ctx.globalCompositeOperation = 'lighter';
+    if (f.kind === 'cloud') {
+        // 霧のゆらぎ: 同じ渦の絵を3層、逆向きにゆっくり回しながら呼吸させる → 渦が巻いて見える
+        ctx.globalAlpha = fade * 0.35; _fxGlow(ctx, 520, '70,150,230', 0.18);
+        for (let j = 0; j < 3; j++) {
+            const L = 900 * (0.7 + 0.22 * j) * (1 + 0.06 * Math.sin(t * 0.45 + j * 2.1 + f.ph));
+            ctx.save();
+            ctx.translate(Math.cos(t * 0.12 + j * 2 + f.ph) * 50, Math.sin(t * 0.09 + j * 1.7) * 50);
+            ctx.rotate(f.ph + j * 2.1 + t * (0.035 + j * 0.025) * (j % 2 ? -1 : 1));
+            ctx.globalAlpha = fade * (0.20 + 0.08 * Math.sin(t * 0.6 + j * 1.9 + f.ph));
+            ctx.drawImage(img, -L / 2, -L / 2, L, L);
+            ctx.restore();
+        }
+    } else if (f.kind === 'storm') {
+        // 嵐の放電: 下地の雲は薄く回り、放電中だけ枝分かれする稲妻が数フレームごとに走り、辺りを照らす。休み中も小さな火花
+        const on = !!f.on;
+        ctx.save(); ctx.rotate(f.ph + t * 0.06);
+        ctx.globalAlpha = fade * (on ? 0.55 + 0.25 * Math.random() : 0.16 + 0.04 * Math.sin(t * 3 + f.ph));
+        ctx.drawImage(img, -260, -260, 520, 520);
+        ctx.rotate(-t * 0.13); ctx.globalAlpha *= 0.6; ctx.drawImage(img, -200, -200, 400, 400);
+        ctx.restore();
+        if (on) {
+            ctx.globalAlpha = fade * (0.25 + 0.2 * Math.random()); _fxGlow(ctx, 650, '170,120,255', 0.35);
+            if (!f._bolts || _frameCount - (f._boltF || 0) > 3) {
+                f._boltF = _frameCount; f._bolts = [];
+                const n = 2 + Math.floor(Math.random() * 3);
+                for (let i = 0; i < n; i++) { const b = _makeBolt(260 + Math.random() * 260, 9, 70); f._bolts.push(b); const k = 3 + Math.floor(Math.random() * 4); const bb = _makeBolt(120 + Math.random() * 120, 5, 50).map(p => [p[0] + b[k][0], p[1] + b[k][1]]); f._bolts.push(bb); }
+            }
+            for (const b of f._bolts) {
+                ctx.globalAlpha = fade * 0.35; ctx.strokeStyle = '#9b6bff'; _strokeBolt(ctx, b, 16);
+                ctx.globalAlpha = fade * 0.9; ctx.strokeStyle = '#e8dcff'; _strokeBolt(ctx, b, 4);
+            }
+        } else if (Math.random() < 0.06) {
+            const b = _makeBolt(80 + Math.random() * 80, 5, 30);
+            ctx.globalAlpha = fade * 0.6; ctx.strokeStyle = '#c9a8ff'; _strokeBolt(ctx, b, 3);
+        }
+    } else {
+        // 熱泉: 脈打つ核・外へ広がる熱の輪・立ちのぼる陽炎の粒
+        const pulse = 1 + 0.07 * Math.sin(t * 2.2 + f.ph);
+        ctx.globalAlpha = fade * 0.5; _fxGlow(ctx, 380, '255,120,40', 0.22);
+        ctx.save(); ctx.rotate(f.ph + t * 0.04); ctx.globalAlpha = fade * (0.6 + 0.15 * Math.sin(t * 2.2 + f.ph)); ctx.drawImage(img, -230 * pulse, -230 * pulse, 460 * pulse, 460 * pulse); ctx.restore();
+        ctx.strokeStyle = '#ff9a4a';
+        for (let j = 0; j < 3; j++) {
+            const ph = ((t * 0.35 + j / 3 + f.ph) % 1);
+            ctx.globalAlpha = fade * 0.35 * (1 - ph); ctx.lineWidth = 10 * (1 - ph) + 2;
+            ctx.beginPath(); ctx.arc(0, 0, 80 + ph * 420, 0, Math.PI * 2); ctx.stroke();
+        }
+        ctx.fillStyle = '#ffb070';
+        for (let j = 0; j < 14; j++) {
+            const ph = ((t * 0.25 + j * 0.0714 + f.ph * 0.3) % 1), a = j * 2.4 + f.ph, r = 40 + ph * 300;
+            ctx.globalAlpha = fade * 0.45 * Math.sin(ph * Math.PI);
+            ctx.beginPath(); ctx.arc(Math.cos(a) * r, Math.sin(a) * r - ph * 60, 10 + 14 * ph, 0, Math.PI * 2); ctx.fill();
+        }
+    }
+    ctx.restore();
+}
 function drawFieldSignals(ctx) {
     const inv = 1 / camera.zoom, t = _frameCount / 60;
     for (const f of fieldSignals) {
@@ -7739,13 +7812,7 @@ function drawFieldSignals(ctx) {
             if (f.kind === 'cache') {
                 const L = Math.max(150, 30 * inv);
                 ctx.save(); ctx.globalAlpha = 0.95; ctx.translate(f.x, f.y); ctx.rotate(f.ph); ctx.drawImage(_fxImg, -L / 2, -L / 2, L, L); ctx.restore();
-            } else {
-                const L = f.kind === 'cloud' ? 900 : f.kind === 'storm' ? 520 : 460;
-                ctx.save(); ctx.globalCompositeOperation = 'lighter';
-                ctx.globalAlpha = fade * (f.kind === 'cloud' ? 0.45 : f.kind === 'storm' ? (f.on ? 0.9 : 0.15) : 0.7 + 0.2 * Math.sin(t * 2 + f.ph));
-                ctx.translate(f.x, f.y); ctx.rotate(f.ph + (f.kind === 'cloud' ? t * 0.05 : 0)); ctx.drawImage(_fxImg, -L / 2, -L / 2, L, L);
-                ctx.restore();
-            }
+            } else drawFieldFx(ctx, f, _fxImg, fade, t); // 第38弾: 重ね絵とアニメーション (旧: 1枚の絵を置くだけで浮いて見えた)
             if (f.kind === 'cache' && f.takeP > 0) { ctx.globalAlpha = 0.9; ctx.strokeStyle = '#ffe18c'; ctx.lineWidth = 2 * inv; ctx.beginPath(); ctx.arc(f.x, f.y, CACHE_R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, f.takeP / CACHE_TIME)); ctx.stroke(); }
             if (f.kind === 'cache') { ctx.globalAlpha = 0.3; ctx.strokeStyle = '#ffe18c'; ctx.lineWidth = 1.5 * inv; ctx.setLineDash([6 * inv, 8 * inv]); ctx.beginPath(); ctx.arc(f.x, f.y, CACHE_R, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
         } else if (f.kind === 'cloud') {
@@ -8154,9 +8221,9 @@ function drawTriangulationCircle(ctx) {
     _circScreen.length = 0;
     for (const sid in _signalAnalysis) {
         const sa = _signalAnalysis[sid];
-        if (!sa.fix) { sa.displayCenterX = null; continue; }
+        if (!sa.fix) { sa.displayCenterX = null; sa._fa = 0; continue; }
         const lo = sa.obs && sa.obs[sa.obs.length - 1];
-        if (sid !== lockedSignalId && (!lo || _frameCount - lo.f > TMA_KEEP)) continue; // 古い記録の円は出さない
+        if (sid !== lockedSignalId && (!lo || _frameCount - lo.f > TMA_KEEP)) { sa._fa = 0; continue; } // 古い記録の円は出さない
         _drawEstCircle(ctx, sid, sa, sid === lockedSignalId);
     }
 }
@@ -8174,7 +8241,8 @@ function _drawEstCircle(ctx, sid, sa, locked) {
     // 幅で色分け: 広い=橙 / 撃てる幅(ミサイルの終末シーカーに収まる)=緑 / 精密=シアン
     const col = R > 2400 ? 'rgb(255,150,40)' : R > 900 ? 'rgb(255,220,90)' : R > 350 ? 'rgb(80,255,140)' : 'rgb(100,220,255)';
     const inv = 1 / camera.zoom;
-    const fade = locked ? 1 : 0.6;
+    sa._fa = Math.min(1, (sa._fa || 0) + 0.035); // 第38弾: 円は突然出さずに0.5秒で浮かび上がる
+    const fade = (locked ? 1 : 0.6) * sa._fa;
     { const sp = worldToScreen(cx, cy); _circScreen.push({ sid, cx: sp.sx, cy: sp.sy, r: R * camera.zoom }); }
     ctx.save();
     ctx.globalAlpha = 0.07 * fade;
@@ -9485,6 +9553,25 @@ function _initNebulaTile() {
 }
 
 // 星雲をスクリーン空間のパララックス層として描画 (常にほぼ等倍=シャープ)
+// 第38弾: 画像のパララックス層 — スクリーン空間で敷き詰め、1枚おきに左右/上下を反転して継ぎ目を目立たせない
+function _drawPhotoLayer(ctx, img, pf, scale, alpha, op) {
+    if (!spriteReady(img)) return;
+    const W = cssW, H = cssH;
+    const TW = img.width * scale, TH = img.height * scale;
+    ctx.save();
+    ctx.setTransform(_dpr, 0, 0, _dpr, 0, 0);
+    ctx.globalAlpha = alpha; ctx.globalCompositeOperation = op;
+    ctx.imageSmoothingEnabled = true;
+    const px = -camera.x * camera.zoom * pf, py = -camera.y * camera.zoom * pf;
+    const i0 = Math.floor(-px / TW), j0 = Math.floor(-py / TH);
+    for (let j = j0; j * TH + py < H; j++) {
+        for (let i = i0; i * TW + px < W; i++) {
+            const x = i * TW + px, y = j * TH + py, fx = (i & 1) ? -1 : 1, fy = (j & 1) ? -1 : 1;
+            ctx.save(); ctx.translate(x + TW / 2, y + TH / 2); ctx.scale(fx, fy); ctx.drawImage(img, -TW / 2, -TH / 2, TW, TH); ctx.restore();
+        }
+    }
+    ctx.restore();
+}
 function _drawNebula(ctx) {
     if (!_nebulaTile) _initNebulaTile();
     const W = cssW, H = cssH;
@@ -9583,7 +9670,9 @@ function drawBackground(ctx) {
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(spaceBgCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
+        _drawPhotoLayer(ctx, SPRITES.bg_space, 0.025, 1.6, 0.85, 'source-over'); // 第38弾: 描いた遠景 (深い星雲)
         _drawNebula(ctx);      // シャープな星雲パララックス層 (引き伸ばしボケ解消)
+        _drawPhotoLayer(ctx, SPRITES.bg_gas, 0.07, 1.25, 0.30, 'lighter');        // 第38弾: 中景の光るガス (加算・少し速く流れる)
         _drawGiantStars(ctx);  // 鮮明な巨星パララックス層 (68倍拡大のボケ解消)
         _drawStarfield(ctx);   // 鮮明なパララックス星層を重ねる
     } else {
