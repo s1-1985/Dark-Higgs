@@ -879,6 +879,7 @@ const DRONE_VIS = { attack: 900, scout: 2000, mech: 1000, buoy: 800 }; // 第36�
 // ═══ 第36弾 (オーナー指示・数値は実装で決めた値): ドローンの機動 ═══
 // 戦闘機: 一撃離脱。機首の前±12°に入った時だけ機銃。突き抜けて離脱し、旋回して次の航過。後退・停止はしない
 const FTR_TURN = 0.05, FTR_ACC = 0.12, FTR_ARC = 12 * Math.PI / 180, FTR_GUN_RANGE = 900, FTR_ENGAGE_R = 2200;
+const ENEMY_FTR_SPEED = 4.4; // 自機の戦闘機と同じ
 const FTR_FIRE_CD = 7, FTR_DMG_SCALE = 0.25, FTR_BREAK_D = 260, FTR_EXTEND_F = 80, FTR_REATTACK_D = 1300;
 // 哨戒機: 機首の向きにだけ進む・自艦の前方を半径1800uで周回。聴音 (方位を送る)・航跡の検出・ミサイルの早期警戒・探信 (指示で1回)
 const SCOUT_TURN = 0.03, SCOUT_ESCORT_R = 1800, SCOUT_LISTEN_R = 6000, SCOUT_WAKE_R = 2500, SCOUT_MSL_WARN_R = 3000, SCOUT_PING_R = 3500, SCOUT_PING_CD = 1800;
@@ -3406,6 +3407,7 @@ class Ship {
 
             // ファイターの燃料切れ (消滅)
             if (this.fuel !== undefined && (this.fuel -= gameSpeedFactor) <= 0) { this.hp = 0; this._dying = 1; this._noReward = true; return; }
+            if (this.type === 'fighter') { enemyFighterStep(this); return; } // 第37弾: 敵の艦載機は自機の戦闘機と同じ一撃離脱 (旧: 戦艦と同じ交戦機動で止まって撃っていた)
             // 第21弾: 状況適応の性格 — 1秒ごとに 隠密/貪欲/攻撃的/慎重 を見直す (相手を掴んでいる=追跡か交戦で記憶が新しい)
             if (this.personality && this.personality._adaptive && (_frameCount + this.uid) % 60 === 0) {
                 const _ac = (this.aiState === 'hunting' || this.aiState === 'combat') && (this.contactFreshness || 0) > 0.2;
@@ -4239,7 +4241,8 @@ class Ship {
                     const dist = Math.hypot(this.targetX - this.x, this.targetY - this.y);
                     if (dist > Math.max(60, (this._v || 0) * 30)) {
                         const _msL = this._maxSpeeds();
-                        this._moveHeading(Math.atan2(this.targetY - this.y, this.targetX - this.x), _msL ? Math.min(this.speed, _msL.cruise) : this.speed); // 第22弾: 横滑りしない
+                        const _cvChase = this._roam === 'convoy' && convoys.some(c => c.sid === this._cvT);
+                        this._moveHeading(Math.atan2(this.targetY - this.y, this.targetX - this.x), _msL ? (_cvChase ? _msL.flank : Math.min(this.speed, _msL.cruise)) : this.speed); // 第22弾: 横滑りしない (第37弾: 輸送船は全速で追う — 巡航では輸送船より遅く追いつけなかった)
                     } else { this.state = 'idle'; this._roam = null; }
                 }
             }
@@ -7366,11 +7369,26 @@ function damageConvoy(cv, dmg, byPlayer) {
     logMessage('輸送船: ' + (byPlayer ? '撃沈 — 漂流コンテナが2つ落ちた' : '沈んだ'), 'warning-msg');
     matchRecEvent(byPlayer ? 'convoyP' : 'convoyE', cv.x, cv.y, '輸送船を撃沈' + (byPlayer ? ' (自艦)' : ''));
 }
+// 第37弾: 等速で進む相手に速さ s で追いつく点 (追いつけなければ相手の30秒先)
+function interceptPoint(x, y, s, tx, ty, vx, vy) {
+    const dx = tx - x, dy = ty - y, a = vx * vx + vy * vy - s * s, b = 2 * (dx * vx + dy * vy), c = dx * dx + dy * dy;
+    let t = -1;
+    if (Math.abs(a) < 1e-6) t = b < 0 ? -c / b : -1;
+    else { const disc = b * b - 4 * a * c; if (disc >= 0) { const r = Math.sqrt(disc), t1 = (-b - r) / (2 * a), t2 = (-b + r) / (2 * a); t = Math.min(t1 > 0 ? t1 : Infinity, t2 > 0 ? t2 : Infinity); if (!isFinite(t)) t = -1; } }
+    if (t < 0) t = 1800;
+    t = Math.min(t, 3600);
+    return { x: tx + vx * t, y: ty + vy * t, t };
+}
+const CONVOY_REASK = 1800, CONVOY_IFF_R = 12000, CONVOY_HEAVE_R = 1200; // 敵が追うかを考え直す30秒 / 民間船の識別信号が届く距離
 function updateConvoys() {
     if (!convoys.length) { if ((convoyNext -= gameSpeedFactor) <= 0) { spawnConvoy(); } }
     for (let i = convoys.length - 1; i >= 0; i--) {
         const cv = convoys[i];
-        cv.x += cv.vx * gameSpeedFactor; cv.y += cv.vy * gameSpeedFactor; cv.age += gameSpeedFactor;
+        // 第37弾: 軍艦が1200u以内に来たら停船して臨検に応じる (遅い空母でも拿捕できるように)。離れたら走り出す
+        if (_frameCount % 30 === 0) { let near = player && player.hp > 0 && Math.hypot(player.x - cv.x, player.y - cv.y) < CONVOY_HEAVE_R; if (!near) for (const e of enemies) if (e.hp > 0 && !e._dying && e.type !== 'fighter' && Math.hypot(e.x - cv.x, e.y - cv.y) < CONVOY_HEAVE_R) { near = true; break; } cv._heave = near; }
+        cv._k = Math.max(0, Math.min(1, (cv._k ?? 1) + (cv._heave ? -0.01 : 0.005)));
+        cv.x += cv.vx * cv._k * gameSpeedFactor; cv.y += cv.vy * cv._k * gameSpeedFactor; cv.age += gameSpeedFactor;
+        if (cv._k < 1) cv.left += (1 - cv._k) * gameSpeedFactor; // 止まっている間は航路の残りが減らない
         // 第36弾: 航路の記録 — 輸送船は通った所で聞こえた艦の方位を記録している (拿捕すると手に入る)
         if (_frameCount % CONVOY_LOG_EVERY === 0) {
             for (const e of enemies) {
@@ -7383,18 +7401,34 @@ function updateConvoys() {
             if (cv.log && cv.log.length > 40) cv.log.splice(0, cv.log.length - 40);
             if (cv.logP && cv.logP.length > 20) cv.logP.splice(0, cv.logP.length - 20);
         }
-        if ((cv.left -= gameSpeedFactor) <= 0) { convoys.splice(i, 1); convoyNext = CONVOY_MIN + Math.floor(Math.random() * CONVOY_VAR); continue; }
+        if ((cv.left -= gameSpeedFactor) <= 0) { convoys.splice(i, 1); convoyNext = CONVOY_MIN + Math.floor(Math.random() * CONVOY_VAR); for (const e of enemies) if (e._cvT === cv.sid) { e._cvT = null; if (e._roam === 'convoy') { e._roam = null; e.state = 'idle'; } } continue; }
         // 追っている敵は先回りの点へ向け直す (2秒ごと)
         if (_frameCount % 120 === 0) for (const e of enemies) {
-            if (e._cvT !== cv.sid || e.hp <= 0 || e._dying || (e.contactFreshness || 0) > 0.4) continue;
-            const d = Math.hypot(cv.x - e.x, cv.y - e.y), lead = Math.min(900, d / 1.5);
-            e.setTarget(cv.x + cv.vx * lead, cv.y + cv.vy * lead);
+            if (e.hp <= 0 || e._dying || e.type === 'fighter' || !ENEMY_CLASS[e.type]) continue;
+            // 第37弾: 30秒ごとに「追うか」を考え直す (旧: 1隻につき1回だけ・潜伏中で自機の気配が無い時だけ → 4試合中3試合で一度も追わなかった)
+            if (e._cvT !== cv.sid && !(e.aiState === 'combat' && (e.contactFreshness || 0) > 0.3) && _frameCount - ((e._cvAsk || {})[cv.sid] || -1e9) > CONVOY_REASK) {
+                const dH = Math.hypot(cv.x - e.x, cv.y - e.y);
+                if (CONVOY_SIG * Math.max(0, 1 - dH / ENEMY_PASSIVE_RANGE) >= 0.1) {
+                    (e._cvAsk || (e._cvAsk = {}))[cv.sid] = _frameCount;
+                    const pers = e.personality || { aggression: 0.5, stealth: 0.3, greed: 0.4, caution: 0.4 };
+                    if (Math.random() < 0.55 + pers.greed * 0.35 + pers.aggression * 0.1) {
+                        e._cvT = cv.sid; e._roam = 'convoy'; e.aiState = 'lurking'; e.lurking = true; e.state = 'moving';
+                        if (comDemo) comThinkEvent('e', 'うるさい信号 → 輸送船と見て拿捕しに行く (' + _dirTxt(e.x, e.y, cv.x, cv.y) + ')', 'e' + e.uid);
+                    }
+                }
+            }
+            if (e._cvT !== cv.sid || (e.aiState === 'combat' && (e.contactFreshness || 0) > 0.4)) continue;
+            const ms = e._maxSpeeds ? e._maxSpeeds() : null;
+            const ip = interceptPoint(e.x, e.y, ms ? ms.flank : 1.5, cv.x, cv.y, cv.vx * (cv._k ?? 1), cv.vy * (cv._k ?? 1));
+            e._roam = 'convoy'; e.state = 'moving';
+            e.setTarget(ip.x, ip.y);
         }
-        // 正体: 有視界で見えたら確定
+        // 正体: 有視界で見えたら確定。第37弾: 民間船の識別信号 — 信号を受けていて12000u以内なら「輸送船」と分かる (位置は分からない)
         const id = _sigIdent[cv.sid];
-        if (player && !(id && id.sure) && inPlayerVision(cv.x, cv.y)) {
+        const _iff = _signalAnalysis[cv.sid] && _signalAnalysis[cv.sid].obs.length && player && Math.hypot(cv.x - player.x, cv.y - player.y) < CONVOY_IFF_R;
+        if (player && !(id && id.sure) && (inPlayerVision(cv.x, cv.y) || _iff)) {
             identSure(cv.sid, false); _sigIdent[cv.sid].lbl = '輸送船';
-            if (_contactLabels[cv.sid]) logMessage('SIGNAL: SIG-' + String(_contactLabels[cv.sid]).padStart(2, '0') + ' は輸送船 — 沈めるか寄り添って拿捕すれば部品', 'system-msg');
+            if (_contactLabels[cv.sid]) logMessage('SIGNAL: SIG-' + String(_contactLabels[cv.sid]).padStart(2, '0') + ' は輸送船' + (_iff ? ' (民間船の識別信号)' : '') + ' — 拿捕すればレア部品2つ・キット・航路の記録', 'system-msg');
         }
         // 拿捕 (500u以内に5秒・双方が居る間は進まない)
         const pN = player && player.hp > 0 && Math.hypot(player.x - cv.x, player.y - cv.y) < CONVOY_BOARD_R;
@@ -11134,6 +11168,73 @@ function scoutLost(d) {
     }
     logMessage('哨戒機を失った' + (lost ? ' — 哨戒機だけが聴いていた信号' + lost + '件の推定は消えた' : '') + (kept ? ' / ' + kept + '件は自艦も受けていたので引き継いだ' : ''), 'warning-msg');
 }
+// ═══ 第37弾 (オーナー): 敵空母の艦載機 — 自機の戦闘機と同じ機動・同じ数値 (機首の向きにだけ進む・一撃離脱・機首の前±12°だけ撃つ・後退/停止なし) ═══
+// 目: 自機の戦闘機と同じ有視界 (900u・霧で遮る) + 至近700uは霧に関係なく。見えない間は母艦が掴んでいる自艦の推定位置へ向かい、何も無ければ母艦の周りを周回
+function enemyFighterStep(f) {
+    if (f.fireFlashTimer > 0) { f.fireFlashTimer--; f.visible = true; } else f.visible = false;
+    if (f.fireCD > 0) f.fireCD--;
+    if (f._v === undefined) f._v = 2.5;
+    const carrier = enemies.find(e => e.type === 'carrier' && e.hp > 0 && !e._dying);
+    // 見えている目標 (自艦・自機のドローン) — いちばん近いもの
+    let tgt = null, td = Infinity;
+    const R = DRONE_VIS.attack, h0 = getHiggsIntensity(f.x, f.y);
+    const sees = (x, y) => { const d = Math.hypot(x - f.x, y - f.y); return d < DRONE_CLOSE_SENSE || (d < R && losReach(f.x, f.y, Math.atan2(y - f.y, x - f.x), R, h0) >= d); };
+    if ((_frameCount + f.uid) % 6 === 0 || !f._seeT) {
+        f._seeT = null;
+        if (player && player.hp > 0 && sees(player.x, player.y)) { tgt = player; td = Math.hypot(player.x - f.x, player.y - f.y); }
+        for (const dr of playerDrones) {
+            if (dr.hp <= 0 || !(dr.type === 'attack' || dr.type === 'mech' || dr.type === 'scout')) continue;
+            const d = Math.hypot(dr.x - f.x, dr.y - f.y);
+            if (d < td && sees(dr.x, dr.y)) { tgt = dr; td = d; }
+        }
+        f._seeT = tgt; f._seeF = _frameCount;
+        if (tgt === player && carrier) { carrier.playerLastKnownPos = { x: player.x, y: player.y, vx: 0, vy: 0 }; carrier.contactFreshness = Math.max(carrier.contactFreshness || 0, 0.7); } // データリンクで母艦へ
+    } else { tgt = f._seeT && f._seeT.hp > 0 ? f._seeT : null; if (tgt) td = Math.hypot(tgt.x - f.x, tgt.y - f.y); }
+    const fly = (tx, ty, vT, turn) => {
+        const da = _angDiff(Math.atan2(ty - f.y, tx - f.x), f.angle);
+        f.angle += Math.max(-turn, Math.min(turn, da));
+        f._v += Math.max(-FTR_ACC, Math.min(FTR_ACC, vT - f._v));
+        f.x += Math.cos(f.angle) * f._v; f.y += Math.sin(f.angle) * f._v;
+        return da;
+    };
+    const vMax = ENEMY_FTR_SPEED;
+    if (tgt) {
+        if (f._st !== 'extend') {
+            const tv = tgt === player ? (player.currentSpeed || 0) : (tgt.v || Math.hypot(tgt.vx || 0, tgt.vy || 0));
+            const lead = td / 12, tx = tgt.x + Math.cos(tgt.angle || 0) * tv * lead, ty = tgt.y + Math.sin(tgt.angle || 0) * tv * lead;
+            const da = fly(tx, ty, vMax, FTR_TURN);
+            if (Math.abs(da) < FTR_ARC && td < FTR_GUN_RANGE && !(f.fireCD > 0)) {
+                const pr = new Projectile(f.x, f.y, { x: tx, y: ty, hp: 1 }, false, 'kinetic', FTR_DMG_SCALE);
+                pr.owner = f; projectiles.push(pr);
+                f.fireCD = FTR_FIRE_CD; f.fireFlashTimer = Math.max(f.fireFlashTimer || 0, 20);
+            }
+            if (td < FTR_BREAK_D) { f._st = 'extend'; f._extT = FTR_EXTEND_F; f._jink = Math.random() < 0.5 ? -1 : 1; }
+        } else {
+            f._extT--;
+            fly(f.x + Math.cos(f.angle + 0.25 * f._jink) * 400, f.y + Math.sin(f.angle + 0.25 * f._jink) * 400, vMax, FTR_TURN * 0.5);
+            if (f._extT <= 0 && td > FTR_REATTACK_D) f._st = 'run';
+        }
+        f.aiState = 'combat';
+        f.huntTarget = { x: tgt.x, y: tgt.y }; f.huntTimer = 1200; // 見失っても最後に見た所へ戻って探す (自機の戦闘機の追跡記憶と同じ役目)
+    } else {
+        f._st = 'run';
+        // 母艦が掴んでいる自艦の推定位置 → 無ければ射出時の推定 → 母艦の周りを周回
+        const lk = f.huntTimer > 0 && f.huntTarget ? f.huntTarget : (carrier && carrier.playerLastKnownPos && (carrier.contactFreshness || 0) > 0.15 ? carrier.playerLastKnownPos : null);
+        if (f.huntTimer > 0) f.huntTimer--;
+        let cx, cy, Rr;
+        if (lk) { cx = lk.x; cy = lk.y; Rr = 900; f.aiState = 'hunting'; }
+        else if (carrier) { cx = carrier.x; cy = carrier.y; Rr = 1200; f.aiState = 'lurking'; }
+        else { cx = f.x + Math.cos(f.angle) * 500; cy = f.y + Math.sin(f.angle) * 500; Rr = 600; }
+        const a = Math.atan2(f.y - cy, f.x - cx), d = Math.hypot(f.x - cx, f.y - cy);
+        const p = d > Rr * 1.6 ? { x: cx + Math.cos(a) * Rr, y: cy + Math.sin(a) * Rr } : { x: cx + Math.cos(a + 0.45) * Rr, y: cy + Math.sin(a + 0.45) * Rr };
+        fly(p.x, p.y, vMax * 0.75, FTR_TURN);
+    }
+    const _cl = clampToMapCircle(f.x, f.y, 300); f.x = _cl.x; f.y = _cl.y;
+    f.speed = f._v; f.currentSpeed = f._v; f._spd = f._v; f._movedF = _frameCount; f.state = 'moving';
+    // シグネチャ: 小さく静か (自機の戦闘機と同じ扱い・撃った時だけ光る)
+    f.heatSig = 0.22 * Math.min(1, f._v / vMax); f.emSig = 0.15; f.higgsSig = 0.1;
+    f.opticalSig = f.fireFlashTimer > 0 ? 0.6 : 0.05;
+}
 // Tech のビームサーベル: 一太刀 (回避されない・後ろからなら×1.5)
 function techSaberHit(d, t) {
     const back = Math.abs(_angDiff(Math.atan2(d.y - t.y, d.x - t.x), t.angle || 0)) > Math.PI * 0.55;
@@ -12204,16 +12305,21 @@ function comPilotStep() {
         for (const cv of convoys) {
             if (!(_sigIdent[cv.sid] && _sigIdent[cv.sid].sure)) continue;
             let p = null;
-            if (inPlayerVision(cv.x, cv.y)) p = { x: cv.x, y: cv.y, vx: cv.vx, vy: cv.vy };
-            else { const sa = _signalAnalysis[cv.sid], est = sa && sa.fix ? trackEstimate(sa, 0) : null; if (est) p = { x: est.x, y: est.y, vx: est.moving ? est.vx : 0, vy: est.moving ? est.vy : 0 }; }
+            if (inPlayerVision(cv.x, cv.y)) p = { x: cv.x, y: cv.y, vx: cv.vx * (cv._k ?? 1), vy: cv.vy * (cv._k ?? 1) }; // 見えている動き (停船中は止まって見える)
+            else {
+                const sa = _signalAnalysis[cv.sid], est = sa && sa.fix ? trackEstimate(sa, 0) : null;
+                if (est) p = { x: est.x, y: est.y, vx: est.moving ? est.vx : 0, vy: est.moving ? est.vy : 0 };
+                else if (sa && sa.obs.length && _frameCount - sa.obs[sa.obs.length - 1].f < 600) { const o = sa.obs[sa.obs.length - 1]; p = { x: o.ox + Math.cos(o.ang) * 5000, y: o.oy + Math.sin(o.ang) * 5000, vx: 0, vy: 0 }; } // 第37弾: 交点がまだ無ければ方位の先へ (横へ動きながら聴けば交わる)
+            }
             if (!p) continue;
             const d = Math.hypot(p.x - player.x, p.y - player.y); if (d < cvD) { cvD = d; cvT = p; }
         }
-        if (cvT && P.greed + P.aggression >= 0.6) {
-            const lead = Math.min(600, cvD / 2);
-            player.setTarget(cvT.x + cvT.vx * lead, cvT.y + cvT.vy * lead); _comSteered(c, 'convoy');
+        if (cvT && P.greed + P.aggression >= 0.5) {
+            // 第37弾: 追いつく点へ (旧: 少し先を追うだけ — 攻撃型の巡航は輸送船より遅く追いつけなかった)
+            const ip = cvD < CONVOY_BOARD_R * 0.8 ? { x: cvT.x + cvT.vx * 30, y: cvT.y + cvT.vy * 30 } : interceptPoint(player.x, player.y, shipCruiseSpeed(gameState.shipType, genAlloc.engine, STANCE_GAIN.flank), cvT.x, cvT.y, cvT.vx, cvT.vy);
+            player.setTarget(ip.x, ip.y); _comSteered(c, 'convoy');
             comThink('p', 'convoy', '輸送船を追って拿捕する (' + _dirTxt(player.x, player.y, cvT.x, cvT.y) + '・' + Math.round(cvD / 100) * 100 + 'u)');
-            if (powerStance === 'silent') setStance('cruise');
+            if (powerStance !== 'flank' && cvD > CONVOY_BOARD_R) setStance('flank'); else if (cvD <= CONVOY_BOARD_R && powerStance === 'flank') setStance('cruise');
             return;
         }
     }
