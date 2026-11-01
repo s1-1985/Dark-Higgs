@@ -7834,9 +7834,8 @@ function drawFieldSignals(ctx) {
             if (f.takeP > 0) { ctx.globalAlpha = 0.9; ctx.beginPath(); ctx.arc(f.x, f.y, CACHE_R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, f.takeP / CACHE_TIME)); ctx.stroke(); }
             ctx.globalAlpha = 0.35; ctx.setLineDash([6 * inv, 8 * inv]); ctx.beginPath(); ctx.arc(f.x, f.y, CACHE_R, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
         }
-        ctx.globalAlpha = 0.85; ctx.fillStyle = k.cs || (k.cs = 'rgb(' + k.col + ')');
-        ctx.font = Math.round(10 * inv) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-        ctx.fillText(k.lbl, f.x, f.y + Math.max(70, 14 * inv));
+        // 第39弾 (オーナー): 名前の文字は消す — 絵とアニメーションで見分けがつく (絵が読み込めない時だけ文字を残す)
+        if (!spriteReady(_fxImg)) { ctx.globalAlpha = 0.85; ctx.fillStyle = k.cs || (k.cs = 'rgb(' + k.col + ')'); ctx.font = Math.round(10 * inv) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(k.lbl, f.x, f.y + Math.max(70, 14 * inv)); }
         ctx.restore();
     }
 }
@@ -8204,7 +8203,7 @@ function drawIdentifiedTerrain(ctx, vpX, vpY, vpW, vpH) {
             ctx.fillStyle = set.col;
             ctx.font = `bold ${Math.round(9 * zc)}px Orbitron, monospace`;
             ctx.textAlign = 'center';
-            ctx.fillText(set.label, f.x, f.y - ms - 6 * zc);
+            // 第39弾 (オーナー): 地形効果の英字ラベルは消す
         }
     }
     ctx.globalAlpha = 1;
