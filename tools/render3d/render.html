@@ -1,0 +1,38 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script></head>
+<body style="margin:0;background:transparent">
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
+const S = 512;
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setSize(S, S); renderer.setClearColor(0x000000, 0);
+renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.15;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.add(new THREE.HemisphereLight(0xcfe6ff, 0x101828, 1.1));
+const key = new THREE.DirectionalLight(0xffffff, 2.4); key.position.set(-3, 6, 4); scene.add(key);
+const rim = new THREE.DirectionalLight(0x66ccff, 1.0); rim.position.set(4, 3, -5); scene.add(rim);
+const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 100);
+cam.position.set(0, 10, 0); cam.up.set(0, 0, -1); cam.lookAt(0, 0, 0);
+window.ready = new Promise(res => {
+  new GLTFLoader().load('../../models/3d/ship_carrier.glb', g => {
+    const root = new THREE.Group(); const m = g.scene; root.add(m); scene.add(root);
+    const box = new THREE.Box3().setFromObject(m), size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+    m.position.sub(c);
+    window._info = { size: [size.x, size.y, size.z] };
+    window.root = root; window.model = m;
+    const half = Math.max(size.x, size.y, size.z) * 0.55;
+    cam.left = -half; cam.right = half; cam.top = half; cam.bottom = -half; cam.updateProjectionMatrix();
+    res(window._info);
+  }, undefined, e => res({ err: String(e) }));
+});
+// yaw: モデルの向き補正 / pitch,roll / up: 真上視点の軸
+window.shot = (yaw, roll, pitch, upAxis) => {
+  window.model.rotation.set(0, 0, 0);
+  window.root.rotation.set(pitch || 0, yaw || 0, roll || 0, 'YXZ');
+  renderer.render(scene, cam);
+  return renderer.domElement.toDataURL('image/png');
+};
+window.view = (pos) => { cam.position.set(pos[0], pos[1], pos[2]); cam.up.set(0, pos[1] ? 0 : 1, pos[1] ? -1 : 0); cam.lookAt(0, 0, 0); };
+</script></body></html>
