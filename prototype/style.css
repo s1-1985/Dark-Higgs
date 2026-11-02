@@ -2109,21 +2109,26 @@ body.in-game #hud-top, body.in-game #hud-left, body.in-game #hud-right { display
     background: rgba(0,6,10,0.8); border: 1px solid rgba(255,255,255,0.10); border-radius: 5px;
     cursor: pointer; --bc: #8aa;
 }
-.band-btn[data-band="heat"]  { --bc: #ff8a3c; }
-.band-btn[data-band="optic"] { --bc: #ffee55; }
-.band-btn[data-band="em"]    { --bc: #c86bff; }
-.band-btn[data-band="higgs"] { --bc: #4fe6ff; }
+/* 第40弾: #hud-left .band-btn の --bc (灰色) に負けて、受信バーが全部灰色になっていた → 同じ強さのセレクタで帯域の色を指定 */
+.band-btn[data-band="heat"],  #hud-left .band-btn[data-band="heat"]  { --bc: #ff8a3c; }
+.band-btn[data-band="optic"], #hud-left .band-btn[data-band="optic"] { --bc: #ffee55; }
+.band-btn[data-band="em"],    #hud-left .band-btn[data-band="em"]    { --bc: #c86bff; }
+.band-btn[data-band="higgs"], #hud-left .band-btn[data-band="higgs"] { --bc: #4fe6ff; }
 #hud-left .bt-label { font-family: 'Orbitron', monospace; font-size: 7px; letter-spacing: 0; color: var(--bc); opacity: 0.6; text-align: center; white-space: nowrap; }
 .bt-meter { flex: 1; min-height: 0; display: flex; gap: 3px; justify-content: center; }
 /* 受信 (太): 下から伸びる。刻み=同調すれば方位が取れるライン */
 #hud-left .bt-bar { position: relative; flex: 1; max-width: 16px; height: auto; background: rgba(255,255,255,0.07); border-radius: 3px; overflow: hidden; }
-#hud-left .bt-fill { position: absolute; left: 0; right: 0; bottom: 0; top: auto; width: auto; height: 0; background: var(--bc); opacity: 0.45; transition: height 0.25s; }
-#hud-left .bt-notch { position: absolute; left: -1px; right: -1px; top: 50%; bottom: auto; width: auto; height: 1px; background: rgba(255,255,255,0.55); }
+#hud-left .bt-fill { position: absolute; left: 0; right: 0; bottom: 0; top: auto; width: auto; height: 0; background: linear-gradient(to top, var(--bc), rgba(255,255,255,0.85)); background-size: 100% 200%; background-position: 0 100%; opacity: 0.5; transition: height 0.25s; border-radius: 2px; }
+/* 第40弾: 方位が取れる刻み (50%) をはっきり — 細い線＋左右の小さな三角 */
+#hud-left .bt-notch { position: absolute; left: -1px; right: -1px; top: 50%; bottom: auto; width: auto; height: 1px; background: rgba(255,255,255,0.7); z-index: 2; }
+#hud-left .bt-notch::before, #hud-left .bt-notch::after { content: ''; position: absolute; top: -3px; border: 3px solid transparent; }
+#hud-left .bt-notch::before { left: 0; border-left-color: rgba(255,255,255,0.7); }
+#hud-left .bt-notch::after { right: 0; border-right-color: rgba(255,255,255,0.7); }
 /* 自艦の放射 (細): その帯域で自分がどれだけ「聞こえて」いるか */
 .bt-tx { position: relative; width: 4px; background: rgba(255,255,255,0.05); border-radius: 2px; overflow: hidden; }
 .bt-tx-fill { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: #e8f4f0; opacity: 0.55; transition: height 0.3s; }
 .band-btn.tx-hi .bt-tx-fill { background: #ff6a5a; opacity: 0.85; }
-.band-btn.hot .bt-fill { opacity: 0.95; }
+.band-btn.hot .bt-fill { opacity: 0.95; box-shadow: 0 0 6px var(--bc); }
 .band-btn.hot:not(.tuned) { animation: bandHot 1.1s infinite alternate; }
 @keyframes bandHot { from { border-color: rgba(255,255,255,0.10); } to { border-color: var(--bc); } }
 .band-btn.tuned { border-color: var(--bc) !important; background: rgba(255,255,255,0.07) !important; }
