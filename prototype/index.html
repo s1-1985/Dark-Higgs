@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261102c">
+    <link rel="stylesheet" href="style.css?v=20261102d">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -127,13 +127,13 @@
             <!-- ポップオーバーで使う実ボタンの置き場 (非表示)。game.js がIDでイベントを結び付けている -->
             <div id="action-store" class="action-grid">
                 <!-- 第22弾: 機関 (旧: 上帯のGENドロワー) — エンジン4種と配分の重点4つ -->
-                <button class="act-icon-btn btn-info eng-btn" id="btn-eng-thermonuclear" data-eng="thermonuclear" title="熱核エンジン — 高出力・熱が大きい">
+                <button class="act-icon-btn btn-info eng-btn" id="btn-eng-thermonuclear" data-eng="thermonuclear" title="熱核エンジン — 最速 (霧で遅くなる)・熱を後方の扇へ遠く (全周には排熱1/4)・熱の痕跡60秒">
                     <i class="ico" style="--ico:url(assets/icons/icon_eng_thr.png)"></i><span>熱核</span></button>
-                <button class="act-icon-btn btn-info eng-btn" id="btn-eng-pulse" data-eng="pulse" title="パルスエンジン — 速い・EMが大きい">
-                    <i class="ico" style="--ico:url(assets/icons/icon_eng_pls.png)"></i><span>パルス</span></button>
-                <button class="act-icon-btn btn-info eng-btn" id="btn-eng-higgs" data-eng="higgs" title="ヒッグスエンジン — 静か・霧の中で速い">
+                <button class="act-icon-btn btn-info eng-btn" id="btn-eng-pulse" data-eng="pulse" title="EMエンジン — 速さ85%・加速×1.5 旋回×1.25・EMを全周へ遠く (霧を通す)・痕跡なし">
+                    <i class="ico" style="--ico:url(assets/icons/icon_eng_pls.png)"></i><span>EM</span></button>
+                <button class="act-icon-btn btn-info eng-btn" id="btn-eng-higgs" data-eng="higgs" title="ヒッグスエンジン — 霧が濃いほど速い (霧30%以下は25%・霧100%で120%)・霧の乱れを全周へ近く・霧の痕跡90秒">
                     <i class="ico" style="--ico:url(assets/icons/icon_eng_hgs.png)"></i><span>ヒッグス</span></button>
-                <button class="act-icon-btn btn-info eng-btn" id="btn-eng-photon" data-eng="photon" title="フォトンエンジン — 最も速い・光が大きい">
+                <button class="act-icon-btn btn-info eng-btn" id="btn-eng-photon" data-eng="photon" title="フォトンエンジン — 速さ75%・光を後方180°へ遠く (霧で消える)・全周には微弱なEM・痕跡なし">
                     <i class="ico" style="--ico:url(assets/icons/icon_eng_pht.png)"></i><span>フォトン</span></button>
                 <button class="act-icon-btn btn-info focus-btn active" id="btn-focus-balance" data-focus="balance" title="配分の重点: 均等"><b class="fx-mark">均</b><span>均等</span></button>
                 <button class="act-icon-btn btn-info focus-btn" id="btn-focus-engine" data-focus="engine" title="配分の重点: 機関 (速さ×1.5・回避+5pt。速いほど推進の信号が増える)"><b class="fx-mark">機</b><span>機関重視</span></button>
@@ -310,19 +310,19 @@
                 <div class="isel-section" id="engine-isel-section">
                     <span class="isel-label">ENGINE</span>
                     <div class="isel-group" id="engine-icon-group">
-                        <button class="isel-btn active" data-val="thermonuclear" title="熱核エンジン — 推進の信号は熱">
+                        <button class="isel-btn active" data-val="thermonuclear" title="熱核エンジン — 最速・熱を後方の扇へ・熱の痕跡">
                             <i class="ico" style="--ico:url(assets/icons/icon_eng_thr.png)"></i>
                             <span>THR</span>
                         </button>
-                        <button class="isel-btn" data-val="pulse" title="パルスエンジン — 推進の信号はEM">
+                        <button class="isel-btn" data-val="pulse" title="EMエンジン — 加速・旋回が良い・EMを全周へ・痕跡なし">
                             <i class="ico" style="--ico:url(assets/icons/icon_eng_pls.png)"></i>
-                            <span>PLS</span>
+                            <span>EM</span>
                         </button>
-                        <button class="isel-btn" data-val="higgs" title="ヒッグスエンジン — 推進の信号は霧の乱れ (航跡)・遅め">
+                        <button class="isel-btn" data-val="higgs" title="ヒッグスエンジン — 霧が濃いほど速い・霧の乱れを全周へ近く・霧の痕跡">
                             <i class="ico" style="--ico:url(assets/icons/icon_eng_hgs.png)"></i>
                             <span>HGS</span>
                         </button>
-                        <button class="isel-btn" data-val="photon" title="フォトンエンジン — 推進の信号は光・最速">
+                        <button class="isel-btn" data-val="photon" title="フォトンエンジン — 遅い・光を後方180°へ・正面は静か・痕跡なし">
                             <i class="ico" style="--ico:url(assets/icons/icon_eng_pht.png)"></i>
                             <span>PHT</span>
                         </button>
@@ -737,7 +737,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261102c"></script>
+    <script src="game.js?v=20261102d"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {

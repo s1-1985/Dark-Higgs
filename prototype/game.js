@@ -135,19 +135,33 @@ const ARMOR_RES_KINETIC = [0, 0, 0.25, 0.25]; // 装甲: kinetic耐性 Lv2+ (第
 const ARMOR_RES_MISSILE = [0, 0,    0.25, 0.25]; // 装甲: missile耐性 Lv2+
 const ARMOR_RES_BEAM    = [0, 0,    0,    0.25]; // 装甲: beam耐性 Lv3+
 
+// 第42弾 (オーナー合意): エンジンの性能差 — 速さ・加速/旋回・信号の向きと届く距離・痕跡を、性格・戦い方・環境で使い分ける
+//   速さ (熱核が開けた所を走る速さ=1): 熱核 1.0 > (ヒッグス 霧次第) > EM 0.85 > フォトン 0.75。熱核・EM・フォトンは霧で最大45%遅くなる
+//   ヒッグスは霧で遅くならず、霧30%以下=0.25 → 霧100%=1.2 (霧が濃いほど速い)。EMは加速×1.5・旋回×1.25
+//   (旧: 熱核1.0・パルス1.2・ヒッグス0.85+霧の加点・フォトン1.4 — フォトンが最速だった)
 const ENGINE_TYPES = {
     thermonuclear: { speedMult: 1.0,  heatMult: 2.0,  optMult: 0.2,  emMult: 0.4,  higgsSpeedBonus: 0.0 },
-    pulse:         { speedMult: 1.2,  heatMult: 0.4,  optMult: 0.3,  emMult: 1.8,  higgsSpeedBonus: 0.0 },
-    higgs:         { speedMult: 0.85, heatMult: 0.08, optMult: 0.1,  emMult: 0.2,  higgsSpeedBonus: 0.6 },
-    photon:        { speedMult: 1.4,  heatMult: 0.0,  optMult: 3.0,  emMult: 0.2,  higgsSpeedBonus: 0.0 }
+    pulse:         { speedMult: 0.85, heatMult: 0.4,  optMult: 0.3,  emMult: 1.8,  higgsSpeedBonus: 0.0 },
+    higgs:         { speedMult: 1.0,  heatMult: 0.08, optMult: 0.1,  emMult: 0.2,  higgsSpeedBonus: 0.0 },
+    photon:        { speedMult: 0.75, heatMult: 0.0,  optMult: 3.0,  emMult: 0.2,  higgsSpeedBonus: 0.0 }
 };
+const ENGINE_FOG_DRAG = 0.45;                                     // 霧の減速 (霧100%で−45%)。ヒッグスエンジンには効かない
+const HIGGS_ENG_SPEED = { lo: 0.25, hi: 1.2, h0: 0.3, h1: 1.0 };   // ヒッグスエンジンの速さ: 霧30%以下=0.25 → 霧100%=1.2 (その間は直線)
+const ENGINE_AGILITY = { thermonuclear: { accel: 1, turn: 1 }, pulse: { accel: 1.5, turn: 1.25 }, higgs: { accel: 1, turn: 1 }, photon: { accel: 1, turn: 1 } };
+// 居る場所の霧の濃さ h での速さの倍率 (熱核が開けた所を走る速さ=1)。自艦も敵も COM の見積もりも同じ
+function engineSpeedFactor(E, h, resist = 0) {
+    const hh = Math.max(0, Math.min(1, h || 0));
+    if (E === 'higgs') return HIGGS_ENG_SPEED.lo + (HIGGS_ENG_SPEED.hi - HIGGS_ENG_SPEED.lo) * Math.max(0, Math.min(1, (hh - HIGGS_ENG_SPEED.h0) / (HIGGS_ENG_SPEED.h1 - HIGGS_ENG_SPEED.h0)));
+    return (ENGINE_TYPES[E] || ENGINE_TYPES.thermonuclear).speedMult * (1 - hh * ENGINE_FOG_DRAG * (1 - resist));
+}
+function engineAgility(E) { return ENGINE_AGILITY[E] || ENGINE_AGILITY.thermonuclear; }
 // 第23弾 (オーナー合意): 推進から出る信号はエンジンごとに主な1種類 (他はわずか)。熱核=熱 / パルス=EM / ヒッグス=航跡(霧の乱れ) / フォトン=光
 // (旧: heatMult などの倍率が混ざり、ヒッグスエンジンでもEMや熱が目立っていた)。演算のEM (センサー・AIへの配分) はエンジンと別に残すが半分にした
 const ENGINE_SIG = {
     thermonuclear: { heat: 1.0,  optic: 0.1,  em: 0.1,  higgs: 0.1 },
     pulse:         { heat: 0.1,  optic: 0.1,  em: 1.0,  higgs: 0.1 },
     higgs:         { heat: 0.05, optic: 0.05, em: 0.05, higgs: 1.0 },
-    photon:        { heat: 0.1,  optic: 1.0,  em: 0.1,  higgs: 0.1 },
+    photon:        { heat: 0.05, optic: 1.0,  em: 0.06, higgs: 0.05 }, // 第42弾: 全周に出るのは微弱なEMだけ (旧 熱0.1・EM0.1・霧0.1)
 };
 const COMPUTE_EM_MULT = 0.5;
 // ═══ 第39弾 (オーナー合意): シグネチャの整理 — 自艦も敵も同じ関数 emitSigs() で出す ═══
@@ -157,9 +171,25 @@ const COMPUTE_EM_MULT = 0.5;
 // 痕跡を残すのは熱核とヒッグスだけ。どのエンジンでも船体が霧を乱す分 (旧: 全艦が霧の航跡を引いていた) は撤去
 const ENGINE_MAIN = { thermonuclear: 'heat', pulse: 'em', higgs: 'higgs', photon: 'optic' };
 const ENGINE_TRAIL = { thermonuclear: 'heat', higgs: 'higgs' }; // 痕跡の帯域 (パルス・フォトンは残さない)
-const SIG_THRUST = 0.6, PULSE_PERIOD = 150, PULSE_ON = 30, PULSE_PEAK = 1.25, PULSE_LOW = 0.2, PHOTON_IDLE = 0.35;
-// 第41弾: エンジンごとの推進の信号の強さ (主帯域に掛ける)。フォトンは最も速い代わりに最も明るい — 霧の中では吸われるが、開けた所では遠くから見える
-const ENGINE_SIG_GAIN = { thermonuclear: 1, pulse: 1, photon: 1.5, higgs: 1 };
+const SIG_THRUST = 0.6, PULSE_PERIOD = 150, PULSE_ON = 30, PULSE_PEAK = 1.25, PULSE_LOW = 0.2, PHOTON_IDLE = 0.1; // 第42弾: フォトンの止まっている時の光 0.35→0.1
+// 第41弾: エンジンごとの推進の信号の強さ (主帯域に掛ける)。第42弾: 届く距離 — 熱核 (後方) とEMとフォトン (後方) は遠く、ヒッグスは近い
+const ENGINE_SIG_GAIN = { thermonuclear: 1.3, pulse: 1, photon: 1.5, higgs: 0.5 };
+// 第42弾 (オーナー合意): 推進の主な信号の向き — 熱核=後方の扇 (±45°で最大・±90°で扇の分が消える)。扇の外にも炉の排熱として1/4が全周に出る /
+//   フォトン=後方180° (±80°で最大・±100°で消える)。前には出ない (全周に出るのは微弱なEMだけ) / EM・ヒッグス=全周
+//   front = 全周に出る割合・full/zero = 艦尾から測った角度 (rad)
+const ENGINE_DIR = { thermonuclear: { band: 'heat', front: 0.25, full: Math.PI / 4, zero: Math.PI / 2 }, photon: { band: 'optic', front: 0, full: Math.PI * 80 / 180, zero: Math.PI * 100 / 180 } };
+// 受け手 (rx,ry) に向いた割合 0..1 (艦尾の向きからの角度で)
+function engineDirGain(d, ang, sx, sy, rx, ry) {
+    let off = Math.abs(_angDiff(Math.atan2(ry - sy, rx - sx), ang + Math.PI));
+    return off <= d.full ? 1 : off >= d.zero ? 0 : 1 - (off - d.full) / (d.zero - d.full);
+}
+// 発信源 s の帯域 b を (rx,ry) から聴いた強さ (直近1秒の最大値)。向きのある推進の分は向きで減る — 自艦も敵も同じ
+function sigToward(s, b, rx, ry) {
+    const tot = sigPeak(s, b), pk = s._sigPk;
+    if (!pk || !(pk.dir > 0) || pk.dirB !== b || !s._dirEng) return tot;
+    const g = engineDirGain(s._dirEng, s._dirAng ?? s.angle ?? 0, s.x, s.y, rx, ry);
+    return Math.max(0, tot - pk.dir * (1 - g));
+}
 // 行動ごとに出る信号 (その行動の間だけ足す)。発砲・発進は1.5秒/1秒で薄れる
 const SIG_ACT = {
     kinFire:    { optic: 0.6, heat: 0.10 },              // 実弾の発砲: 閃光
@@ -181,6 +211,7 @@ const SIG_COMPUTE = { emSensors: 0.09, emAi: 0.20, heatAi: 0.05 }; // 演算 (�
 //      bottomed, pm{heat,heatAdd,optic,em,emAdd,opticFire,mslLaunchHeat,chargeLeak}, wounded, pulsePh }
 function emitSigs(o) {
     const out = { heat: 0, optic: 0, em: 0, higgs: 0 };
+    let dirB = null, dirV = 0;
     const es = ENGINE_SIG[o.engine] || ENGINE_SIG.thermonuclear, main = ENGINE_MAIN[o.engine] || 'heat';
     const mt = o.mt || { e: 1, w: 1, s: 1, a: 1 }, pm = o.pm || PM_DEF;
     if (o.engineOn) {
@@ -189,13 +220,16 @@ function emitSigs(o) {
         for (const b of BANDS) out[b] = T * SIG_THRUST * es[b] * (b === main ? gn : 1);
         if (main === 'em') out.em *= ((_frameCount + (o.pulsePh || 0)) % PULSE_PERIOD) < PULSE_ON ? PULSE_PEAK : PULSE_LOW;
         else if (main === 'optic') out.optic = SIG_THRUST * gn * (PHOTON_IDLE + (1 - PHOTON_IDLE) * T) * (1 - 0.6 * (o.hHere || 0));
-        else if (main === 'higgs') out.higgs = T * SIG_THRUST * (0.5 + 0.5 * (o.hHere || 0));
+        else if (main === 'higgs') out.higgs = T * SIG_THRUST * gn * (0.5 + 0.5 * (o.hHere || 0)); // 第42弾: 届く距離は近い (gn 0.5)
         for (const b of BANDS) out[b] *= mt.e;
+        // 第42弾: 向きのある推進の分 (受け手の向きで減る分) を分けておく — 合計 (out) は艦尾から見た値のまま
+        const dd = ENGINE_DIR[o.engine];
+        if (dd) { dirB = dd.band; dirV = out[dd.band] * (1 - dd.front); }
     }
     const al = o.alloc || { sensors: 0.3, ai: 0.5 };
     out.em += (al.sensors * SIG_COMPUTE.emSensors * mt.s + al.ai * SIG_COMPUTE.emAi * mt.a);
     out.heat += al.ai * SIG_COMPUTE.heatAi * mt.a;
-    if (o.quiet) for (const b of BANDS) out[b] *= SILENT_SIG_MULT; // 潜航・機関停止・潜伏: 推進と演算を絞る (行動で出る信号は減らない)
+    if (o.quiet) { for (const b of BANDS) out[b] *= SILENT_SIG_MULT; dirV *= SILENT_SIG_MULT; } // 潜航・機関停止・潜伏: 推進と演算を絞る (行動で出る信号は減らない)
     const add = (t, k) => { if (!t || !(k > 0)) return; for (const b in t) out[b] += t[b] * k; };
     if (o.ff > 0) {
         if (o.ft === 'kinetic') add({ optic: SIG_ACT.kinFire.optic * pm.opticFire, heat: SIG_ACT.kinFire.heat }, o.ff * mt.w);
@@ -216,14 +250,17 @@ function emitSigs(o) {
     // 居る場所: 磁気嵐は電磁波を、熱雲は熱を覆い隠す / デブリ擬態は全部を岩塊に紛れさせる
     out.em *= 1 - (o.storm || 0) * STORM_EM_MASK;
     out.heat *= 1 - (o.thermal || 0) * THERMAL_HEAT_MASK;
-    if (o.bottomed) for (const b of BANDS) out[b] *= BOTTOM_SIG_MULT;
+    if (dirB === 'heat') dirV *= 1 - (o.thermal || 0) * THERMAL_HEAT_MASK;
+    if (o.bottomed) { for (const b of BANDS) out[b] *= BOTTOM_SIG_MULT; dirV *= BOTTOM_SIG_MULT; }
     // 部品 (熱・光・電磁波の倍率と、常に漏れる分)
     const q = o.quiet ? SILENT_SIG_MULT : 1;
     out.heat = out.heat * pm.heat + pm.heatAdd * q;
     out.optic *= pm.optic;
+    if (dirB === 'heat') dirV *= pm.heat; else if (dirB === 'optic') dirV *= pm.optic;
     out.em = out.em * pm.em + pm.emAdd * q;
     if (o.wounded) out.heat = Math.max(out.heat, WOUNDED_HEAT_FLOOR * (o.quiet ? 0.7 : 1)); // 手負い: 冷却材の漏れ
     for (const b of BANDS) out[b] = Math.max(0, Math.min(1, out[b]));
+    out._dirB = dirB; out._dirV = dirB ? Math.max(0, Math.min(out[dirB], dirV)) : 0; // 合計のうち向きのある分
     return out;
 }
 // 推力 0..1 = 機関負荷 (艦種の巡航速度に対する今の速さ)。止まっていても機関が動いていれば少し
@@ -232,9 +269,13 @@ function speedLoad(spd, cls) { return (spd || 0) / Math.max(0.1, gameSpeedFactor
 function thrustFrac(spd, cls) { return Math.min(1, 0.04 + 0.8 * Math.min(1.25, speedLoad(spd, cls))); }
 // 直近1秒の最大値 (パルスのような断続的な信号も、1秒ごとに聴く側が取りこぼさない量だけ拾える)
 function sigPeakUpdate(s) {
-    const pk = s._sigPk || (s._sigPk = { heat: 0, optic: 0, em: 0, higgs: 0, f: { heat: 0, optic: 0, em: 0, higgs: 0 } });
+    const pk = s._sigPk || (s._sigPk = { heat: 0, optic: 0, em: 0, higgs: 0, f: { heat: 0, optic: 0, em: 0, higgs: 0 }, dir: 0, dirB: null, dirF: 0 });
     const cur = { heat: s.heatSig || 0, optic: s.opticalSig || 0, em: s.emSig || 0, higgs: s.higgsSig || 0 };
     for (const b of BANDS) if (cur[b] >= pk[b] || _frameCount - pk.f[b] > 60) { pk[b] = cur[b]; pk.f[b] = _frameCount; }
+    // 第42弾: 向きのある推進の分も同じく直近1秒の最大値 (合計の最大値を超えない)
+    const dv = s._sigDirV || 0, db = s._sigDirB || null;
+    if (db !== pk.dirB || dv >= pk.dir || _frameCount - pk.dirF > 60) { pk.dir = dv; pk.dirB = db; pk.dirF = _frameCount; }
+    if (pk.dirB) pk.dir = Math.min(pk.dir, pk[pk.dirB]);
 }
 function sigPeak(s, b) { const pk = s._sigPk; return pk ? pk[b] : (b === 'heat' ? s.heatSig : b === 'optic' ? s.opticalSig : b === 'em' ? s.emSig : s.higgsSig) || 0; }
 
@@ -3254,7 +3295,7 @@ class Ship {
         if (!cls) return null;
         // 第39弾: 自機と同じ式 — 機関の配分 (航行モード)・エンジンの種類・霧の減速 (ヒッグスエンジンは霧で速くなる)・岩礁帯・部品
         const _eg = ENGINE_TYPES[this.engine] || ENGINE_TYPES.thermonuclear, _h = getHiggsIntensity(this.x, this.y);
-        const base = (shipCruiseSpeed(cls, (this.gen || GEN_FOCUS.balance).engine, 1) * (1 - _h * 0.45) * _eg.speedMult + _h * _eg.higgsSpeedBonus * MOVE_SPEED_MULT) * this.terrainSpeedMult() * epm(this).speed; // 第33弾: 部品
+        const base = shipCruiseSpeed(cls, (this.gen || GEN_FOCUS.balance).engine, 1) * engineSpeedFactor(this.engine || 'thermonuclear', _h) * this.terrainSpeedMult() * epm(this).speed; // 第33弾: 部品 / 第42弾: エンジンの速さ
         return { silent: base * SILENT_SPEED_MULT, cruise: base, flank: base * 1.5 };
     }
     _moveHeading(targetAng, desired) {
@@ -3264,10 +3305,18 @@ class Ship {
             this.angle += Math.sign(d) * Math.min(Math.abs(d), ENEMY_TURN_RATES[this.type] || 0.035);
             this._v = desired;
         } else {
-            this.angle += Math.sign(d) * Math.min(Math.abs(d), PLAYER_TURN_RATES[cls] * epm(this).turn);
+            const _ag = engineAgility(this.engine);
+            this.angle += Math.sign(d) * Math.min(Math.abs(d), PLAYER_TURN_RATES[cls] * epm(this).turn * _ag.turn);
+            if (this._engSwT > 0) { // 第42弾: エンジンの切替中は推力ゼロ — 自艦と同じく惰性で漂う (艦首だけ回る)
+                const ca = this._swAng ?? this.angle;
+                this._v = (this._v || 0) * Math.exp(-COAST_DECAY * (1 + COAST_FOG_DRAG * getHiggsIntensity(this.x, this.y)));
+                this.x += Math.cos(ca) * this._v; this.y += Math.sin(ca) * this._v;
+                this.speed = this._v; this.currentSpeed = this._v; this._movedF = _frameCount;
+                return d;
+            }
             const tm = Math.min(1, Math.abs(d) / (Math.PI * 0.12));
             const ts = Math.max(0, desired) * (1 - (SHIP_TURN_SLOW[cls] || 0.5) * tm);
-            const ar = SHIP_ACCEL_RATE[cls] * epm(this).accel;
+            const ar = SHIP_ACCEL_RATE[cls] * epm(this).accel * _ag.accel;
             const brake = (this._sysEngineTimer || 0) > 0 ? 0.25 : 2.5;
             const v = this._v || 0;
             this._v = v < ts ? Math.min(ts, v + ar) : Math.max(ts, v - ar * brake);
@@ -3372,6 +3421,7 @@ class Ship {
                 bottomed: isBottomed, pm: PM, wounded: this.hp / this.maxHp < WOUNDED_HP_FRAC, pulsePh: 0,
             });
             this.heatSig = _sg.heat; this.opticalSig = _sg.optic; this.emSig = _sg.em; this.higgsSig = _sg.higgs;
+            this._sigDirB = _sg._dirB; this._sigDirV = _sg._dirV; this._dirEng = ENGINE_DIR[gameState.engineType] || null; // 第42弾: 向きのある推進の分
             if (this.hp / this.maxHp < WOUNDED_HP_FRAC) {
                 if (!this._woundedLogged) { this._woundedLogged = true; logMessage('WARN: 冷却材漏出 — 熱シグネチャを抑えられない。敵に追われやすい', 'warning-msg'); }
             } else this._woundedLogged = false;
@@ -3387,13 +3437,11 @@ class Ship {
             if (jamPulseCD > 0) jamPulseCD--;
 
             // §P1 慣性ベース速度: 最高速度目標(_baseTargetSpeed)を計算。実加速は各移動ブロックで行う
-            const _engTypeP = ENGINE_TYPES[gameState.engineType] || ENGINE_TYPES.thermonuclear;
             const _higgsHereEng = getHiggsIntensity(this.x, this.y);
-            const _higgsSlowdown = 1 - _higgsHereEng * 0.45 * (1 - ENGINE_UPG_HIGGS_RESIST[gameState.upgrades.engine]);
-            const _higgsBonusSpeed = _higgsHereEng * _engTypeP.higgsSpeedBonus;
+            const _engSpdF = engineSpeedFactor(gameState.engineType, _higgsHereEng, ENGINE_UPG_HIGGS_RESIST[gameState.upgrades.engine] || 0); // 第42弾
             if (this._beamDrain > 0) this._beamDrain -= gameSpeedFactor;
             updateEngineSwitch();
-            const _baseTargetSpeed = (engineSwitchT > 0 ? 0 : 1) * PM.speed * (this._beamDrain > 0 ? BEAM_DRAIN_SPEED : 1) * (shipCruiseSpeed(gameState.shipType, genAlloc.engine, genGain) * _higgsSlowdown * _engTypeP.speedMult + _higgsBonusSpeed * MOVE_SPEED_MULT) * this.terrainSpeedMult() * gameSpeedFactor * (silentRunning ? SILENT_SPEED_MULT : 1) * (boostT > 0 ? BOOST_MULT : 1);
+            const _baseTargetSpeed = (engineSwitchT > 0 ? 0 : 1) * PM.speed * (this._beamDrain > 0 ? BEAM_DRAIN_SPEED : 1) * shipCruiseSpeed(gameState.shipType, genAlloc.engine, genGain) * _engSpdF * this.terrainSpeedMult() * gameSpeedFactor * (silentRunning ? SILENT_SPEED_MULT : 1) * (boostT > 0 ? BOOST_MULT : 1);
             if (this.currentSpeed === undefined) this.currentSpeed = 0;
             this.speed = this.currentSpeed; // 移動ブロックで更新される
 
@@ -3461,12 +3509,12 @@ class Ship {
                 let d = targetAng - this.angle;
                 while (d < -Math.PI) d += Math.PI * 2;
                 while (d > Math.PI) d -= Math.PI * 2;
-                const tr = (PLAYER_TURN_RATES[gameState.shipType] || PLAYER_TURN_RATE) * gameSpeedFactor * PM.turn; // 第32弾: 部品
+                const tr = (PLAYER_TURN_RATES[gameState.shipType] || PLAYER_TURN_RATE) * gameSpeedFactor * PM.turn * engineAgility(gameState.engineType).turn; // 第32弾: 部品 / 第42弾: EMは旋回×1.25
                 this.angle += Math.sign(d) * Math.min(Math.abs(d), tr);
                 if (playerCoasting) return d; // 第17弾: 機関停止中は艦首だけ回す (進路は変わらない)
                 const tm = Math.min(1, Math.abs(d) / (Math.PI * 0.12));
                 const ts = targetSpd * (1 - (SHIP_TURN_SLOW[gameState.shipType] || 0.5) * tm);
-                const ar = (SHIP_ACCEL_RATE[gameState.shipType] || 0.008) * gameSpeedFactor * (boostT > 0 ? BOOST_ACCEL : 1) * PM.accel;
+                const ar = (SHIP_ACCEL_RATE[gameState.shipType] || 0.008) * gameSpeedFactor * (boostT > 0 ? BOOST_ACCEL : 1) * PM.accel * engineAgility(gameState.engineType).accel; // 第42弾: EMは加速×1.5
                 // 第17弾: 機関が損傷・過熱している間は逆噴射も効かず、ゆっくりしか減速できない (噴射で稼いだ速度が残る)
                 const brake = (this._sysEngineTimer || 0) > 0 ? 0.25 : 2.5;
                 this.currentSpeed = this.currentSpeed < ts ? Math.min(ts, this.currentSpeed + ar) : Math.max(ts, this.currentSpeed - ar * brake);
@@ -3596,6 +3644,14 @@ class Ship {
                            : (this.aiState === 'combat' || this.aiState === 'hunting') ? 'track' : 'search';
                 const _fk = comFocusPlan(_pf, _sit, !!(this._quietRun || this._hiding || (_pf.stealth ?? 0) >= 0.5));
                 if (_fk !== this._focus && (_sit === 'engage' || _sit === 'retreat' || _frameCount - (this._focusF || -1e9) >= 1200)) { this._focusF = _frameCount; setEnemyFocus(this, _fk); }
+                // 第42弾: エンジンも場面と居る所の環境で (自機COMと同じ comEngineDecide)。替えるのは捜索・接近の間で、潜伏中でなく15秒撃たれていない時だけ
+                if (!(this._engSwT > 0)) {
+                    const _esit = _sit === 'track' ? (comDoctrine(_pf).approach ? 'approach' : 'search') : _sit;
+                    if ((_esit === 'search' || _esit === 'approach') && !this._hiding && _frameCount - (this._lastHitF ?? -1e9) > 900) {
+                        const _env = comEnvAt(this.x, this.y), _ev = comEngineDecide(this._engM || (this._engM = {}), _pf, _esit, _env, this.engine || 'thermonuclear', _frameCount);
+                        if (_ev) enemyRequestEngine(this, _ev.engine, engineWhy(_ev, _env));
+                    }
+                }
             }
             // 発砲フラッシュタイマー更新 (発砲直後だけ可視になる)
             if (this.fireFlashTimer > 0) {
@@ -3728,7 +3784,7 @@ class Ship {
             let _noiseSrc = null, _relayPost = null;
             if (player && player.hp > 0) {
                 if (_listen && this.type !== 'fighter' || _listen && distToPlayer < 2500) {
-                    const h = hearSource(player, 'e' + this.uid, this.x, this.y, player.x, player.y, b => sigPeak(player, b), sigRange, enemyBands(this)); // 第21弾: 敵も聴いている帯域だけ
+                    const h = hearSource(player, 'e' + this.uid, this.x, this.y, player.x, player.y, b => sigToward(player, b, this.x, this.y), sigRange, enemyBands(this)); // 第21弾: 敵も聴いている帯域だけ
                     if (h) { playerSigDetected = true; detectedSigStrength = h.sig; domSig = h.band; _hBand = h.band; _hNoise = h.noise; _hNb = h.nb; this._heardBand = h.band; this._heardBandF = _frameCount; } // 第41弾: 聞こえた帯域 (帯域の選び方に使う)
                 }
                 // 接近探知 (デブリ擬態中は岩塊に紛れて至近でも掴めない — 至近を通過されてもやり過ごせる)
@@ -3766,7 +3822,7 @@ class Ship {
                     const n = post.o, RR = post.R;
                     const dn = Math.hypot(player.x - n.x, player.y - n.y);
                     if (dn > RR) continue;
-                    let s0 = 0; for (const b of BANDS) s0 = Math.max(s0, sigPeak(player, b)); // 第39弾: 自艦の聴音局 (relayListen) と同じ式
+                    let s0 = 0; for (const b of BANDS) s0 = Math.max(s0, sigToward(player, b, n.x, n.y)); // 第39弾: 自艦の聴音局 (relayListen) と同じ式 / 第42弾: 向き
                     const sg = s0 * (1 - dn / RR) * (1 - getHiggsIntensity((player.x + n.x) / 2, (player.y + n.y) / 2) * 0.5);
                     if (sg >= 0.12) { playerSigDetected = true; detectedSigStrength = Math.max(detectedSigStrength, sg * 0.6); _relayPost = { x: n.x, y: n.y, sig: sg }; break; }
                 }
@@ -3859,7 +3915,7 @@ class Ship {
             let pb = this.predictedBehavior || 'unknown';
             if (playerSigDetected && player) {
                 // 第39弾: 受け取った強さ (しきい値に対する比) から推定する — 旧: 自機の発信の値 (真値) をそのまま読んでいた
-                if (_listen) { const _rl = { heat: 0, optic: 0, em: 0, higgs: 0 }; hearLevels(player, 'e' + this.uid, this.x, this.y, player.x, player.y, b => sigPeak(player, b), sigRange, _rl, enemyBands(this)); this._rxL = _rl; }
+                if (_listen) { const _rl = { heat: 0, optic: 0, em: 0, higgs: 0 }; hearLevels(player, 'e' + this.uid, this.x, this.y, player.x, player.y, b => sigToward(player, b, this.x, this.y), sigRange, _rl, enemyBands(this)); this._rxL = _rl; }
                 const _rl = this._rxL || { heat: 0, optic: 0, em: 0 };
                 const pm = { heat: _rl.heat * 0.3, optic: _rl.optic * 0.2, em: _rl.em * 0.3 }; // 受信レベル×しきい値 = 受け取った強さ
                 // 最寄りアクティブノードがプレイヤー近傍か (EMスパイク+ノード近接=収集)
@@ -4457,6 +4513,12 @@ class Ship {
 
     // 第39弾: 敵のシグネチャ (自艦と同じ emitSigs)。update() の後に毎フレーム呼ぶ — 旧: update() の途中の return (撃った後の再配置中など) で飛ばされ、値が固まっていた
     _enemySigs() {
+            if (this._hpPrev !== undefined && this.hp < this._hpPrev) this._lastHitF = _frameCount; // 第42弾: 撃たれた時刻 (エンジン切替の判断)
+            this._hpPrev = this.hp;
+            if (this._engSwT > 0 && (this._engSwT -= gameSpeedFactor) <= 0) { // 第42弾: 敵のエンジン切替の完了
+                this._engSwT = 0; this.engine = this._engSwTo || this.engine; this._engSwTo = null; this._swAng = null;
+                if (comDemo && this.type !== 'fighter') comThinkEvent('e', ENGINE_JP[this.engine] + 'に切替完了 — 再点火', 'e' + this.uid);
+            }
             const spd = Math.hypot(this.x - this.prevX, this.y - this.prevY);
             this._vx = this.x - this.prevX; this._vy = this.y - this.prevY; // 第20弾: 見えている時の見越し射撃に使う (見えている動き)
             this._spd = spd;
@@ -4473,8 +4535,9 @@ class Ship {
             if (this._fireFlash > 0) this._fireFlash -= gameSpeedFactor;
             const _lf = this._launchFlash > 0 ? this._launchFlash / 60 : 0;
             if (this._launchFlash > 0) this._launchFlash -= gameSpeedFactor;
+            const _eSw = !_isF && this._engSwT > 0; // 第42弾: 敵もエンジンの切替中は推力ゼロ・EMが漏れる (自艦と同じ)
             const _sg = emitSigs({
-                engine: _isF ? 'thermonuclear' : (this.engine || 'thermonuclear'), engineOn: true,
+                engine: _isF ? 'thermonuclear' : (this.engine || 'thermonuclear'), engineOn: !_eSw, engSwitch: _eSw,
                 thrust: _thrusting ? (_isF ? Math.min(1, 0.04 + spd / Math.max(0.1, gameSpeedFactor) / ENEMY_FTR_SPEED) : thrustFrac(spd, ENEMY_CLASS[this.type] || 'assault')) : 0,
                 alloc: _isF ? { sensors: 0, ai: 0 } : { sensors: _al.sensors / 100, ai: _al.ai / 100 },
                 quiet: !!this._hiding || !!this._quietRun, ff: _ff, ft: this._fireFlashType, launch: _lf,
@@ -4486,6 +4549,7 @@ class Ship {
             });
             const _fm = _isF ? 0.5 : 1; // 艦載機は小さい
             this.heatSig = _sg.heat * _fm; this.opticalSig = _sg.optic * _fm; this.emSig = _sg.em * _fm; this.higgsSig = _sg.higgs * _fm;
+            this._sigDirB = _isF ? null : _sg._dirB; this._sigDirV = _isF ? 0 : _sg._dirV; this._dirEng = _isF ? null : (ENGINE_DIR[this.engine] || null); // 第42弾
             this._quietRun = false; // 潜伏中の移動で毎フレーム立て直す
             sigPeakUpdate(this);
             if (this.hp / this.maxHp < WOUNDED_HP_FRAC) {
@@ -5632,7 +5696,9 @@ function generateSector() {
         if (_th) _th.textContent = '自機COM ' + SHIP_JP[comCfg.ship] + ' [' + persLabel(_com.pp) + ']  vs  敵COM ' + SHIP_JP[comCfg.enemy] + ' [' + persLabel(boss.personality) + ']';
     }
     // 第21弾: 敵のエンジン (性格で選ぶ。速さはエンジンの倍率) / 自機のエンジン切替をリセット
-    boss.engine = pickEnemyEngine(boss.personality);
+    { const _env0 = comEnvAt(boss.x, boss.y), _ev0 = comEngineEval(boss.personality || {}, 'search', _env0); // 第42弾: 出現した所の環境と性格で (自機COMと同じ)
+      boss.engine = _ev0.engine; boss._engSwT = 0; boss._engM = { engRevF: _frameCount, engSit: 'search' };
+      if (comDemo) comThinkEvent('e', 'エンジン → ' + ENGINE_JP[_ev0.engine] + ' (' + engineWhy(_ev0, _env0) + ')', 'e' + boss.uid); }
     boss._focus = null; setEnemyFocus(boss, comFocusPlan(boss.personality || {}, 'search', (boss.personality || {}).stealth >= 0.5)); boss._focusF = 0; // 第39弾: 敵も航行モードを持つ (自機と同じ効果)・第41弾: 場面ごとに選び直す
     boss.lureSOS = 1; boss.lureShip = 1; // 第21弾: 敵の囮 (各1個 — 実装で決めた数)
     if (boss._eLo) { boss.lureSOS = boss._eLo.fsos || 0; boss.lureShip = boss._eLo.lure || 0; if (boss.type === 'carrier') boss.droneStock = boss._eLo.attack || 0; } // 第22弾: COM対戦で敵の積み込みを編集した時だけ
@@ -6285,7 +6351,7 @@ document.getElementById('weapon-select')?.addEventListener('change', e => {
     player && (player._fireOrder = null); // 武器を変えたら出しかけの射撃命令は取り消す
 });
 // 第21弾 (オーナー合意): エンジンは戦闘中も切り替えられるが、切替に10秒かかる (その間は推力ゼロ・EMが漏れる)
-const ENGINE_JP = { thermonuclear: '熱核エンジン', pulse: 'パルスエンジン', higgs: 'ヒッグスエンジン', photon: 'フォトンエンジン' };
+const ENGINE_JP = { thermonuclear: '熱核エンジン', pulse: 'EMエンジン', higgs: 'ヒッグスエンジン', photon: 'フォトンエンジン' }; // 第42弾: パルス→EM (内部キーは pulse のまま)
 const ENGINE_SWITCH_TIME = 600, ENGINE_SWITCH_EM = 0.30; // EMの量は実装で決めた値 (制圧・補給中と同じ)
 let engineSwitchT = 0, engineSwitchTo = null, _engCoast = false; // 切替中は機関停止と同じく惰性で漂う
 function requestEngineSwitch(type) {
@@ -6479,36 +6545,94 @@ function enemyBands(e) {
     }
     return e._bp;
 }
-// ── エンジン (自機COMも敵も同じ) ──
-// 性格の構え (隠密=潜航・攻撃的=全速・それ以外=巡航) で、霧の濃さの分布 (マップの面積の割合) にわたって
-//   見つかりやすさ = その構えで一番遠くまで届く帯域の届く割合 + 痕跡 (熱60秒・霧90秒の深さ)
-//   速さ = エンジンの速さ × 霧の減速 (ヒッグスエンジンは霧で速い)
-// を出し、点数 = 速さ × (0.2 + 攻撃性×0.5 + 貪欲さ×0.6) − 見つかりやすさ × (隠密性×1.3 + 慎重さ×0.6) が一番高いもの
-const ENGINE_FOG_DIST = [[0.05, 0.15], [0.12, 0.20], [0.35, 0.35], [0.65, 0.22], [0.92, 0.08]]; // [霧の濃さ, 面積の割合] (第21弾の分布)
-function pickEngineFor(P) {
-    const stance = (P.stealth ?? 0.4) >= 0.5 ? 'silent' : (P.aggression ?? 0.5) >= 0.7 ? 'flank' : 'cruise';
-    const T = stance === 'silent' ? 0.307 : stance === 'flank' ? 0.84 : 0.573;
-    const wS = 0.2 + (P.aggression ?? 0.5) * 0.5 + (P.greed ?? 0.4) * 0.6, wH = (P.stealth ?? 0.4) * 1.3 + (P.caution ?? 0.4) * 0.6;
+// ── エンジン (自機COMも敵も同じ) ── 第42弾: 性格・場面・居る所の環境で見積もる
+// 場面: search=全周に聞かれる / approach=正面の相手に聞かれる / retreat=後ろの相手に聞かれ、痕跡を辿られる / engage=見えている撃ち合い
+// 環境 env.hs = [[霧の濃さ, 重み]...] (居る所とその周り) と、居る所の磁気嵐・熱雲 (それぞれ電磁波・熱を覆う)
+//   速さ = engineSpeedFactor (熱核=1・ヒッグスは霧で速い) / 見つかりやすさ = その場面で相手の居る向きへ一番遠くまで届く帯域の届く割合
+//   痕跡 = 熱核 熱60秒・ヒッグス 霧90秒の深さ / 機動 = EMの加速・旋回
+// 点数 = 速さ×(0.2+攻撃性×0.5+貪欲さ×0.6)×場面 − 見つかりやすさ×(隠密性×1.3+慎重さ×0.6)×場面 − 痕跡×(隠密性×1.2+慎重さ×0.6)×場面 + 機動×場面
+const ENGINE_FOG_DIST = [[0.05, 0.26], [0.15, 0.11], [0.25, 0.12], [0.4, 0.22], [0.58, 0.08], [0.72, 0.08], [0.85, 0.05], [0.95, 0.08]]; // [霧の濃さ, 面積の割合] (第42弾で計測し直した分布)
+const ENGINE_SIT_W = { // 場面ごとの重み (速さ・見つかりやすさ・痕跡・機動) と、相手の居る向き (艦首から)
+    search:   { s: 1.0, h: 1.0, t: 1.0, a: 0.1, dirs: [0, 0.785, 1.571, 2.356, 3.1416, -2.356, -1.571, -0.785] },
+    approach: { s: 1.2, h: 1.2, t: 0.5, a: 0.3, dirs: [0, 0.35, -0.35] },
+    retreat:  { s: 1.5, h: 1.3, t: 1.5, a: 0.6, dirs: [3.1416, 2.79, -2.79] },
+    engage:   { s: 0.6, h: 0.5, t: 0.2, a: 1.0, dirs: [0, 0.6, -0.6, 1.571, -1.571] },
+};
+const ENGINE_KEYS = ['thermonuclear', 'pulse', 'higgs', 'photon'];
+function engineDirGainOff(d, offNose) { const off = Math.PI - Math.abs(_angDiff(offNose, 0)); return off <= d.full ? 1 : off >= d.zero ? 0 : 1 - (off - d.full) / (d.zero - d.full); }
+// 居る所 (重み2) と周り3000uの8点 (重み1) の霧と、居る所の磁気嵐・熱雲
+function comEnvAt(x, y) {
+    const hs = [[getHiggsIntensity(x, y), 2]];
+    for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4; hs.push([getHiggsIntensity(x + Math.cos(a) * 3000, y + Math.sin(a) * 3000), 1]); }
+    return { hs, storm: getStormIntensity(x, y), thermal: getThermalIntensity(x, y) };
+}
+function comEngineEval(P, sit, env) {
+    const a = P.aggression ?? 0.5, st = P.stealth ?? 0.4, g = P.greed ?? 0.4, ca = P.caution ?? 0.4;
+    const W = ENGINE_SIT_W[sit] || ENGINE_SIT_W.search;
+    const stance = st >= 0.5 ? 'silent' : (a >= 0.7 && sit !== 'search') ? 'flank' : 'cruise';
+    const gain = stance === 'silent' ? SILENT_SPEED_MULT : stance === 'flank' ? 1.5 : 1;
+    const wS = (0.2 + a * 0.5 + g * 0.6) * W.s, wH = (st * 1.3 + ca * 0.6) * W.h, wT = (st * 1.2 + ca * 0.6) * W.t; // 痕跡は辿られる — 隠密・慎重ほど嫌う
+    const hs = (env && env.hs) || ENGINE_FOG_DIST;
+    let wsum = 0; for (const [, w] of hs) wsum += w;
+    const scores = {}, detail = {};
     let best = 'thermonuclear', bv = -1e9;
-    const scores = {};
-    for (const E of ['thermonuclear', 'pulse', 'photon', 'higgs']) {
-        let sc = 0;
-        for (const [h, w] of ENGINE_FOG_DIST) {
-            const sg = emitSigs({ engine: E, engineOn: true, thrust: T, alloc: { sensors: 0.3, ai: 0.5 }, quiet: stance === 'silent', hHere: h, pulsePh: (150 - (_frameCount % 150)) % 150 });
-            let ex = 0;
-            for (const b of BANDS) { const r = sg[b] * (1 - h * PATH_MEDIA.fog.a[b]); if (r > 0) ex = Math.max(ex, 1 - sensorConfig[b].threshold * 0.5 / r); }
+    for (const E of ENGINE_KEYS) {
+        let spd = 0, ex = 0, tr = 0;
+        const dd = ENGINE_DIR[E];
+        for (const [h, w] of hs) {
+            const v = engineSpeedFactor(E, h);
+            const T = Math.min(1, 0.04 + 0.8 * Math.min(1.25, v * gain / 1.5));
+            const sg = emitSigs({ engine: E, engineOn: true, thrust: T, alloc: { sensors: 0.3, ai: 0.5 }, quiet: stance === 'silent', hHere: h, storm: env ? env.storm : 0, thermal: env ? env.thermal : 0, pulsePh: (150 - (_frameCount % 150)) % 150 });
+            let exh = 0;
+            for (const off of W.dirs) {
+                const gd = dd ? engineDirGainOff(dd, off) : 1;
+                let m = 0;
+                for (const b of BANDS) {
+                    let sb = sg[b]; if (dd && b === sg._dirB) sb -= sg._dirV * (1 - gd);
+                    const r = sb * (1 - h * PATH_MEDIA.fog.a[b]);
+                    if (r > 0) m = Math.max(m, 1 - sensorConfig[b].threshold * 0.5 / r);
+                }
+                exh += m / W.dirs.length;
+            }
             const tb = ENGINE_TRAIL[E];
             const trail = tb ? (TRAIL_LIFE[tb] / 5400) * T * (tb === 'higgs' ? 0.25 + 0.55 * h : 0.6) * (stance === 'silent' ? 0.7 : 1) : 0;
-            const eg = ENGINE_TYPES[E];
-            const spd = eg.speedMult * (1 - h * 0.45) + eg.higgsSpeedBonus * h;
-            sc += w * (spd * wS - (ex + 0.6 * trail) * wH);
+            spd += v * w / wsum; ex += exh * w / wsum; tr += trail * w / wsum;
         }
+        const ag = engineAgility(E), agi = (ag.accel - 1) * 0.3 + (ag.turn - 1) * 0.4;
+        const sc = spd * wS - ex * wH - tr * wT + agi * W.a;
         scores[E] = Math.round(sc * 100) / 100;
+        detail[E] = { spd: Math.round(spd * 100), ex: Math.round(ex * 100), tr: Math.round(tr * 100) };
         if (sc > bv) { bv = sc; best = E; }
     }
-    return { engine: best, scores, stance };
+    return { engine: best, scores, detail, stance, sit };
 }
-function pickEnemyEngine(p) { return pickEngineFor(p || {}).engine; } // 第41弾: 自機COMと同じ選び方
+function pickEngineFor(P, env) { return comEngineEval(P, 'search', env); } // 第41弾の名前のまま (第42弾: 場面と環境つきの comEngineEval)
+// 第42弾: 試合中にエンジンを替えるか (自機COMも敵も同じ)。30秒ごとに見直し、点数が方針の差 (0.06+0.10×静けさ) 以上よく、前の切替から90秒たっていれば替える
+const ENGINE_REVIEW = 1800, ENGINE_MIN_GAP = 5400;
+function comEngineDecide(m, P, sit, env, cur, now) {
+    if (now - (m.engRevF ?? -1e9) < ENGINE_REVIEW && sit === m.engSit) return null;
+    m.engRevF = now; m.engSit = sit;
+    const ev = comEngineEval(P, sit, env);
+    const still = comDoctrine(P).still;
+    if (ev.engine === cur || now - (m.engSwF ?? -1e9) < ENGINE_MIN_GAP) return null;
+    if (ev.scores[ev.engine] - ev.scores[cur] < 0.06 + 0.10 * still) return null;
+    m.engSwF = now;
+    return ev;
+}
+const _SIT_JP = { search: '捜索', approach: '接近', retreat: '退く', engage: '交戦' };
+function engineWhy(ev, env) {
+    const d = ev.detail[ev.engine], h = env && env.hs ? env.hs[0][0] : null;
+    return _SIT_JP[ev.sit] + (h !== null ? '・霧' + Math.round(h * 100) + '%' : '') + ' — 速さ' + d.spd + '%・聞かれる' + d.ex + '%' + (d.tr ? '・痕跡' : '') + ' / 点数 ' + ENGINE_KEYS.map(k => ENGINE_SHORT[k] + ev.scores[k]).join(' ');
+}
+const ENGINE_SHORT = { thermonuclear: '熱核', pulse: 'EM', higgs: 'ヒッグス', photon: 'フォトン' };
+// 敵のエンジン切替 (自艦の requestEngineSwitch と同じ: 10秒は推力ゼロで惰性・EMが漏れる)
+function enemyRequestEngine(e, E, why) {
+    if (!ENGINE_TYPES[E] || e.engine === E || e._engSwT > 0) return false;
+    e._engSwT = ENGINE_SWITCH_TIME; e._engSwTo = E; e._swAng = e.angle;
+    if (comDemo) comThinkEvent('e', 'エンジン → ' + ENGINE_JP[E] + 'へ切替 (10秒は惰性)' + (why ? ' — ' + why : ''), 'e' + e.uid);
+    return true;
+}
+function pickEnemyEngine(p, x, y) { return comEngineEval(p || {}, 'search', x !== undefined ? comEnvAt(x, y) : null).engine; } // 第42弾: 出現した所の環境で
 // ── 航行モード (自機COMも敵も同じ) — 性格と「今どの場面か」で選ぶ ──
 // 捜索: 探知 (遠くを動かずに聴く — 慎重・隠密) / 機関 (広く動き回る — 貪欲・攻撃的)
 // 追跡: 解析 (推定円を早く絞る — 潜航中か隠密でない時。潜航していない隠密は演算の電磁波を嫌う) / 探知 (慎重) / 機関 (寄って行く — 攻撃的)
@@ -7889,10 +8013,10 @@ function listeningPosts(side) {
     if (side === 'player') for (const d of playerDrones) if (d.type === 'scout' && d.hp > 0 && d._q >= DRONE_LINK_WEAK) out.push({ o: d, x: d.x, y: d.y, R: SCOUT_LISTEN_R, lbl: '哨戒機', src: 'd' + d._id, noise: 1 + 1.5 * Math.max(0, 1 - d._q / DRONE_LINK_STRONG) });
     return out;
 }
-function _maxBandSig(t) { let m = 0; for (const b of BANDS) m = Math.max(m, sensorConfig[b].sig(t) || 0); return m; }
+function _maxBandSig(t, rx, ry) { let m = 0; for (const b of BANDS) m = Math.max(m, rx === undefined ? (sensorConfig[b].sig(t) || 0) : sigToward(t, b, rx, ry)); return m; } // 第42弾: 受け手の向き
 function _sigZoneRoll(t, posts) {
     const nearP = posts.find(p => Math.hypot(t.x - p.x, t.y - p.y) < SIGZ_R), near = !!nearP;
-    if (near && _maxBandSig(t) >= SIGZ_TH) t._szT = (t._szT || 0) + gameSpeedFactor; else t._szT = 0;
+    if (near && _maxBandSig(t, nearP.x, nearP.y) >= SIGZ_TH) t._szT = (t._szT || 0) + gameSpeedFactor; else t._szT = 0;
     if (t._szT < SIGZ_HOLD || _frameCount - (t._szLast || -1e9) < SIGZ_PERIOD) return null;
     t._szLast = _frameCount;
     if (Math.random() >= SIGZ_P) return null;
@@ -8091,7 +8215,7 @@ function relayListen() {
             const d = Math.hypot(e.x - n.x, e.y - n.y);
             if (d > RR) continue;
             let s0 = 0;
-            for (const b of BANDS) s0 = Math.max(s0, sigPeak(e, b)); // 第39弾: 直近1秒の最大値 (敵の聴音局と同じ)
+            for (const b of BANDS) s0 = Math.max(s0, sigToward(e, b, n.x, n.y)); // 第39弾: 直近1秒の最大値 (敵の聴音局と同じ) / 第42弾: 向き
             const sig = s0 * (1 - d / RR) * (1 - getHiggsIntensity((e.x + n.x) / 2, (e.y + n.y) / 2) * 0.5);
             if (sig < 0.12) continue;
             const conf = Math.min(1, (sig - 0.12) / 0.5);
@@ -8238,7 +8362,7 @@ function checkPassiveDetection() {
     for (const e of enemies) {
         if (e.hp <= 0) continue;
         if (e.type === 'fighter' && Math.hypot(e.x - px, e.y - py) > 2500) continue; // 艦載機は小さく静か — 近くでないと聴こえない (方位で追う相手ではない)
-        const h = hearSource(e, 'p', px, py, e.x, e.y, b => sigPeak(e, b), range, sensorOrder);
+        const h = hearSource(e, 'p', px, py, e.x, e.y, b => sigToward(e, b, px, py), range, sensorOrder);
         if (h) {
             allContacts.push({ x: e.x, y: e.y, sig: h.sig, band: h.band, nb: h.nb, noise: h.noise, angle: Math.atan2(e.y - py, e.x - px), sourceId: enemySid(e), clN: e.type === 'fighter' ? 0 : clutterCount(e.x, e.y, e), ecm: epm(e).ecm });
             if (huntStats && huntStats.firstContact < 0) huntStats.firstContact = _frameCount - huntStats.startFrame; // 戦闘詳報: 初接触
@@ -12147,7 +12271,7 @@ function rxLevels(includeOff, all) {
     for (const e of enemies) {
         if (e.hp <= 0 || e._dying) continue;
         if (!all && rxKnown(enemySid(e))) continue;
-        hearLevels(e, 'p', px, py, e.x, e.y, b => sigPeak(e, b), range, out, bands);
+        hearLevels(e, 'p', px, py, e.x, e.y, b => sigToward(e, b, px, py), range, out, bands);
     }
     for (const cv of convoys) { if (!all && rxKnown(cv.sid)) continue; hearLevels(cv, 'p', px, py, cv.x, cv.y, () => CONVOY_SIG, range, out, bands); } // 第34弾: 輸送船
     for (const f of fieldSignals) { if (!all && rxKnown(f.sid)) continue; hearLevels(f, 'p', px, py, f.x, f.y, b => fieldSig(f, b), range, out, bands); } // 第31弾: 自然/お宝の信号
@@ -12573,12 +12697,12 @@ function comPilotStep() {
     const r = xoEvaluate();
     c.mode = '';
     const D = c.D = comDoctrine(P); // 第41弾: 性格から立ち回りの方針
-    // 第41弾: エンジンは試合の始めに性格で選ぶ (敵と同じ pickEngineFor。始めの10秒なら切替の惰性なし)
+    // 第41弾: エンジンは試合の始めに選ぶ (始めの10秒なら切替の惰性なし)。第42弾: 性格と居る所の環境で (敵と同じ comEngineEval)・試合中も場面で替える (下)
     if (!c.engSet) {
-        c.engSet = true;
-        const pe = pickEngineFor(P);
+        c.engSet = true; c.engM = { engRevF: now, engSit: 'search' };
+        const env0 = comEnvAt(player.x, player.y), pe = comEngineEval(P, 'search', env0);
         if (pe.engine !== gameState.engineType && now < 900) { gameState.engineType = pe.engine; if (typeof _syncEngineUI === 'function') _syncEngineUI(); }
-        comThinkEvent('p', 'エンジン → ' + ENGINE_JP[pe.engine] + ' (構え: ' + ({ silent: '潜航', cruise: '巡航', flank: '全速' })[pe.stance] + ' / 点数 ' + Object.keys(pe.scores).map(k => ENGINE_JP[k] + pe.scores[k]).join('・') + ')');
+        comThinkEvent('p', 'エンジン → ' + ENGINE_JP[pe.engine] + ' (構え: ' + ({ silent: '潜航', cruise: '巡航', flank: '全速' })[pe.stance] + ' / ' + engineWhy(pe, env0) + ')');
     }
     // 追跡を始めた時刻 (乗り換えの判断に使う)
     if (lockedSignalId !== c.lockSid) { c.lockSid = lockedSignalId; c.lockF = now; c.lockHeardF = now; }
@@ -12620,6 +12744,12 @@ function comPilotStep() {
         if (fk !== c.focus && (sit === 'engage' || sit === 'retreat' || now - (c.focusF || -1e9) >= 1200)) {
             c.focus = fk; c.focusF = now; setGenFocus(fk, true);
             comThinkEvent('p', '航行モード → ' + FOCUS_JP[fk] + ' (' + ({ search: '捜索', track: '追跡', engage: '交戦', retreat: '退く' })[sit] + ')');
+        }
+        // 第42弾: エンジンも場面と居る所の環境で (敵と同じ comEngineDecide)。替えるのは捜索・接近の間で、兆候 (照射・攻撃) が無く、ミサイルが来ていない時だけ (10秒は惰性になる)
+        const esit = sit === 'track' ? (D.approach ? 'approach' : 'search') : sit;
+        if ((esit === 'search' || esit === 'approach') && engineSwitchT <= 0 && !playerCoasting && playerExposureLevel < 2 && !incomingMissile(player, false)) {
+            const env = comEnvAt(player.x, player.y), ev = comEngineDecide(c.engM || (c.engM = {}), P, esit, env, gameState.engineType, now);
+            if (ev) { requestEngineSwitch(ev.engine); comThinkEvent('p', 'エンジン → ' + ENGINE_JP[ev.engine] + 'へ切替 (10秒は惰性) — ' + engineWhy(ev, env)); }
         }
     }
     // 第21弾: 状況適応の性格 (自機COM) — 相手を掴んでいる=受信中の敵信号か有視界
@@ -13042,6 +13172,21 @@ function _enemyThought(e) {
 }
 
 // 副長の状況判断。優先度順に「今いちばん大事なこと」と、その場で押せる1アクションを返す
+var _xoEng = { f: -1e9, text: '', chk: -1e9 }; // var: 初期化の途中で呼ばれても TDZ にならないように
+function xoEngineAdvice() {
+    if (!player || player.hp <= 0 || comDemo || engineSwitchT > 0) return null;
+    const now = _frameCount;
+    if (now - _xoEng.f < 480) return _xoEng.text;
+    if (now - _xoEng.f < 5400 || now - _xoEng.chk < 300) return null;
+    _xoEng.chk = now;
+    const sit = lockedSignalId ? 'approach' : 'search', env = comEnvAt(player.x, player.y); // 追跡中=接近 (正面の相手に聞かれる)・それ以外=捜索 (全周)
+    const ev = comEngineEval(COM_PRESETS.standard.p, sit, env), cur = gameState.engineType;
+    if (ev.engine === cur || ev.scores[ev.engine] - ev.scores[cur] < 0.15) return null;
+    const d = ev.detail[ev.engine], dc = ev.detail[cur];
+    _xoEng.f = now;
+    _xoEng.text = 'エンジン: 霧' + Math.round(env.hs[0][0] * 100) + '%の' + (sit === 'approach' ? '接近' : '捜索') + 'なら' + ENGINE_JP[ev.engine] + ' (速さ' + d.spd + '%・聞かれる' + d.ex + '% / 今の' + ENGINE_SHORT[cur] + ' 速さ' + dc.spd + '%・聞かれる' + dc.ex + '%)。切替は10秒の惰性';
+    return _xoEng.text;
+}
 function xoEvaluate() {
     if (!player) return null;
     if (player.hp <= 0) return { tone: 'bad', text: '艦体崩壊 — 通信途絶' };
@@ -13214,6 +13359,8 @@ function xoEvaluate() {
     // 第31弾 (オーナー): OFFの帯域に反応 → ONにすれば方位が取れる
     { const rxa = rxLevels(true); let ob = null; for (const b of BANDS) if (!sensorsOn[b] && rxa[b] >= 0.5 && (!ob || rxa[b] > rxa[ob])) ob = b;
       if (ob) return { tone: 'info', text: 'OFFの' + (BAND_JP[ob] || ob) + '帯に反応 — ONにすれば方位が取れる (2本目以降は自艦も漏れる)' }; }
+    // 第42弾: エンジンの使い分け — 今の場面と周りの霧で、標準の性格の見積もりが今のエンジンよりはっきり良ければ8秒だけ言う (90秒に1回・実行ボタンなし)
+    { const ea = xoEngineAdvice(); if (ea) return { tone: 'info', text: ea }; }
     // 9) 第20弾: 手掛かりが無い → 情報の取れる所を勧める (司令部情報は撤去)
     const src = xoInfoSource();
     if (src) {
