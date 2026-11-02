@@ -158,6 +158,8 @@ const COMPUTE_EM_MULT = 0.5;
 const ENGINE_MAIN = { thermonuclear: 'heat', pulse: 'em', higgs: 'higgs', photon: 'optic' };
 const ENGINE_TRAIL = { thermonuclear: 'heat', higgs: 'higgs' }; // 痕跡の帯域 (パルス・フォトンは残さない)
 const SIG_THRUST = 0.6, PULSE_PERIOD = 150, PULSE_ON = 30, PULSE_PEAK = 1.25, PULSE_LOW = 0.2, PHOTON_IDLE = 0.35;
+// 第41弾: エンジンごとの推進の信号の強さ (主帯域に掛ける)。フォトンは最も速い代わりに最も明るい — 霧の中では吸われるが、開けた所では遠くから見える
+const ENGINE_SIG_GAIN = { thermonuclear: 1, pulse: 1, photon: 1.5, higgs: 1 };
 // 行動ごとに出る信号 (その行動の間だけ足す)。発砲・発進は1.5秒/1秒で薄れる
 const SIG_ACT = {
     kinFire:    { optic: 0.6, heat: 0.10 },              // 実弾の発砲: 閃光
@@ -183,9 +185,10 @@ function emitSigs(o) {
     const mt = o.mt || { e: 1, w: 1, s: 1, a: 1 }, pm = o.pm || PM_DEF;
     if (o.engineOn) {
         const T = Math.max(0, Math.min(1, o.thrust));
-        for (const b of BANDS) out[b] = T * SIG_THRUST * es[b];
+        const gn = ENGINE_SIG_GAIN[o.engine] || 1;
+        for (const b of BANDS) out[b] = T * SIG_THRUST * es[b] * (b === main ? gn : 1);
         if (main === 'em') out.em *= ((_frameCount + (o.pulsePh || 0)) % PULSE_PERIOD) < PULSE_ON ? PULSE_PEAK : PULSE_LOW;
-        else if (main === 'optic') out.optic = SIG_THRUST * (PHOTON_IDLE + (1 - PHOTON_IDLE) * T) * (1 - 0.6 * (o.hHere || 0));
+        else if (main === 'optic') out.optic = SIG_THRUST * gn * (PHOTON_IDLE + (1 - PHOTON_IDLE) * T) * (1 - 0.6 * (o.hHere || 0));
         else if (main === 'higgs') out.higgs = T * SIG_THRUST * (0.5 + 0.5 * (o.hHere || 0));
         for (const b of BANDS) out[b] *= mt.e;
     }
@@ -3583,8 +3586,16 @@ class Ship {
             if (this.personality && this.personality._adaptive && (_frameCount + this.uid) % 60 === 0) {
                 const _ac = (this.aiState === 'hunting' || this.aiState === 'combat') && (this.contactFreshness || 0) > 0.2;
                 const _am = adaptPersonality(this.personality, _ac, this.hp / this.maxHp);
-                if (_am) setEnemyFocus(this, pickFocus(this.personality)); // 第39弾: 性格が変われば航行モードも
+                if (_am) this._focusF = -1e9; // 第39弾: 性格が変われば航行モードも (第41弾: 下の場面ごとの選び方で選び直す)
                 if (_am && comDemo) comThinkEvent('e', '性格が変わる → ' + ADAPT_MODES[_am].label + ' (' + (_am === 'cautious' ? '耐久' + _pct(this.hp / this.maxHp) + ' < 40%' : _am === 'aggressive' ? '自機を掴んだ' : _am === 'greedy' ? '90秒手掛かりなし' : '見失って60秒') + ')', 'e' + this.uid);
+            }
+            // 第41弾: 航行モードは自機COMと同じく性格と場面で (comFocusPlan)。1秒ごとに見て、20秒は変えない (交戦・退く時はすぐ)
+            if (this.type !== 'fighter' && (_frameCount + this.uid) % 60 === 0) {
+                const _pf = this.personality || { aggression: 0.5, stealth: 0.4, greed: 0.4, caution: 0.4 };
+                const _sit = (this._hiding || this.hp / this.maxHp < 0.12 + (_pf.caution ?? 0.4) * 0.43) ? 'retreat' : (this.aiState === 'combat' && this.detectionTimer > 60) ? 'engage'
+                           : (this.aiState === 'combat' || this.aiState === 'hunting') ? 'track' : 'search';
+                const _fk = comFocusPlan(_pf, _sit, !!(this._quietRun || this._hiding || (_pf.stealth ?? 0) >= 0.5));
+                if (_fk !== this._focus && (_sit === 'engage' || _sit === 'retreat' || _frameCount - (this._focusF || -1e9) >= 1200)) { this._focusF = _frameCount; setEnemyFocus(this, _fk); }
             }
             // 発砲フラッシュタイマー更新 (発砲直後だけ可視になる)
             if (this.fireFlashTimer > 0) {
@@ -3718,7 +3729,7 @@ class Ship {
             if (player && player.hp > 0) {
                 if (_listen && this.type !== 'fighter' || _listen && distToPlayer < 2500) {
                     const h = hearSource(player, 'e' + this.uid, this.x, this.y, player.x, player.y, b => sigPeak(player, b), sigRange, enemyBands(this)); // 第21弾: 敵も聴いている帯域だけ
-                    if (h) { playerSigDetected = true; detectedSigStrength = h.sig; domSig = h.band; _hBand = h.band; _hNoise = h.noise; _hNb = h.nb; }
+                    if (h) { playerSigDetected = true; detectedSigStrength = h.sig; domSig = h.band; _hBand = h.band; _hNoise = h.noise; _hNb = h.nb; this._heardBand = h.band; this._heardBandF = _frameCount; } // 第41弾: 聞こえた帯域 (帯域の選び方に使う)
                 }
                 // 接近探知 (デブリ擬態中は岩塊に紛れて至近でも掴めない — 至近を通過されてもやり過ごせる)
                 if (!isBottomed && !(lullSheltered(player) && distToPlayer > BASE_VISION_RADIUS) && distToPlayer < Math.max(VIS_CLOSE, myDetectRange) && losReach(this.x, this.y, Math.atan2(player.y - this.y, player.x - this.x), Math.max(VIS_CLOSE, myDetectRange)) >= distToPlayer) { // 第22弾: 自機と同じ視線ルール (300u以内は必ず)
@@ -4358,7 +4369,7 @@ class Ship {
                         this.setTarget(_fpick.x, _fpick.y);
                         if (comDemo) comThinkEvent('e', (_fpick.kind === 'cache' ? '弱く平坦な信号 → 漂流コンテナと見て回収に向かう' : '信号を確かめに行く') + ' (' + _dirTxt(this.x, this.y, _fpick.x, _fpick.y) + ')', 'e' + this.uid);
                         this._roam = 'cache';
-                    } else if (this.type !== 'fighter' && !_hasScent && (this.lureSOS || 0) > 0 && (_pers.caution >= 0.5 || _pers.stealth >= 0.5) && _frameCount - (this._lastScentF || 0) > ENEMY_ROAM_QUIET * (1.4 - _pers.aggression) && Math.random() < 0.01) {
+                    } else if (this.type !== 'fighter' && !_hasScent && (this.lureSOS || 0) > 0 && (_pers.caution >= 0.5 || _pers.stealth >= 0.5) && _frameCount - (this._lastScentF || 0) > ENEMY_ROAM_QUIET * (1.4 - _pers.aggression) * (0.7 + 0.8 * (_pers.stealth ?? 0.4)) && Math.random() < 0.01) {
                         // 第21弾: 慎重・隠密な個体は偽SOSで誘い出し、その近くの霧に潜んで待ち伏せる (自機と同じ偽SOS)
                         this.lureSOS--;
                         const _sa = Math.atan2(MAP_CY - this.y, MAP_CX - this.x) + (Math.random() - 0.5) * 1.2, _sd = 3000 + Math.random() * 2000;
@@ -4367,8 +4378,8 @@ class Ship {
                         const _amb = findHidingSpot(_sp.x, _sp.y, 1500);
                         this.setTarget(_amb.x, _amb.y); this._roam = 'patrol';
                         if (comDemo) comThinkEvent('e', '気配なし → 偽SOSを ' + _dirTxt(this.x, this.y, _sp.x, _sp.y) + ' に出し、その近くの霧で待ち伏せる', 'e' + this.uid);
-                    } else if (this.type !== 'fighter' && !_hasScent && ((_frameCount - (this._lastScentF || 0) > ENEMY_ROAM_QUIET * (1.4 - _pers.aggression) && Math.random() < 0.02)
-                               || (this._partHunt = enemySlotsUsed(this) < enemySlotsMax(this) && _frameCount - (this._lastScentF || 0) > ENEMY_PART_QUIET && Math.random() < 0.15 + _pers.greed * 0.3))) {
+                    } else if (this.type !== 'fighter' && !_hasScent && ((_frameCount - (this._lastScentF || 0) > ENEMY_ROAM_QUIET * (1.4 - _pers.aggression) * (0.7 + 0.8 * (_pers.stealth ?? 0.4)) && Math.random() < 0.02)
+                               || (this._partHunt = enemySlotsUsed(this) < enemySlotsMax(this) && _frameCount - (this._lastScentF || 0) > ENEMY_PART_QUIET && comDoctrine(_pers).partHunt && Math.random() < 0.15 + _pers.greed * 0.3))) { // 第41弾: 寄り道は自機COMと同じ方針 (隠密は寄り道しない)
                         // 第33弾: 部品の枠が空いていれば、20秒気配が無いだけで部品を取りに出る (長い静けさを待たない)
                         // 第20弾: 長く何も聞こえない → 隠れ場所伝いに区間ごとに哨戒へ (行き先: 自分のものでないノード / コロニー / マップ中央)
                         let g = this._roamGoal;
@@ -5622,7 +5633,7 @@ function generateSector() {
     }
     // 第21弾: 敵のエンジン (性格で選ぶ。速さはエンジンの倍率) / 自機のエンジン切替をリセット
     boss.engine = pickEnemyEngine(boss.personality);
-    boss._focus = null; setEnemyFocus(boss, pickFocus(boss.personality)); // 第39弾: 敵も航行モードを持つ (自機と同じ効果)
+    boss._focus = null; setEnemyFocus(boss, comFocusPlan(boss.personality || {}, 'search', (boss.personality || {}).stealth >= 0.5)); boss._focusF = 0; // 第39弾: 敵も航行モードを持つ (自機と同じ効果)・第41弾: 場面ごとに選び直す
     boss.lureSOS = 1; boss.lureShip = 1; // 第21弾: 敵の囮 (各1個 — 実装で決めた数)
     if (boss._eLo) { boss.lureSOS = boss._eLo.fsos || 0; boss.lureShip = boss._eLo.lure || 0; if (boss.type === 'carrier') boss.droneStock = boss._eLo.attack || 0; } // 第22弾: COM対戦で敵の積み込みを編集した時だけ
     boss.upgSpeed = (ENGINE_TYPES[boss.engine] || ENGINE_TYPES.thermonuclear).speedMult;
@@ -6425,31 +6436,100 @@ function _syncBandUI() {
 }
 // 第21弾: 敵が聴いている帯域 — 性格で本数 (攻撃的・隠れない個体ほど多く聴いて漏らす)。順は 熱→EM→ヒッグス→光学
 const ENEMY_BAND_ORDER = ['heat', 'em', 'higgs', 'optic'];
-function enemyBands(e) {
-    const p = e.personality || { aggression: 0.5, stealth: 0.4 };
-    const n = Math.max(1, Math.min(4, 1 + Math.round(p.aggression * 2 + (1 - p.stealth))));
-    return ENEMY_BAND_ORDER.slice(0, n);
+// ═══ 第41弾 (オーナー「COMの動き・センサー・エンジン・航行モードが性格と結びついていない」): COMの立ち回り — 自機COMも敵も同じ関数 ═══
+// 性格の4軸から「立ち回りの方針」を作る。静けさ = 隠密性と慎重さで上がり、攻撃性で下がる
+//   静か (隠密): 止まって長く聴く・測量はゆっくり長い1本・信号に飛びつかない (追跡を長く続ける)・寄り道しない・待ち伏せで探す
+//   騒がしい (攻撃的): 短く聴いてすぐ動く・短い測量を重ねる・寄って行く・能動的に探し回る
+function comDoctrine(P) {
+    const cl = (v) => Math.max(0, Math.min(1, v));
+    const still = cl((P.stealth ?? 0.4) * 0.75 + (P.caution ?? 0.4) * 0.35 - (P.aggression ?? 0.5) * 0.5);
+    return {
+        still,
+        listenSec: 8 + 82 * still,          // 捜索で着いたら止まって聴く秒数
+        legHoldSec: 15 + 45 * still,        // 一度引いた航路を変えない秒数
+        perpLeg: 2600 - 900 * still,        // 測量の航路の長さ (静かなほど短く刻み、長く止まって聴く)
+        perpWaitSec: 6 + 54 * still,        // 測量の航路を1本走ったら止まって聴く秒数
+        commitSec: 20 + 70 * still,         // 追跡する信号を乗り換えない秒数
+        switchMargin: 0.15 + 0.25 * still,  // 乗り換えるのは、艦影の見込みがこれだけ上の信号だけ
+        partHunt: (P.greed ?? 0.4) - (P.stealth ?? 0.4) * 0.45 >= 0.05,
+        partRange: 6000 + 9000 * cl((P.greed ?? 0.4) - (P.stealth ?? 0.4) * 0.3),
+        convoy: (P.greed ?? 0.4) + (P.aggression ?? 0.5) - (P.stealth ?? 0.4) * 0.6 >= 0.45,
+        approach: (P.aggression ?? 0.5) >= 0.45 || still < 0.45, // 射程外の相手へ寄って行くか (隠密は寄らずに待つ)
+        followMax: still >= 0.5 ? 2500 + 6000 * (1 - still) : 1e9, // AIの「その方面へ」(記録の方位線・コロニー等) に従う距離 (待ち伏せは近い所だけ)
+        search: still >= 0.5 ? 'ambush' : 'sweep',
+        ambushSec: (8 + 82 * still) * 1.6, // 待ち伏せの場所で止まって聴く秒数
+    };
 }
-// 第21弾: 敵のエンジン — 性格で選ぶ (隠密=ヒッグス / 攻撃的=フォトン / 貪欲=パルス / それ以外=熱核)
-// 第39弾: COM (敵・自機COM) の航行モード — 性格の一番強い傾向で選ぶ (攻撃性→兵装 / 慎重さ→探知 / 貪欲さ→機関 / 隠密性→解析)
-function pickFocus(p) {
-    if (!p) return 'balance';
-    const sc = { weapon: (p.aggression ?? 0.5) - 0.7, sensor: (p.caution ?? 0.4) - 0.6, engine: (p.greed ?? 0.4) - 0.7, analysis: (p.stealth ?? 0.3) - 0.6 };
-    let best = 'balance', bv = 0;
+// ── 聴く帯域 (自機COMも敵も同じ) ──
+// 本数 = 1 + 攻撃性×2 + 慎重さ×0.5 − 隠密性×1.5 (2本目からは自艦が漏れる)。
+// 並び = 相手を最近聞いた帯域を先頭 → 残りは居る場所の霧で弱まりにくい順 (電磁波 → 霧の乱れ → 熱 → 光)。
+// 60秒何も聞こえなければ、先頭 (漏れない1本) を20秒ごとに4帯域で回して聴き回す
+function comBandPlan(P, heardBand, heardF, h) {
+    const n = Math.max(1, Math.min(4, 1 + Math.round((P.aggression ?? 0.5) * 2 + (P.caution ?? 0.4) * 0.5 - (P.stealth ?? 0.4) * 1.5)));
+    const rank = BANDS.slice().sort((a, b) => (1 - h * PATH_MEDIA.fog.a[a]) - (1 - h * PATH_MEDIA.fog.a[b])).reverse();
+    let order;
+    if (heardBand && _frameCount - (heardF || -1e9) < 3600) order = [heardBand].concat(rank.filter(b => b !== heardBand));
+    else { const sw = BANDS[Math.floor(_frameCount / 1200) % 4]; order = [sw].concat(rank.filter(b => b !== sw)); }
+    return order.slice(0, n);
+}
+function enemyBands(e) {
+    if (!e._bp || _frameCount - (e._bpF || -1e9) >= 600) { // 10秒ごとに見直す
+        e._bp = comBandPlan(e.personality || { aggression: 0.5, stealth: 0.4, caution: 0.4 }, e._heardBand, e._heardBandF, getHiggsIntensity(e.x, e.y));
+        e._bpF = _frameCount;
+    }
+    return e._bp;
+}
+// ── エンジン (自機COMも敵も同じ) ──
+// 性格の構え (隠密=潜航・攻撃的=全速・それ以外=巡航) で、霧の濃さの分布 (マップの面積の割合) にわたって
+//   見つかりやすさ = その構えで一番遠くまで届く帯域の届く割合 + 痕跡 (熱60秒・霧90秒の深さ)
+//   速さ = エンジンの速さ × 霧の減速 (ヒッグスエンジンは霧で速い)
+// を出し、点数 = 速さ × (0.2 + 攻撃性×0.5 + 貪欲さ×0.6) − 見つかりやすさ × (隠密性×1.3 + 慎重さ×0.6) が一番高いもの
+const ENGINE_FOG_DIST = [[0.05, 0.15], [0.12, 0.20], [0.35, 0.35], [0.65, 0.22], [0.92, 0.08]]; // [霧の濃さ, 面積の割合] (第21弾の分布)
+function pickEngineFor(P) {
+    const stance = (P.stealth ?? 0.4) >= 0.5 ? 'silent' : (P.aggression ?? 0.5) >= 0.7 ? 'flank' : 'cruise';
+    const T = stance === 'silent' ? 0.307 : stance === 'flank' ? 0.84 : 0.573;
+    const wS = 0.2 + (P.aggression ?? 0.5) * 0.5 + (P.greed ?? 0.4) * 0.6, wH = (P.stealth ?? 0.4) * 1.3 + (P.caution ?? 0.4) * 0.6;
+    let best = 'thermonuclear', bv = -1e9;
+    const scores = {};
+    for (const E of ['thermonuclear', 'pulse', 'photon', 'higgs']) {
+        let sc = 0;
+        for (const [h, w] of ENGINE_FOG_DIST) {
+            const sg = emitSigs({ engine: E, engineOn: true, thrust: T, alloc: { sensors: 0.3, ai: 0.5 }, quiet: stance === 'silent', hHere: h, pulsePh: (150 - (_frameCount % 150)) % 150 });
+            let ex = 0;
+            for (const b of BANDS) { const r = sg[b] * (1 - h * PATH_MEDIA.fog.a[b]); if (r > 0) ex = Math.max(ex, 1 - sensorConfig[b].threshold * 0.5 / r); }
+            const tb = ENGINE_TRAIL[E];
+            const trail = tb ? (TRAIL_LIFE[tb] / 5400) * T * (tb === 'higgs' ? 0.25 + 0.55 * h : 0.6) * (stance === 'silent' ? 0.7 : 1) : 0;
+            const eg = ENGINE_TYPES[E];
+            const spd = eg.speedMult * (1 - h * 0.45) + eg.higgsSpeedBonus * h;
+            sc += w * (spd * wS - (ex + 0.6 * trail) * wH);
+        }
+        scores[E] = Math.round(sc * 100) / 100;
+        if (sc > bv) { bv = sc; best = E; }
+    }
+    return { engine: best, scores, stance };
+}
+function pickEnemyEngine(p) { return pickEngineFor(p || {}).engine; } // 第41弾: 自機COMと同じ選び方
+// ── 航行モード (自機COMも敵も同じ) — 性格と「今どの場面か」で選ぶ ──
+// 捜索: 探知 (遠くを動かずに聴く — 慎重・隠密) / 機関 (広く動き回る — 貪欲・攻撃的)
+// 追跡: 解析 (推定円を早く絞る — 潜航中か隠密でない時。潜航していない隠密は演算の電磁波を嫌う) / 探知 (慎重) / 機関 (寄って行く — 攻撃的)
+// 交戦: 兵装 / 退く: 機関。20秒は変えない
+function comFocusPlan(P, situation, quiet) {
+    const a = P.aggression ?? 0.5, st = P.stealth ?? 0.4, g = P.greed ?? 0.4, ca = P.caution ?? 0.4;
+    let sc;
+    if (situation === 'retreat') return 'engine';
+    if (situation === 'engage') return 'weapon';
+    if (situation === 'track') sc = { analysis: 0.5 + 0.3 * ca + 0.2 * a - (quiet ? 0 : 0.35 * st), sensor: 0.3 + 0.5 * ca, engine: 0.2 + 0.55 * a, balance: 0.4 };
+    else sc = { sensor: 0.3 + 0.4 * ca + 0.3 * st, engine: 0.2 + 0.5 * g + 0.3 * a, analysis: 0.2, balance: 0.4 };
+    let best = 'balance', bv = -1;
     for (const k in sc) if (sc[k] > bv) { bv = sc[k]; best = k; }
     return best;
 }
+// 旧 (第39弾): 性格だけで一度決めていた。第41弾で場面ごと (comFocusPlan) に
+function pickFocus(p) { return comFocusPlan(p || {}, 'search', (p && p.stealth >= 0.5)); }
 function setEnemyFocus(e, k) {
     if (!GEN_FOCUS[k] || e._focus === k) return;
     e._focus = k; e.gen = GEN_FOCUS[k]; e._fx = focusFx(e.gen);
     if (comDemo && e.type !== 'fighter') comThinkEvent('e', '航行モード → ' + FOCUS_JP[k], 'e' + e.uid);
-}
-function pickEnemyEngine(p) {
-    if (!p) return 'thermonuclear';
-    if (p.stealth >= 0.7) return 'higgs';
-    if (p.aggression >= 0.7) return 'photon';
-    if (p.greed >= 0.7) return 'pulse';
-    return 'thermonuclear';
 }
 // 自艦が帯域で漏らす量 (2本目以降)
 function sensorLeak(kind) { return sensorsOn[kind] && sensorOrder.indexOf(kind) > 0 ? SENSOR_LEAK[kind] * PM.leakMul : 0; } // 第32弾: 多帯域受信機
@@ -7505,7 +7585,7 @@ function updateConvoys() {
                 if (CONVOY_SIG * Math.max(0, 1 - dH / ENEMY_PASSIVE_RANGE) >= 0.1) {
                     (e._cvAsk || (e._cvAsk = {}))[cv.sid] = _frameCount;
                     const pers = e.personality || { aggression: 0.5, stealth: 0.3, greed: 0.4, caution: 0.4 };
-                    if (Math.random() < 0.55 + pers.greed * 0.35 + pers.aggression * 0.1) {
+                    if (comDoctrine(pers).convoy && Math.random() < 0.55 + pers.greed * 0.35 + pers.aggression * 0.1) { // 第41弾: 自機COMと同じ方針
                         e._cvT = cv.sid; e._roam = 'convoy'; e.aiState = 'lurking'; e.lurking = true; e.state = 'moving';
                         if (comDemo) comThinkEvent('e', 'うるさい信号 → 輸送船と見て拿捕しに行く (' + _dirTxt(e.x, e.y, cv.x, cv.y) + ')', 'e' + e.uid);
                     }
@@ -7549,7 +7629,7 @@ function enemyConvoyPick(e, pers) {
         const d = Math.hypot(cv.x - e.x, cv.y - e.y);
         if (CONVOY_SIG * Math.max(0, 1 - d / ENEMY_PASSIVE_RANGE) < 0.1) continue;
         seen[cv.sid] = true;
-        if (Math.random() < 0.55 + pers.greed * 0.35 + pers.aggression * 0.1) return cv; // 第36弾: 敵も本気で狙う (旧 0.3+貪欲×0.4+攻撃×0.2)
+        if (comDoctrine(pers).convoy && Math.random() < 0.55 + pers.greed * 0.35 + pers.aggression * 0.1) return cv; // 第36弾: 敵も本気で狙う / 第41弾: 自機COMと同じ方針
     }
     return null;
 }
@@ -12480,22 +12560,71 @@ function comPilotStep() {
     const fireThr = 0.65 - 0.35 * P.aggression;
     const sigs = currentSignals();
     // 第23弾: 内部IDで艦か囮かを見分けない (旧: 'e-' で始まる信号=敵艦と分かっていた)。囮と識別した信号だけ除く
-    const contact = Object.keys(sigs).some(k => { const d = identInfo(k); return !(d.known && d.low && d.txt.includes('確認')); }) || enemies.some(e => e.hp > 0 && !e._dying && e.inVision);
-    if (lockedSignalId && sigs[lockedSignalId]) {
+    // 第41弾: 艦でないと分かった信号 (海図に載せた発信元・識別で艦影25%未満・正体を確認した囮/輸送船) は「相手の気配」に数えない
+    //   (旧: 輸送船や艦影1%の信号も気配に数え、その測量に走り続けた・2つの囮の間で2秒ごとに追跡を往復した)
+    const dud = (sid) => { if (_srcKnown[sid]) return true; const d = identInfo(sid); return d.known && (d.p < 0.25 || (d.low && d.txt.includes('確認'))); };
+    const contact = Object.keys(sigs).some(k => !dud(k)) || enemies.some(e => e.hp > 0 && !e._dying && e.inVision);
+    if (lockedSignalId && dud(lockedSignalId)) {
         const d = identInfo(lockedSignalId);
-        if (d.known && d.p < 0.25 && Object.keys(sigs).length > 1) { comThinkEvent('p', 'SIG-' + sigNo(lockedSignalId) + ' は' + d.txt + ' — 囮と見て別の信号へ'); trackNextSignal(); }
+        comThinkEvent('p', 'SIG-' + sigNo(lockedSignalId) + ' は' + d.txt + ' — 艦ではない → 追跡を外す');
+        (c.rej || (c.rej = {}))[lockedSignalId] = now; // 艦影45%を超えるまで追い直さない (識別が25%前後で揺れて付け外しを繰り返した)
+        window._lockSignal(null); c.lockSid = null;
     }
     const r = xoEvaluate();
     c.mode = '';
-    // 第39弾: 聴いた範囲を覚える (敵と同じ searchMark) / 聴く帯域の本数は敵と同じ式 (1 + 攻撃性×2 + (1 − 隠密性)・熱→EM→霧→光の順)
+    const D = c.D = comDoctrine(P); // 第41弾: 性格から立ち回りの方針
+    // 第41弾: エンジンは試合の始めに性格で選ぶ (敵と同じ pickEngineFor。始めの10秒なら切替の惰性なし)
+    if (!c.engSet) {
+        c.engSet = true;
+        const pe = pickEngineFor(P);
+        if (pe.engine !== gameState.engineType && now < 900) { gameState.engineType = pe.engine; if (typeof _syncEngineUI === 'function') _syncEngineUI(); }
+        comThinkEvent('p', 'エンジン → ' + ENGINE_JP[pe.engine] + ' (構え: ' + ({ silent: '潜航', cruise: '巡航', flank: '全速' })[pe.stance] + ' / 点数 ' + Object.keys(pe.scores).map(k => ENGINE_JP[k] + pe.scores[k]).join('・') + ')');
+    }
+    // 追跡を始めた時刻 (乗り換えの判断に使う)
+    if (lockedSignalId !== c.lockSid) { c.lockSid = lockedSignalId; c.lockF = now; c.lockHeardF = now; }
+    if (lockedSignalId && sigs[lockedSignalId]) c.lockHeardF = now;
+    if (lockedSignalId && sigs[lockedSignalId] && !sigs[lockedSignalId].relay) { c.heardBand = sigs[lockedSignalId].sensor; c.heardBandF = now; }
+    // 第39弾: 聴いた範囲を覚える (敵と同じ searchMark)
     searchMark(player, player.x, player.y, passiveRange() * SEARCH_HEAR_FRAC);
-    { const nb = Math.max(1, Math.min(4, 1 + Math.round(P.aggression * 2 + (1 - P.stealth)))), want = ENEMY_BAND_ORDER.slice(0, nb);
-      if (want.join() !== sensorOrder.join()) { for (const b of BANDS) if (!want.includes(b) && sensorsOn[b] && sensorOrder.length > 1) toggleBand(b, true); for (const b of want) if (!sensorsOn[b]) toggleBand(b, true); } }
+    // 第41弾: 聴く帯域は敵と同じ comBandPlan (相手を聞いた帯域を先頭・霧で弱まりにくい順・聞こえなければ聴き回す)。10秒ごとに見直す
+    if (now - (c.bpF || -1e9) >= 600) {
+        c.bpF = now;
+        const want = comBandPlan(P, c.heardBand, c.heardBandF, getHiggsIntensity(player.x, player.y));
+        if (want.join() !== sensorOrder.join()) {
+            for (const b of want) if (!sensorsOn[b]) toggleBand(b, true);
+            for (const b of BANDS) if (!want.includes(b) && sensorsOn[b] && sensorOrder.length > 1) toggleBand(b, true);
+            sensorOrder = want.filter(b => sensorsOn[b]).concat(sensorOrder.filter(b => !want.includes(b))); currentSensor = sensorOrder[0]; _syncBandUI();
+            comThink('p', 'bands', '聴く帯域 → ' + want.map(b => BAND_JP[b] || b).join('・') + (c.heardBand && now - c.heardBandF < 3600 ? ' (相手を' + (BAND_JP[c.heardBand] || c.heardBand) + 'で聞いた)' : ' (何も聞こえない — 聴き回す)'));
+        }
+    }
+    // 第41弾: 追跡する信号の乗り換えは方針どおり — 追跡を始めて commitSec 秒は、もっと艦影らしい信号 (switchMargin 以上) でなければ変えない
+    {
+        const score = (sid) => { const d = identInfo(sid), b = sigs[sid]; return (d.known ? d.p : 0.5) + Math.min(0.3, (b && b.strength || 0) * 0.3) - (b && b.relay ? 0.1 : 0); };
+        let best = null, bs = -1;
+        for (const sid in sigs) { if (dud(sid) || (c.rej && c.rej[sid] && identInfo(sid).p < 0.45)) continue; const v = score(sid); if (v > bs) { bs = v; best = sid; } }
+        const cur = lockedSignalId && sigs[lockedSignalId] ? score(lockedSignalId) : -1;
+        // 聞こえなくなっても すぐには乗り換えない (明滅する信号・霧の陰で途切れる) — 方針の秒数 (10〜40秒) 聞こえなければ
+        const lostLong = lockedSignalId && !sigs[lockedSignalId] && now - (c.lockHeardF || 0) >= (10 + 30 * D.still) * 60;
+        if (best && best !== lockedSignalId && (!lockedSignalId || lostLong || (now - c.lockF >= D.commitSec * 60 && bs > cur + D.switchMargin))) {
+            const why = !lockedSignalId ? '追跡を始める' : lostLong ? 'SIG-' + sigNo(lockedSignalId) + ' が聞こえなくなった' : 'SIG-' + sigNo(best) + ' の方が艦影らしい';
+            window._lockSignal(best); c.lockSid = best; c.lockF = now;
+            comThinkEvent('p', why + ' → SIG-' + sigNo(best) + ' を追跡 (乗り換えない時間 ' + Math.round(D.commitSec) + '秒)');
+        }
+    }
+    // 第41弾: 航行モードは性格と場面で (敵と同じ comFocusPlan)。20秒は変えない (交戦・退く時はすぐ)
+    {
+        const teF = bestFireTarget(), lkF = teF ? playerLockInfo(teF) : null;
+        if (contact) c.contactF = now;
+        const sit = hpF < retreat ? 'retreat' : (lkF && lkF.full) ? 'engage' : now - (c.contactF ?? -1e9) < 1800 ? 'track' : 'search'; // 信号が明滅しても30秒は「追跡」のまま
+        const fk = comFocusPlan(P, sit, powerStance === 'silent' || P.stealth >= 0.5);
+        if (fk !== c.focus && (sit === 'engage' || sit === 'retreat' || now - (c.focusF || -1e9) >= 1200)) {
+            c.focus = fk; c.focusF = now; setGenFocus(fk, true);
+            comThinkEvent('p', '航行モード → ' + FOCUS_JP[fk] + ' (' + ({ search: '捜索', track: '追跡', engage: '交戦', retreat: '退く' })[sit] + ')');
+        }
+    }
     // 第21弾: 状況適応の性格 (自機COM) — 相手を掴んでいる=受信中の敵信号か有視界
     {
         const am = adaptPersonality(P, contact, hpF);
-        // 第39弾: 自機COMも性格で航行モードを選ぶ (敵と同じ pickFocus)
-        { const fk = pickFocus(P); if (fk !== c.focus) { c.focus = fk; setGenFocus(fk, true); comThinkEvent('p', '航行モード → ' + FOCUS_JP[fk]); } }
         if (am) comThinkEvent('p', '性格が変わる → ' + ADAPT_MODES[am].label + ' (' + (am === 'cautious' ? '耐久' + _pct(hpF) + ' < 40%' : am === 'aggressive' ? '相手を掴んだ' : am === 'greedy' ? '90秒手掛かりなし' : '見失って60秒') + ')');
     }
     // 1) 退く
@@ -12614,7 +12743,7 @@ function comPilotStep() {
             if (!p) continue;
             const d = Math.hypot(p.x - player.x, p.y - player.y); if (d < cvD) { cvD = d; cvT = p; }
         }
-        if (cvT && P.greed + P.aggression >= 0.5) {
+        if (cvT && D.convoy) { // 第41弾: 方針 (貪欲+攻撃的 − 隠密×0.6 ≥ 0.45)
             // 第37弾: 追いつく点へ (旧: 少し先を追うだけ — 攻撃型の巡航は輸送船より遅く追いつけなかった)
             const ip = cvD < CONVOY_BOARD_R * 0.8 ? { x: cvT.x + cvT.vx * 30, y: cvT.y + cvT.vy * 30 } : interceptPoint(player.x, player.y, shipCruiseSpeed(gameState.shipType, genAlloc.engine, STANCE_GAIN.flank), cvT.x, cvT.y, cvT.vx, cvT.vy);
             player.setTarget(ip.x, ip.y); _comSteered(c, 'convoy');
@@ -12624,8 +12753,8 @@ function comPilotStep() {
         }
     }
     // 5) 取る — 第33弾: 部品の枠が空いていれば、貪欲さ0.25以上で部品の取れる所 (難破船・確かめた漂流コンテナ・部品をまだ取っていないノード/コロニー) へ寄り道する
-    if (!contact && P.greed >= 0.25 && partSlotsUsed() < partSlotsMax()) {
-        let ps = null, pd = COM_GOAL_RANGE * 1.5;
+    if (!contact && D.partHunt && partSlotsUsed() < partSlotsMax()) { // 第41弾: 寄り道は 貪欲さ − 隠密性×0.45 ≥ 0.05 の時だけ・距離も方針で
+        let ps = null, pd = D.partRange;
         for (const st of structures) {
             const ok = st.type === 'derelict' ? !st.salvaged : st.type === 'colony' ? !st._partP && !st.hacked : false;
             if (!ok) continue; const d = Math.hypot(st.x - player.x, st.y - player.y); if (d < pd) { pd = d; ps = st; }
@@ -12641,7 +12770,7 @@ function comPilotStep() {
             return;
         }
     }
-    if (!contact && P.greed >= 0.5) {
+    if (!contact && P.greed - P.stealth * 0.45 >= 0.25) { // 第41弾: 隠密は取りに行かない
         const g = _comNearest(true, true);
         if (g) {
             const isNode = !g.type;
@@ -12656,11 +12785,11 @@ function comPilotStep() {
     const bL = lockedSignalId && sigs[lockedSignalId], saL = lockedSignalId && _signalAnalysis[lockedSignalId];
     const towards = r && !r.act && /こちらへ向かってくる/.test(r.text);
     if (towards && bL && _comCanSteer(c)) {
-        // 「横へ外すか、止まって待ち伏せろ」— 攻撃性0.5以上は止まって待ち伏せ (潜航)、未満は横へ外す
-        if (P.aggression >= 0.5) {
+        // 「横へ外すか、止まって待ち伏せろ」— 攻撃性0.5以上か静か (隠密・慎重) なら止まって潜航で待つ (動けば信号と痕跡が出る)、それ以外は横へ外す
+        if (P.aggression >= 0.5 || D.still >= 0.5) {
             if (player.state === 'moving') { player.setTarget(player.x, player.y); _comSteered(c, 'stop'); }
             c.silentUntil = now + 600;
-            comThink('p', 'ambush', 'SIG-' + sigNo(lockedSignalId) + ' がこちらへ向かってくる・攻撃性' + _pct(P.aggression) + ' → 止まって潜航で待ち伏せる');
+            comThink('p', 'ambush', 'SIG-' + sigNo(lockedSignalId) + ' がこちらへ向かってくる → ' + (P.aggression >= 0.5 ? '攻撃性' + _pct(P.aggression) + ' — 止まって待ち伏せる' : '静けさ' + _pct(D.still) + ' — 止まって息を潜める (やり過ごす)'));
         } else {
             const hd = player.state === 'moving' ? Math.atan2(player.targetY - player.y, player.targetX - player.x) : null;
             if (hd === null || Math.abs(Math.sin(hd - bL.angle)) < 0.7) { xoPerpendicularLeg(bL.angle); _comSteered(c, 'perp'); }
@@ -12672,14 +12801,22 @@ function comPilotStep() {
     if (r && !r.act && bL && !bL.relay && (!saL || !saL.fix || trackEstimate(saL, 0).r > 900) && _comCanSteer(c)) {
         const hd = player.state === 'moving' ? Math.atan2(player.targetY - player.y, player.targetX - player.x) : null;
         if (hd === null || Math.abs(Math.sin(hd - bL.angle)) < 0.5) {
-            xoPerpendicularLeg(bL.angle); _comSteered(c, 'perp');
-            comThink('p', 'perp', 'AI「' + r.text + '」→ 方位線に直交する航路へ (場所を変えて聴き、交点を出す)');
+            const pr = _comPerp(c, D, bL.angle);
+            comThink('p', pr === 'wait' ? 'perpwait' : 'perp', pr === 'wait' ? '測量の航路を1本走った → 止まって聴く (残り' + Math.ceil(D.perpWaitSec - (now - c.perpEndF) / 60) + '秒・静けさ' + _pct(D.still) + ')' : 'AI「' + r.text + '」→ 方位線に直交して' + Math.round(D.perpLeg / 100) * 100 + 'u (場所を変えて聴き、交点を出す)');
             _comStance(c, P);
             return;
         }
     }
     const mv = r && r.act ? COM_MOVE_ACTS[r.act.label] : null;
-    if (r && r.act && !COM_SKIP[r.act.label] && (!mv || _comCanSteer(c))) {
+    // 第41弾: 追跡の乗り換えは上で方針どおりに決める (AIの「追跡」「次の信号」は使わない) / 隠密は射程外の相手へ寄らない / 直交航路は方針の長さと間
+    //   AIの「その方面へ」も待ち伏せの方針なら近い所 (followMax) だけ — 遠い記録の方位線やコロニーへは走らず、隠れ場所で待つ (旧: 性格によらず従い、隠密でも走り回った)
+    const farGo = r && r.act && r.act.label === 'その方面へ' && r.src && r.src.d > D.followMax;
+    const skipAct = r && r.act && (r.act.label === '追跡' || r.act.label === '次の信号' || (r.act.label === '接近' && !D.approach) || farGo);
+    if (r && r.act && r.act.label === '接近' && !D.approach && player.state !== 'moving') comThink('p', 'wait-in', 'AI「' + r.text + '」→ 静けさ' + _pct(D.still) + ' — 寄らずに、相手が射程に入るのを待つ');
+    if (r && r.act && r.act.label === '直交航路' && _comCanSteer(c)) {
+        const pr = _comPerp(c, D, bL ? bL.angle : player.angle);
+        comThink('p', pr === 'wait' ? 'perpwait' : 'perp', pr === 'wait' ? '測量の航路を1本走った → 止まって聴く (静けさ' + _pct(D.still) + ')' : 'AI「' + r.text + '」→ 直交して' + Math.round(D.perpLeg / 100) * 100 + 'u');
+    } else if (r && r.act && !COM_SKIP[r.act.label] && !skipAct && (!mv || _comCanSteer(c))) {
         r.act.fn();
         if (mv) _comSteered(c, mv);
         if (r.act.label === '接近' && P.aggression >= 0.7) c.flankUntil = now + 1200;
@@ -12688,21 +12825,33 @@ function comPilotStep() {
     } else if (held) {
         // 撃たないなら測り直す (方位線に直交して動く)
         const b = te && sigs[enemySid(te)];
-        if (b && player.state !== 'moving') { xoPerpendicularLeg(b.angle); _comSteered(c, 'perp'); }
-        comThink('p', 'held', held + (b ? ' — 直交して測り直す' : ''));
+        if (b && player.state !== 'moving') _comPerp(c, D, b.angle);
+        comThink('p', 'held', held + (b ? ' — 直交して測り直す (方針: ' + Math.round(D.perpLeg / 100) * 100 + 'u・止まって' + Math.round(D.perpWaitSec) + '秒)' : ''));
     } else if (player.state !== 'moving') {
-        // 手掛かりが無い: 最後の推定位置 → まだ聴いていない海域 (第39弾: 敵と同じ searchNext。旧: マップ中央) の順に捜索航路を引く。
-        // 着いたら10秒止まって聴く (動いている間は痕跡と推進の信号を出す)
+        // 手掛かりが無い — 第41弾: 方針で探し方を変える
+        //   待ち伏せ (隠密・慎重): 自分のものでないコロニー/ノードの近くの霧か岩礁帯に入り、長く止まって聴く (相手が補給・部品・占有に来る所)
+        //   掃き出し (それ以外): まだ聴いていない海域へ走り、短く止まって聴く (第39弾の searchNext)
+        const pause = (D.search === 'ambush' ? D.ambushSec : D.listenSec) * 60;
         if (c.srchArrF === undefined || c.srchArrF < 0) { c.srchArrF = now; }
-        if (now - c.srchArrF < COM_SEARCH_PAUSE) { comThink('p', 'listen', '捜索: 止まって聴く (残り' + Math.ceil((COM_SEARCH_PAUSE - (now - c.srchArrF)) / 60) + '秒)'); return; }
+        if (now - c.srchArrF < pause) { comThink('p', 'listen', (D.search === 'ambush' ? '待ち伏せ: 止まって聴く' : '捜索: 止まって聴く') + ' (残り' + Math.ceil((pause - (now - c.srchArrF)) / 60) + '秒・静けさ' + _pct(D.still) + ')' + (farGo ? ' — AIの勧め (' + Math.round(r.src.d / 100) * 100 + 'u先) は遠いので走らない' : '')); _comStance(c, P); return; }
         c.srchArrF = -1;
         const sa = lockedSignalId && _signalAnalysis[lockedSignalId], est = sa && trackEstimate(sa, 0);
         let tx, ty, why;
-        if (est && Math.hypot(est.x - player.x, est.y - player.y) > 1500) { tx = est.x; ty = est.y; why = '最後の推定位置'; }
-        else { const sn = searchNext(player, player.x, player.y); tx = sn.x; ty = sn.y; why = 'まだ聴いていない海域'; }
-        const ang = Math.atan2(ty - player.y, tx - player.x);
-        _setLeg(ang + (Math.random() - 0.5) * 0.3, Math.min(Math.hypot(tx - player.x, ty - player.y), COM_SEARCH_LEG * 1.5), '捜索航路'); _comSteered(c, 'leg');
-        comThink('p', 'search', (r ? 'AI「' + r.text + '」。' : '') + '手掛かりなし → ' + why + 'へ捜索航路 (動けば痕跡が残る)');
+        const estD = est ? Math.hypot(est.x - player.x, est.y - player.y) : 0;
+        if (est && estD > 1500 && (D.search === 'sweep' || estD < 6000)) { tx = est.x; ty = est.y; why = '最後の推定位置'; }
+        else if (D.search === 'ambush') {
+            const vis = c.ambushVisited || (c.ambushVisited = {});
+            let lm = null, ld = 16000;
+            for (const st of structures) { if (st.type !== 'colony' || st.owner === 'player') continue; const k = 'c' + Math.round(st.x) + ',' + Math.round(st.y); if (now - (vis[k] || -1e9) < 10800) continue; const d = Math.hypot(st.x - player.x, st.y - player.y); if (d > 1500 && d < ld) { ld = d; lm = { x: st.x, y: st.y, k, lbl: 'コロニー' }; } }
+            for (const n of resourceNodes) { if (n.owner === 'player') continue; const k = 'n' + Math.round(n.x) + ',' + Math.round(n.y); if (now - (vis[k] || -1e9) < 10800) continue; const d = Math.hypot(n.x - player.x, n.y - player.y); if (d > 1500 && d < ld * 0.8) { ld = d; lm = { x: n.x, y: n.y, k, lbl: 'ノード' }; } }
+            if (lm) {
+                vis[lm.k] = now;
+                const cv = findCoverSpot(lm.x, lm.y, 2500);
+                tx = cv ? cv.x : lm.x + 1200; ty = cv ? cv.y : lm.y; why = lm.lbl + 'の近くの' + (cv ? '隠れ場所' : '外れ') + 'で待ち伏せ';
+            } else { const sn = searchNext(player, player.x, player.y); tx = sn.x; ty = sn.y; why = 'まだ聴いていない海域'; }
+        } else { const sn = searchNext(player, player.x, player.y); tx = sn.x; ty = sn.y; why = 'まだ聴いていない海域'; }
+        player.setTarget(clampToMapCircle(tx, ty, 1500).x, clampToMapCircle(tx, ty, 1500).y); _comSteered(c, 'leg');
+        comThink('p', 'search', (r ? 'AI「' + r.text + '」。' : '') + '手掛かりなし → ' + why + ' (' + _dirTxt(player.x, player.y, tx, ty) + ')');
     } else if (r && _frameCount - _thinkLastP > 180) { // 直前(3秒以内)に何か決めたばかりなら「続ける」は言わない
         comThink('p', 'xo-' + r.tone + r.text.replace(/[\d.±]+/g, '#'), 'AI「' + r.text + '」→ 今の航路を続ける');
     }
@@ -12739,9 +12888,21 @@ function _comGoTo(o, near, c) {
 // 今の航路を変えてよいか (到着した・20秒たった。直交航路は到着まで)
 function _comCanSteer(c) {
     if (player.state !== 'moving') return true;
-    const age = _frameCount - (c.legF ?? -1e9);
-    if (c.legKind === 'perp') return age >= COM_LEG_HOLD * 3; // 直交航路は走り切る (60秒で打ち切る安全弁)
-    return age >= COM_LEG_HOLD;
+    const age = _frameCount - (c.legF ?? -1e9), hold = c.D ? c.D.legHoldSec * 60 : COM_LEG_HOLD; // 第41弾: 方針 (隠密ほど一度引いた航路を長く変えない)
+    if (c.legKind === 'perp') return age >= Math.max(hold, COM_LEG_HOLD * 3); // 直交航路は走り切る (60秒で打ち切る安全弁)
+    return age >= hold;
+}
+// 第41弾: 測量の航路 — 方針の長さで方位線に直交して1本走り、着いたら方針の秒数だけ止まって聴く。次の1本は反対側へ (同じ海域で基線を作る)
+function _comPerp(c, D, bearingAng) {
+    const now = _frameCount;
+    if (c.legKind === 'perp' && player.state !== 'moving' && !c.perpEndF) c.perpEndF = now;
+    if (c.perpEndF && now - c.perpEndF < D.perpWaitSec * 60) { if (player.state === 'moving' && c.legKind !== 'perp') player.setTarget(player.x, player.y); return 'wait'; }
+    c.perpEndF = 0;
+    c.perpSide = !c.perpSide;
+    const ang = bearingAng + (c.perpSide ? Math.PI / 2 : -Math.PI / 2);
+    const p = clampToMapCircle(player.x + Math.cos(ang) * D.perpLeg, player.y + Math.sin(ang) * D.perpLeg, 1500);
+    player.setTarget(p.x, p.y); _comSteered(c, 'perp');
+    return 'leg';
 }
 function _comSteered(c, kind) { c.legF = _frameCount; c.legKind = kind; }
 const COM_MOVE_ACTS = { '直交航路': 'perp', '接近': 'leg', 'その方面へ': 'leg', '補給へ': 'leg' };
@@ -13057,7 +13218,7 @@ function xoEvaluate() {
     const src = xoInfoSource();
     if (src) {
         const heading = player.state === 'moving' && Math.hypot(player.targetX - src.x, player.targetY - src.y) < 800;
-        return { tone: 'info', text: src.why + ' (方位' + compassDeg(Math.atan2(src.y - player.y, src.x - player.x)) + '° ' + Math.round(src.d / 100) * 100 + 'u)', act: heading ? null : { label: 'その方面へ', fn: () => player.setTarget(src.x, src.y) } };
+        return { tone: 'info', src, text: src.why + ' (方位' + compassDeg(Math.atan2(src.y - player.y, src.x - player.x)) + '° ' + Math.round(src.d / 100) * 100 + 'u)', act: heading ? null : { label: 'その方面へ', fn: () => player.setTarget(src.x, src.y) } };
     }
     // 司令部情報 (第20弾で開始時の配布は撤去。残すのは表示の互換だけ)
     if (intelBearing) {
