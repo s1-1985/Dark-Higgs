@@ -2345,7 +2345,7 @@ body.in-game #map-mode-banner { left: var(--field-cx) !important; top: calc(var(
 
 /* ── 第15弾: 出力スタンス / GEN重点 / 自艦ノイズ ── */
 .hud-act.flank { border-color: #ff8a3c; background: rgba(255,120,40,0.22); color: #ffd8b8; }
-.gd-focus { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+.gd-focus { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
 .gd-focus-btn {
     padding: 7px 2px; font-size: 11px; color: #9fc9bb; cursor: pointer;
     background: rgba(0,0,0,0.45); border: 1px solid #23423a; border-radius: 4px;
