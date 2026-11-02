@@ -126,11 +126,12 @@ const DIR_SONAR_HALF_ANGLE = [0, Math.PI/36, Math.PI/12, Math.PI/9];     // 5°/
 const DIR_SONAR_MAX_RANGE  = MAP_RADIUS * 2;                               // マップ直径
 const UPGRADE_MULT = [0, 1.0, 1.5, 2.0]; // Lv別性能倍率 (sensor用)
 // §3-1 アップグレードツリー再整合
-const ENGINE_UPG_HIGGS_RESIST = [0, 0.20, 0.35, 0.50]; // エンジン: ヒッグス/デブリ減速軽減 Lv0-3
-const ENGINE_UPG_HEAT_REDUCE  = [0, 0.10, 0.20, 0.30]; // エンジン: heatSig低下率 Lv0-3
-const WEAPONS_UPG_RANGE_MULT  = [1.0, 1.15, 1.30, 1.50]; // 武装: 射程倍率 Lv0-3
+// 第39弾: 開始時の Lv1 は「基準」(自機だけの隠れた強化を撤去 — 旧Lv1: 霧/岩礁の減速−20%・熱−10%・射程×1.15・実弾の被害−25%)。強化は第32弾で廃止済み
+const ENGINE_UPG_HIGGS_RESIST = [0, 0, 0.20, 0.35]; // エンジン: ヒッグス/デブリ減速軽減 Lv0-3
+const ENGINE_UPG_HEAT_REDUCE  = [0, 0, 0.10, 0.20]; // エンジン: heatSig低下率 Lv0-3
+const WEAPONS_UPG_RANGE_MULT  = [1.0, 1.0, 1.15, 1.30]; // 武装: 射程倍率 Lv0-3
 const WEAPONS_UPG_RELOAD_MULT = [1.0, 1.0, 0.85, 0.70]; // 武装: リロード時間倍率 Lv0-3 (第20弾: 開始時のLv1で合意値どおり=ミサイル10秒・ビーム35秒。旧Lv1=0.85)
-const ARMOR_RES_KINETIC = [0, 0.25, 0.25, 0.25]; // 装甲: kinetic耐性 Lv1+
+const ARMOR_RES_KINETIC = [0, 0, 0.25, 0.25]; // 装甲: kinetic耐性 Lv2+ (第39弾: Lv1は基準)
 const ARMOR_RES_MISSILE = [0, 0,    0.25, 0.25]; // 装甲: missile耐性 Lv2+
 const ARMOR_RES_BEAM    = [0, 0,    0,    0.25]; // 装甲: beam耐性 Lv3+
 
@@ -149,6 +150,202 @@ const ENGINE_SIG = {
     photon:        { heat: 0.1,  optic: 1.0,  em: 0.1,  higgs: 0.1 },
 };
 const COMPUTE_EM_MULT = 0.5;
+// ═══ 第39弾 (オーナー合意): シグネチャの整理 — 自艦も敵も同じ関数 emitSigs() で出す ═══
+// 推進はエンジンの主帯域に出る (推力×0.6・他の帯域は ENGINE_SIG の小さな値):
+//   熱核 = 熱 (航跡に熱の痕跡が残る) / パルス = EM を断続的に (2.5秒ごとに0.5秒強く) /
+//   フォトン = 光を常に (推力0でも35%・霧の中や霧越しでは弱まる) / ヒッグス = 霧の乱れ (航跡に霧の痕跡が残る)
+// 痕跡を残すのは熱核とヒッグスだけ。どのエンジンでも船体が霧を乱す分 (旧: 全艦が霧の航跡を引いていた) は撤去
+const ENGINE_MAIN = { thermonuclear: 'heat', pulse: 'em', higgs: 'higgs', photon: 'optic' };
+const ENGINE_TRAIL = { thermonuclear: 'heat', higgs: 'higgs' }; // 痕跡の帯域 (パルス・フォトンは残さない)
+const SIG_THRUST = 0.6, PULSE_PERIOD = 150, PULSE_ON = 30, PULSE_PEAK = 1.6, PULSE_LOW = 0.2, PHOTON_IDLE = 0.35;
+// 行動ごとに出る信号 (その行動の間だけ足す)。発砲・発進は1.5秒/1秒で薄れる
+const SIG_ACT = {
+    kinFire:    { optic: 0.6, heat: 0.10 },              // 実弾の発砲: 閃光
+    mslFire:    { heat: 0.35, optic: 0.15, em: 0.45 },   // ミサイルの発射: 推進炎と誘導の電波
+    beamFire:   { optic: 0.9, em: 0.6 },                 // ビームの発射: 強い光と電磁波 (霧に軌跡も残る)
+    beamCharge: { heat: 0.30, em: 0.40, higgs: 0.30 },   // ビームのチャージ: 熱・電磁波・霧の乱れ
+    beamCool:   { heat: 0.15, em: 0.10 },                // ビームの再充電 (35秒): 放熱
+    mslReload:  { em: 0.20 },                            // ミサイルの装填: 管制の電波
+    launch:     { optic: 0.35, em: 0.40 },               // ドローンの発進
+    assemble:   { em: 0.35, heat: 0.10 },                // 資材からの組み立て
+    comms:      { em: 0.30 },                            // 制圧・補給の通信
+    repair:     { heat: 0.30, optic: 0.20 },             // リペアキットの修理 (溶接)
+    engSwitch:  { em: 0.30 },                            // エンジン切替
+    sysEngine:  { heat: 0.35 },                          // 機関損傷 (冷却系の漏れ)
+};
+const SIG_COMPUTE = { emSensors: 0.09, emAi: 0.20, heatAi: 0.05 }; // 演算 (探知・AIへの配分) の電磁波と熱。配分はそれぞれ 0..1
+// o: { engine, engineOn, thrust 0..1, alloc{sensors,ai 0..1}, mt{e,w,s,a}, quiet, ff(0..1), ft, launch(0..1), charge(倍率 0=なし),
+//      beamCool, mslReload, assemble, comms, repair, engSwitch, sysEngine, leak{heat,optic,em,higgs}, hHere, storm, thermal,
+//      bottomed, pm{heat,heatAdd,optic,em,emAdd,opticFire,mslLaunchHeat,chargeLeak}, wounded, pulsePh }
+function emitSigs(o) {
+    const out = { heat: 0, optic: 0, em: 0, higgs: 0 };
+    const es = ENGINE_SIG[o.engine] || ENGINE_SIG.thermonuclear, main = ENGINE_MAIN[o.engine] || 'heat';
+    const mt = o.mt || { e: 1, w: 1, s: 1, a: 1 }, pm = o.pm || PM_DEF;
+    if (o.engineOn) {
+        const T = Math.max(0, Math.min(1, o.thrust));
+        for (const b of BANDS) out[b] = T * SIG_THRUST * es[b];
+        if (main === 'em') out.em *= ((_frameCount + (o.pulsePh || 0)) % PULSE_PERIOD) < PULSE_ON ? PULSE_PEAK : PULSE_LOW;
+        else if (main === 'optic') out.optic = SIG_THRUST * (PHOTON_IDLE + (1 - PHOTON_IDLE) * T) * (1 - 0.6 * (o.hHere || 0));
+        else if (main === 'higgs') out.higgs = T * SIG_THRUST * (0.5 + 0.5 * (o.hHere || 0));
+        for (const b of BANDS) out[b] *= mt.e;
+    }
+    const al = o.alloc || { sensors: 0.3, ai: 0.5 };
+    out.em += (al.sensors * SIG_COMPUTE.emSensors * mt.s + al.ai * SIG_COMPUTE.emAi * mt.a);
+    out.heat += al.ai * SIG_COMPUTE.heatAi * mt.a;
+    if (o.quiet) for (const b of BANDS) out[b] *= SILENT_SIG_MULT; // 潜航・機関停止・潜伏: 推進と演算を絞る (行動で出る信号は減らない)
+    const add = (t, k) => { if (!t || !(k > 0)) return; for (const b in t) out[b] += t[b] * k; };
+    if (o.ff > 0) {
+        if (o.ft === 'kinetic') add({ optic: SIG_ACT.kinFire.optic * pm.opticFire, heat: SIG_ACT.kinFire.heat }, o.ff * mt.w);
+        else if (o.ft === 'missile') add({ heat: SIG_ACT.mslFire.heat * pm.mslLaunchHeat, optic: SIG_ACT.mslFire.optic, em: SIG_ACT.mslFire.em }, o.ff * mt.w);
+        else if (o.ft === 'beam') add(SIG_ACT.beamFire, o.ff * mt.w);
+    }
+    if (mt.w > 1) { out.heat += (mt.w - 1) * 0.06; out.em += (mt.w - 1) * 0.06; }
+    if (o.charge > 0) add(SIG_ACT.beamCharge, o.charge);
+    else if (o.beamCool) add(SIG_ACT.beamCool, 1);
+    if (o.mslReload) add(SIG_ACT.mslReload, 1);
+    if (o.launch > 0) add(SIG_ACT.launch, o.launch);
+    if (o.assemble) add(SIG_ACT.assemble, 1);
+    if (o.comms) add(SIG_ACT.comms, 1);
+    if (o.repair) add(SIG_ACT.repair, 1);
+    if (o.engSwitch) add(SIG_ACT.engSwitch, 1);
+    if (o.sysEngine) add(SIG_ACT.sysEngine, 1);
+    if (o.leak) for (const b of BANDS) out[b] += o.leak[b] || 0;
+    // 居る場所: 磁気嵐は電磁波を、熱雲は熱を覆い隠す / デブリ擬態は全部を岩塊に紛れさせる
+    out.em *= 1 - (o.storm || 0) * STORM_EM_MASK;
+    out.heat *= 1 - (o.thermal || 0) * THERMAL_HEAT_MASK;
+    if (o.bottomed) for (const b of BANDS) out[b] *= BOTTOM_SIG_MULT;
+    // 部品 (熱・光・電磁波の倍率と、常に漏れる分)
+    const q = o.quiet ? SILENT_SIG_MULT : 1;
+    out.heat = out.heat * pm.heat + pm.heatAdd * q;
+    out.optic *= pm.optic;
+    out.em = out.em * pm.em + pm.emAdd * q;
+    if (o.wounded) out.heat = Math.max(out.heat, WOUNDED_HEAT_FLOOR * (o.quiet ? 0.7 : 1)); // 手負い: 冷却材の漏れ
+    for (const b of BANDS) out[b] = Math.max(0, Math.min(1, out[b]));
+    return out;
+}
+// 推力 0..1 = 機関負荷 (艦種の巡航速度に対する今の速さ)。止まっていても機関が動いていれば少し
+// 推力 0..1 = 機関負荷。基準は「均等の配分の全速」(= 巡航×1.5)。巡航≈0.57・全速≈0.84・潜航≈0.31 (旧: 機関100%の速さを基準にしていて巡航でも0.3しか出ず、熱が1500u先で消えていた)
+function speedLoad(spd, cls) { return (spd || 0) / Math.max(0.1, gameSpeedFactor) / Math.max(0.1, shipCruiseSpeed(cls, GEN_FOCUS.balance.engine, 1) * 1.5); }
+function thrustFrac(spd, cls) { return Math.min(1, 0.04 + 0.8 * Math.min(1.25, speedLoad(spd, cls))); }
+// 直近1秒の最大値 (パルスのような断続的な信号も、1秒ごとに聴く側が取りこぼさない量だけ拾える)
+function sigPeakUpdate(s) {
+    const pk = s._sigPk || (s._sigPk = { heat: 0, optic: 0, em: 0, higgs: 0, f: { heat: 0, optic: 0, em: 0, higgs: 0 } });
+    const cur = { heat: s.heatSig || 0, optic: s.opticalSig || 0, em: s.emSig || 0, higgs: s.higgsSig || 0 };
+    for (const b of BANDS) if (cur[b] >= pk[b] || _frameCount - pk.f[b] > 60) { pk[b] = cur[b]; pk.f[b] = _frameCount; }
+}
+function sigPeak(s, b) { const pk = s._sigPk; return pk ? pk[b] : (b === 'heat' ? s.heatSig : b === 'optic' ? s.opticalSig : b === 'em' ? s.emSig : s.higgsSig) || 0; }
+
+// ═══ 第39弾 (オーナー合意): 経路の減衰 — 発信源と受け手の間の霧・磁気嵐・熱雲・岩礁帯は、帯域ごとに信号を弱め、方位の誤差を広げる ═══
+// (自艦が聴く時も敵が聴く時も同じ。旧: 中点の1点だけを見て、嵐・熱雲・岩礁帯は敵が自艦を聴く時だけ効いていた)
+// a = 弱める割合 (経路の平均の濃さ×a) / n = 方位の誤差の広がり (1 + 濃さ×n 倍)
+const PATH_MEDIA = {
+    fog:     { a: { heat: 0.35, optic: 0.85, em: 0.10, higgs: 0.30 }, n: { heat: 0.5, optic: 0.4, em: 0.2, higgs: 1.2 } },
+    storm:   { a: { heat: 0,    optic: 0.20, em: 0.90, higgs: 0 },    n: { heat: 0,   optic: 0.3, em: 2.0, higgs: 0 } },
+    thermal: { a: { heat: 0.80, optic: 0,    em: 0,    higgs: 0 },    n: { heat: 2.0, optic: 0,   em: 0,   higgs: 0 } },
+    debris:  { a: { heat: 0.20, optic: 0.85, em: 0,    higgs: 0 },    n: { heat: 0.3, optic: 0.5, em: 0,   higgs: 0 } },
+};
+const PATH_SAMPLES = 8;
+// 経路の平均の濃さ {fog,storm,thermal,debris}。発信源の位置を含め、受け手の位置は含めない (受け手の周りは受け手の事情)
+function pathMedia(sx, sy, rx, ry) {
+    let f = 0, s = 0, t = 0, d = 0;
+    for (let i = 0; i < PATH_SAMPLES; i++) {
+        const k = i / PATH_SAMPLES, x = sx + (rx - sx) * k, y = sy + (ry - sy) * k;
+        f += getHiggsIntensity(x, y); s += getStormIntensity(x, y); t += getThermalIntensity(x, y); d += getDebrisIntensity(x, y);
+    }
+    return { fog: f / PATH_SAMPLES, storm: s / PATH_SAMPLES, thermal: t / PATH_SAMPLES, debris: d / PATH_SAMPLES };
+}
+function pathAtten(pm, b) { let k = 1; for (const m in PATH_MEDIA) k *= 1 - Math.min(1, (pm[m] || 0) * PATH_MEDIA[m].a[b]); return Math.max(0, k); }
+function pathNoise(pm, b) { let k = 1; for (const m in PATH_MEDIA) k += (pm[m] || 0) * PATH_MEDIA[m].n[b]; return k; }
+// 経路は0.5秒・300u動くまで使い回す (発信源ごと・聴く側ごと)
+function pathMediaCached(src, key, sx, sy, rx, ry) {
+    const c = src._pmc || (src._pmc = {});
+    const e = c[key];
+    if (e && _frameCount - e.f < 30 && Math.abs(e.sx - sx) + Math.abs(e.sy - sy) + Math.abs(e.rx - rx) + Math.abs(e.ry - ry) < 300) return e.v;
+    const v = pathMedia(sx, sy, rx, ry);
+    c[key] = { f: _frameCount, sx, sy, rx, ry, v };
+    return v;
+}
+// 第39弾: 受け手 (rx,ry) が発信源を聴く — 自艦も敵も同じ。sigOf(b) = 発信源のその帯域の強さ (直近1秒の最大値)
+// 受け取る強さ = 強さ × (1 − 距離/受信の最大距離) × 経路の減衰。しきい値の半分を超えた帯域で方位が取れる。一番よく聴こえた帯域を返す
+function hearSource(src, key, rx, ry, sx, sy, sigOf, range, bands) {
+    const d = Math.hypot(sx - rx, sy - ry);
+    if (d >= range) return null;
+    const pmd = pathMediaCached(src, key, sx, sy, rx, ry), da = 1 - d / range;
+    let best = null, bestQ = 0, nb = 0;
+    for (const b of bands) {
+        const sc = sensorConfig[b], sig = (sigOf(b) || 0) * da * pathAtten(pmd, b);
+        if (sig > sc.threshold * 0.5) { nb++; const q = sig / sc.threshold; if (q > bestQ) { bestQ = q; best = { band: b, sig, noise: pathNoise(pmd, b) }; } }
+    }
+    return best ? { band: best.band, sig: best.sig, noise: best.noise, nb, d } : null;
+}
+// 受信レベル (帯域ごと・しきい値に対する比)。バー表示用
+function hearLevels(src, key, rx, ry, sx, sy, sigOf, range, out, bands) {
+    const d = Math.hypot(sx - rx, sy - ry);
+    if (d >= range) return;
+    const pmd = pathMediaCached(src, key, sx, sy, rx, ry), da = 1 - d / range;
+    for (const b of bands) { const lvl = (sigOf(b) || 0) * da * pathAtten(pmd, b) / sensorConfig[b].threshold; if (lvl > out[b]) out[b] = lvl; }
+}
+// 方位の誤差 (1σ, rad) — 自艦も敵も同じ式。強い信号ほど・追跡中ほど鋭い。経路の霧・嵐・熱雲で広がる・探知重視で鋭い
+const BEAR_DIV = 0.96; // 旧: 探知の配分と AI の解析精度の割り算 (均等で ≈0.96)
+function bearingSigma(conf, tracked, fx, clN, ecm, noise) {
+    return (0.005 + 0.035 * (1 - conf)) * (tracked ? 1 : 2.2) / BEAR_DIV * (fx ? fx.bearErr : 1) * clutterErrMult(clN || 0) * (ecm || 1) * (noise || 1);
+}
+const PASSIVE_BASE = 15000; // 第39弾 (オーナー合意): 受信の最大距離 11000→15000u (自艦/敵)
+// ═══ 第39弾 (オーナー合意「探し方を賢く」): COM (自機COM・敵とも同じ) は聴いた範囲を覚え、まだ聴いていない所へ向かう ═══
+// マップを3000u角のマスに分け、巡航の艦が聞こえる距離 (受信の最大距離×0.45) の内を「聴いた」とする。3分たてば忘れる (相手は動く)
+const SEARCH_CELL = 3000, SEARCH_N = 24, SEARCH_FORGET = 10800, SEARCH_HEAR_FRAC = 0.45;
+function searchMem(who) { return who._srch || (who._srch = new Float32Array(SEARCH_N * SEARCH_N).fill(-1e9)); }
+function _scell(i) { return MAP_CX - SEARCH_N * SEARCH_CELL / 2 + (i + 0.5) * SEARCH_CELL; }
+function searchMark(who, x, y, R) {
+    const m = searchMem(who), r2 = R * R;
+    for (let j = 0; j < SEARCH_N; j++) { const cy = _scell(j); if (Math.abs(cy - y) > R) continue;
+        for (let i = 0; i < SEARCH_N; i++) { const cx = _scell(i), dx = cx - x, dy = cy - y; if (dx * dx + dy * dy < r2) m[j * SEARCH_N + i] = _frameCount; } }
+}
+// まだ聴いていない (か、聴いてから時間がたった) マスのうち、近くて・マップの内側寄りの所
+function searchNext(who, x, y) {
+    const m = searchMem(who);
+    let best = null, bv = -Infinity;
+    for (let j = 0; j < SEARCH_N; j++) for (let i = 0; i < SEARCH_N; i++) {
+        const cx = _scell(i), cy = _scell(j), dc = Math.hypot(cx - MAP_CX, cy - MAP_CY);
+        if (dc > MAP_RADIUS - 4000) continue;
+        const age = Math.min(SEARCH_FORGET, _frameCount - m[j * SEARCH_N + i]);
+        if (age < SEARCH_FORGET * 0.5) continue;
+        const d = Math.hypot(cx - x, cy - y);
+        if (d < SEARCH_CELL) continue;
+        const v = age / SEARCH_FORGET * 2 - d / 12000 - dc / 30000 + Math.random() * 0.15;
+        if (v > bv) { bv = v; best = { x: cx, y: cy }; }
+    }
+    return best || { x: MAP_CX, y: MAP_CY };
+}
+
+// ═══ 第39弾 (オーナー合意): 航行モード (重点) 5つ — 自艦も敵も同じ効果 ═══
+// 均等=基準 / 機関: 速さ×1.5・回避+5pt / 兵装: リロード×0.8・散布×0.7・相手の回避×0.85 /
+// 探知: 受信の最大距離×1.17・ソナーの距離と半径×1.33・方位の誤差×0.85 / 解析: AI 50→80 — AIの助言が速く細かく・回避+3pt・相手の回避×0.9・解析の速さ×1.4
+// 代償は物理どおり (機関以外は速さが落ちる・速いほど推進の信号・AIが高いほど演算の電磁波)
+const GEN_FOCUS = {
+    balance:  { engine: 40, weapons: 30, sensors: 30, ai: 50, prec: { sensor: 34, weapon: 33, engine: 33 } },
+    engine:   { engine: 60, weapons: 20, sensors: 20, ai: 50, prec: { sensor: 20, weapon: 20, engine: 60 } },
+    sensor:   { engine: 25, weapons: 20, sensors: 55, ai: 50, prec: { sensor: 60, weapon: 20, engine: 20 } },
+    weapon:   { engine: 25, weapons: 55, sensors: 20, ai: 50, prec: { sensor: 20, weapon: 60, engine: 20 } },
+    analysis: { engine: 35, weapons: 25, sensors: 25, ai: 80, prec: { sensor: 34, weapon: 33, engine: 33 } },
+};
+const FOCUS_JP = { balance: '均等', engine: '機関重視', sensor: '探知重視', weapon: '兵装重視', analysis: '解析重視' };
+// 配分 → 効果 (重点のプリセットも MT も同じ式。基準=均等。重点以外の系統に罰はつけない)
+function focusFx(al) {
+    const c = (v) => Math.max(0, Math.min(1, v));
+    const e = c((al.engine / 40 - 1) / 0.5), w = c((al.weapons / 30 - 1) / (55 / 30 - 1)), s = c((al.sensors / 30 - 1) / (55 / 30 - 1)), a = c((al.ai / 50 - 1) / 0.6);
+    return {
+        evade: 0.05 * e + 0.03 * a,          // 回避率に足す (pt)
+        reload: 1 - 0.2 * w,                 // リロード時間
+        spread: 1 - 0.3 * w,                 // 実弾の散布
+        oppEvade: (1 - 0.15 * w) * (1 - 0.10 * a), // 相手の回避率に掛ける (命中)
+        rxRange: 1 + 0.17 * s,               // 受信の最大距離
+        sonar: 1 + 0.33 * s,                 // ソナーの距離と半径
+        bearErr: 1 - 0.15 * s,               // 方位の誤差
+        anaSpeed: 1 + 0.4 * a,               // 解析の速さ
+        ai: a,                               // AIの助言の頻度と細かさ (0..1)
+    };
+}
 
 // エンジン種別 → 噴射(スラスター)炎の色。core=中心の高温色, mid=外周色, a=全体アルファ。
 // ヒッグスは低アルファ=ほぼ不可視(目立たない推進)。MEMORY.md「エンジン噴射エフェクト色」準拠。
@@ -553,7 +750,7 @@ const ENEMY_DETECT_BASE = 1100;  // 近接ハード探知レンジの基準(旧8
 // 第13弾: 敵のシグネチャ探知を「自機のパッシブ受信機と同じモデル」に統一 (到達11000u・閾値×0.5)。
 // 旧式(近接レンジ×到達倍率・閾値×0.6)は自機より約1.5倍耳が悪く、先に見つけるのは常に自機だった。
 // 敵は4帯域を同時に聴くが、自分の居るヒッグス濃度で耳が鈍る (雲に潜む=互いに盲目)。
-const ENEMY_PASSIVE_RANGE = 11000;
+const ENEMY_PASSIVE_RANGE = 15000; // 第39弾: 受信の最大距離 (自艦と同じ PASSIVE_BASE)
 const ENEMY_STALK_SPEED = 0.55;
 // 第20弾: 司令部情報の撤去で「双方が黙って待つと永遠に会わない」ため、敵は長く何も聞こえなければ哨戒に出る
 // (静けさの許容 = ENEMY_ROAM_QUIET × (1.4 − 攻撃性) → 攻撃性0.5で54秒・0.9で30秒・0.15で75秒)。行き先は海図の既知物 (ノード/コロニー/中央)
@@ -733,12 +930,15 @@ const LOCK_PERSIST_BASE = 2.0; // ロック保持倍率 (visionRadius × N)
 
 // GEN配分 (ゼロサム: エンジン/武器/センサー/AI の合計=100)
 let genAlloc = { engine: 40, weapons: 30, sensors: 30, ai: 50 };
+let _xoEvalF = -1e9, _xoLast = null; // 第39弾: AIの助言の間隔
+let _pfx = null, _pfxF = -1; const SYS_SENSOR_RX = 0.35; // 第39弾: 航行モードの効果のキャッシュ / センサー損傷の受信距離
+let genFocusKey = 'balance'; // 第39弾: 今の航行モード (最上部で宣言 — 初期化中の参照でTDZにならないよう)
 
 // AI精度配分 (§3-2): GEN AI出力(genAlloc.ai)を 解析/命中/回避 の3つにゼロサム配分。
 // 実効精度 = (AI出力) × (各配分)。AIを上げるほど精度↑だが EM放射も増える(逆探知トレードオフ)。
 let aiPrecision = { sensor: 34, weapon: 33, engine: 33 };
 // 実効精度 0..1 (AI=100%かつ当該100%配分で1.0)。各効果の係数は AI_* 定数で調整。
-function aiPrec(key) { return (genAlloc.ai / 100) * (aiPrecision[key] / 100); }
+function aiPrec(key) { return 0.5 * (GEN_FOCUS.balance.prec[key] / 100); } // 第39弾: AIの効果は航行モード (focusFx) に一本化。ここは自機/敵とも均等の値で固定 (旧: 自機だけ配分で伸びた)
 const AI_SENSOR_ACC   = 0.6;  // 解析精度→コンタクト精度ブースト上限
 const AI_WEAPON_AIM   = 0.7;  // 命中精度→デブリ等のミス率低減上限
 const AI_ENGINE_DODGE = 0.45; // 回避精度→被弾回避率上限
@@ -989,7 +1189,7 @@ const ENEMY_SPAWN_VAR = 4000;
 // ═══════════════════════════════════════════════════════════════
 const ENEMY_PING_CD_MIN = 720;       // 敵アクティブソナーの最短間隔 12s
 const ENEMY_PING_CD_VAR = 480;       // +0〜8s (隠密気質の個体はさらに探信を控える)
-const ENEMY_PING_RANGE = 4200;       // 探信の有効距離
+const ENEMY_PING_RANGE_OLD = 4200;   // (第39弾: 探信の距離は enemyPingRange — 自機と同じ式)
 const ENEMY_PING_HIGGS_BLOCK = 0.5;  // 自機地点のヒッグス濃度がこれ以上なら反射が埋もれる
 let silentRunning = false;           // 静粛航行モード
 let powerStance = 'cruise';           // 第15弾: 出力スタンス 'silent'(潜航) | 'cruise'(巡航) | 'flank'(全速)
@@ -2122,9 +2322,13 @@ function shipSpeedNow(t) {
     return t.speed || 0;
 }
 // 弾が当たった時に避けられる確率 (速いほど避ける)。ビームは光速なので避けられない
-function evadeChance(type, t) {
+function evadeChance(type, t, shooter) {
     const f = Math.min(1, shipSpeedNow(t) / EVADE_SPEED_REF);
-    return type === 'kinetic' ? EVADE_K_BASE + EVADE_K_SPD * f : type === 'missile' ? EVADE_M_BASE + EVADE_M_SPD * f : 0;
+    const base = type === 'kinetic' ? EVADE_K_BASE + EVADE_K_SPD * f : type === 'missile' ? EVADE_M_BASE + EVADE_M_SPD * f : 0;
+    if (!base) return 0;
+    // 第39弾: 航行モード — 機関重視は回避+5pt・解析重視は+3pt / 撃った側の兵装重視は相手の回避×0.85・解析重視は×0.9 (自機も敵も同じ)
+    const isShip = t === player || (t && t.gen !== undefined);
+    return Math.max(0, (base + (isShip ? shipFx(t).evade : 0)) * (shooter && (shooter === player || shooter.gen !== undefined) ? shipFx(shooter).oppEvade : 1));
 }
 // センサー撹乱 (受信・探知の距離が一時的に落ちる)
 function applyDaze(t, frames, why) {
@@ -2394,8 +2598,24 @@ class Projectile {
                             this.active = false;
                             return;
                         }
-                    } else if (player && player.hp > 0 && Math.hypot(player.x - this.x, player.y - this.y) < (this.seekR || 600)) { // 第33弾: 囮耐性シーカー
+                    } else if (player && player.hp > 0 && Math.hypot(player.x - this.x, player.y - this.y) < (this.seekR || 900)) { // 第33弾: 囮耐性シーカー (第39弾: 自機と同じ 900u/部品で1300u)
                         this.target = player;
+                    } else {
+                        // 第39弾: 敵のミサイルも推定点に何も居なければ自爆し、撃った側は「そこには居ない」と学ぶ (自艦と同じ)。
+                        // 近くに居た自艦は、撃たれたことと発射点の方角を掴む
+                        createHitEffect(this.x, this.y, '#cc8888');
+                        const ow = this.owner;
+                        if (ow && ow._sa) recordMissSa(ow._sa, { x: this.x, y: this.y, r: 1000 });
+                        if (ow && player && player.hp > 0 && Math.hypot(player.x - this.x, player.y - this.y) < 2500) {
+                            const ox = this.ox ?? ow.x, oy = this.oy ?? ow.y, err = 300 + Math.hypot(player.x - ox, player.y - oy) * 0.08;
+                            const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * err, sid = enemySid(ow);
+                            if (!_signalAnalysis[sid]) _signalAnalysis[sid] = _newSignalAnalysis();
+                            _signalAnalysis[sid].ping = { x: ox + Math.cos(a) * r, y: oy + Math.sin(a) * r, r: err, f: _frameCount };
+                            solveFix(_signalAnalysis[sid]);
+                            logMessage('SENSOR: 敵ミサイルが近くで自爆 (推定が外れた) — 発射点の方角を掴んだ', 'warning-msg');
+                        }
+                        this.active = false;
+                        return;
                     }
                 }
             }
@@ -2495,7 +2715,7 @@ class Projectile {
             // デブリ帯(岩礁帯): 遮蔽で実弾/ミサイルが外れやすい (ビームは貫通=Projectile生成時に即着弾でここを通らない)
             // AI命中精度(武器配分): 自機の弾はミス率を低減
             const _debHit = getDebrisIntensity(hitTarget.x, hitTarget.y);
-            const _missChance = _debHit * DEBRIS_MISS * (this.isPlayer ? (1 - aiPrec('weapon') * AI_WEAPON_AIM) : 1);
+            const _missChance = _debHit * DEBRIS_MISS * (1 - aiPrec('weapon') * AI_WEAPON_AIM); // 第39弾: 自機も敵も同じ
             if (_missChance > 0 && Math.random() < _missChance) {
                 this.active = false; // 岩片に阻まれ命中せず
                 createHitEffect(this.x, this.y, '#8a8a7a');
@@ -2503,7 +2723,7 @@ class Projectile {
             }
             // 第20弾: 回避 — 当たっても相手の速さで避けられる (自機/敵とも同じ式・1発につき1回だけ判定)。
             // 旧: 自機だけがAI配分(回避)で敵弾を避けていた
-            if (!this._evaded && Math.random() < evadeChance(this.type, hitTarget) * (this.isPlayer && this.type === 'kinetic' && PM.kinClose && this.distTraveled < 300 ? 0.3 : 1)) {
+            if (!this._evaded && Math.random() < evadeChance(this.type, hitTarget, this.isPlayer ? player : this.owner) * (this.isPlayer && this.type === 'kinetic' && PM.kinClose && this.distTraveled < 300 ? 0.3 : 1)) {
                 this._evaded = true;
                 effects.push({ x: hitTarget.x, y: hitTarget.y - 30, text: '回避', life: 1.0, type: 'floatText', c: '#9fd8ff' });
                 if (this.type === 'missile') { nearMissBlast(this.x, this.y, this.isPlayer, this.dmg); this.active = false; } // 避けられたミサイルは近くで爆発
@@ -2674,6 +2894,8 @@ function missRevealsShooter(ox, oy, ex, ey, isLine) {
         const err = 300 + Math.hypot(e.x - ox, e.y - oy) * 0.08;
         const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * err;
         e.playerLastKnownPos = { x: ox + Math.cos(a) * r, y: oy + Math.sin(a) * r, vx: 0, vy: 0 };
+        if (e._sa) e._sa.ping = { x: e.playerLastKnownPos.x, y: e.playerLastKnownPos.y, r: err, f: _frameCount }; // 第39弾: 推定の材料 (点の観測)
+        e._lkGuess = false;
         e.contactFreshness = Math.max(e.contactFreshness || 0, 0.8);
         e.detectionState = 'alerted';
         e._alertUntil = _frameCount + ENEMY_ALERT_MEMORY;
@@ -2746,8 +2968,12 @@ function assumedHitChance(te, w, lk) {
     if (!lk.assumed) return 0;
     if (lk.dist > weaponRange(w)) return 0;
     // 第18弾: 弾が届く時刻の見越し点での幅 (着弾までに相手が動ける分を含む)
-    const sd = Math.max(80, assumedAimPoint(te, w).r / 2); // 推定円R ≈ 2σ
-    const reach = w === 'missile' ? 900 : w === 'beam' ? BEAM_HIT_WIDTH + 60 : 260; // 当たり得る幅 (シーカー/ビーム幅/散布)
+    return hitChanceR(w, assumedAimPoint(te, w).r, PM.seeker ? 1300 : 900);
+}
+// 推定円の幅 r から見た命中の見込み (自機も敵も同じ)。当たり得る幅 = シーカー/ビーム幅/散布
+function hitChanceR(w, r, seek) {
+    const sd = Math.max(80, (r || 1e9) / 2); // 推定円R ≈ 2σ
+    const reach = w === 'missile' ? (seek || 900) : w === 'beam' ? BEAM_HIT_WIDTH + 60 : 260;
     return Math.max(0, Math.min(0.95, 1 - Math.exp(-(reach * reach) / (2 * sd * sd))));
 }
 
@@ -2789,13 +3015,13 @@ function playerFireWeapon(s, target, wType, lk) {
     const aimX = _ap ? _ap.x : target.x;
     const aimY = _ap ? _ap.y : target.y;
     const genF = Math.max(0.3, 1.5 - (genAlloc.weapons / 100));
-    const reloadMult = WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0;
+    const reloadMult = (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0) * shipFx(s).reload; // 第39弾: 兵装重視はリロード×0.8
     const pct = Math.round(assumedHitChance(target, wType, lk) * 100);
     if (wType === 'kinetic') {
         const base = Math.atan2(aimY - s.y, aimX - s.x);
         const mk = (off) => { const p = new Projectile(s.x, s.y, { x: aimX, y: aimY }, true, 'kinetic', dmgScale); p.angle = base + off; p.ox = s.x; p.oy = s.y; projectiles.push(p); };
         mk(0);
-        if (gameState.shipType === 'assault') { mk(-KINETIC_SPREAD); mk(KINETIC_SPREAD); } // 攻撃型: 3連装同時発射
+        if (gameState.shipType === 'assault') { const _sp = KINETIC_SPREAD * shipFx(s).spread; mk(-_sp); mk(_sp); } // 攻撃型: 3連装同時発射 (第39弾: 兵装重視は散布×0.7)
         if (s === player) {
             _kinAmmoFrac += PM.kinAmmoUse; const use = Math.floor(_kinAmmoFrac); _kinAmmoFrac -= use; // 第32弾: 高速装填は弾の消費×1.5
             cargo.ammoK = Math.max(0, cargo.ammoK - use); _hudCache.cargo = null; if (cargo.ammoK === 0) logMessage('WEP: 実弾を撃ち尽くした — 占有したコロニーで補給', 'warning-msg');
@@ -3012,7 +3238,9 @@ class Ship {
     _maxSpeeds() {
         const cls = ENEMY_CLASS[this.type];
         if (!cls) return null;
-        const base = shipCruiseSpeed(cls, 40, 1) * (this.upgSpeed || 1) * this.terrainSpeedMult() * epm(this).speed; // 第33弾: 部品
+        // 第39弾: 自機と同じ式 — 機関の配分 (航行モード)・エンジンの種類・霧の減速 (ヒッグスエンジンは霧で速くなる)・岩礁帯・部品
+        const _eg = ENGINE_TYPES[this.engine] || ENGINE_TYPES.thermonuclear, _h = getHiggsIntensity(this.x, this.y);
+        const base = (shipCruiseSpeed(cls, (this.gen || GEN_FOCUS.balance).engine, 1) * (1 - _h * 0.45) * _eg.speedMult + _h * _eg.higgsSpeedBonus * MOVE_SPEED_MULT) * this.terrainSpeedMult() * epm(this).speed; // 第33弾: 部品
         return { silent: base * SILENT_SPEED_MULT, cruise: base, flank: base * 1.5 };
     }
     _moveHeading(targetAng, desired) {
@@ -3078,11 +3306,9 @@ class Ship {
         const _sysEng = (this._sysEngineTimer > 0) ? SYS_ENGINE_SLOW : 1;
         const deb = getDebrisIntensity(this.x, this.y);
         if (deb <= 0) return _sysEng;
-        // AI配分で姿勢制御補助=軽減。自機はGEN AI配分、敵は固定の軽減(全く動けなくなるのを防ぐ)。
-        const aiMit = this.isPlayer ? (genAlloc.ai / 100) * DEBRIS_AI_MITIGATE : DEBRIS_ENEMY_MITIGATE;
-        // §3-1 エンジンアップグレード: デブリ減速もヒッグスの50%相当で軽減
-        const engMit = this.isPlayer ? ENGINE_UPG_HIGGS_RESIST[gameState.upgrades.engine] * 0.5 : 0;
-        return _sysEng * (1 - deb * DEBRIS_SLOW * (1 - aiMit) * (1 - engMit));
+        // AI配分で姿勢制御補助=軽減 (第39弾: 自機も敵も、その艦のAI配分で同じ式。旧: 敵は固定0.35・自機はエンジン強化でも軽減)
+        const aiMit = ((this.isPlayer ? genAlloc.ai : (this.gen || GEN_FOCUS.balance).ai) / 100) * DEBRIS_AI_MITIGATE;
+        return _sysEng * (1 - deb * DEBRIS_SLOW * (1 - aiMit));
     }
 
     update() {
@@ -3107,99 +3333,32 @@ class Ship {
             // 第17弾: 「前フレームの位置」はここ(移動の前)で保存する。旧: 移動の後に保存していたため、次フレームの
             // この計算では常に速度0になり、自艦のシグネチャが速さに関係なく一定だった (敵の予測照準に渡す速度も0だった)
             this.prevX = this.x; this.prevY = this.y;
-            const _engType = ENGINE_TYPES[gameState.engineType] || ENGINE_TYPES.thermonuclear;
             const _hHere = getHiggsIntensity(this.x, this.y);
-            const _ep = genAlloc.engine / 100;
-            const _gain = (typeof genGain === 'number' && genGain > 0) ? genGain : 1; // 0.5..2.0
-            // 推進排気強度 0..1: 「機関負荷」(艦種の最大巡航速度に対する現在速度)を主体に、エンジン配分とゲインで増減。
-            // 第13弾: 旧式は絶対速度/6で正規化しており実速度域(0.3〜2u/f)では熱がほぼ立たなかった → 艦種別の負荷で正規化。
-            const _spdN = Math.min(1, _spd / Math.max(0.1, shipCruiseSpeed(this.type, 100, 1)));
-            // 第17弾: 機関停止中は推力ゼロ (熱と推進のEMが消える) / 緊急噴射中は推力最大
-            const _thrust = (playerCoasting || engineSwitchT > 0) ? 0 : boostT > 0 ? 1 : Math.min(1, (0.04 + _spdN * 0.75 + _ep * 0.06) * (0.55 + _gain * 0.45));
-            // 各シグネチャ = 推進強度 × エンジン種別倍率。エンジンごとに支配的シグネチャが変わる。
-            // §3-1 エンジンアップグレード: 熱効率改善でheatSig低下
-            // 電力(genAlloc.ai)↑ → 処理熱放射も増大
-            const _es = ENGINE_SIG[gameState.engineType] || ENGINE_SIG.thermonuclear;
-            const _mE = mtOver('engine'), _mW = mtOver('weapons'), _mS = mtOver('sensors'), _mA = mtOver('ai'); // 第36弾: MTで100%を超えた系統
-            this.heatSig    = Math.min(1, _thrust * _es.heat * 0.6 * _mE * (1 - ENGINE_UPG_HEAT_REDUCE[gameState.upgrades.engine]) + genAlloc.ai / 100 * 0.05 * _mA + (_mW - 1) * 0.06);
-            // 機関損傷: 冷却系破損で熱漏洩 (自機も対称に狩られやすくなる)
-            if (this._sysEngineTimer > 0) this.heatSig = Math.min(1, this.heatSig + 0.35);
-            // 発砲閃光: 撃った瞬間だけ強く光り1.5秒で減衰 (旧: 一度ビームを撃つと光学+0.5が永久に残っていた)
+            // 第39弾: シグネチャは敵と同じ関数 emitSigs で出す (推進=エンジンの主帯域・演算・行動ごとの信号・居る場所・部品)
             const _ff = Math.max(0, (this._fireFlash || 0)) / 90;
             if (this._fireFlash > 0) this._fireFlash -= gameSpeedFactor;
-            const _ft = this._fireFlashType;
-            this.opticalSig = Math.min(1, _thrust * _es.optic * 0.5 * _mE + _ff * _mW * (_ft === 'kinetic' ? 0.6 * PM.opticFire : _ft === 'beam' ? 0.9 : 0.15)); // 第20弾: ビームの発射は強い光 (第32弾: 近接信管弾は×1.5)
-            // EM: 推進＋(センサー/AI処理放射)。ゲインで増幅。AI↑でEM↑(逆探知の法則)。
-            // 第13弾: エンジン種別のEM倍率は推進由来の放射だけに掛ける。AI/センサーの演算放射は機関に関係なく漏れる
-            // (旧: 全体に掛けていたため熱核エンジンではAI放射が×0.4に消え、完全停止した艦は至近以外で絶対に見つからなかった)
-            this.emSig      = Math.min(1, _thrust * _es.em * 0.6 * _mE + (genAlloc.sensors / 100 * 0.18 * _mS + genAlloc.ai / 100 * 0.40 * _mA) * COMPUTE_EM_MULT * (0.6 + (playerCoasting ? 1 : _gain) * 0.4) + (_mW - 1) * 0.06);
-            if (_ff > 0 && _ft === 'beam') this.emSig = Math.min(1, this.emSig + _ff * 0.6);   // 第20弾: ビームの発射は強いEM
-            if (_ff > 0 && _ft === 'missile') { this.heatSig = Math.min(1, this.heatSig + _ff * 0.35 * PM.mslLaunchHeat); this.emSig = Math.min(1, this.emSig + _ff * 0.45); } // 第20弾: ミサイル発射はEMも
-            // 第20弾: ドローンの発進は光とEMが漏れる
-            if (this._launchFlash > 0) {
-                const _lf = this._launchFlash / 60;
-                this._launchFlash -= gameSpeedFactor;
-                this.opticalSig = Math.min(1, this.opticalSig + _lf * 0.35);
-                this.emSig = Math.min(1, this.emSig + _lf * 0.40);
+            const _lf = this._launchFlash > 0 ? this._launchFlash / 60 : 0;
+            if (this._launchFlash > 0) this._launchFlash -= gameSpeedFactor;
+            const _chg = (this._beamCharge || 0) > 0;
+            if (_chg && _frameCount - (this._chargeFrame || 0) > 30) { // チャージが中断されたら放熱 (発射条件が30f以上満たされない場合)
+                this._beamCharge = Math.max(0, this._beamCharge - 2 * gameSpeedFactor);
+                if (this._beamCharge === 0) this._chargeLogged = false;
             }
-            // 磁気嵐帯: 嵐がEM放射を覆い隠す → AIを安全に高配分できる退避所 (§3-13 D)
-            this.emSig     *= (1 - getStormIntensity(this.x, this.y) * STORM_EM_MASK);
-            // 熱雲: 環境熱ノイズが熱署名を埋もれさせる → HEATセンサーから隠れやすい (§3-13 Phase3)
-            this.heatSig   *= (1 - getThermalIntensity(this.x, this.y) * THERMAL_HEAT_MASK);
-            // ヒッグス: ヒッグス雲内を動くほどウェイク乱流。ヒッグスエンジンは特に顕著。
-            this.higgsSig   = Math.min(1, _thrust * _hHere * 1.6 + _thrust * _es.higgs * 0.5); // 霧の中を動けば乱れる＋ヒッグスエンジンは推進そのものが霧を乱す
-            // 第17弾: 漂っていても霧の中を動けば霧が乱れる (推力の分は無い)
-            if (playerCoasting) this.higgsSig = Math.min(1, _spdN * _hHere * 0.8);
-            // 静粛航行: 全シグネチャ抑制 (速度も落ちる。発砲/ソナーで自動解除)。機関停止中も同じ
-            if (silentRunning || playerCoasting) {
-                this.heatSig    *= SILENT_SIG_MULT;
-                this.opticalSig *= SILENT_SIG_MULT;
-                this.emSig      *= SILENT_SIG_MULT;
-                this.higgsSig   *= SILENT_SIG_MULT;
-            }
-            // デブリ擬態: 岩塊に艦影が紛れ、さらに大幅低減 (敵の近接ハード探知も無効)
-            if (isBottomed) {
-                this.heatSig    *= BOTTOM_SIG_MULT;
-                this.opticalSig *= BOTTOM_SIG_MULT;
-                this.emSig      *= BOTTOM_SIG_MULT;
-                this.higgsSig   *= BOTTOM_SIG_MULT;
-            }
-            // ビームチャージ中: 熱/EM/ヒッグス激増 — 敵の「chargingシグネチャ推定→回避行動」が本物になる
-            // 第20弾: リロード中(35秒)も熱/EM/ヒッグスが漏れ続ける。ミサイルのリロード中はEM (オーナー指定・量は実装で決めた値)
-            if (this.beamReloading) {
-                this.heatSig  = Math.min(1, this.heatSig + 0.15);
-                this.emSig    = Math.min(1, this.emSig + 0.20);
-                this.higgsSig = Math.min(1, this.higgsSig + 0.15);
-            }
-            if (this.missileReloading) this.emSig = Math.min(1, this.emSig + 0.20);
-            if ((this._beamCharge || 0) > 0) {
-                const _cl = PM.chargeLeak; // 第32弾: 集束レンズは漏れ×1.5
-                this.heatSig = Math.min(1, this.heatSig + 0.30 * _cl);
-                this.emSig   = Math.min(1, this.emSig + 0.40 * _cl);
-                this.higgsSig = Math.min(1, this.higgsSig + 0.30 * _cl);
-                // チャージが中断されたら放熱 (発射条件が30f以上満たされない場合)
-                if (_frameCount - (this._chargeFrame || 0) > 30) {
-                    this._beamCharge = Math.max(0, this._beamCharge - 2 * gameSpeedFactor);
-                    if (this._beamCharge === 0) this._chargeLogged = false;
-                }
-            }
-            // 第16弾: ノード制圧・コロニーハック中 — 通信のEMが漏れる
-            if (_capturing || _resupply) this.emSig = Math.min(1, this.emSig + 0.30); // 第20弾: 補給中も
-            // 第16弾: 資材から組み立て中 — 工作機械のEMが漏れる (潜航でも隠せない)。第20弾: オーナー指定でEMだけに
-            if (cargoAssembling()) this.emSig = Math.min(1, this.emSig + 0.35);
-            // 第21弾: 2本目以降に聴いている帯域は、その種類で漏れる / エンジン切替中はEMが漏れる
-            this.heatSig = Math.min(1, this.heatSig + sensorLeak('heat'));
-            this.opticalSig = Math.min(1, this.opticalSig + sensorLeak('optic'));
-            this.emSig = Math.min(1, this.emSig + sensorLeak('em') + (engineSwitchT > 0 ? ENGINE_SWITCH_EM : 0));
-            this.higgsSig = Math.min(1, this.higgsSig + sensorLeak('higgs'));
-            // 第32弾: 部品 (熱・光・電磁波の倍率と、常に漏れる分。潜航/機関停止中は漏れる分も小さい)
-            { const _qm = (silentRunning || playerCoasting) ? SILENT_SIG_MULT : 1;
-              this.heatSig = Math.min(1, this.heatSig * PM.heat + PM.heatAdd * _qm);
-              this.opticalSig = Math.min(1, this.opticalSig * PM.optic);
-              this.emSig = Math.min(1, this.emSig * PM.em + PM.emAdd * _qm); }
-            // 手負い: HP20%未満で冷却材漏洩 — 熱は隠しきれない (静粛航行でも下限あり)
+            const _sg = emitSigs({
+                engine: gameState.engineType, engineOn: !(playerCoasting || engineSwitchT > 0),
+                thrust: boostT > 0 ? 1 : thrustFrac(_spd, gameState.shipType),
+                alloc: { sensors: genAlloc.sensors / 100, ai: genAlloc.ai / 100 },
+                mt: { e: mtOver('engine'), w: mtOver('weapons'), s: mtOver('sensors'), a: mtOver('ai') },
+                quiet: silentRunning || playerCoasting, ff: _ff, ft: this._fireFlashType, launch: _lf,
+                charge: _chg ? PM.chargeLeak : 0, beamCool: !!this.beamReloading, mslReload: !!this.missileReloading,
+                assemble: cargoAssembling(), comms: !!(_capturing || _resupply), repair: (this._kitT || 0) > 0 || repairActive,
+                engSwitch: engineSwitchT > 0, sysEngine: this._sysEngineTimer > 0,
+                leak: { heat: sensorLeak('heat'), optic: sensorLeak('optic'), em: sensorLeak('em'), higgs: sensorLeak('higgs') },
+                hHere: _hHere, storm: getStormIntensity(this.x, this.y), thermal: getThermalIntensity(this.x, this.y),
+                bottomed: isBottomed, pm: PM, wounded: this.hp / this.maxHp < WOUNDED_HP_FRAC, pulsePh: 0,
+            });
+            this.heatSig = _sg.heat; this.opticalSig = _sg.optic; this.emSig = _sg.em; this.higgsSig = _sg.higgs;
             if (this.hp / this.maxHp < WOUNDED_HP_FRAC) {
-                this.heatSig = Math.max(this.heatSig, WOUNDED_HEAT_FLOOR * (silentRunning ? 0.7 : 1));
                 if (!this._woundedLogged) { this._woundedLogged = true; logMessage('WARN: 冷却材漏出 — 熱シグネチャを抑えられない。敵に追われやすい', 'warning-msg'); }
             } else this._woundedLogged = false;
 
@@ -3413,6 +3572,7 @@ class Ship {
             if (this.personality && this.personality._adaptive && (_frameCount + this.uid) % 60 === 0) {
                 const _ac = (this.aiState === 'hunting' || this.aiState === 'combat') && (this.contactFreshness || 0) > 0.2;
                 const _am = adaptPersonality(this.personality, _ac, this.hp / this.maxHp);
+                if (_am) setEnemyFocus(this, pickFocus(this.personality)); // 第39弾: 性格が変われば航行モードも
                 if (_am && comDemo) comThinkEvent('e', '性格が変わる → ' + ADAPT_MODES[_am].label + ' (' + (_am === 'cautious' ? '耐久' + _pct(this.hp / this.maxHp) + ' < 40%' : _am === 'aggressive' ? '自機を掴んだ' : _am === 'greedy' ? '90秒手掛かりなし' : '見失って60秒') + ')', 'e' + this.uid);
             }
             // 発砲フラッシュタイマー更新 (発砲直後だけ可視になる)
@@ -3514,7 +3674,7 @@ class Ship {
             // ──────────────────────────────────────
             const distToPlayer = Math.hypot(player.x - this.x, player.y - this.y);
             const higgsHereDetect = getHiggsIntensity(this.x, this.y);
-            const playerEmBoost = 0.5 + (genAlloc.ai / 100) * 0.5;
+            const _efx = shipFx(this);
             // 潜航型ジャミング: ジャミング半径内の敵は探知レンジが劣化する
             let jamDegrade = 0;
             if (gameState.shipType === 'stealth') {
@@ -3526,41 +3686,29 @@ class Ship {
                 }
             }
             const _clN = playerClutter(); // 第18弾: 混信 — 周りに発信源が多いほど自艦を見分けにくい
-            // 第21弾: 至近の直接探知 = 自機の有視界と同じ式 (居る場所の濃度で最大半径・視線の先の霧で遮られる)。
-            // 旧: 1100×(1−濃さ×0.55) の円で、濃い霧では自機の有視界 (1200×(1−濃さ×0.95)) より広く「敵だけ見える」場面があった
-            let myDetectRange = (BASE_VISION_RADIUS + (LULL_VIS - BASE_VISION_RADIUS) * lullK) * Math.max(MIN_VISION_FACTOR, 1 - higgsHereDetect * (1 - MIN_VISION_FACTOR)) * (1 + gameState.sector * 0.05) * playerEmBoost * (1 - jamDegrade) * (this.upgDetect || 1) / (1 + CLUTTER_HARD * _clN);
-            let sigRange = ENEMY_PASSIVE_RANGE * (1 - higgsHereDetect * 0.3) * (1 + gameState.sector * 0.03) * (1 - jamDegrade) * (this.upgDetect || 1);
+            // 第21弾: 至近の直接探知 = 自機の有視界と同じ式 (居る場所の濃度で最大半径・視線の先の霧で遮られる)
+            // 第39弾: 敵だけの補正 (セクターごとの+5%・自艦のAI配分で伸び縮み・ノードでの強化) は撤去 — 自艦の有視界と同じ
+            let myDetectRange = (BASE_VISION_RADIUS + (LULL_VIS - BASE_VISION_RADIUS) * lullK) * Math.max(MIN_VISION_FACTOR, 1 - higgsHereDetect * (1 - MIN_VISION_FACTOR)) * (1 - jamDegrade) / (1 + CLUTTER_HARD * _clN);
+            // 第39弾: 受信の最大距離も自艦と同じ式 (15000u × 探知重視 × 居る場所の霧)。セクター補正は撤去
+            let sigRange = PASSIVE_BASE * _efx.rxRange * epm(this).rxRange * (1 - higgsHereDetect * 0.3) * (1 - jamDegrade);
             // ヒッグスサージ: 敵の探知も対称に縮退/ブースト (プレイヤーと同じ物理法則)
             if (surgePhase === 'active') { myDetectRange *= SURGE_DETECT_MULT; sigRange *= SURGE_DETECT_MULT; }
             else if (surgePhase === 'after') { myDetectRange *= SURGE_CLARITY_MULT; sigRange *= SURGE_CLARITY_MULT; }
-            // センサー損傷: ほぼ盲目 (奇襲でセンサーを潰せば追跡を振り切れる)
-            if (this._sysSensorTimer > 0) { myDetectRange *= 0.1; sigRange *= 0.1; }
+            if (this._sysSensorTimer > 0) sigRange *= SYS_SENSOR_RX; // センサー損傷 (自艦と同じ)
             if (this._daze > 0) { myDetectRange *= DAZE_SENSOR_MULT; sigRange *= DAZE_SENSOR_MULT; } // 第20弾: センサー撹乱
-            // 第15弾: 自艦ノイズ — 速く動いている敵ほど耳が塞がる (プレイヤーと同じ物理)
 
+            // 第39弾: 聴くのは自艦と同じく1秒ごと (直近1秒の最大値)。至近の直接探知 (見える) は毎フレーム
+            const _listen = (_frameCount + this.uid * 13) % 60 === 0;
             let playerSigDetected = false;
             let _hardDetect = false; // 至近の直接探知 (位置誤差ほぼ無し)
-            let detectedSigStrength = 0;
-            let domSig = null, domVal = 0; // 最も強く検知したシグネチャ種別 (行動推定用)
+            let detectedSigStrength = 0, _hBand = null, _hNoise = 1, _hNb = 0;
+            let domSig = null; // 最も強く検知したシグネチャ種別 (行動推定用)
+            let _noiseSrc = null, _relayPost = null;
             if (player && player.hp > 0) {
-                const pSigs = { heat: player.heatSig||0, optic: player.opticalSig||0, em: player.emSig||0, higgs: player.higgsSig||0 };
-                const _mx = (player.x + this.x) / 2, _my = (player.y + this.y) / 2;
-                const _debrisPath  = getDebrisIntensity(_mx, _my);
-                const _stormPath   = getStormIntensity(_mx, _my);
-                const _thermalPath = getThermalIntensity(_mx, _my);
-                enemyBands(this).forEach(sName => { // 第21弾: 敵も聴いている帯域だけ (性格で本数が決まる)
-                    const sc2 = sensorConfig[sName];
-                    const higgsPath = getHiggsIntensity(_mx, _my);
-                    const distAtten = Math.max(0, 1 - distToPlayer / sigRange);
-                    // 地形ハザード: デブリ=OPTIC減衰 / 磁気嵐=EM減衰 / 熱雲=HEAT減衰 (§3-13)
-                    let terrAtten = 1;
-                    if (sName === 'optic') terrAtten = 1 - _debrisPath * DEBRIS_OPTIC_MOD;
-                    else if (sName === 'em')   terrAtten = 1 - _stormPath   * STORM_EM_MOD;
-                    else if (sName === 'heat') terrAtten = 1 - _thermalPath * THERMAL_HEAT_MOD;
-                    const attenuated = pSigs[sName] * distAtten * (1 - higgsPath * sc2.higgsMod) * terrAtten;
-                    if (attenuated > sc2.threshold * 0.5) { playerSigDetected = true; detectedSigStrength = Math.max(detectedSigStrength, attenuated); }
-                    if (attenuated > domVal) { domVal = attenuated; domSig = sName; }
-                });
+                if (_listen && this.type !== 'fighter' || _listen && distToPlayer < 2500) {
+                    const h = hearSource(player, 'e' + this.uid, this.x, this.y, player.x, player.y, b => sigPeak(player, b), sigRange, enemyBands(this)); // 第21弾: 敵も聴いている帯域だけ
+                    if (h) { playerSigDetected = true; detectedSigStrength = h.sig; domSig = h.band; _hBand = h.band; _hNoise = h.noise; _hNb = h.nb; }
+                }
                 // 接近探知 (デブリ擬態中は岩塊に紛れて至近でも掴めない — 至近を通過されてもやり過ごせる)
                 if (!isBottomed && !(lullSheltered(player) && distToPlayer > BASE_VISION_RADIUS) && distToPlayer < Math.max(VIS_CLOSE, myDetectRange) && losReach(this.x, this.y, Math.atan2(player.y - this.y, player.x - this.x), Math.max(VIS_CLOSE, myDetectRange)) >= distToPlayer) { // 第22弾: 自機と同じ視線ルール (300u以内は必ず)
                     this.detectionTimer++;
@@ -3571,74 +3719,77 @@ class Ship {
             }
 
             // 第17弾: ノイズメーカー — 全速の自艦と同じ熱を出す囮。敵は強い方の音を自艦と思い込む (至近で直接掴んでいれば本物が勝つ)
-            let _noiseSrc = null;
-            if ((noiseMakers.length || lures.length) && !_hardDetect && player && player.hp > 0) {
+            if (_listen && (noiseMakers.length || lures.length) && !_hardDetect && player && player.hp > 0) {
                 // 第21弾: 自機の偽艦影ブイも「自機の音」に見える (敵が聴いている帯域で一番強いもの)
                 for (const L of lures) {
                     if (L.owner !== 'p' || L.kind !== 'ship' || L.phase !== 'on') continue;
-                    const dn = Math.hypot(L.x - this.x, L.y - this.y);
-                    if (dn >= sigRange) continue;
-                    const sL = lureSigFor(this, L, dn, sigRange);
-                    if (sL > sensorConfig.heat.threshold * 0.5 && sL > detectedSigStrength) { detectedSigStrength = sL; _noiseSrc = L; }
+                    const h = hearSource(L, 'e' + this.uid, this.x, this.y, L.x, L.y, () => LURE_SIG * Math.min(1, L.life / 60), sigRange, enemyBands(this));
+                    if (h && h.sig > detectedSigStrength) { detectedSigStrength = h.sig; _noiseSrc = L; _hNoise = h.noise; _hBand = h.band; }
                 }
                 for (const nm of noiseMakers) {
-                    const dn = Math.hypot(nm.x - this.x, nm.y - this.y);
-                    if (dn >= sigRange) continue;
-                    const hp = getHiggsIntensity((nm.x + this.x) / 2, (nm.y + this.y) / 2);
-                    const s = NOISE_HEAT * Math.min(1, nm.life / 60) * (1 - dn / sigRange) * (1 - hp * sensorConfig.heat.higgsMod);
-                    if (s > sensorConfig.heat.threshold * 0.5 && s > detectedSigStrength) { detectedSigStrength = s; _noiseSrc = nm; }
+                    const h = hearSource(nm, 'e' + this.uid, this.x, this.y, nm.x, nm.y, b => b === 'heat' ? NOISE_HEAT * Math.min(1, nm.life / 60) : 0, sigRange, enemyBands(this));
+                    if (h && h.sig > detectedSigStrength) { detectedSigStrength = h.sig; _noiseSrc = nm; _hNoise = h.noise; _hBand = h.band; }
                 }
                 if (_noiseSrc) playerSigDetected = true;
             }
             // 第16弾: 敵が制圧したノードは敵の聴音局 (自機と対称)。ノードの近くで音を立てれば、敵は遠くからでも位置を掴む
-            let _relayErr = -1;
-            if (!playerSigDetected && this.type !== 'fighter' && player && player.hp > 0 && (_frameCount + this.uid) % 30 === 0) {
+            if (_listen && !playerSigDetected && this.type !== 'fighter' && player && player.hp > 0) {
                 for (const post of listeningPosts('enemy')) { // 第31弾: 敵のコロニーも聴音局 (8000u)
                     const n = post.o, RR = post.R;
                     const dn = Math.hypot(player.x - n.x, player.y - n.y);
                     if (dn > RR) continue;
-                    const s = Math.max(player.heatSig || 0, player.emSig || 0, (player.opticalSig || 0) * 0.8) * (1 - dn / RR) * (1 - getHiggsIntensity((player.x + n.x) / 2, (player.y + n.y) / 2) * 0.5);
-                    if (s > 0.12) { playerSigDetected = true; detectedSigStrength = Math.max(detectedSigStrength, s * 0.6); _relayErr = dn * 0.18 + 150; break; }
+                    let s0 = 0; for (const b of BANDS) s0 = Math.max(s0, sigPeak(player, b)); // 第39弾: 自艦の聴音局 (relayListen) と同じ式
+                    const sg = s0 * (1 - dn / RR) * (1 - getHiggsIntensity((player.x + n.x) / 2, (player.y + n.y) / 2) * 0.5);
+                    if (sg >= 0.12) { playerSigDetected = true; detectedSigStrength = Math.max(detectedSigStrength, sg * 0.6); _relayPost = { x: n.x, y: n.y, sig: sg }; break; }
                 }
             }
-            // センサー制約型: 探知中のみ最終既知位置を更新。喪失後は古い予測が凍結される。
-            if (!playerSigDetected) this._ana = (this._ana || 0) * Math.pow(0.9995, gameSpeedFactor); // 第29弾: 聞こえない間は解析量が薄れる (約23秒で半分)
+            // 第39弾 (オーナー: 自艦も敵も同じ法則): 敵の推定も方位の記録から解く (自艦と同じ solveFix / trackEstimate)。
+            // 旧: 真の位置に乱数の誤差を足していた・速さは真の速さだった
+            const _sa = this._sa || (this._sa = Object.assign(_newSignalAnalysis(), { who: this }));
+            _sa.rMax = sigRange * 1.6;
+            if (_listen && this.type !== 'fighter' && (_frameCount + this.uid) % 120 < 60) searchMark(this, this.x, this.y, sigRange * SEARCH_HEAR_FRAC); // 第39弾: 聴いた範囲を覚える
+            if (_listen) {
+                const _lo = _sa.obs[_sa.obs.length - 1];
+                if (!_lo && !_sa.ping) _sa.ana = 0;
+                else if (!playerSigDetected) _sa.ana = (_sa.ana || 0) * 0.97; // 聞こえない間は解析量が薄れる (約23秒で半分 — 旧と同じ)
+            }
             if (playerSigDetected && player && player.hp > 0) {
-                // 第13弾: 敵の位置推定にも誤差を (プレイヤーの推定円と対称)。
-                // 遠く・弱い信号ほど誤差が大きく、探知が続くほど観測を重ねて真値へ収束する(平滑化)。
                 const _q = _hardDetect ? 1 : Math.min(1, detectedSigStrength / 0.5);
-                // 聞こえた音の主 (自艦 or ノイズメーカー)。敵には区別がつかない
-                const _sx = _noiseSrc ? _noiseSrc.x : player.x, _sy = _noiseSrc ? _noiseSrc.y : player.y;
-                const _srcDist = _noiseSrc ? Math.hypot(_sx - this.x, _sy - this.y) : distToPlayer;
-                // 第29弾: 敵も解析量が要る (聞こえない間は薄れる: 下の else) (自機と同じ式・演算力は敵のコロニーで上がる)。見えていれば一気に貯まる
-                this._ana = (this._ana || 0) + (_hardDetect ? 0.5 : analysisPower('enemy') * (0.5 + 0.5 * _q) / 60) * gameSpeedFactor;
-                const _err = Math.max((_relayErr >= 0 ? _relayErr : (1 - _q) * _srcDist * 0.25 + 50) * (_noiseSrc ? 1 : clutterErrMult(_clN)) * (_hardDetect ? 1 : PM.ecm), // 第32弾: ECM
-                                      _hardDetect ? 0 : _srcDist * anaFloorFrac(this._ana) * 0.5);
-                const _ea = Math.random() * Math.PI * 2, _er = Math.sqrt(Math.random()) * _err;
-                let _lkx = _sx + Math.cos(_ea) * _er, _lky = _sy + Math.sin(_ea) * _er;
-                // §3-12残: ジャミングで相手の方位を広げる — JAM中は探知位置にノイズを加算
-                // 方位の不確かさ↑＝位置推定がズレる＝発砲精度が下がる
-                if (gameState.shipType === 'stealth') {
-                    if (jamBurst > 0 && distToPlayer < JAM_BURST_RADIUS) {
-                        const _ja = Math.random() * Math.PI * 2;
-                        _lkx += Math.cos(_ja) * Math.random() * 400;
-                        _lky += Math.sin(_ja) * Math.random() * 400;
-                    } else if (jamCont && distToPlayer < JAM_CONT_RADIUS) {
-                        const _ja = Math.random() * Math.PI * 2;
-                        _lkx += Math.cos(_ja) * Math.random() * 250;
-                        _lky += Math.sin(_ja) * Math.random() * 250;
+                if (_hardDetect) {
+                    // 見えている: その位置が点の観測 (自艦の有視界と同じ)。見えている動きから速さも分かる
+                    _sa.ping = { x: player.x, y: player.y, r: 200, f: _frameCount };
+                    this.playerLastKnownPos = { x: player.x, y: player.y, vx: player.x - (player.prevX ?? player.x), vy: player.y - (player.prevY ?? player.y) };
+                    this._lkGuess = false; this._estR = 200;
+                    if (_listen) { _sa.ana = (_sa.ana || 0) + 30; solveFix(_sa); } // 見えていれば一気に貯まる
+                } else if (_listen) {
+                    // 聞こえた音の主 (自艦 or ノイズメーカー or 偽艦影)。敵には区別がつかない — 方位だけが手に入る
+                    const _src = _noiseSrc || player;
+                    const conf = Math.max(0, Math.min(1, (detectedSigStrength - 0.15 * 0.5) / (1 - 0.075)));
+                    let ox = this.x, oy = this.y, sig;
+                    if (_relayPost && !_noiseSrc) { ox = _relayPost.x; oy = _relayPost.y; sig = (0.012 + 0.03 * (1 - Math.min(1, (_relayPost.sig - 0.12) / 0.5))) * clutterErrMult(_clN); }
+                    else sig = bearingSigma(conf, true, _efx, _noiseSrc ? 0 : _clN, _noiseSrc ? 1 : PM.ecm, _hNoise); // 第32弾: ECM / 第39弾: 経路の雑音
+                    // ジャミング: 方位が乱れる (旧: 位置にノイズを足していた)
+                    if (gameState.shipType === 'stealth' && !_noiseSrc && ((jamBurst > 0 && distToPlayer < JAM_BURST_RADIUS) || (jamCont && distToPlayer < JAM_CONT_RADIUS))) sig *= jamBurst > 0 ? 3 : 2;
+                    const ang = Math.atan2(_src.y - oy, _src.x - ox) + _gauss() * sig;
+                    const _n0 = _sa.obs.length;
+                    _addObs(_sa, ox, oy, ang, sig, detectedSigStrength, null, _relayPost && !_noiseSrc ? 'post' : undefined);
+                    _sa.ana = (_sa.ana || 0) + analysisPower('enemy', this) * (0.5 + 0.5 * _q) * (_sa.obs.length > _n0 ? ANA_NEWPOS : 1); // 第29弾: 解析量 (自艦と同じ式)
+                    solveFix(_sa);
+                    const est = trackEstimate(_sa, 0);
+                    if (est) {
+                        this.playerLastKnownPos = { x: est.x, y: est.y, vx: est.vx || 0, vy: est.vy || 0 };
+                        this._lkGuess = false; this._estR = est.r;
+                    } else {
+                        // まだ方位しか無い: 方位線の上の見込みの距離 (受信の最大距離の半分) を仮の行き先にする。撃つ根拠にはしない。
+                        // 行き先を方位線から斜めにずらす (近づきながら基線ができる)
+                        const gd = Math.min(sigRange * 0.5, 9000), side = (this.uid % 2 ? 1 : -1);
+                        const ga = ang + side * 0.35;
+                        this.playerLastKnownPos = { x: ox + Math.cos(ga) * gd, y: oy + Math.sin(ga) * gd, vx: 0, vy: 0 };
+                        this._lkGuess = true; this._estR = gd;
                     }
                 }
-                const _prevLk = this.playerLastKnownPos;
-                const _blend = (_prevLk && this.contactFreshness > 0.5) ? 0.08 : 1; // 連続探知中は観測を平均化
-                this.playerLastKnownPos = {
-                    x: _prevLk ? _prevLk.x + (_lkx - _prevLk.x) * _blend : _lkx,
-                    y: _prevLk ? _prevLk.y + (_lky - _prevLk.y) * _blend : _lky,
-                    vx: (_noiseSrc ? _noiseSrc.vx * gameSpeedFactor : player.x - (player.prevX ?? player.x)) * _q,
-                    vy: (_noiseSrc ? _noiseSrc.vy * gameSpeedFactor : player.y - (player.prevY ?? player.y)) * _q
-                };
                 // 推定がノイズメーカー由来か (他の理由で推定が書き換わるまで = 本物を掴み直すまで)
-                this._noiseLk = _noiseSrc ? this.playerLastKnownPos : null;
+                if (_listen || _hardDetect) this._noiseLk = _noiseSrc ? this.playerLastKnownPos : null;
                 this.contactFreshness = 1.0;
                 this.intelPos = null; // 実探知を得たら司令部情報の捜索は終了
             } else {
@@ -3715,7 +3866,7 @@ class Ship {
                         this.lurking = false;
                         this.detectionState = 'alerted';
                         if (!this.alertLogged) { this.alertLogged = true; logMessage(`WARN: 敵艦(${personalityTag(this.personality || {})}個体)があなたのシグネチャを捕捉。迎撃態勢に入ります。`, 'warning-msg'); }
-                        if (comDemo && this.type !== 'fighter') comThinkEvent('e', (_hardDetect ? '至近で直接掴んだ' : _noiseSrc ? '強い音を捕捉 (実はノイズメーカー)' : _relayErr >= 0 ? '聴音局が自機の音を拾った' : '自機の' + ({ heat: '熱', optic: '光', em: 'EM', higgs: '航跡' }[domSig] || '') + 'を捕捉') + ' (推定' + Math.round(_distBelief / 100) * 100 + 'u) → 交戦', 'e' + this.uid);
+                        if (comDemo && this.type !== 'fighter') comThinkEvent('e', (_hardDetect ? '至近で直接掴んだ' : _noiseSrc ? '強い音を捕捉 (実はノイズメーカー)' : _relayPost ? '聴音局が自機の音を拾った' : '自機の' + ({ heat: '熱', optic: '光', em: 'EM', higgs: '航跡' }[domSig] || '') + 'を捕捉') + ' (推定' + Math.round(_distBelief / 100) * 100 + 'u) → 交戦', 'e' + this.uid);
                     }
                 } else if (this.aiState === 'lurking' || this.aiState === 'gathering') {
                     this.aiState = 'hunting';
@@ -3819,7 +3970,7 @@ class Ship {
                         this.aiState = 'hunting'; this.huntTimer = 900; this.lurking = false;
                         if (comDemo) comThinkEvent('e', '補給完了 (実弾' + this.ammoK + '・ミサイル' + this.ammoM + ') → 狩りへ戻る', 'e' + this.uid);
                         if (this.inVision || this.contactLife > 0) logMessage('SENSOR: 敵艦が補給を終えた', 'warning-msg');
-                    } else this.emSig = Math.max(this.emSig, 0.45); // 補給中は通信のEMが漏れる (自機と同じ)
+                    } else this._commsF = _frameCount; // 補給中は通信のEMが漏れる (第39弾: 自機と同じ値 — emitSigs の comms)
                     _supplyActive = !!this._supply;
                 }
             }
@@ -3833,8 +3984,8 @@ class Ship {
                 this.lurking = false;
                 const prof = ENEMY_COMBAT[this.type] || ENEMY_COMBAT.destroyer;
                 const pers = this.personality || { aggression: 0.5, stealth: 0.3, greed: 0.4, caution: 0.4 };
-                const fireRange = (700 + gameState.sector * 25) * prof.rangeMult;
-                this.speed = Math.min(2.2, 0.9 + gameState.sector * 0.08) * prof.speedMult * (this.upgSpeed || 1) * this.terrainSpeedMult() * gameSpeedFactor * MOVE_SPEED_MULT; // 艦載機の速さ (戦艦は _maxSpeeds)
+                const fireRange = 725 * prof.rangeMult; // 第39弾: セクター補正は撤去
+                this.speed = 0.98 * prof.speedMult * (this.upgSpeed || 1) * this.terrainSpeedMult() * gameSpeedFactor * MOVE_SPEED_MULT; // 艦載機の速さ (戦艦は _maxSpeeds)
 
                 // センサー制約型照準: 実プレイヤーではなく「最終既知位置」へ撃つ。
                 // 接触が新しいほど速度ぶんリード外挿、喪失するほど古い点で凍結 → 移動/沈黙で外れる。
@@ -3949,6 +4100,12 @@ class Ship {
                     if (wType === 'kinetic' && distToBelief > 760) wType = 'missile';
                     // 第20弾: 弾数・リロード・ビームのチャージ (自機と同じ)。使えない兵装は持ち替え、何も無ければ撃たない
                     wType = this._usableWeapon(wType, distToBelief);
+                    // 第39弾: 見えていない相手には、推定円が十分に小さい時だけ撃つ (自機COMと同じ基準: 見込み ≥ 65% − 35%×攻撃性)。方位しか無ければ撃たない
+                    if (wType && this.type !== 'fighter' && !(this.detectionTimer > 60)) {
+                        const _te = this._sa && (this._sa.fix || this._sa.motion || this._sa.ping) ? trackEstimate(this._sa, 0) : null;
+                        const _hc = this._lkGuess || !_te ? 0 : hitChanceR(wType, _te.r, epm(this).seeker ? 1300 : 900);
+                        if (_hc < 0.65 - 0.35 * (pers.aggression ?? 0.5)) { wType = null; this.fireCooldown = Math.max(this.fireCooldown, 60); }
+                    }
                     // 第22弾: 自機と同じく射角に入っていなければ撃たない (旧: 艦首の向きに関係なく撃てた)。ビームのチャージは射角の外でもできる
                     if (wType && wType !== 'beam' && Math.abs(diff) > (WEAPON_FIRE_ARC[wType] || Math.PI / 4)) { wType = wType === 'missile' && this._usableWeapon('kinetic', distToBelief) === 'kinetic' && Math.abs(diff) < WEAPON_FIRE_ARC.kinetic ? 'kinetic' : null; if (!wType) this.fireCooldown = 10; }
                     let _canShoot = !!wType;
@@ -3964,7 +4121,7 @@ class Ship {
                     const shots = (wType === 'kinetic') ? prof.burst : 1;
                     const baseRange = Math.max(1, Math.hypot(aimX - this.x, aimY - this.y));
                     for (let s = 0; s < shots; s++) {
-                        const spread = shots > 1 ? (s - (shots - 1) / 2) * KINETIC_SPREAD : 0; // 第20弾: 自機と同じ散布
+                        const spread = shots > 1 ? (s - (shots - 1) / 2) * KINETIC_SPREAD * shipFx(this).spread : 0; // 第20弾: 自機と同じ散布 (第39弾: 兵装重視は×0.7)
                         const sa = ta + spread;
                         const tgX = this.x + Math.cos(sa) * baseRange;
                         const tgY = this.y + Math.sin(sa) * baseRange;
@@ -3980,10 +4137,17 @@ class Ship {
                                 leaveBeamChannel(this.x, this.y, _blk.x, _blk.y);
                                 continue;
                             }
-                            if (missDist >= player.radius * 2.2) {
-                                effects.push({ x: this.x, y: this.y, tx: tgX, ty: tgY, type: 'beam', a: 1, c: '#ff4d4d' });
-                                leaveBeamChannel(this.x, this.y, tgX, tgY);
-                                beamNearMiss(this.x, this.y, tgX, tgY, false, null); // 外れても至近を通れば自艦のセンサーが乱れる
+                            // 第39弾: 自機と同じ線判定 — 推定点の方向へ射程いっぱいまで一直線、線から140u以内に居れば当たる (旧: 狙った点の近くだけ)
+                            const _bL = WEAPON_RANGE.beam, _bA = Math.atan2(tgY - this.y, tgX - this.x);
+                            const _btx = player.x - this.x, _bty = player.y - this.y;
+                            const _bAl = _btx * Math.cos(_bA) + _bty * Math.sin(_bA), _bPp = Math.abs(-_btx * Math.sin(_bA) + _bty * Math.cos(_bA));
+                            void missDist;
+                            if (!(_bAl > 0 && _bAl < _bL && _bPp < BEAM_HIT_WIDTH + (player.radius || 0))) {
+                                const _bex = this.x + Math.cos(_bA) * _bL, _bey = this.y + Math.sin(_bA) * _bL;
+                                effects.push({ x: this.x, y: this.y, tx: _bex, ty: _bey, type: 'beam', a: 1, c: '#ff4d4d' });
+                                leaveBeamChannel(this.x, this.y, _bex, _bey);
+                                beamNearMiss(this.x, this.y, _bex, _bey, false, null); // 外れても至近を通れば自艦のセンサーが乱れる
+                                if (this._sa) recordMissSa(this._sa, { x: this.x, y: this.y, x2: _bex, y2: _bey, r: BEAM_HIT_WIDTH + 120 }); // 外れ = その線上には居ない
                                 continue;
                             }
                             projTarget = player;
@@ -3993,17 +4157,18 @@ class Ship {
                         _eproj.owner = this; // kinetic/missile着弾時の奇襲被弾判定用
                         { const _m = epm(this); // 第33弾: 敵の部品
                           if (wType === 'kinetic') _eproj.dmg *= _m.kinDmg * _m.dmgAll;
-                          else if (wType === 'missile') { _eproj.dmg *= _m.mslDmg * _m.dmgAll; _eproj.maxDist *= _m.mslRange; _eproj.speed *= _m.mslSpeed; _eproj.quiet = !!_m.mslQuiet; _eproj.emp = !!_m.emp; _eproj.seekR = _m.seeker ? 900 : 600; } }
+                          else if (wType === 'missile') { _eproj.dmg *= _m.mslDmg * _m.dmgAll; _eproj.maxDist *= _m.mslRange; _eproj.speed *= _m.mslSpeed; _eproj.quiet = !!_m.mslQuiet; _eproj.emp = !!_m.emp; _eproj.seekR = _m.seeker ? 1300 : 900; } } // 第39弾: 終末シーカーは自機と同じ 900u (部品で1300u)
                         _beamShooter = null;
                         projectiles.push(_eproj);
                     }
                     playSound('shoot');
                     this.fireCooldown = prof.fireCD * (this.upgFireCD || 1); // 実弾の連射間隔 (ミサイル・ビームはリロードが律速)
                     // 第20弾: 弾を消費してリロード (実弾=8斉射マガジン / ミサイル=1発ごとに10秒 / ビーム=35秒)
-                    if (wType === 'kinetic' && this.ammoK !== undefined) { this.ammoK--; if (this._kMag === undefined) this._kMag = epm(this).kinMag; if (--this._kMag <= 0 || this.ammoK <= 0) this._kReload = KINETIC_RELOAD_TIME * epm(this).kinReload; }
-                    else if (wType === 'missile' && this.ammoM !== undefined) { this.ammoM--; this._mReload = MISSILE_RELOAD_TIME * epm(this).mslReload; }
-                    else if (wType === 'beam') { this._bReload = BEAM_RELOAD_TIME * epm(this).beamReload; this._eCharge = 0; }
+                    if (wType === 'kinetic' && this.ammoK !== undefined) { this.ammoK--; if (this._kMag === undefined) this._kMag = epm(this).kinMag; if (--this._kMag <= 0 || this.ammoK <= 0) this._kReload = KINETIC_RELOAD_TIME * epm(this).kinReload * shipFx(this).reload; }
+                    else if (wType === 'missile' && this.ammoM !== undefined) { this.ammoM--; this._mReload = MISSILE_RELOAD_TIME * epm(this).mslReload * shipFx(this).reload; }
+                    else if (wType === 'beam') { this._bReload = BEAM_RELOAD_TIME * epm(this).beamReload * shipFx(this).reload; this._eCharge = 0; }
                     this.fireFlashTimer = 120;
+                    this._fireFlash = 90; this._fireFlashType = wType; // 第39弾: 発砲の信号は自艦と同じ (emitSigs)
                     this._lastFireType = wType; this._lastFireF = _frameCount; // 第22弾: 自機(COM)は撃たれた兵装で機動を選ぶ
                     if (this.type !== 'fighter') matchRecEvent('fireE', this.x, this.y, '敵: ' + _WPN_JP[wType] + 'を撃つ (推定点まで' + Math.round(distToBelief / 100) * 100 + 'u)');
                     this.visible = true;
@@ -4075,7 +4240,7 @@ class Ship {
                     firePingFromEnemy(this);
                     if (comDemo) comThinkEvent('e', '接触が薄い (確信' + _pct(this.contactFreshness) + ') → 探信を打つ (位置を晒すが正確な位置が取れる)', 'e' + this.uid);
                 }
-                this.speed = Math.min(1.6, 0.8 + gameState.sector * 0.06) * _huntProf.speedMult * (this.upgSpeed || 1) * this.terrainSpeedMult() * gameSpeedFactor * MOVE_SPEED_MULT;
+                this.speed = 0.86 * _huntProf.speedMult * (this.upgSpeed || 1) * this.terrainSpeedMult() * gameSpeedFactor * MOVE_SPEED_MULT;
                 if (this.huntTimer > 0) this.huntTimer--;
                 if (this.huntTarget) {
                     const dist = Math.hypot(this.huntTarget.x - this.x, this.huntTarget.y - this.y);
@@ -4091,7 +4256,7 @@ class Ship {
 
             } else if (this.aiState === 'gathering') {
                 this.lurking = false;
-                this.speed = Math.min(1.2, 0.7 + gameState.sector * 0.05) * this.terrainSpeedMult() * gameSpeedFactor * MOVE_SPEED_MULT;
+                this.speed = 0.75 * this.terrainSpeedMult() * gameSpeedFactor * MOVE_SPEED_MULT;
                 // 最寄りノード探索 (第16弾: 自分のものでないノードを制圧しに行く)
                 if (!this.gatherTarget || this.gatherTarget.owner === 'enemy') {
                     let closest = null, closestDist = Infinity;
@@ -4111,7 +4276,7 @@ class Ship {
                         enemyCaptureNode(this, this.gatherTarget);
                         this.resourcePoints++;
                         // ノード1個ごとに小回復。2個ごとに性格重み付けで自己強化 (放置すると相手が育つ)。
-                        if (this.resourcePoints % 2 === 0) applyEnemyUpgrade(this); // 第26弾: ノードでの小回復は撤去
+                        // 第39弾: ノードでの自己強化 (applyEnemyUpgrade) は撤去 — 自機はノードで強くならない (部品のドラフトは自機と同じ)
                         this.gatherTarget = null; this._capT = 0;
                         this.aiState = 'lurking'; this.lurking = true;
                     }
@@ -4206,16 +4371,14 @@ class Ship {
                             for (const st of structures) { if (st.type !== 'colony' || st.owner === 'enemy') continue; const d = Math.hypot(st.x - this.x, st.y - this.y); if (d < cd) { cd = d; col = st; } }
                             if (col && Math.random() < 0.4 + _pers.greed * 0.5) {
                                 g = this._roamGoal = { x: col.x, y: col.y, lbl: col.owner === 'player' ? '自機のコロニー (奪う)' : 'コロニー (占有する)', col };
-                                if (comDemo) comThinkEvent('e', '気配なし → ' + g.lbl + ' (' + _dirTxt(this.x, this.y, g.x, g.y) + ')。占有すれば自機の方角が分かる', 'e' + this.uid);
+                                if (comDemo) comThinkEvent('e', '気配なし → ' + g.lbl + ' (' + _dirTxt(this.x, this.y, g.x, g.y) + ')。占有すれば補給・聴音局・演算力', 'e' + this.uid);
                             }
                         }
                         if (!g || (!g.col && Math.hypot(g.x - this.x, g.y - this.y) < 2500)) {
-                            const cands = [{ x: MAP_CX, y: MAP_CY, lbl: 'マップ中央' }];
-                            for (const n of resourceNodes) if (n.owner !== 'enemy') cands.push({ x: n.x, y: n.y, lbl: 'ノード' });
-                            for (const st of structures) if (st.type === 'colony') cands.push({ x: st.x, y: st.y, lbl: 'コロニー' });
-                            const far = cands.filter(q => Math.hypot(q.x - this.x, q.y - this.y) > 4000);
-                            g = this._roamGoal = (far.length ? far : cands)[Math.floor(Math.random() * (far.length || cands.length))];
-                            if (comDemo) comThinkEvent('e', '長く気配なし (攻撃性' + _pct(_pers.aggression) + ') → ' + g.lbl + 'の方へ哨戒に出る (' + _dirTxt(this.x, this.y, g.x, g.y) + ')', 'e' + this.uid);
+                            // 第39弾: まだ聴いていない所へ (自機COMと同じ searchNext)。旧: ノード/コロニー/中央から無作為
+                            const sn = searchNext(this, this.x, this.y);
+                            g = this._roamGoal = { x: sn.x, y: sn.y, lbl: 'まだ聴いていない海域' };
+                            if (comDemo) comThinkEvent('e', '長く気配なし (攻撃性' + _pct(_pers.aggression) + ') → ' + g.lbl + 'へ哨戒に出る (' + _dirTxt(this.x, this.y, g.x, g.y) + ')', 'e' + this.uid);
                         }
                         const dG = Math.hypot(g.x - this.x, g.y - this.y), aG = Math.atan2(g.y - this.y, g.x - this.x), leg = Math.min(dG, 3500 + Math.random() * 1500);
                         if ((g.col || g.der || g.node) && dG < 3000) { this.setTarget(g.x + Math.cos(aG + Math.PI) * 150, g.y + Math.sin(aG + Math.PI) * 150); if (g.node && dG < 600) this.aiState = 'gathering'; } // 最後は直接 (コロニー600u/8秒・難破船500u/3秒・ノードは収集へ)
@@ -4243,7 +4406,9 @@ class Ship {
                     if (dist > Math.max(60, (this._v || 0) * 30)) {
                         const _msL = this._maxSpeeds();
                         const _cvChase = this._roam === 'convoy' && convoys.some(c => c.sid === this._cvT);
-                        this._moveHeading(Math.atan2(this.targetY - this.y, this.targetX - this.x), _msL ? (_cvChase ? _msL.flank : Math.min(this.speed, _msL.cruise)) : this.speed); // 第22弾: 横滑りしない (第37弾: 輸送船は全速で追う — 巡航では輸送船より遅く追いつけなかった)
+                        // 第39弾: 潜伏中の移動は自機の「潜航」と同じ (隠密性0.5以上の個体 — 自機COMと同じ基準): 速さ×0.5・推進と演算の信号×0.55
+                        this._quietRun = !_cvChase && (this.personality ? this.personality.stealth : 0.5) >= 0.5;
+                        this._moveHeading(Math.atan2(this.targetY - this.y, this.targetX - this.x), _msL ? (_cvChase ? _msL.flank : this._quietRun ? Math.min(this.speed, _msL.silent) : Math.min(this.speed, _msL.cruise)) : this.speed); // 第22弾: 横滑りしない (第37弾: 輸送船は全速で追う — 巡航では輸送船より遅く追いつけなかった)
                     } else { this.state = 'idle'; this._roam = null; }
                 }
             }
@@ -4255,144 +4420,45 @@ class Ship {
         // ============================================================
         // マルチセンサーシグネチャ更新 (敵のみ)
         // ============================================================
-        if (!this.isPlayer) {
-            // 熱源シグネチャ: 移動量から計算
+    }
+
+    // 第39弾: 敵のシグネチャ (自艦と同じ emitSigs)。update() の後に毎フレーム呼ぶ — 旧: update() の途中の return (撃った後の再配置中など) で飛ばされ、値が固まっていた
+    _enemySigs() {
             const spd = Math.hypot(this.x - this.prevX, this.y - this.prevY);
             this._vx = this.x - this.prevX; this._vy = this.y - this.prevY; // 第20弾: 見えている時の見越し射撃に使う (見えている動き)
-            this._spd = spd; // 自艦ノイズ (探知の聴こえにくさ) に使う
+            this._spd = spd;
             this.prevX = this.x;
             this.prevY = this.y;
-            // 熱源シグネチャ: 武器種と状態で変化
-            // - missile: 推進剤燃焼で長時間高熱
-            // - beam: チャージ中に廃熱上昇
-            // - 再配置中: エンジン全開で発熱
             const higgsHere = getHiggsIntensity(this.x, this.y);
-            if (this.weaponType === 'missile' && this.fireFlashTimer > 20) {
-                this.heatSig = Math.min(1.0, this.heatSig + 0.07); // ミサイル推進剤燃焼
-            } else if (this.weaponType === 'beam' && this.fireFlashTimer > 60) {
-                this.heatSig = Math.min(1.0, this.heatSig + 0.04); // ビームチャージ廃熱
-            } else if (this.postFireCooldown > 0) {
-                this.heatSig = Math.min(1.0, this.heatSig + 0.05); // 再配置エンジン全開
-            } else {
-                this.heatSig = Math.min(1.0, spd / 1.0); // 速度に比例
-            }
-            // 機関損傷: 冷却系破損で熱漏洩 — 損傷した獲物は熱で追える
-            if (this._sysEngineTimer > 0) this.heatSig = Math.min(1.0, this.heatSig + 0.35);
-            // 手負いの獲物: HP20%未満で冷却材漏洩 — 熱痕跡を引きずる (追撃戦の演出)
+            // 第39弾: シグネチャは自艦と同じ関数 emitSigs で出す (旧: 敵だけ別の式 — 熱を速さで毎フレーム上書き・潜伏中のEMのゆらぎ・発砲の値も自艦と違った)
+            const _isF = this.type === 'fighter';
+            const _thrusting = this._movedF === _frameCount || !(this._v > 0.005);
+            const _bd = _isF ? [] : enemyBands(this), _lk = { heat: 0, optic: 0, em: 0, higgs: 0 }, _em = epm(this);
+            for (let bi = 1; bi < _bd.length; bi++) _lk[_bd[bi]] = SENSOR_LEAK[_bd[bi]] * _em.leakMul;
+            const _al = this.gen || GEN_FOCUS.balance;
+            const _ff = Math.max(0, this._fireFlash || 0) / 90;
+            if (this._fireFlash > 0) this._fireFlash -= gameSpeedFactor;
+            const _lf = this._launchFlash > 0 ? this._launchFlash / 60 : 0;
+            if (this._launchFlash > 0) this._launchFlash -= gameSpeedFactor;
+            const _sg = emitSigs({
+                engine: _isF ? 'thermonuclear' : (this.engine || 'thermonuclear'), engineOn: true,
+                thrust: _thrusting ? (_isF ? Math.min(1, 0.04 + spd / Math.max(0.1, gameSpeedFactor) / ENEMY_FTR_SPEED) : thrustFrac(spd, ENEMY_CLASS[this.type] || 'assault')) : 0,
+                alloc: _isF ? { sensors: 0, ai: 0 } : { sensors: _al.sensors / 100, ai: _al.ai / 100 },
+                quiet: !!this._hiding || !!this._quietRun, ff: _ff, ft: this._fireFlashType, launch: _lf,
+                charge: this._eCharge > 0 ? _em.chargeLeak : 0, beamCool: this._bReload > 0, mslReload: this._mReload > 0,
+                comms: _frameCount - (this._commsF || -99) < 3 || (this.aiState === 'gathering' && this._capT > 0),
+                repair: (this._kitT || 0) > 0, sysEngine: this._sysEngineTimer > 0, leak: _lk,
+                hHere: higgsHere, storm: getStormIntensity(this.x, this.y), thermal: getThermalIntensity(this.x, this.y),
+                pm: _em, wounded: this.hp / this.maxHp < WOUNDED_HP_FRAC, pulsePh: this.uid * 37,
+            });
+            const _fm = _isF ? 0.5 : 1; // 艦載機は小さい
+            this.heatSig = _sg.heat * _fm; this.opticalSig = _sg.optic * _fm; this.emSig = _sg.em * _fm; this.higgsSig = _sg.higgs * _fm;
+            this._quietRun = false; // 潜伏中の移動で毎フレーム立て直す
+            sigPeakUpdate(this);
             if (this.hp / this.maxHp < WOUNDED_HP_FRAC) {
-                this.heatSig = Math.max(this.heatSig, WOUNDED_HEAT_FLOOR);
-                if (!this._woundedLogged) { this._woundedLogged = true; logMessage('SENSOR: 敵艦から冷却材漏出を検知 — 熱痕跡で追い詰めろ', 'system-msg'); }
-                if (Math.random() < 0.10 && heatTrails.length < 600) heatTrails.push({ x: this.x, y: this.y, intensity: 0.7, life: 1.0, decay: 0.0015 });
-            }
-
-            // 光学シグネチャ: 武器種で異なる
-            // - kinetic: 銃口炎 (短く強烈な光学スパイク)
-            // - missile: 打ち出し時の小フラッシュ
-            // - beam: 中程度の光学 (エネルギー放射)
-            if (this.weaponType === 'kinetic' && this.fireFlashTimer > 50) {
-                this.opticalSig = Math.min(1.0, this.opticalSig + 0.18); // 銃口炎フラッシュ
-            } else if (this.weaponType === 'beam' && this.fireFlashTimer > 40) {
-                this.opticalSig = Math.min(1.0, this.opticalSig + 0.10); // ビーム光
-            } else if (this.weaponType === 'missile' && this.fireFlashTimer > 100) {
-                this.opticalSig = Math.min(1.0, this.opticalSig + 0.04); // 打ち出し小フラッシュ
-            } else {
-                // 発光フェード + ヒッグス減衰
-                this.opticalSig = Math.max(0, this.opticalSig * 0.92) * (1 - higgsHere * 0.95);
-            }
-
-            // ヒッグスシグネチャ: ヒッグス雲内で潜伏すると乱流が生じる
-            const higgsAtThisShip = higgsHere;
-            if (this.lurking && this.postFireCooldown === 0) {
-                // 潜伏中はヒッグス内の微妙な乱流 (濃度に比例)
-                const target = higgsAtThisShip * 0.6 + Math.sin(Date.now() * 0.002 + this.y * 0.001) * 0.1;
-                this.higgsSig += (target - this.higgsSig) * 0.04;
-            } else if (this.postFireCooldown > 0) {
-                // 再配置中: 高速移動でヒッグスウェイクが強まる
-                // spd は prevX/prevY更新前 (line 863) に計算済み — ここで再宣言しない
-                this.higgsSig = Math.min(1.0, higgsAtThisShip * spd * 1.5);
-                // §3-12 敵 HEAT trail (高速移動時の熱排気跡)
-                if (this.heatSig > 0.08 && spd > 0.3 && Math.random() < 0.18) {
-                    if (heatTrails.length < 600) heatTrails.push({ x: this.x, y: this.y, intensity: this.heatSig * 0.85, life: 1.0, decay: 0.0015 });
-                }
-                // §3-12 敵 EM trail (AI処理/ミサイル誘導放射)
-                if (this.emSig > 0.12 && Math.random() < 0.12) {
-                    if (emTrails.length < 600) emTrails.push({ x: this.x, y: this.y, intensity: this.emSig * 0.9, life: 1.0, decay: 0.0025 });
-                }
-            } else {
-                // 通常航行: 移動していればヒッグス濃度×速度でウェイクシグネチャが立つ (仕様: 高速移動→HIGGS◎)
-                this.higgsSig = Math.max(this.higgsSig - 0.02, Math.min(1.0, higgsAtThisShip * spd * 1.2));
-            }
-
-            // 痕跡 (2026-07-11): 通常航行でもエンジン痕跡を航路上に残す — 「解析で痕跡を辿り追い詰める」狩りの核。
-            // decay指定で武器エフェクト由来のtrailより長寿命 (熱≈11s / ウェイク≈7.5s / EM≈6.7s)。
-            // 可視化は従来どおり「対応センサー選択中 + 自機センサーレンジ内」のみ = どこからでも見える訳ではない。
-            if (this.postFireCooldown === 0 && spd > 0.25) {
-                if (this.heatSig > 0.10 && Math.random() < 0.15) {
-                    if (heatTrails.length < 600) heatTrails.push({ x: this.x, y: this.y, intensity: this.heatSig * 0.8, life: 1.0, decay: 0.0015 });
-                }
-                if (this.emSig > 0.15 && Math.random() < 0.08) {
-                    if (emTrails.length < 600) emTrails.push({ x: this.x, y: this.y, intensity: this.emSig * 0.85, life: 1.0, decay: 0.0025 });
-                }
-            }
-
-            // 電磁波シグネチャ: 武器種で異なる
-            // - beam: チャージ中に強いEMパルス (最大の特徴量)
-            // - missile: 誘導系EMが持続
-            // - kinetic: 薬莢排出の微弱EMのみ
-            if (this.weaponType === 'beam' && this.fireFlashTimer > 50) {
-                this.emSig = Math.min(1.0, this.emSig + 0.14); // ビームチャージ強EM
-            } else if (this.weaponType === 'missile' && this.fireFlashTimer > 30) {
-                this.emSig = Math.min(1.0, this.emSig + 0.05); // ミサイル誘導EM
-            } else if (this.weaponType === 'kinetic' && this.fireFlashTimer > 90) {
-                this.emSig = Math.min(1.0, this.emSig + 0.02); // 薬莢微弱EM
-            } else if (this.lurking && this.postFireCooldown === 0) {
-                // 潜伏中の受動EM漏洩 (ゆらぎあり)
-                const target = (0.5 + Math.sin(Date.now() * 0.0015 + this.x * 0.001) * 0.1) * COMPUTE_EM_MULT; // 第23弾: 演算のEMは自機と同じく半分
-                this.emSig += (target - this.emSig) * 0.03;
-            } else if (this.postFireCooldown > 0) {
-                // 再配置中: 無線封鎖 (熱源は上がるがEMは下がる)
-                this.emSig = Math.max(0, this.emSig - 0.025);
-            } else {
-                this.emSig = Math.max(0, this.emSig - 0.01);
-            }
-            // 第16弾: ノードを制圧している間は通信のEMが漏れる (自機と対称)
-            if (this.aiState === 'gathering' && this._capT > 0) this.emSig = Math.max(this.emSig, 0.45);
-            // 第17弾: 潜伏中は機関を止めてシグネチャ×0.55 (自機の潜航と対称)。毎フレーム計算し直す熱にだけ掛ける
-            // (EM・光学・ヒッグスは前フレームから減衰していく値なので、掛け続けると0へ潰れる。止まっていれば自然に消える)
-            if (this._hiding) this.heatSig *= ENEMY_HIDE_SIG;
-            // 第20弾: ビームのチャージ中・リロード中は熱/EM/ヒッグス、ミサイルのリロード中はEM、艦載機の発進は光とEMが漏れる (自機と同じ)
-            if (this._eCharge > 0) { this.heatSig = Math.min(1, this.heatSig + 0.30); this.emSig = Math.max(this.emSig, 0.55); this.higgsSig = Math.min(1, this.higgsSig + 0.30); }
-            else if (this._bReload > 0) { this.heatSig = Math.min(1, this.heatSig + 0.15); this.emSig = Math.max(this.emSig, 0.35); this.higgsSig = Math.min(1, this.higgsSig + 0.15); }
-            if (this._mReload > 0) this.emSig = Math.max(this.emSig, 0.30);
-            if (this._launchFlash > 0) { this._launchFlash -= gameSpeedFactor; this.opticalSig = Math.max(this.opticalSig, 0.5); this.emSig = Math.max(this.emSig, 0.5); }
-            // 第21弾: 敵のエンジン (自機と同じ4種の倍率。動いている分だけ効く) と、2本目以降に聴いている帯域の漏れ (自機と同じ量)
-            if (this.type !== 'fighter') {
-                const _eg = ENGINE_TYPES[this.engine] || ENGINE_TYPES.thermonuclear;
-                if (spd > 0.15) {
-                    const _sn = Math.min(1, spd / 2);
-                    const _ees = ENGINE_SIG[this.engine] || ENGINE_SIG.thermonuclear; // 第23弾: 自機と同じ表
-                    this.heatSig = Math.min(1, this.heatSig * _ees.heat);
-                    this.opticalSig = Math.min(1, this.opticalSig + _sn * 0.5 * _ees.optic);
-                    this.emSig = Math.min(1, this.emSig + _sn * 0.6 * _ees.em);
-                    this.higgsSig = Math.min(1, this.higgsSig + _sn * 0.5 * _ees.higgs);
-                }
-                const _bd = enemyBands(this);
-                for (let bi = 1; bi < _bd.length; bi++) {
-                    const b = _bd[bi], L = SENSOR_LEAK[b];
-                    if (b === 'heat') this.heatSig = Math.min(1, this.heatSig + L);
-                    else if (b === 'optic') this.opticalSig = Math.min(1, this.opticalSig + L);
-                    else if (b === 'em') this.emSig = Math.min(1, this.emSig + L * epm(this).leakMul);
-                    else this.higgsSig = Math.min(1, this.higgsSig + L * epm(this).leakMul);
-                }
-                // 第33弾: 敵の部品 (熱・光・電磁波の倍率と常に漏れる分。自機と同じ)。光学・EMは前フレームから減衰する値なので加算は「下限」として掛ける
-                if (this.pm) {
-                    const _m = this.pm, _q = this._hiding ? ENEMY_HIDE_SIG : 1;
-                    this.heatSig = Math.min(1, this.heatSig * _m.heat + _m.heatAdd * _q);
-                    this.opticalSig = Math.min(1, this.opticalSig * _m.optic);
-                    this.emSig = Math.min(1, Math.max(this.emSig * _m.em, _m.emAdd * _q));
-                }
-            }
-        }
+                // 冷却材の漏れは見えている時だけ知らせる (旧: どこに居ても知らせていた = 情報漏れ)
+                if (!this._woundedLogged && this.inVision) { this._woundedLogged = true; logMessage('SENSOR: 敵艦から冷却材漏出を視認 — 熱を隠せない', 'system-msg'); }
+            } else this._woundedLogged = false;
     }
 
     draw(ctx) {
@@ -5510,7 +5576,7 @@ function generateSector() {
     // セクターが深いほど高HP・高速化。艦種ラベル(攻撃型=高耐久 / 潜航型=脆い / 空母型=中)とHPを整合(2026-06-23)
     // 第20弾: 敵の耐久は自機の同じ艦種とそろえる (攻撃型3500/潜航型700/空母型2500)。セクターごとに+10% (オーナー合意)
     const _bossHp = { destroyer: 3500, corvette: 700, carrier: 2500 };
-    boss.maxHp = Math.round((_bossHp[boss.type] || 2000) * (1 + 0.1 * (gameState.sector - 1)));
+    boss.maxHp = Math.round(_bossHp[boss.type] || 2000); // 第39弾: 敵だけのセクター補正 (+10%/セクター) は撤去 — 同じ艦種の自機と同じ耐久
     boss.hp = boss.maxHp;
     // 第20弾: 敵も自機の同じ艦種の既定の積み方と同じ弾数 (攻撃型 実弾144斉射・ミサイル12 / 潜航型 48・6 / 空母型 48・9)
     { const _es = { destroyer: 'assault', corvette: 'stealth', carrier: 'carrier' }[boss.type] || 'assault';
@@ -5534,6 +5600,7 @@ function generateSector() {
     }
     // 第21弾: 敵のエンジン (性格で選ぶ。速さはエンジンの倍率) / 自機のエンジン切替をリセット
     boss.engine = pickEnemyEngine(boss.personality);
+    boss._focus = null; setEnemyFocus(boss, pickFocus(boss.personality)); // 第39弾: 敵も航行モードを持つ (自機と同じ効果)
     boss.lureSOS = 1; boss.lureShip = 1; // 第21弾: 敵の囮 (各1個 — 実装で決めた数)
     if (boss._eLo) { boss.lureSOS = boss._eLo.fsos || 0; boss.lureShip = boss._eLo.lure || 0; if (boss.type === 'carrier') boss.droneStock = boss._eLo.attack || 0; } // 第22弾: COM対戦で敵の積み込みを編集した時だけ
     boss.upgSpeed = (ENGINE_TYPES[boss.engine] || ENGINE_TYPES.thermonuclear).speedMult;
@@ -5931,13 +5998,7 @@ GEN_KEYS.forEach(key => {
 });
 updateGenTotal();
 
-// 第15弾: GEN配分の「重点」プリセット — 8本のスライダーを毎回触らなくても、意図(何に力を割くか)で1タップ
-const GEN_FOCUS = {
-    balance: { engine: 40, weapons: 30, sensors: 30, prec: { sensor: 34, weapon: 33, engine: 33 } },
-    engine:  { engine: 60, weapons: 20, sensors: 20, prec: { sensor: 20, weapon: 20, engine: 60 } },
-    sensor:  { engine: 25, weapons: 20, sensors: 55, prec: { sensor: 60, weapon: 20, engine: 20 } },
-    weapon:  { engine: 25, weapons: 55, sensors: 20, prec: { sensor: 20, weapon: 60, engine: 20 } },
-};
+// 第15弾: GEN配分の「重点」プリセット (第39弾: 定義はファイル先頭の GEN_FOCUS — 解析重視を追加)
 // ═══ 第36弾 (オーナー合意): GENの詳細設定 (MT) — 各ゲイン0〜200% (100%=均等)。合計の上限なし。
 // 100%を超えた分は、その系統のシグネチャが ゲイン² 倍 (200%で4倍)。複数上げればそれぞれの系統が漏れる。AT (重点4つ) は従来どおり
 const GEN_MT_BASE = { engine: GEN_FOCUS.balance.engine, weapons: GEN_FOCUS.balance.weapons, sensors: GEN_FOCUS.balance.sensors, ai: 50 };
@@ -5992,11 +6053,12 @@ function openMTPanel(on) {
     document.getElementById('mt-at')?.addEventListener('click', () => { openMTPanel(false); setGenFocus('balance'); });
     document.getElementById('btn-focus-mt')?.addEventListener('click', () => openMTPanel(true));
 })();
-function setGenFocus(key) {
+function setGenFocus(key, quiet) {
     const f = GEN_FOCUS[key];
     if (!f) return;
     genMT = null; document.getElementById('btn-focus-mt')?.classList.remove('active'); // 第36弾: ATに戻す
-    genAlloc.ai = 50;
+    genFocusKey = key;
+    genAlloc.ai = f.ai; // 第39弾: 解析重視は AI 80
     for (const k of GEN_KEYS) {
         genAlloc[k] = f[k];
         const el = document.getElementById(`gen-${k}`), v = document.getElementById(`gen-${k}-val`);
@@ -6010,8 +6072,9 @@ function setGenFocus(key) {
         if (v) v.textContent = f.prec[k] + '%';
     }
     updateGenTotal();
+    if (player) player.generatorOutput = genAlloc.engine;
     document.querySelectorAll('.gd-focus-btn, .focus-btn').forEach(b => b.classList.toggle('active', b.dataset.focus === key));
-    playSound('ui');
+    if (!quiet) playSound('ui');
 }
 document.querySelectorAll('.gd-focus-btn').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); setGenFocus(b.dataset.focus); }));
 
@@ -6354,6 +6417,19 @@ function enemyBands(e) {
     return ENEMY_BAND_ORDER.slice(0, n);
 }
 // 第21弾: 敵のエンジン — 性格で選ぶ (隠密=ヒッグス / 攻撃的=フォトン / 貪欲=パルス / それ以外=熱核)
+// 第39弾: COM (敵・自機COM) の航行モード — 性格の一番強い傾向で選ぶ (攻撃性→兵装 / 慎重さ→探知 / 貪欲さ→機関 / 隠密性→解析)
+function pickFocus(p) {
+    if (!p) return 'balance';
+    const sc = { weapon: (p.aggression ?? 0.5) - 0.7, sensor: (p.caution ?? 0.4) - 0.6, engine: (p.greed ?? 0.4) - 0.7, analysis: (p.stealth ?? 0.3) - 0.6 };
+    let best = 'balance', bv = 0;
+    for (const k in sc) if (sc[k] > bv) { bv = sc[k]; best = k; }
+    return best;
+}
+function setEnemyFocus(e, k) {
+    if (!GEN_FOCUS[k] || e._focus === k) return;
+    e._focus = k; e.gen = GEN_FOCUS[k]; e._fx = focusFx(e.gen);
+    if (comDemo && e.type !== 'fighter') comThinkEvent('e', '航行モード → ' + FOCUS_JP[k], 'e' + e.uid);
+}
 function pickEnemyEngine(p) {
     if (!p) return 'thermonuclear';
     if (p.stealth >= 0.7) return 'higgs';
@@ -6434,6 +6510,13 @@ function _segDist(px, py, x1, y1, x2, y2) {
     return Math.hypot(px - x1 - dx * t, py - y1 - dy * t);
 }
 // 射撃が外れた: 否定の観測として記録し、推定を解き直す (同じ所を撃ち続けない — 外れから学ぶ)
+function recordMissSa(sa, m) {
+    m.f = _frameCount;
+    (sa.misses || (sa.misses = [])).push(m);
+    while (sa.misses.length > 4 || (sa.misses.length && _frameCount - sa.misses[0].f > TMA_KEEP)) sa.misses.shift();
+    solveFix(sa); sa.motion = null; sa.alt = null;
+    if (sa.fix) sa.fix.r = Math.max(sa.fix.r, 1200);
+}
 function recordMiss(sid, m) {
     const sa = sid && _signalAnalysis[sid];
     if (!sa) return;
@@ -6474,10 +6557,11 @@ function _solveFix(sa, obs, ping, tau, warm) {
     sa.base = base;
     if (!ping && base < TMA_MIN_BASE) return null; // 同じ場所で何度聴いても距離は分からない
     // 粗い格子探索 (最新の観測点から、平均方位±0.6rad・距離400〜18000の対数格子)。直近の解があればそこから始める
-    const L = obs.length ? obs[obs.length - 1] : { ox: player.x, oy: player.y };
+    const _ob = sa.who || player;
+    const L = obs.length ? obs[obs.length - 1] : { ox: _ob.x, oy: _ob.y };
     let bx = 0, by = 0, bc = Infinity;
     if (warm) { bx = warm.x; by = warm.y; bc = _fixCost(bx, by, obs, now, ping, tau, sa.misses); }
-    const rMax = Math.max(6000, passiveRange() * 1.6);
+    const rMax = Math.max(6000, sa.rMax || passiveRange() * 1.6); // 第39弾: 敵の記録は敵の受信の最大距離
     for (let i = 0; i < (warm ? 0 : 24); i++) {
         const rho = 400 * Math.pow(rMax / 400, i / 23);
         for (let j = -6; j <= 6; j++) {
@@ -6654,7 +6738,7 @@ function _inv4(H) {
 // 無ければ交点に留まる仮定 (幅は見込み60u/sぶん時間とともに広がる)。
 function trackEstimate(sa, ahead = 0) {
     if (!sa) return null;
-    const now = _frameCount, m = sa.motion;
+    const now = _frameCount, m = sa.motion, ob = sa.who || player; // 第39弾: 聴いた側 (自艦 or 敵)
     if (m) {
         const dt = now - m.f + ahead, C = m.C;
         const x = m.x + m.vx * dt, y = m.y + m.vy * dt;
@@ -6663,7 +6747,7 @@ function trackEstimate(sa, ahead = 0) {
         const pxy = C[1] + dt * (C[3] + C[6]) + dt * dt * C[11];
         const tr = pxx + pyy, det = pxx * pyy - pxy * pxy;
         let r = 2 * Math.sqrt(Math.max(0, tr / 2 + Math.sqrt(Math.max(0, tr * tr / 4 - det)))) * Math.sqrt(Math.max(1, m.chi2));
-        r = Math.max(150, Math.hypot(x - player.x, y - player.y) * Math.max(CV_R_FLOOR, anaFloorFrac(sa.ana)), r); // 等速の仮定そのものの誤差ぶん・第29弾: 解析量の下限
+        r = Math.max(150, Math.hypot(x - ob.x, y - ob.y) * Math.max(CV_R_FLOOR, anaFloorFrac(sa.ana)), r); // 等速の仮定そのものの誤差ぶん・第29弾: 解析量の下限
         return { x, y, r, vx: m.vx, vy: m.vy, moving: true };
     }
     const f = sa.fix;
@@ -6673,7 +6757,7 @@ function trackEstimate(sa, ahead = 0) {
     // 動いている仮定でも記録が同じくらい説明できるなら、その仮定の位置まで円を広げる (どちらか分からない、が正直な答え)
     const a = sa.alt;
     if (a && !f.fromMotion) { const ta = now - a.f + ahead; r = Math.max(r, Math.hypot(a.x + a.vx * ta - f.x, a.y + a.vy * ta - f.y) + 150); }
-    r = Math.max(r, Math.hypot(f.x - player.x, f.y - player.y) * anaFloorFrac(sa.ana)); // 第29弾: 解析量の下限
+    r = Math.max(r, Math.hypot(f.x - ob.x, f.y - ob.y) * anaFloorFrac(sa.ana)); // 第29弾: 解析量の下限
     return { x: f.x, y: f.y, r, vx: 0, vy: 0, moving: false };
 }
 // 追跡ボタンの幅表示 (±850 / ±1.2k)
@@ -6844,7 +6928,7 @@ function updateEnemyColonyCapture() {
         if (!near) { if (st.eHackP > 0) st.eHackP = Math.max(0, st.eHackP - 0.003); continue; }
         if (player && player.hp > 0 && Math.hypot(player.x - st.x, player.y - st.y) < COLONY_HACK_R) continue; // 双方が居る間は進まない
         st.eHackP = (st.eHackP || 0) + gameSpeedFactor / COLONY_HACK_TIME;
-        near.emSig = Math.max(near.emSig || 0, 0.45);
+        near._commsF = _frameCount; near.emSig = Math.max(near.emSig || 0, SIG_ACT.comms.em); // 第39弾: 通信の信号は自艦と同じ
         if (st.eHackP >= 1) {
             const was = st.owner;
             st.owner = 'enemy'; st.hacked = false; st.eHackP = 0; st.hackP = 0;
@@ -7891,7 +7975,9 @@ function enemyCaptureNode(e, n) {
 // (追跡中の信号に半分・残りを他で等分)。強い信号ほど・場所を変えて聴いた方位ほど多く貯まる (実装で決めた値)。
 // 下限 = 距離 × (12% + 88%×exp(−解析量/6))。近づくだけでは絞れない / 囮やノイズメーカーは演算力を食う。敵も同じ式
 const ANA_MIN = 0.12, ANA_TAU = 6, ANA_COLONY = 0.35, ANA_NEWPOS = 1.5;
-function analysisPower(side) { let ea = 0; if (side !== 'player') for (const e of enemies) if (e.pm && e.hp > 0) ea = Math.max(ea, e.pm.ana); return 1 + ANA_COLONY * Math.min(3, coloniesOwned(side)) + (side === 'player' ? PM.ana : ea); } // 第32弾: 解析コア (第33弾: 敵も)
+function analysisPower(side, who) { let ea = 0; if (side !== 'player') for (const e of enemies) if (e.pm && e.hp > 0) ea = Math.max(ea, e.pm.ana); // 第32弾: 解析コア (第33弾: 敵も)
+    const fx = side === 'player' ? playerFx() : shipFx(who || enemies.find(e => e.hp > 0 && e.type !== 'fighter')); // 第39弾: 解析重視は解析の速さ×1.4
+    return (1 + ANA_COLONY * Math.min(3, coloniesOwned(side)) + (side === 'player' ? PM.ana : ea)) * fx.anaSpeed; }
 function anaFloorFrac(ana) { return ANA_MIN + (1 - ANA_MIN) * Math.exp(-(ana || 0) / ANA_TAU); }
 function anaPct(ana) { return Math.round((1 - (anaFloorFrac(ana) - ANA_MIN) / (1 - ANA_MIN)) * 100); }
 const _RX_WORD = { heat: '熱源', optic: '光', em: '電磁波', higgs: '霧の乱れ' };
@@ -7942,7 +8028,10 @@ function identInfo(sid) {
 }
 function addBearingObs(sid, ox, oy, angle, sigma, strength, colorRgb, src) {
     if (!_signalAnalysis[sid]) _signalAnalysis[sid] = _newSignalAnalysis();
-    const sa = _signalAnalysis[sid];
+    return _addObs(_signalAnalysis[sid], ox, oy, angle, sigma, strength, colorRgb, src);
+}
+// 第39弾: 方位の記録を1本足す (自艦の記録も敵の記録も同じ)
+function _addObs(sa, ox, oy, angle, sigma, strength, colorRgb, src) {
     let lo = null;
     for (let i = sa.obs.length - 1; i >= Math.max(0, sa.obs.length - 4); i--) {
         const o = sa.obs[i];
@@ -7984,71 +8073,35 @@ function checkPassiveDetection() {
 
     relayListen(); // 第16弾: 聴音局(制圧したノード)からの方位
     const range = passiveRange();
-    const noise = 0; // 第36弾: 自艦ノイズは撤去 (オーナー: 動かない方が有利になるのは良くない)
-    const sensorPrec = 0.45 + (genAlloc.sensors / 100) * 0.55;
-
-    // 第21弾: ONの帯域すべてで聴き、敵ごとに一番よく聴こえた帯域で方位を取る
+    const px = player.x, py = player.y;
+    // 第39弾: 自艦も敵と同じ hearSource で聴く (経路の霧・嵐・熱雲・岩礁帯で弱まり、方位の誤差が広がる)。強さは直近1秒の最大値
     const allContacts = [];
     for (const e of enemies) {
         if (e.hp <= 0) continue;
-        const dist = Math.hypot(e.x - player.x, e.y - player.y);
-        if (e.type === 'fighter' && dist > 2500) continue; // 艦載機は小さく静か — 近くでないと聴こえない (方位で追う相手ではない)
-        const hPath = getHiggsIntensity((e.x + player.x) / 2, (e.y + player.y) / 2);
-        const distAtten = Math.max(0, 1 - dist / range);
-        let best = null, bestQ = 0, nb = 0;
-        for (const b of sensorOrder) {
-            const sc = sensorConfig[b];
-            const sig = sc.sig(e) * distAtten * (1 - hPath * sc.higgsMod) * (1 - noise * 0.5);
-            const q = sig / sc.threshold;
-            if (sig > sc.threshold * 0.5) nb++;
-            if (sig > sc.threshold * 0.5 && q > bestQ) { bestQ = q; best = { band: b, sig }; }
-        }
-        if (best) {
-            allContacts.push({ x: e.x, y: e.y, sig: best.sig, band: best.band, nb, angle: Math.atan2(e.y - player.y, e.x - player.x), sourceId: enemySid(e), clN: e.type === 'fighter' ? 0 : clutterCount(e.x, e.y, e), ecm: epm(e).ecm });
+        if (e.type === 'fighter' && Math.hypot(e.x - px, e.y - py) > 2500) continue; // 艦載機は小さく静か — 近くでないと聴こえない (方位で追う相手ではない)
+        const h = hearSource(e, 'p', px, py, e.x, e.y, b => sigPeak(e, b), range, sensorOrder);
+        if (h) {
+            allContacts.push({ x: e.x, y: e.y, sig: h.sig, band: h.band, nb: h.nb, noise: h.noise, angle: Math.atan2(e.y - py, e.x - px), sourceId: enemySid(e), clN: e.type === 'fighter' ? 0 : clutterCount(e.x, e.y, e), ecm: epm(e).ecm });
             if (huntStats && huntStats.firstContact < 0) huntStats.firstContact = _frameCount - huntStats.startFrame; // 戦闘詳報: 初接触
         }
+        // 第39弾: 有視界で見えている相手は、その位置が「点の観測」になる (見失った後の推定の出発点。敵も同じ)
+        if (e.inVision && e.type !== 'fighter') { const sid = enemySid(e); if (!_signalAnalysis[sid]) _signalAnalysis[sid] = _newSignalAnalysis(); _signalAnalysis[sid].ping = { x: e.x, y: e.y, r: 200, f: _frameCount }; }
     }
     // 第21弾: 敵の偽艦影ブイも艦と同じように聴こえる (区別はつかない)
     for (const L of lures) {
         if (L.owner !== 'e' || L.kind !== 'ship' || L.phase !== 'on') continue;
-        const dist = Math.hypot(L.x - player.x, L.y - player.y);
-        if (dist >= range) continue;
-        const hPath = getHiggsIntensity((L.x + player.x) / 2, (L.y + player.y) / 2);
-        let best = null, bestQ = 0, nb = 0;
-        for (const b of sensorOrder) {
-            const sc = sensorConfig[b];
-            const sig = LURE_SIG * Math.min(1, L.life / 60) * (1 - dist / range) * (1 - hPath * sc.higgsMod) * (1 - noise * 0.5);
-            if (sig > sc.threshold * 0.5) nb++;
-            if (sig > sc.threshold * 0.5 && sig / sc.threshold > bestQ) { bestQ = sig / sc.threshold; best = { band: b, sig }; }
-        }
-        if (best) allContacts.push({ x: L.x, y: L.y, sig: best.sig, band: best.band, nb, angle: Math.atan2(L.y - player.y, L.x - player.x), sourceId: L.sid, clN: 0 });
+        const h = hearSource(L, 'p', px, py, L.x, L.y, () => LURE_SIG * Math.min(1, L.life / 60), range, sensorOrder);
+        if (h) allContacts.push({ x: L.x, y: L.y, sig: h.sig, band: h.band, nb: h.nb, noise: h.noise, angle: Math.atan2(L.y - py, L.x - px), sourceId: L.sid, clN: 0 });
     }
     // 第34弾: 輸送船 (全帯域0.6)
     for (const cv of convoys) {
-        const dist = Math.hypot(cv.x - player.x, cv.y - player.y);
-        if (dist >= range) continue;
-        const hPath = getHiggsIntensity((cv.x + player.x) / 2, (cv.y + player.y) / 2);
-        let best = null, bestQ = 0, nb = 0;
-        for (const b of sensorOrder) {
-            const sc = sensorConfig[b], sig = CONVOY_SIG * (1 - dist / range) * (1 - hPath * sc.higgsMod) * (1 - noise * 0.5);
-            if (sig > sc.threshold * 0.5) nb++;
-            if (sig > sc.threshold * 0.5 && sig / sc.threshold > bestQ) { bestQ = sig / sc.threshold; best = { band: b, sig }; }
-        }
-        if (best) allContacts.push({ x: cv.x, y: cv.y, sig: best.sig, band: best.band, nb, angle: Math.atan2(cv.y - player.y, cv.x - player.x), sourceId: cv.sid, clN: 0 });
+        const h = hearSource(cv, 'p', px, py, cv.x, cv.y, () => CONVOY_SIG, range, sensorOrder);
+        if (h) allContacts.push({ x: cv.x, y: cv.y, sig: h.sig, band: h.band, nb: h.nb, noise: h.noise, angle: Math.atan2(cv.y - py, cv.x - px), sourceId: cv.sid, clN: 0 });
     }
     // 第31弾: 自然の信号・お宝の信号も同じ物理で聴こえる (ONの帯域だけ方位が取れる)
     for (const f of fieldSignals) {
-        const dist = Math.hypot(f.x - player.x, f.y - player.y);
-        if (dist >= range) continue;
-        const hPath = getHiggsIntensity((f.x + player.x) / 2, (f.y + player.y) / 2);
-        let best = null, bestQ = 0, nb = 0;
-        for (const b of sensorOrder) {
-            const sc = sensorConfig[b];
-            const sig = fieldSig(f, b) * (1 - dist / range) * (1 - hPath * sc.higgsMod) * (1 - noise * 0.5);
-            if (sig > sc.threshold * 0.5) nb++;
-            if (sig > sc.threshold * 0.5 && sig / sc.threshold > bestQ) { bestQ = sig / sc.threshold; best = { band: b, sig }; }
-        }
-        if (best) allContacts.push({ x: f.x, y: f.y, sig: best.sig, band: best.band, nb, angle: Math.atan2(f.y - player.y, f.x - player.x), sourceId: f.sid, clN: 0 });
+        const h = hearSource(f, 'p', px, py, f.x, f.y, b => fieldSig(f, b), range, sensorOrder);
+        if (h) allContacts.push({ x: f.x, y: f.y, sig: h.sig, band: h.band, nb: h.nb, noise: h.noise, angle: Math.atan2(f.y - py, f.x - px), sourceId: f.sid, clN: 0 });
     }
     if (allContacts.length === 0) return;
 
@@ -8073,8 +8126,7 @@ function checkPassiveDetection() {
         const conf = Math.max(0, Math.min(1, (c.sig - thr * 0.5) / (1 - thr * 0.5)));
         const tracked = c.sourceId === lockedSignalId;
         // 方位誤差(1σ, rad): 強い信号ほど・静かなほど・追跡(狭帯域処理)中ほど鋭い
-        const sigma = (0.005 + 0.035 * (1 - conf)) * (1 + 2 * noise) * (tracked ? 1 : 2.2)
-                    / (0.6 + 0.4 * sensorPrec) / (1 + aiPrec('sensor') * 0.8) * clutterErrMult(c.clN || 0) * (c.ecm || 1); // 第18弾: 混信 (第33弾: 敵のECM)
+        const sigma = bearingSigma(conf, tracked, playerFx(), c.clN, c.ecm, c.noise); // 第18弾: 混信 (第33弾: 敵のECM・第39弾: 経路の雑音・探知重視)
         const angle = c.angle + _gauss() * sigma;
         const compassDeg = Math.round((Math.atan2(Math.cos(angle), -Math.sin(angle)) * 180 / Math.PI + 360) % 360);
         if (!_contactLabels[c.sourceId]) _contactLabels[c.sourceId] = _contactLabelNext++;
@@ -8450,7 +8502,7 @@ function freeFireAt(wx, wy) {
         cancelSilentRunning('発砲');
         player.fireCooldown = WEAPON_COOLDOWNS.missile * genF;
         player.missileReloading = true;
-        player.missileReloadTimer = Math.round(MISSILE_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0) * PM.mslReload);
+        player.missileReloadTimer = Math.round(MISSILE_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0) * PM.mslReload * playerFx().reload);
         player._fireFlash = 90; player._fireFlashType = 'missile'; player._lastFireType = 'missile'; player._lastFireF = _frameCount;
         logMessage('WEP: ミサイル座標射撃 — 自位置シグネチャ露出', 'warning-msg');
         return;
@@ -8492,7 +8544,7 @@ function updateFreeBeam() {
     beamNearMiss(player.x, player.y, ex, ey, true, hitE);
     beamRevealsShooter(player.x, player.y, true);
     player.beamReloading = true;
-    player.beamReloadTimer = Math.round(BEAM_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0) * PM.beamReload);
+    player.beamReloadTimer = Math.round(BEAM_RELOAD_TIME * (WEAPONS_UPG_RELOAD_MULT[gameState.upgrades.weapons] || 1.0) * PM.beamReload * playerFx().reload);
     player.fireCooldown = WEAPON_COOLDOWNS.beam * Math.max(0.3, 1.5 - (genAlloc.weapons / 100));
     player._fireFlash = 90; player._fireFlashType = 'beam'; player._lastFireType = 'beam'; player._lastFireF = _frameCount; player._beamDrain = BEAM_DRAIN_DUR;
     playSound('shoot');
@@ -8594,7 +8646,7 @@ function fireOmniSonar() {
     const sensorLv  = gameState.upgrades.sensor;
     const baseRange = OMNI_SONAR_RANGE[sensorLv];
     const stormAtPlayer = getStormIntensity(player.x, player.y);
-    const omniRange = baseRange * (genAlloc.sensors / 100) * genGain * (1 - stormAtPlayer * STORM_SONAR_DEGRADE) * PM.sonarRange; // 第32弾: ソナー拡張
+    const omniRange = baseRange * SONAR_FRAC * playerFx().sonar * genGain * (1 - stormAtPlayer * STORM_SONAR_DEGRADE) * PM.sonarRange; // 第32弾: ソナー拡張 (第39弾: 探知重視×1.33)
     const sc = sensorConfig[currentSensor];
 
     playSound('ui');
@@ -8646,7 +8698,7 @@ function fireDirectionalSonar(targetAngle) {
     const sensorLv  = gameState.upgrades.sensor;
     const halfAngle = DIR_SONAR_HALF_ANGLE[sensorLv];
     const stormAtPlayer2 = getStormIntensity(player.x, player.y);
-    const maxRange  = DIR_SONAR_MAX_RANGE * (genAlloc.sensors / 100) * genGain * (1 - stormAtPlayer2 * STORM_SONAR_DEGRADE);
+    const maxRange  = DIR_SONAR_MAX_RANGE * SONAR_FRAC * playerFx().sonar * genGain * (1 - stormAtPlayer2 * STORM_SONAR_DEGRADE);
 
     playSound('ui');
     cancelSilentRunning('アクティブソナー使用');
@@ -9772,7 +9824,7 @@ function updateEnvInfo() {
         if (el) { el.textContent = ammo; el.classList.toggle('rld', !!rld); }
     }
     // GEN配分の要約 (上帯のGENボタン)
-    const gs = 'E' + Math.round(genAlloc.engine) + ' W' + Math.round(genAlloc.weapons) + ' S' + Math.round(genAlloc.sensors);
+    const gs = (genMT ? 'MT ' : (FOCUS_JP[genFocusKey] || '') + ' ') + 'E' + Math.round(genAlloc.engine) + ' W' + Math.round(genAlloc.weapons) + ' S' + Math.round(genAlloc.sensors) + ' AI' + Math.round(genAlloc.ai); // 第39弾: 航行モード名とAI
     if (gs !== _hudCache.gen) { _hudCache.gen = gs; const el = document.getElementById('gen-summary'); if (el) el.textContent = gs; }
     // メニューモーダルのセクター/クレジット
     const mmSector = document.getElementById('mm-sector');
@@ -10082,61 +10134,72 @@ function drawHUDOverlay(ctx) {
     // (第13弾: 旧スクリーン空間スレットリング(4帯域リング)は撤去 — 気配リング・受信ブリップ・バンドチューナーと情報が重複していた)
 }
 
-// ═══ 第15弾: ヒッグスの航跡 ═══
-const WAKE_LIFE = 5400;   // 90秒
+// ═══ 第15弾: ヒッグスの航跡 → 第39弾 (オーナー合意): エンジンごとの痕跡 ═══
+// 熱核 = 熱の痕跡 (60秒で冷める・熱雲の中では残りにくい) / ヒッグス = 霧の痕跡 (90秒・霧が濃いほど深い) / パルス・フォトンは痕跡を残さない。
+// 痕跡の新しい側 (8秒) はまだ形にならない — 旧: 頭がそのまま艦の位置を指していた (オーナー: 霧の乱れがくっきりで艦影そのもの)
+// 他艦の痕跡は、その帯域をONにしている時だけ見える/読める (自艦も敵も同じ)
+const WAKE_LIFE = 5400;   // 霧の痕跡 90秒
+const TRAIL_LIFE = { higgs: 5400, heat: 3600 };
+const TRAIL_SETTLE = 480; // 新しい側の8秒は読めない
 const WAKE_SAMPLE = 30;   // 0.5秒毎に記録
-const WAKE_READ_ENEMY = 3200; // 敵が航跡を読める距離
-function _speedFrac(spd, cls) { return (spd || 0) / Math.max(0.1, gameSpeedFactor) / (shipCruiseSpeed(cls, 100, 1) || 1); }
+const WAKE_READ_ENEMY = 3200; // 痕跡を読める距離 (敵)。自艦は受信の最大距離×0.25
+function _speedFrac(spd, cls) { return speedLoad(spd, cls); } // 第39弾: 推力と同じ基準 (均等の全速)
 function _shipClass(e) { return e.type === 'carrier' ? 'carrier' : e.type === 'corvette' ? 'stealth' : 'assault'; }
-// 航跡の深さ = 速さ × 霧の濃さ。濃い霧の中を速く動くほど深く長く残る (霧は音を隠すが、動きは記録する)
-function recordWake(owner, x, y, frac, hullMul = 1, exhaust = true) {
-    if (frac < 0.06) return;
-    const h = getHiggsIntensity(x, y);
-    // 第17弾: 推力の排気が無い (機関停止) と、霧を乱す分だけが残る
-    let st = Math.pow(Math.min(1.6, frac), 0.9) * ((exhaust ? 0.55 : 0) + 0.9 * h) * hullMul;
-    if (surgePhase === 'active') st *= SURGE_WAKE_MULT;
-    if (silentRunning && owner === 'player') st *= 0.7;
-    if (owner === 'player') st *= PM.wake; // 第32弾: ベクターノズル
+function trailLife(rb) { return TRAIL_LIFE[rb.band] || WAKE_LIFE; }
+// 痕跡の深さ = 推力 × エンジン (霧の痕跡は霧の濃さでも深くなる)。推力が無ければ (機関停止・切替中) 残らない
+function recordWake(owner, x, y, frac, hullMul = 1, exhaust = true, engine = 'higgs', quiet = false) {
+    const band = ENGINE_TRAIL[engine];
+    if (!band || !exhaust || frac < 0.06) return;
+    let st = Math.pow(Math.min(1.6, frac), 0.9) * hullMul;
+    if (band === 'higgs') st *= 0.25 + 0.55 * getHiggsIntensity(x, y);
+    else st *= 0.6 * (1 - getThermalIntensity(x, y) * THERMAL_HEAT_MASK);
+    if (surgePhase === 'active' && band === 'higgs') st *= SURGE_WAKE_MULT;
+    if (quiet) st *= 0.7;
     if (st < 0.03) return;
     let rb = null;
-    for (const w of wakeRibbons) if (w.owner === owner && !w.closed) { rb = w; break; }
+    for (const w of wakeRibbons) if (w.owner === owner && w.band === band && !w.closed) { rb = w; break; }
     const last = rb && rb.pts[rb.pts.length - 1];
-    if (!rb || Math.hypot(x - last.x, y - last.y) > 900) { if (rb) rb.closed = true; rb = { owner, pts: [] }; wakeRibbons.push(rb); }
+    if (!rb || Math.hypot(x - last.x, y - last.y) > 900) { if (rb) rb.closed = true; rb = { owner, band, pts: [] }; wakeRibbons.push(rb); }
     rb.pts.push({ x, y, f: _frameCount, s: Math.min(1, st) });
 }
 function updateWakes() {
     if (_frameCount % WAKE_SAMPLE === 0) {
-        if (player && player.hp > 0) recordWake('player', player.x, player.y, _speedFrac(player.currentSpeed, gameState.shipType), gameState.shipType === 'stealth' ? STEALTH_WAKE_MULT : 1, !playerCoasting);
-        // 第17弾: ノイズメーカーは自艦の全速と同じ航跡を引く (敵はこれも辿る)
-        for (const n of noiseMakers) recordWake(n._wid, n.x, n.y, _speedFrac(Math.hypot(n.vx, n.vy) * gameSpeedFactor, gameState.shipType), gameState.shipType === 'stealth' ? STEALTH_WAKE_MULT : 1);
-        for (const e of enemies) if (e.hp > 0 && !e._dying && e.type !== 'fighter') recordWake(enemySid(e), e.x, e.y, _speedFrac(e._spd, _shipClass(e)), (_shipClass(e) === 'stealth' ? STEALTH_WAKE_MULT : 1) * epm(e).wake);
-        for (const d of decoys) recordWake(d._wid || (d._wid = 'decoy-' + (++_wakeIdSeq)), d.x, d.y, Math.hypot(d.vx, d.vy) / 2);
+        const pEng = gameState.engineType, pHull = gameState.shipType === 'stealth' ? STEALTH_WAKE_MULT : 1;
+        if (player && player.hp > 0) recordWake('player', player.x, player.y, _speedFrac(player.currentSpeed, gameState.shipType), pHull * PM.wake, !playerCoasting && !(engineSwitchT > 0), pEng, silentRunning);
+        // 第17弾: ノイズメーカーは自艦の全速と同じ痕跡を引く (敵はこれも辿る)
+        for (const n of noiseMakers) recordWake(n._wid, n.x, n.y, _speedFrac(Math.hypot(n.vx, n.vy) * gameSpeedFactor, gameState.shipType), pHull, true, n.eng || pEng);
+        for (const e of enemies) if (e.hp > 0 && !e._dying && e.type !== 'fighter') recordWake(enemySid(e), e.x, e.y, _speedFrac(e._spd, _shipClass(e)), (_shipClass(e) === 'stealth' ? STEALTH_WAKE_MULT : 1) * epm(e).wake, e._movedF === _frameCount, e.engine || 'thermonuclear', !!(e._hiding || e._quietRun));
+        for (const d of decoys) recordWake(d._wid || (d._wid = 'decoy-' + (++_wakeIdSeq)), d.x, d.y, Math.hypot(d.vx, d.vy) / 2, 1, true, pEng);
     }
     const cx = higgsCurrent.x * gameSpeedFactor, cy = higgsCurrent.y * gameSpeedFactor;
     for (let i = wakeRibbons.length - 1; i >= 0; i--) {
-        const rb = wakeRibbons[i];
+        const rb = wakeRibbons[i], life = trailLife(rb);
         let k = 0;
-        while (k < rb.pts.length && _frameCount - rb.pts[k].f > WAKE_LIFE) k++;
+        while (k < rb.pts.length && _frameCount - rb.pts[k].f > life) k++;
         if (k) rb.pts.splice(0, k);
         if (!rb.pts.length) { wakeRibbons.splice(i, 1); continue; }
         for (const p of rb.pts) { p.x += cx; p.y += cy; }
     }
 }
-// 敵が自分の近くの航跡を読む: 新しい側へ辿った先にプレイヤーが居ると推測する。
-// 自艦・僚艦の航跡は読まない。デコイの航跡は見分けられない (= 偽の足跡で釣れる)。
+// 痕跡の強さ (読む側から見て)。新しい側8秒は0
+function trailValue(rb, p, d, R) {
+    const age = _frameCount - p.f;
+    if (age < TRAIL_SETTLE || d > R) return 0;
+    return p.s * (1 - age / trailLife(rb)) * (1 - d / R);
+}
+// 敵が自分の近くの痕跡を読む: 新しい側へ辿った先にプレイヤーが居ると推測する。聴いている帯域の痕跡だけ (自艦と同じ)
+// 自艦・僚艦の痕跡は読まない。デコイ・ノイズメーカーの痕跡は見分けられない (= 偽の足跡で釣れる)。
 function readWakeClue(e) {
-    const own = enemySid(e);
-    const R = WAKE_READ_ENEMY * (1 + gameState.sector * 0.05);
+    const own = enemySid(e), bands = enemyBands(e);
+    const R = WAKE_READ_ENEMY;
     let best = null, bv = 0.12;
     for (const rb of wakeRibbons) {
-        if (rb.owner === own || rb.owner.startsWith('e-')) continue;
+        if (rb.owner === own || rb.owner.startsWith('e-') || !bands.includes(rb.band)) continue;
         const pts = rb.pts;
         for (let i = pts.length - 1; i >= 0; i -= 2) {
-            const p = pts[i], age = _frameCount - p.f;
-            if (age > 3600) break;
-            const d = Math.hypot(e.x - p.x, e.y - p.y);
-            if (d > R) continue;
-            const v = p.s * (1 - age / WAKE_LIFE) * (1 - d / R);
+            const p = pts[i];
+            if (_frameCount - p.f > 3600) break;
+            const v = trailValue(rb, p, Math.hypot(e.x - p.x, e.y - p.y), R);
             if (v > bv) { bv = v; best = { rb, i }; }
         }
     }
@@ -10146,38 +10209,39 @@ function readWakeClue(e) {
     if (L < 1) return { x: q.x, y: q.y };
     return { x: q.x + dx / L * 2000, y: q.y + dy / L * 2000 };
 }
-// 航跡の描画 (ワールド空間・フォグの手前)。自分の航跡は常に薄く見える (=記録を残していることの自覚)。
-// 他艦の航跡は HIGGS 帯に同調している時だけ、受信範囲の半分まで見える。
+// 痕跡の描画 (ワールド空間・フォグの手前)。自分の痕跡は常に薄く見える (=記録を残していることの自覚)。
+// 他艦の痕跡はその帯域をONにしている時だけ、受信の最大距離×0.25まで・できあがった所 (8秒より古い) だけ見える。
+const TRAIL_COL = { higgs: '#46ebff', heat: '#ff9a4d' }, TRAIL_COL_OWN = { higgs: '#bee1ff', heat: '#ffd2a8' };
 function drawWakes(ctx) {
     if (!player) return;
     const zi = 1 / camera.zoom;
-    const higgsOn = sensorsOn.higgs;
-    const readR = passiveRange() * 0.55;
+    const readR = passiveRange() * 0.25;
     ctx.save();
     ctx.lineCap = 'round';
     for (const rb of wakeRibbons) {
         const own = rb.owner === 'player';
-        if (!own && !higgsOn && !higgsViewOff) continue;
+        const scout = rb._scoutF && _frameCount - rb._scoutF < 1800;
+        if (!own && !sensorsOn[rb.band] && !higgsViewOff && !scout) continue;
         const pts = rb.pts;
         if (pts.length < 2) continue;
-        ctx.strokeStyle = own ? '#bee1ff' : '#46ebff';
+        const life = trailLife(rb);
+        ctx.strokeStyle = (own ? TRAIL_COL_OWN : TRAIL_COL)[rb.band] || '#46ebff';
         for (let i = 1; i < pts.length; i += 5) {
             const j = Math.min(pts.length - 1, i + 5);
             const pm = pts[Math.min(pts.length - 1, i + 2)];
-            if (!own && !higgsViewOff && Math.hypot(pm.x - player.x, pm.y - player.y) > readR) continue;
-            const ageF = (_frameCount - pm.f) / WAKE_LIFE;
-            const a = Math.min(1, pm.s * 1.3) * (1 - ageF) * (own ? 0.45 : 0.95);
-            if (a < 0.02) continue;
-            const w = 40 + 260 * ageF; // 時間とともに拡散
+            let a;
+            if (own || higgsViewOff) a = Math.min(1, pm.s * 1.3) * (1 - (_frameCount - pm.f) / life) * (own ? 0.45 : 0.95);
+            else a = Math.min(1, trailValue(rb, pm, scout ? 0 : Math.hypot(pm.x - player.x, pm.y - player.y), readR) * 1.6) * 0.8;
+            if (!(a >= 0.02)) continue;
+            const ageF = (_frameCount - pm.f) / life;
+            const w = 60 + 340 * ageF; // 時間とともに拡散
             ctx.beginPath();
             ctx.moveTo(pts[i - 1].x, pts[i - 1].y);
             for (let k = i; k <= j; k++) ctx.lineTo(pts[k].x, pts[k].y);
-            ctx.globalAlpha = a * 0.25;
+            ctx.globalAlpha = a * 0.22;
             ctx.lineWidth = Math.max(4 * zi, w);
             ctx.stroke();
-            ctx.globalAlpha = a;
-            ctx.lineWidth = Math.max(1.6 * zi, w * 0.12);
-            ctx.stroke();
+            if (own) { ctx.globalAlpha = a; ctx.lineWidth = Math.max(1.6 * zi, w * 0.12); ctx.stroke(); }
         }
     }
     ctx.restore();
@@ -10690,7 +10754,7 @@ function updateLures() {
         }
         if (L.kind === 'ship') {
             L.x += L.vx * gameSpeedFactor; L.y += L.vy * gameSpeedFactor;
-            recordWake(L.wid, L.x, L.y, 0.6, 1);
+            recordWake(L.wid, L.x, L.y, 0.6, 1, true, L.owner === 'p' ? gameState.engineType : ((enemies.find(e => e.type !== 'fighter') || {}).engine || 'thermonuclear'));
         }
         if ((L.life -= gameSpeedFactor) <= 0 || Math.hypot(L.x - MAP_CX, L.y - MAP_CY) > MAP_RADIUS) { lures.splice(i, 1); continue; }
         // 第23弾: 敵の偽艦影/ノイズが有視界に入れば正体が分かる
@@ -11630,8 +11694,12 @@ function updateDistressBeacon() {
 // 接触を失った敵が探信音を放つ。敵は正確な情報を得るチャンスと引き換えに、
 // 自分の正確な方位をプレイヤーに晒す — 潜水艦戦の象徴的な情報交換。
 // カウンタープレイ: 濃いヒッグスに潜れば反射が埋もれる / デコイが偽エコーを返す。
+// 第39弾: 探信の距離は自機と同じ式 (全周ソナーの Lv1 × 均等の配分 × 探知重視 × 磁気嵐)
+const SONAR_FRAC = 0.30;
+function enemyPingRange(e) { return OMNI_SONAR_RANGE[1] * SONAR_FRAC * shipFx(e).sonar * (1 - getStormIntensity(e.x, e.y) * STORM_SONAR_DEGRADE); }
 function firePingFromEnemy(e) {
     if (!player || player.hp <= 0) return;
+    const ENEMY_PING_RANGE = enemyPingRange(e);
     // 演出: 音波リング (フォグ無視 — 音はヒッグスの霧を越えて聞こえる)
     effects.push({ x: e.x, y: e.y, r: 0, maxR: ENEMY_PING_RANGE, a: 0.7, c: '#ff8866', type: 'circle' });
     effects.push({ x: e.x, y: e.y, r: 0, maxR: ENEMY_PING_RANGE * 0.55, a: 0.5, c: '#ffbb99', type: 'circle' });
@@ -11669,7 +11737,8 @@ function firePingFromEnemy(e) {
     }
     if (echo) {
         const _isNoise = noiseMakers.includes(echo);
-        e.playerLastKnownPos = { x: echo.x, y: echo.y, vx: _isNoise ? echo.vx * gameSpeedFactor : 0, vy: _isNoise ? echo.vy * gameSpeedFactor : 0 };
+        e.playerLastKnownPos = { x: echo.x, y: echo.y, vx: 0, vy: 0 }; // 第39弾: 反響は位置だけ (速さは分からない)
+        if (e._sa) { e._sa.ping = { x: echo.x, y: echo.y, r: 250, f: _frameCount }; solveFix(e._sa); } e._lkGuess = false;
         e._noiseLk = _isNoise ? e.playerLastKnownPos : null;
         e.contactFreshness = Math.max(e.contactFreshness, 0.85);
         logMessage(_isNoise ? '離脱: ノイズメーカーが敵の探信に反射 — 敵はそちらを掴んだ' : 'DECOY: デコイが偽エコー反射 — 敵ソナーを誤誘導', 'system-msg');
@@ -11677,11 +11746,8 @@ function firePingFromEnemy(e) {
         // 濃いヒッグスに潜んでいれば反射が背景に埋もれる
         const hHere = getHiggsIntensity(player.x, player.y);
         if (hHere < ENEMY_PING_HIGGS_BLOCK) {
-            e.playerLastKnownPos = {
-                x: player.x, y: player.y,
-                vx: player.x - (player.prevX ?? player.x),
-                vy: player.y - (player.prevY ?? player.y)
-            };
+            e.playerLastKnownPos = { x: player.x, y: player.y, vx: 0, vy: 0 }; // 第39弾: 反響は位置だけ (旧: 真の速さも渡していた)
+            if (e._sa) { e._sa.ping = { x: player.x, y: player.y, r: 250, f: _frameCount }; solveFix(e._sa); } e._lkGuess = false;
             e.contactFreshness = Math.max(e.contactFreshness, 0.85);
             logMessage('WARN: 敵ソナーがこちらを捉えた — エコー反射', 'warning-msg');
         } else {
@@ -11804,13 +11870,17 @@ const BAND_LABEL = { heat: 'HEAT', optic: 'OPTIC', em: 'EM', higgs: 'HIGGS' };
 const BAND_JP = { heat: '熱', optic: '光学', em: '電磁波', higgs: 'ヒッグス' };
 // パッシブ受信の到達距離 (方位ウェッジ生成・受信レベル表示で共通)
 function passiveRange() {
-    let range = Math.max(effectiveRadarRange * 10, 11000) * PM.rxRange; // 第36弾: 曳航アレイ
+    // 第39弾: 受信の最大距離 15000u × 探知重視 × 部品 × 居る場所の霧 (敵と同じ式)
+    let range = PASSIVE_BASE * PM.rxRange * playerFx().rxRange * (player ? 1 - getHiggsIntensity(player.x, player.y) * 0.3 : 1);
     if (surgePhase === 'active') range *= SURGE_DETECT_MULT;        // ヒッグスサージ: 敵味方対称に縮退
     else if (surgePhase === 'after') range *= SURGE_CLARITY_MULT;   // 通過後は高感度
-    if (player && player._sysSensorTimer > 0) range *= 0.35;        // センサー損傷
+    if (player && player._sysSensorTimer > 0) range *= SYS_SENSOR_RX; // センサー損傷 (敵も同じ)
     if (player && player._daze > 0) range *= DAZE_SENSOR_MULT;      // 第20弾: センサー撹乱
     return range;
 }
+// 第39弾: 航行モードの効果 (自艦は1フレームに1回、敵は配分が変わった時に作る)
+function playerFx() { if (_pfxF !== _frameCount || !_pfx) { _pfx = focusFx(genAlloc); _pfxF = _frameCount; } return _pfx; }
+function shipFx(s) { if (!s) return focusFx(GEN_FOCUS.balance); if (s === player) return playerFx(); return s._fx || (s._fx = focusFx(s.gen || GEN_FOCUS.balance)); }
 // 帯域ごとの受信レベル(敵艦のみ)。0.5 = その帯域に同調すれば方位が取れる閾値、1.0 = 閾値の2倍。
 // 「どの帯域に何かが居るか」は常に分かるが、「どの方位か」は同調しないと分からない = じゃんけんの核
 // 第31弾 (オーナー): includeOff=true なら OFF の帯域も受信レベルだけは出す (左のバーが増減する)。方位はONの帯域でしか取れない
@@ -11828,56 +11898,29 @@ function rxLevels(includeOff, all) {
     const out = { heat: 0, optic: 0, em: 0, higgs: 0 };
     if (!player || player.hp <= 0) return out;
     const range = passiveRange();
-    const mask = 1; // 第36弾: 自艦ノイズは撤去
+    const bands = includeOff ? BANDS : BANDS.filter(b => sensorsOn[b]); // 第21弾: OFFの帯域は聴いていない (方位は取れない)
+    const px = player.x, py = player.y;
+    // 第39弾: 自艦が聴く時も経路の減衰が効く (敵と同じ hearLevels)。強さは直近1秒の最大値
     for (const e of enemies) {
         if (e.hp <= 0 || e._dying) continue;
         if (!all && rxKnown(enemySid(e))) continue;
-        const dist = Math.hypot(e.x - player.x, e.y - player.y);
-        if (dist >= range) continue;
-        const hPath = getHiggsIntensity((e.x + player.x) / 2, (e.y + player.y) / 2);
-        const da = 1 - dist / range;
-        for (const b of BANDS) {
-            if (!sensorsOn[b] && !includeOff) continue; // 第21弾: OFFの帯域は聴いていない (方位は取れない)
-            const sc = sensorConfig[b];
-            const lvl = sc.sig(e) * da * (1 - hPath * sc.higgsMod) * mask / sc.threshold;
-            if (lvl > out[b]) out[b] = lvl;
-        }
+        hearLevels(e, 'p', px, py, e.x, e.y, b => sigPeak(e, b), range, out, bands);
     }
-    for (const cv of convoys) { // 第34弾: 輸送船
-        if (!all && rxKnown(cv.sid)) continue;
-        const dist = Math.hypot(cv.x - player.x, cv.y - player.y);
-        if (dist >= range) continue;
-        const hPath = getHiggsIntensity((cv.x + player.x) / 2, (cv.y + player.y) / 2), da = 1 - dist / range;
-        for (const b of BANDS) { if (!sensorsOn[b] && !includeOff) continue; const sc = sensorConfig[b], lvl = CONVOY_SIG * da * (1 - hPath * sc.higgsMod) * mask / sc.threshold; if (lvl > out[b]) out[b] = lvl; }
-    }
-    for (const f of fieldSignals) { // 第31弾: 自然/お宝の信号
-        if (!all && rxKnown(f.sid)) continue;
-        const dist = Math.hypot(f.x - player.x, f.y - player.y);
-        if (dist >= range) continue;
-        const hPath = getHiggsIntensity((f.x + player.x) / 2, (f.y + player.y) / 2), da = 1 - dist / range;
-        for (const b of BANDS) {
-            if (!sensorsOn[b] && !includeOff) continue;
-            const sc = sensorConfig[b], lvl = fieldSig(f, b) * da * (1 - hPath * sc.higgsMod) * mask / sc.threshold;
-            if (lvl > out[b]) out[b] = lvl;
-        }
-    }
+    for (const cv of convoys) { if (!all && rxKnown(cv.sid)) continue; hearLevels(cv, 'p', px, py, cv.x, cv.y, () => CONVOY_SIG, range, out, bands); } // 第34弾: 輸送船
+    for (const f of fieldSignals) { if (!all && rxKnown(f.sid)) continue; hearLevels(f, 'p', px, py, f.x, f.y, b => fieldSig(f, b), range, out, bands); } // 第31弾: 自然/お宝の信号
     for (const L of lures) { // 第21弾: 敵の偽艦影ブイ
         if (L.owner !== 'e' || L.kind !== 'ship' || L.phase !== 'on') continue;
         if (!all && rxKnown(L.sid)) continue;
-        const dist = Math.hypot(L.x - player.x, L.y - player.y);
-        if (dist >= range) continue;
-        const hPath = getHiggsIntensity((L.x + player.x) / 2, (L.y + player.y) / 2);
-        for (const b of BANDS) { if (!sensorsOn[b] && !includeOff) continue; const sc = sensorConfig[b]; const lvl = LURE_SIG * (1 - dist / range) * (1 - hPath * sc.higgsMod) * mask / sc.threshold; if (lvl > out[b]) out[b] = lvl; }
+        hearLevels(L, 'p', px, py, L.x, L.y, () => LURE_SIG * Math.min(1, L.life / 60), range, out, bands);
     }
-    const readR = range * 0.55;
-    if (sensorsOn.higgs || includeOff) for (const rb of wakeRibbons) {
-        if (!rb.owner.startsWith('e-')) continue;
+    // 第39弾: 相手の痕跡 (熱の痕跡・霧の痕跡) も、その帯域で聴いていればバーが動く
+    const readR = range * 0.25;
+    for (const rb of wakeRibbons) {
+        if (!rb.owner.startsWith('e-') || !bands.includes(rb.band)) continue;
         const pts = rb.pts;
         for (let i = pts.length - 1; i >= 0; i -= 3) {
-            const p = pts[i], d = Math.hypot(p.x - player.x, p.y - player.y);
-            if (d > readR) continue;
-            const v = p.s * (1 - (_frameCount - p.f) / WAKE_LIFE) * (1 - d / readR) * 1.4 * mask;
-            if (v > out.higgs) out.higgs = v;
+            const p = pts[i], v = trailValue(rb, p, Math.hypot(p.x - px, p.y - py), readR) * 1.4;
+            if (v > out[rb.band]) out[rb.band] = v;
         }
     }
     return out;
@@ -12068,7 +12111,7 @@ const _dirTxt = (fx, fy, tx, ty) => '方位' + compassDeg(Math.atan2(ty - fy, tx
 //  あとは副長の助言に従う (追跡・直交航路・兵装の持ち替え・回避)。手掛かりが何も無ければ自分で捜索航路を引く
 // 第20弾: 人間並みの操艦 (オーナー合意) — 判断は2秒ごと。一度引いた航路は到着するか20秒たつまで変えない (直交航路は到着まで走り切る)。
 // 例外はミサイル回避と離脱。旧: 0.5秒ごとに判断し航路をすぐ引き直していた (人間には真似できない小刻みな三角測量)
-const COM_TICK = 120, COM_LEG_HOLD = 1200, COM_GOAL_RANGE = 9000, COM_DEPLOY_GAP = 600, COM_HIDE_TIME = ENEMY_HIDE_TIME, COM_SEARCH_LEG = 4000;
+const COM_TICK = 120, COM_LEG_HOLD = 1200, COM_GOAL_RANGE = 9000, COM_DEPLOY_GAP = 600, COM_HIDE_TIME = ENEMY_HIDE_TIME, COM_SEARCH_LEG = 4000, COM_SEARCH_PAUSE = 600; // 第39弾: 捜索で着いたら10秒止まって聴く
 const COM_SKIP = { '帰投': 1, 'ソナー': 1, '離脱': 1, '射撃': 1 }; // 自機COMが自分で決める (退く・撃つ) / 使わない (副長の「静寂ならソナー」は位置を晒すだけ)
 function comNewMemo() { return { pp: comPersonalityFor('p'), lastDeploy: -1e9, hideUntil: 0, flankUntil: 0, silentUntil: 0, mode: '' }; }
 
@@ -12281,9 +12324,15 @@ function comPilotStep() {
     }
     const r = xoEvaluate();
     c.mode = '';
+    // 第39弾: 聴いた範囲を覚える (敵と同じ searchMark) / 聴く帯域の本数は敵と同じ式 (1 + 攻撃性×2 + (1 − 隠密性)・熱→EM→霧→光の順)
+    searchMark(player, player.x, player.y, passiveRange() * SEARCH_HEAR_FRAC);
+    { const nb = Math.max(1, Math.min(4, 1 + Math.round(P.aggression * 2 + (1 - P.stealth)))), want = ENEMY_BAND_ORDER.slice(0, nb);
+      if (want.join() !== sensorOrder.join()) { for (const b of BANDS) if (!want.includes(b) && sensorsOn[b] && sensorOrder.length > 1) toggleBand(b, true); for (const b of want) if (!sensorsOn[b]) toggleBand(b, true); } }
     // 第21弾: 状況適応の性格 (自機COM) — 相手を掴んでいる=受信中の敵信号か有視界
     {
         const am = adaptPersonality(P, contact, hpF);
+        // 第39弾: 自機COMも性格で航行モードを選ぶ (敵と同じ pickFocus)
+        { const fk = pickFocus(P); if (fk !== c.focus) { c.focus = fk; setGenFocus(fk, true); comThinkEvent('p', '航行モード → ' + FOCUS_JP[fk]); } }
         if (am) comThinkEvent('p', '性格が変わる → ' + ADAPT_MODES[am].label + ' (' + (am === 'cautious' ? '耐久' + _pct(hpF) + ' < 40%' : am === 'aggressive' ? '相手を掴んだ' : am === 'greedy' ? '90秒手掛かりなし' : '見失って60秒') + ')');
     }
     // 1) 退く
@@ -12316,7 +12365,7 @@ function comPilotStep() {
         if (r.act.label === '回避') _comCMOff();
         r.act.fn();
         if (r.act.label === '回避') { _comSteered(c, 'free'); c.legF = -1e9; } // 回避も例外
-        comThink('p', 'evade' + r.act.label, '副長「' + r.text + '」→ ' + r.act.label);
+        comThink('p', 'evade' + r.act.label, 'AI「' + r.text + '」→ ' + r.act.label);
         _comStance(c, P);
         return;
     }
@@ -12461,7 +12510,7 @@ function comPilotStep() {
         const hd = player.state === 'moving' ? Math.atan2(player.targetY - player.y, player.targetX - player.x) : null;
         if (hd === null || Math.abs(Math.sin(hd - bL.angle)) < 0.5) {
             xoPerpendicularLeg(bL.angle); _comSteered(c, 'perp');
-            comThink('p', 'perp', '副長「' + r.text + '」→ 方位線に直交する航路へ (場所を変えて聴き、交点を出す)');
+            comThink('p', 'perp', 'AI「' + r.text + '」→ 方位線に直交する航路へ (場所を変えて聴き、交点を出す)');
             _comStance(c, P);
             return;
         }
@@ -12472,23 +12521,27 @@ function comPilotStep() {
         if (mv) _comSteered(c, mv);
         if (r.act.label === '接近' && P.aggression >= 0.7) c.flankUntil = now + 1200;
         if (r.act.label === '潜航') c.silentUntil = now + 1200;
-        comThink('p', 'xo' + r.act.label, (held ? held + '。' : '') + '副長「' + r.text + '」→ ' + r.act.label + (c.flankUntil > now && r.act.label === '接近' ? ' (攻撃性' + _pct(P.aggression) + ' → 全速で)' : ''));
+        comThink('p', 'xo' + r.act.label, (held ? held + '。' : '') + 'AI「' + r.text + '」→ ' + r.act.label + (c.flankUntil > now && r.act.label === '接近' ? ' (攻撃性' + _pct(P.aggression) + ' → 全速で)' : ''));
     } else if (held) {
         // 撃たないなら測り直す (方位線に直交して動く)
         const b = te && sigs[enemySid(te)];
         if (b && player.state !== 'moving') { xoPerpendicularLeg(b.angle); _comSteered(c, 'perp'); }
         comThink('p', 'held', held + (b ? ' — 直交して測り直す' : ''));
     } else if (player.state !== 'moving') {
-        // 手掛かりが無い: 最後の推定位置 → マップ中央の順に捜索航路を引く
-        let tx = MAP_CX, ty = MAP_CY, why = 'マップ中央方面';
+        // 手掛かりが無い: 最後の推定位置 → まだ聴いていない海域 (第39弾: 敵と同じ searchNext。旧: マップ中央) の順に捜索航路を引く。
+        // 着いたら10秒止まって聴く (動いている間は痕跡と推進の信号を出す)
+        if (c.srchArrF === undefined || c.srchArrF < 0) { c.srchArrF = now; }
+        if (now - c.srchArrF < COM_SEARCH_PAUSE) { comThink('p', 'listen', '捜索: 止まって聴く (残り' + Math.ceil((COM_SEARCH_PAUSE - (now - c.srchArrF)) / 60) + '秒)'); return; }
+        c.srchArrF = -1;
         const sa = lockedSignalId && _signalAnalysis[lockedSignalId], est = sa && trackEstimate(sa, 0);
-        if (est) { tx = est.x; ty = est.y; why = '最後の推定位置'; }
-        let ang = Math.atan2(ty - player.y, tx - player.x);
-        if (Math.hypot(tx - player.x, ty - player.y) < 1500) ang = Math.random() * Math.PI * 2;
-        _setLeg(ang + (Math.random() - 0.5) * 0.6, COM_SEARCH_LEG, '捜索航路'); _comSteered(c, 'leg');
-        comThink('p', 'search', (r ? '副長「' + r.text + '」。' : '') + '手掛かりなし → ' + why + 'へ捜索航路 (動けば痕跡が残る)');
+        let tx, ty, why;
+        if (est && Math.hypot(est.x - player.x, est.y - player.y) > 1500) { tx = est.x; ty = est.y; why = '最後の推定位置'; }
+        else { const sn = searchNext(player, player.x, player.y); tx = sn.x; ty = sn.y; why = 'まだ聴いていない海域'; }
+        const ang = Math.atan2(ty - player.y, tx - player.x);
+        _setLeg(ang + (Math.random() - 0.5) * 0.3, Math.min(Math.hypot(tx - player.x, ty - player.y), COM_SEARCH_LEG * 1.5), '捜索航路'); _comSteered(c, 'leg');
+        comThink('p', 'search', (r ? 'AI「' + r.text + '」。' : '') + '手掛かりなし → ' + why + 'へ捜索航路 (動けば痕跡が残る)');
     } else if (r && _frameCount - _thinkLastP > 180) { // 直前(3秒以内)に何か決めたばかりなら「続ける」は言わない
-        comThink('p', 'xo-' + r.tone + r.text.replace(/[\d.±]+/g, '#'), '副長「' + r.text + '」→ 今の航路を続ける');
+        comThink('p', 'xo-' + r.tone + r.text.replace(/[\d.±]+/g, '#'), 'AI「' + r.text + '」→ 今の航路を続ける');
     }
     _comStance(c, P);
 }
@@ -12925,6 +12978,14 @@ function _updateExpoChip() {
     if (ch) ch.className = 'expo-' + exL;
     if (tx) tx.textContent = exTxt;
 }
+// AIの数字の細かさ: AI 75%以上=そのまま / 45%以上=方位5°・距離500u・割合5% / それ未満=方位10°・距離1000u・割合10%
+function aiRoundText(t, ai) {
+    if (ai >= 0.75) return t;
+    const dg = ai >= 0.45 ? 5 : 10, du = ai >= 0.45 ? 500 : 1000, dp = ai >= 0.45 ? 5 : 10;
+    return t.replace(/(方位\s?)(\d{1,3})°/g, (m, a, d) => a + ((Math.round(+d / dg) * dg) % 360) + '°')
+            .replace(/(\d{3,6})u/g, (m, d) => (Math.max(du, Math.round(+d / du) * du)) + 'u')
+            .replace(/(\d{1,3})%/g, (m, d) => (Math.round(+d / dp) * dp) + '%');
+}
 function updateTacStrip() {
     if (!player) return;
     // 4帯域ミキサー: 太=受信レベル (0.5の刻み=同調すれば方位が取れる) / 細=自艦の放射
@@ -12949,8 +13010,12 @@ function updateTacStrip() {
         if (txHi !== el.txHi) { el.txHi = txHi; el.btn.classList.toggle('tx-hi', txHi); }
     }
     _updateExpoChip();
-    // 副長
-    const r = xoEvaluate();
+    // 第39弾 (オーナー): 副長 → AI。AIの配分で助言の頻度と細かさが変わる (均等=1秒ごと・方位5°/距離500u刻み / 解析重視=0.4秒ごと・そのままの数字)
+    const _aiF = Math.max(0, Math.min(1, genAlloc.ai / 100));
+    const _xoEvery = Math.round(120 - 120 * _aiF * 0.9);
+    let r;
+    if (_frameCount - (_xoEvalF || -1e9) >= _xoEvery || !_xoLast) { r = xoEvaluate(); if (r && r.text) r = Object.assign({}, r, { text: aiRoundText(r.text, _aiF) }); _xoLast = r; _xoEvalF = _frameCount; }
+    else r = _xoLast;
     const key = r ? (r.tone + '|' + r.text + '|' + (r.act ? r.act.label : '')) : '';
     if (key !== _xoState) {
         _xoState = key;
@@ -13293,6 +13358,7 @@ function stepWorld() {
         // Updates
         if (player && player.hp > 0) {
             player.update();
+            sigPeakUpdate(player); // 第39弾: 直近1秒の最大値 (敵が1秒ごとに聴く時に使う)
         } else if (player && !player.isDead) {
             // 第22弾: 自艦の撃沈 — 敵と同じく3秒の漂流・誘爆 → 最終爆発 → 原因を出してからゲームオーバー
             // (旧: その場で爆発して2.5秒後に終了画面。何にやられたか分からなかった)
@@ -13320,7 +13386,7 @@ function stepWorld() {
                 setTimeout(() => showGameOver(), 1800);
             }
         }
-        enemies.forEach(e => e.update());
+        enemies.forEach(e => { e.update(); if (e.hp > 0 && !e.isPlayer) e._enemySigs(); });
         updateDecoys();
         updateWakes();
         updatePlayerDrones();

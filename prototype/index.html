@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261101e">
+    <link rel="stylesheet" href="style.css?v=20261102a">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -47,7 +47,7 @@
                 <span id="hud-expo" class="expo-0" title="脅威の兆候 (観測できたものだけ): 静穏 / 受信=信号を受けた / 照射=探信・照準波を受けた / 攻撃=被弾・ミサイル・ビームのチャージ"><i></i><b id="hud-expo-text">静穏</b></span>
                 <div id="xo-bar" class="xo-idle">
                     <span id="xo-dot"></span>
-                    <span id="xo-label">副長</span>
+                    <span id="xo-label">AI</span>
                     <span id="xo-text">—</span>
                     <button id="xo-act" style="display:none"></button>
                 </div>
@@ -136,9 +136,10 @@
                 <button class="act-icon-btn btn-info eng-btn" id="btn-eng-photon" data-eng="photon" title="フォトンエンジン — 最も速い・光が大きい">
                     <i class="ico" style="--ico:url(assets/icons/icon_eng_pht.png)"></i><span>フォトン</span></button>
                 <button class="act-icon-btn btn-info focus-btn active" id="btn-focus-balance" data-focus="balance" title="配分の重点: 均等"><b class="fx-mark">均</b><span>均等</span></button>
-                <button class="act-icon-btn btn-info focus-btn" id="btn-focus-engine" data-focus="engine" title="配分の重点: 機関 (速い・熱とEMが増える)"><b class="fx-mark">機</b><span>機関重視</span></button>
-                <button class="act-icon-btn btn-info focus-btn" id="btn-focus-sensor" data-focus="sensor" title="配分の重点: 探知 (遠くまで聴ける)"><b class="fx-mark">探</b><span>探知重視</span></button>
-                <button class="act-icon-btn btn-info focus-btn" id="btn-focus-weapon" data-focus="weapon" title="配分の重点: 兵装 (連射が速い)"><b class="fx-mark">兵</b><span>兵装重視</span></button>
+                <button class="act-icon-btn btn-info focus-btn" id="btn-focus-engine" data-focus="engine" title="配分の重点: 機関 (速さ×1.5・回避+5pt。速いほど推進の信号が増える)"><b class="fx-mark">機</b><span>機関重視</span></button>
+                <button class="act-icon-btn btn-info focus-btn" id="btn-focus-sensor" data-focus="sensor" title="配分の重点: 探知 (受信の最大距離×1.17・ソナーの距離と半径×1.33・方位の誤差×0.85)"><b class="fx-mark">探</b><span>探知重視</span></button>
+                <button class="act-icon-btn btn-info focus-btn" id="btn-focus-weapon" data-focus="weapon" title="配分の重点: 兵装 (リロード×0.8・散布×0.7・相手の回避×0.85)"><b class="fx-mark">兵</b><span>兵装重視</span></button>
+                <button class="act-icon-btn btn-info focus-btn" id="btn-focus-analysis" data-focus="analysis" title="配分の重点: 解析 (AI 80 — 助言が速く細かい・回避+3pt・相手の回避×0.9・解析の速さ×1.4。演算の電磁波が増える)"><b class="fx-mark">析</b><span>解析重視</span></button>
                 <button class="act-icon-btn btn-info" id="btn-focus-mt" title="詳細 (MT) — 機関・兵装・探知・AIのゲインを0〜200%で個別に。上限の合計はない。100%を超えた分はその系統のシグネチャが2乗で増える"><b class="fx-mark">MT</b><span>詳細</span></button>
                 <button class="act-icon-btn btn-info" id="btn-scan" title="全周囲ソナー">
                     <i class="ico" style="--ico:url(assets/icons/icon_sonar.png)"></i>
@@ -332,6 +333,7 @@
                     <button class="gd-focus-btn" data-focus="engine">機関重視</button>
                     <button class="gd-focus-btn" data-focus="sensor">探知重視</button>
                     <button class="gd-focus-btn" data-focus="weapon">兵装重視</button>
+                    <button class="gd-focus-btn" data-focus="analysis">解析重視</button>
                 </div>
                 <div class="gd-note">出力の大小は右列の 潜航/巡航/全速。配分は上の重点だけで決める。エンジンは戦闘中も切り替えられるが、切替の10秒は推力ゼロ (惰性) でEMが漏れる</div>
             </div>
@@ -572,10 +574,10 @@
                     <ol class="brief-steps">
                         <li><b class="bs-1">聴く</b>左の受信機: 太いバー=受信、刻みを超えた帯域に<em>同調</em>すると方位が取れる。細いバー=<em>自艦の放射</em>。</li>
                         <li><b class="bs-2">測る</b>自艦リングの点か地図の推定円を<em>タップして追跡</em>し、方位を記録。<em>場所を変えて</em>聴くと方位線が交わり推定円が出る。交わらない=相手が動いている。止まって聴くと方位が鋭くなる。</li>
-                        <li><b class="bs-3">撃つ</b>推定円を<em>長押し→射撃</em>。円が小さいほど当たる (見込み%は副長が言う)。針路が読めると推定円に<em>矢印</em>が出て、射撃は弾が届く時の<em>見越し点</em>を狙う。外れれば「そこには居ない」と分かるが、<em>撃った位置を教える</em>。ソナーは正確だが遠くまで聞かれる。</li>
+                        <li><b class="bs-3">撃つ</b>推定円を<em>長押し→射撃</em>。円が小さいほど当たる (見込み%はAIが言う)。針路が読めると推定円に<em>矢印</em>が出て、射撃は弾が届く時の<em>見越し点</em>を狙う。外れれば「そこには居ない」と分かるが、<em>撃った位置を教える</em>。ソナーは正確だが遠くまで聞かれる。</li>
                         <li><b class="bs-4">消える</b>出力を<em>潜航</em>へ。ヒッグスの霧は音を隠すが、動けば<em>航跡が90秒残り</em>、敵はそれを辿ってくる (HIGGS帯で相手の航跡も見える)。見つかったら右列の<em>離脱</em>: 閃光で目を潰す→噴射で距離を取る→<em>機関停止</em>で音を消して漂う。ドローンや艦載機が飛び交う所・嵐・熱雲・岩礁に紛れると見分けにくい (<em>混信</em>)。</li>
                     </ol>
-                    <div class="brief-tip">自艦の周りのリング: 0°=上・時計回り。ログや副長が言った方位はリング上で光る。青緑の縁(有視界)の内側に入った敵ははっきり見える — 縁の大きさは自艦の居る場所のヒッグス濃度で変わる。<br>ノードの近くに5秒留まると制圧 (資材+聴音局)、コロニーは8秒でハック (修理・資材・敵の方位線)。右列の「搭載」で戦闘機・砲台・Techなど — 完成品はすぐ出せ、資材は組み立てに時間とEMがかかる。<br>副長は状況を読み上げるだけ — 決めるのはあなた。移動はフィールドを長押し →「移動」。ドラッグで見回し、ピンチか右下の＋−で拡大縮小。</div>
+                    <div class="brief-tip">自艦の周りのリング: 0°=上・時計回り。ログやAIが言った方位はリング上で光る。青緑の縁(有視界)の内側に入った敵ははっきり見える — 縁の大きさは自艦の居る場所のヒッグス濃度で変わる。<br>ノードの近くに5秒留まると制圧 (資材+聴音局)、コロニーは8秒で占有 (補給1回・聴音局・解析の演算力)。右列の「搭載」で戦闘機・砲台・Techなど — 完成品はすぐ出せ、資材は組み立てに時間とEMがかかる。<br>AIは状況を読み上げるだけ — 決めるのはあなた (AIの配分が高いほど助言が速く細かい)。移動はフィールドを長押し →「移動」。ドラッグで見回し、ピンチか右下の＋−で拡大縮小。</div>
                     <button class="btn btn-primary" id="btn-brief-ok">了解 — 出撃</button>
                 </div>
             </div>
@@ -735,7 +737,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261101e"></script>
+    <script src="game.js?v=20261102a"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -776,7 +778,7 @@
             nav:   ['btn-cancel', 'btn-camera-follow', 'btn-attack-toggle', 'btn-game-speed'],
             drone: ['btn-drone-attack','btn-drone-mech','btn-drone-build','btn-drone-scout','btn-drone-decoy',
                     'btn-drone-buoy','btn-drone-barrier','btn-drone-higgs', 'btn-hack'],
-            engine: ['btn-eng-thermonuclear', 'btn-eng-pulse', 'btn-eng-higgs', 'btn-eng-photon', 'btn-focus-balance', 'btn-focus-engine', 'btn-focus-sensor', 'btn-focus-weapon', 'btn-focus-mt'],
+            engine: ['btn-eng-thermonuclear', 'btn-eng-pulse', 'btn-eng-higgs', 'btn-eng-photon', 'btn-focus-balance', 'btn-focus-engine', 'btn-focus-sensor', 'btn-focus-weapon', 'btn-focus-analysis', 'btn-focus-mt'],
             escape: ['btn-item-repair', 'btn-item-flash', 'btn-item-noise', 'btn-item-smoke', 'btn-item-fsos', 'btn-item-lure', 'btn-boost', 'btn-coast'],
         };
         var _apop  = document.getElementById('action-popover');
