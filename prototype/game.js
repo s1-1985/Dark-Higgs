@@ -5421,7 +5421,7 @@ function generateSector() {
     dirSonarVisual = null;
     dirSonarPendingFire = false;
     passiveBearings = [];
-    lockedSignalId = null; _contactLabels = {}; _contactLabelNext = 1; _signalAnalysis = {};
+    lockedSignalId = null; _contactLabels = {}; _contactLabelNext = 1; _signalAnalysis = {}; for (const k in _srcKnown) delete _srcKnown[k]; // 第40弾
     for (const k in _passiveLastSeen) delete _passiveLastSeen[k];
     player = new Ship(MAP_CX, MAP_CY, true);
     player.generatorOutput = genAlloc.engine;
@@ -7635,6 +7635,53 @@ const FIELD_KINDS = {
     cache: { lbl: '漂流コンテナ', band: null, lo: 0.15, hi: 0.25, col: '255,225,140' },
 };
 const CLOUD_LIFE = 7200, FIELD_FADE = 300, CACHE_R = 400, CACHE_TIME = 180, CACHE_RESPAWN = 3600, FIELD_IDENT_R = 2500;
+// ═══ 第40弾 (オーナー): 特定した発信元 = 海図の既知物 ═══
+// 目視か解析で正体が分かった 自然の信号 (霧のゆらぎ・嵐の放電・熱泉)・漂流コンテナ・囮 は、
+// 霧の上に描き (位置は 目視=見た位置 / 解析=推定円の中心)・推定円 (シグネチャサークル) は描かず・センサーにも入れない
+// (方位の記録・解析の取り分・受信バー・リングの反応・兆候「受信」のどれにもならない)。推定円は未特定の信号だけ。
+// 解析で分かる条件: 手掛かり3つ以上・解析75%以上・艦影25%未満 かつ —
+//   自然 = 「1つの帯域だけ」(2本以上ONで1帯域にしか出ない。帯域で種類が分かる: 霧の乱れ=霧のゆらぎ / 電磁波=嵐の放電 / 熱=熱泉)
+//   コンテナ = 「帯域が平坦」+「探信の反響が小さい」+ 動かない (囮は動く — 動きが読めていなければ見誤ることもある)
+// 艦影の信号は対象外 (見えて艦と分かったものは推定円のまま)
+const _srcKnown = {}; // sid → { kind:'cloud'|'storm'|'vent'|'cache'|'lure', by:'eye'|'ana', x, y, f }
+const SRC_KIND_JP = { cloud: '霧のゆらぎ', storm: '嵐の放電', vent: '熱泉', cache: '漂流コンテナ', lure: '囮' };
+function srcKnown(sid) { return !!_srcKnown[sid]; }
+function markSrcKnown(sid, kind, by, x, y) {
+    const was = _srcKnown[sid];
+    _srcKnown[sid] = { kind, by, x, y, f: _frameCount };
+    if (was) return;
+    for (let i = passiveBearings.length - 1; i >= 0; i--) if (passiveBearings[i].sourceId === sid) passiveBearings.splice(i, 1);
+    if (lockedSignalId === sid) { lockedSignalId = null; }
+    const no = _contactLabels[sid];
+    if (no) logMessage('SIGNAL: SIG-' + String(no).padStart(2, '0') + ' は' + (by === 'ana' ? '解析で' : '') + SRC_KIND_JP[kind] + 'と判明 — 海図に載せ、以後センサーは聞き流す', 'system-msg');
+    matchRecEvent('srcKnown', x, y, (no ? 'SIG-' + String(no).padStart(2, '0') + ' ' : '') + SRC_KIND_JP[kind] + 'と判明 (' + (by === 'ana' ? '解析' : '目視') + ')');
+}
+function updateSrcKnown() {
+    if (_frameCount % 30) return;
+    for (const sid in _sigIdent) {
+        const id = _sigIdent[sid], k = _srcKnown[sid];
+        if (k && k.by === 'eye') continue;
+        if (id.sure) {
+            if (id.L > 0) continue; // 艦影 (見えた艦は推定円のまま)
+            const f = fieldSignals.find(q => q.sid === sid), L = !f && lures.find(q => q.sid === sid);
+            if (f) markSrcKnown(sid, f.kind, 'eye', f.x, f.y); else if (L) markSrcKnown(sid, 'lure', 'eye', L.x, L.y);
+            continue;
+        }
+        if (k || id.n < IDENT_MIN_N) continue;
+        const sa = _signalAnalysis[sid];
+        if (!sa || anaPct(sa.ana) < RX_KNOWN_ANA || 1 / (1 + Math.exp(-id.L)) >= 0.25) continue;
+        const est = trackEstimate(sa, 0);
+        if (!est) continue;
+        let kind = null;
+        if ((id.why['1つの帯域だけ'] || 0) > 0) kind = { higgs: 'cloud', em: 'storm', heat: 'vent' }[id.band] || null;
+        else if ((id.why['探信の反響が小さい'] || 0) > 0 && (id.why['帯域が平坦'] || 0) > 0 && !sa.motion && !((id.why['遅く一定の動き'] || 0) > 0)) kind = 'cache';
+        if (kind) markSrcKnown(sid, kind, 'ana', est.x, est.y);
+    }
+    // 消えた発信元 (霧のゆらぎが散った・コンテナが回収された・囮が切れた) は海図から外す
+    for (const sid in _srcKnown) if (!fieldSignals.some(f => f.sid === sid) && !lures.some(l => l.sid === sid)) delete _srcKnown[sid];
+}
+// 特定した発信元の描く位置: 目視で分かった物は今の位置 / 解析で分かった物は推定の中心 (見えたらその場で目視に切り替わる)
+function srcDrawPos(sid, obj) { const k = _srcKnown[sid]; if (!k || k.by === 'eye' || !obj) return obj; return { x: k.x, y: k.y }; }
 function _fieldSpot() {
     for (let k = 0; k < 30; k++) {
         const a = Math.random() * Math.PI * 2, r = 3000 + Math.sqrt(Math.random()) * (FIELD_SPREAD_R - 3000);
@@ -7903,12 +7950,29 @@ function drawFieldFx(ctx, f, img, fade, t) {
     }
     ctx.restore();
 }
+// 第40弾: 海図に載った発信元の印 — 細い輪＋四隅のかぎ＋小さな種類の札 (推定円とは違う形で「分かっている物」と分かる)
+function drawKnownMark(ctx, x, y, known, k, inv, t) {
+    const R = Math.max(known.kind === 'cache' ? 220 : 340, 26 * inv), col = k ? (k.cs || (k.cs = 'rgb(' + k.col + ')')) : '#9fd8ff';
+    ctx.save();
+    ctx.strokeStyle = col; ctx.lineWidth = 1.4 * inv;
+    ctx.globalAlpha = 0.55;
+    const c = R * 0.32;
+    for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+        ctx.beginPath(); ctx.moveTo(x + sx * R, y + sy * (R - c)); ctx.lineTo(x + sx * R, y + sy * R); ctx.lineTo(x + sx * (R - c), y + sy * R); ctx.stroke();
+    }
+    if (known.by === 'ana') { ctx.globalAlpha = 0.35; ctx.setLineDash([4 * inv, 6 * inv]); ctx.beginPath(); ctx.arc(x, y, R * 0.82, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
+    ctx.restore();
+}
 function drawFieldSignals(ctx) {
     const inv = 1 / camera.zoom, t = _frameCount / 60;
-    for (const f of fieldSignals) {
-        if (!higgsViewOff && !(player && inPlayerVision(f.x, f.y))) continue;
+    for (const f0 of fieldSignals) {
+        // 第40弾: 特定した発信元 (目視・解析) は霧の外でも海図として霧の上に描く。未特定のものは見えている時だけ
+        const known = _srcKnown[f0.sid];
+        if (!known && !higgsViewOff && !(player && inPlayerVision(f0.x, f0.y))) continue;
+        const f = known && known.by === 'ana' && !higgsViewOff ? Object.assign(Object.create(f0), srcDrawPos(f0.sid, f0)) : f0;
         const k = FIELD_KINDS[f.kind], fade = Math.min(1, f.age / FIELD_FADE, f.life / FIELD_FADE);
         ctx.save();
+        if (known) drawKnownMark(ctx, f.x, f.y, known, k, inv, t);
         const _fxImg = SPRITES[f.kind === 'cache' ? 'field_cache' : 'fx_field_' + f.kind];
         if (spriteReady(_fxImg)) { // 第35弾: 生成したスプライト (自然の信号は黒地を加算で重ねる)
             if (f.kind === 'cache') {
@@ -8107,7 +8171,7 @@ function checkPassiveDetection() {
     }
     // 第21弾: 敵の偽艦影ブイも艦と同じように聴こえる (区別はつかない)
     for (const L of lures) {
-        if (L.owner !== 'e' || L.kind !== 'ship' || L.phase !== 'on') continue;
+        if (L.owner !== 'e' || L.kind !== 'ship' || L.phase !== 'on' || _srcKnown[L.sid]) continue; // 第40弾: 特定した囮は聞き流す
         const h = hearSource(L, 'p', px, py, L.x, L.y, () => LURE_SIG * Math.min(1, L.life / 60), range, sensorOrder);
         if (h) allContacts.push({ x: L.x, y: L.y, sig: h.sig, band: h.band, nb: h.nb, noise: h.noise, angle: Math.atan2(L.y - py, L.x - px), sourceId: L.sid, clN: 0 });
     }
@@ -8118,6 +8182,7 @@ function checkPassiveDetection() {
     }
     // 第31弾: 自然の信号・お宝の信号も同じ物理で聴こえる (ONの帯域だけ方位が取れる)
     for (const f of fieldSignals) {
+        if (_srcKnown[f.sid]) continue; // 第40弾: 特定した自然の信号・コンテナは聞き流す
         const h = hearSource(f, 'p', px, py, f.x, f.y, b => fieldSig(f, b), range, sensorOrder);
         if (h) allContacts.push({ x: f.x, y: f.y, sig: h.sig, band: h.band, nb: h.nb, noise: h.noise, angle: Math.atan2(f.y - py, f.x - px), sourceId: f.sid, clN: 0 });
     }
@@ -8166,6 +8231,7 @@ function checkPassiveDetection() {
         sa.ana = (sa.ana || 0) + _anaB * _share * (0.5 + 0.5 * conf) * (sa.obs.length > _n0 ? ANA_NEWPOS : 1); // 第29弾: 解析量
         solveFix(sa); // 第26弾: 追跡していない信号も解く (地図に複数の推定円を出すため。追跡中は方位が鋭いので円も小さい)
         identStep(c.sourceId, tracked, c.nb || 1, sa, Math.max(0.2, Math.min(2, _anaB * _share * 2))); // 第23弾: 識別の手掛かり (第29弾: 演算力の取り分で速さが変わる)
+        if (_sigIdent[c.sourceId]) _sigIdent[c.sourceId].band = c.band; // 第40弾: 一番よく聞こえた帯域 (自然の信号の種類の手掛かり)
         if (tracked) {
             const _te = enemyBySid(c.sourceId);
             if (_te && _te.hp > 0 && !_te._dying) applyTrackContact(_te, sa);
@@ -8290,7 +8356,7 @@ function drawTriangulationCircle(ctx) {
     _circScreen.length = 0;
     for (const sid in _signalAnalysis) {
         const sa = _signalAnalysis[sid];
-        if (!sa.fix) { sa.displayCenterX = null; sa._fa = 0; continue; }
+        if (!sa.fix || _srcKnown[sid]) { sa.displayCenterX = null; sa._fa = 0; continue; } // 第40弾: 特定した発信元は推定円を描かない
         const lo = sa.obs && sa.obs[sa.obs.length - 1];
         if (sid !== lockedSignalId && (!lo || _frameCount - lo.f > TMA_KEEP)) { sa._fa = 0; continue; } // 古い記録の円は出さない
         _drawEstCircle(ctx, sid, sa, sid === lockedSignalId);
@@ -10820,7 +10886,17 @@ function drawLures(ctx) {
     const zc = 1 / camera.zoom, t = Date.now();
     for (const L of lures) {
         // 自分の囮は常に見える。相手の偽SOSは本物と同じ見た目で別に描く (SOSマーカー)。相手の偽艦影ブイは受信の反応としてだけ出る
-        if (L.owner !== 'p') continue;
+        // 第40弾: 相手の偽艦影ブイも、見て正体が分かったら海図に載せて霧の上に描く (推定円は出さない)
+        if (L.owner !== 'p') {
+            const kn = _srcKnown[L.sid];
+            if (!kn || L.kind !== 'ship') continue;
+            drawKnownMark(ctx, L.x, L.y, kn, null, zc, t / 1000);
+            const _li2 = SPRITES.lure_ship;
+            ctx.globalAlpha = 0.7;
+            if (spriteReady(_li2)) { const z = Math.max(120, 28 * zc); ctx.drawImage(_li2, L.x - z / 2, L.y - z / 2, z, z); }
+            ctx.globalAlpha = 1;
+            continue;
+        }
         const a = L.phase === 'fly' ? 0.9 : Math.min(1, L.life / 60) * (0.6 + Math.sin(t * 0.008) * 0.3);
         ctx.globalAlpha = a;
         ctx.strokeStyle = L.kind === 'sos' ? '#00e5ff' : '#c48bff'; ctx.fillStyle = ctx.strokeStyle; ctx.lineWidth = 1.5 * zc;
@@ -11910,6 +11986,7 @@ function shipFx(s) { if (!s) return focusFx(GEN_FOCUS.balance); if (s === player
 // 第36弾 (オーナー): 受信バーは「まだ正体も位置も分かっていない信号」だけ — 正体が確定した信号と、識別・解析が済んだ信号は除く
 const RX_KNOWN_ANA = 75; // 解析n%以上 + 識別の手掛かりがそろった信号は「解析済み」
 function rxKnown(sid) {
+    if (_srcKnown[sid]) return true; // 第40弾: 特定した発信元はバーに出さない
     const id = _sigIdent[sid];
     if (!id) return false;
     if (id.sure) return true;
@@ -12491,7 +12568,7 @@ function comPilotStep() {
             if (!ok) continue; const d = Math.hypot(st.x - player.x, st.y - player.y); if (d < pd) { pd = d; ps = st; }
         }
         for (const n of resourceNodes) { if (n._partP || n.owner === 'player') continue; const d = Math.hypot(n.x - player.x, n.y - player.y); if (d < pd) { pd = d; ps = n; } }
-        for (const f of fieldSignals) { if (f.kind !== 'cache' || !(_sigIdent[f.sid] && _sigIdent[f.sid].sure)) continue; const d = Math.hypot(f.x - player.x, f.y - player.y); if (d < pd) { pd = d; ps = f; } }
+        for (const sid in _srcKnown) { const k = _srcKnown[sid]; if (k.kind !== 'cache') continue; const f = fieldSignals.find(q => q.sid === sid); if (!f) continue; const q = srcDrawPos(sid, f); const d = Math.hypot(q.x - player.x, q.y - player.y); if (d < pd) { pd = d; ps = { kind: 'cache', x: q.x, y: q.y, sid }; } } // 第40弾: 目視か解析で分かったコンテナ (位置は分かっている所)
         if (ps) {
             const kind = ps.kind === 'cache' ? '漂流コンテナ' : ps.type === 'derelict' ? '難破船' : ps.type === 'colony' ? 'コロニー' : 'ノード';
             const near = ps.kind === 'cache' ? CACHE_R * 0.5 : ps.type === 'derelict' ? DERELICT_SALVAGE_R * 0.6 : ps.type === 'colony' ? COLONY_HACK_R * 0.6 : NODE_CAP_R * 0.6;
@@ -12962,8 +13039,8 @@ function xoInfoSource() {
     }
     // 第31弾: 正体を確かめた漂流コンテナ (回収すれば弾・資材)
     { let bc = null, bdc = Infinity;
-      for (const f of fieldSignals) { if (f.kind !== 'cache' || !(_sigIdent[f.sid] && _sigIdent[f.sid].sure)) continue; const d = Math.hypot(f.x - player.x, f.y - player.y); if (d < bdc) { bdc = d; bc = f; } }
-      if (bc && bdc > CACHE_R) return { x: bc.x, y: bc.y, d: bdc, why: '漂流コンテナ — 400u以内に3秒で回収 (弾・資材)' }; }
+      for (const sid in _srcKnown) { const k = _srcKnown[sid]; if (k.kind !== 'cache') continue; const f = fieldSignals.find(q => q.sid === sid); if (!f) continue; const q = srcDrawPos(sid, f); const d = Math.hypot(q.x - player.x, q.y - player.y); if (d < bdc) { bdc = d; bc = q; } } // 第40弾
+      if (bc && bdc > CACHE_R) return { x: bc.x, y: bc.y, d: bdc, why: '漂流コンテナ — 400u以内に3秒で回収 (部品)' }; }
     // 遭難信号: 消える前に着けるなら (信号は60秒)
     for (const bc of beaconsFor('p')) { // 第21弾: 敵の偽SOSも見分けはつかない
         const d = Math.hypot(bc.x - player.x, bc.y - player.y);
@@ -13418,7 +13495,7 @@ function stepWorld() {
         updateEscape(); // 第17弾: ノイズメーカー・煙幕・噴射
         updatePointDefense(); // 第28弾: 実弾でミサイルを迎撃
         updateLures();  // 第21弾: 囮
-        updateFieldSignals(); updateSigZones(); // 第31弾: 自然/お宝の信号・監視網の円
+        updateFieldSignals(); updateSigZones(); updateSrcKnown(); // 第31弾: 自然/お宝の信号・監視網の円 / 第40弾: 特定した発信元
         updateParts(); // 第32弾: 部品 (機雷・囮発射機・照準波・自機COMの付け替え)
         updateLootTraces(); updateConvoys(); // 第34弾: 空き巣の跡・輸送船
         updateHuntTension();
