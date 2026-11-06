@@ -2439,6 +2439,9 @@ body.in-game.com-demo.think-on #think-panel.wide { max-height: 62%; }
 .band-btn.off { opacity: 0.55; }
 .band-btn.off .bt-fill { opacity: 0.6 !important; } /* 第31弾: OFFの帯域も受信レベルは見える (方位は取れない) */
 .band-btn.leak { position: relative; }
+/* 第43弾: 高感度 (帯域バーをもう一度タップ) — ラベルに ▲・枠が太く光る (受信距離×1.35 / 漏れ+1本分 / 方位誤差増) */
+.band-btn.hi { box-shadow: 0 0 8px var(--bc), inset 0 0 6px var(--bc); border-width: 2px !important; }
+.band-btn.hi .bt-label::after { content: '▲'; font-size: 7px; margin-left: 2px; color: var(--bc); }
 .band-btn.leak::after { content: ''; position: absolute; top: 3px; right: 3px; width: 5px; height: 5px; border-radius: 50%; background: #ff8a6a; box-shadow: none; }
 
 #lpm-lures .lpm-drow button { flex: 1; border-color: #c48bff; color: #e0c8ff; background: #140a1e; }
