@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261102d">
+    <link rel="stylesheet" href="style.css?v=20261106a">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -74,10 +74,10 @@
                     </div>
                 </div>
                 <div id="band-tuner" title="受信機: 太いバー=受信レベル (刻み=方位が取れるライン) / 細いバー=自艦の放射">
-                    <button class="band-btn tuned" data-band="heat" title="熱帯域に同調 (1)"><span class="bt-label">HEAT</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
-                    <button class="band-btn" data-band="optic" title="光学帯域に同調 (2)"><span class="bt-label">OPT</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
-                    <button class="band-btn" data-band="em" title="電磁波帯域に同調 (3)"><span class="bt-label">EM</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
-                    <button class="band-btn" data-band="higgs" title="ヒッグス帯域に同調 (4)"><span class="bt-label">HGS</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
+                    <button class="band-btn tuned" data-band="heat" title="熱帯域 — タップで OFF → 標準 → 高感度 ▲ (受信距離×1.35・漏れ+1本分・方位誤差増) (1)"><span class="bt-label">HEAT</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
+                    <button class="band-btn" data-band="optic" title="光学帯域 — タップで OFF → 標準 → 高感度 ▲ (受信距離×1.35・漏れ+1本分・方位誤差増) (2)"><span class="bt-label">OPT</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
+                    <button class="band-btn" data-band="em" title="電磁波帯域 — タップで OFF → 標準 → 高感度 ▲ (受信距離×1.35・漏れ+1本分・方位誤差増) (3)"><span class="bt-label">EM</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
+                    <button class="band-btn" data-band="higgs" title="ヒッグス帯域 — タップで OFF → 標準 → 高感度 ▲ (受信距離×1.35・漏れ+1本分・方位誤差増) (4)"><span class="bt-label">HGS</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
                 </div>
                 <div id="band-legend"><span class="bl-rx">受信</span><span class="bl-tx">自艦</span></div>
             </div>
@@ -93,7 +93,7 @@
                 <button class="hud-act" data-group="drone" id="abar-grp-drone" title="搭載 — 戦闘機・砲台・Techなど (完成品はすぐ出せる / 資材は組み立て)">
                     <img src="assets/icon_drone.png" alt="" class="abar-icon"><span>搭載</span><em class="abar-cargo"></em>
                 </button>
-                <button class="hud-act" data-group="scan" title="索敵 — ソナー / 指向ソナー / 信号一覧">
+                <button class="hud-act" id="abar-scan" title="索敵 — タップ=ソナー(標準) / 押し続けて離す=強 (Shift+クリック=弱)。指向ソナー・信号一覧は地図の長押しメニューから">
                     <img src="assets/icon_scan.png" alt="" class="abar-icon"><span>索敵</span>
                 </button>
                 <button class="hud-act" id="abar-silent" onclick="cycleStance()" title="出力 — 潜航(静か) / 巡航 / 全速(速い・うるさい) (S)">
@@ -731,13 +731,15 @@
         <button onclick="lpmSelectMove()" style="display:block; width:100%; background:#001a0e; border:1px solid #00ffaa; color:#00ffaa; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">▶ 移動</button>
         <button onclick="lpmSelectFire()" style="display:block; width:100%; background:#1a0008; border:1px solid #ff4466; color:#ff4466; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">⊕ 射撃</button>
         <button onclick="lpmSelectStop()" style="display:block; width:100%; background:#140a00; border:1px solid #ffaa44; color:#ffbb66; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">■ 停止</button>
+        <button onclick="lpmSelectDirSonar()" style="display:block; width:100%; background:#001418; border:1px solid #00d4ff; color:#66e6ff; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">◎ 指向ソナー</button>
+        <button onclick="lpmSelectSigList()" style="display:block; width:100%; background:#0a0f14; border:1px solid #6b8aa8; color:#9ab6d0; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">≡ 信号一覧</button>
         <div id="lpm-drones"></div>
         <div id="lpm-lures"></div>
         <button onclick="hideLongPressMenu()" style="display:block; width:100%; background:#0a0a0a; border:1px solid #446655; color:#668877; padding:5px 4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">× キャンセル</button>
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261102d"></script>
+    <script src="game.js?v=20261106a"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {

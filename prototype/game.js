@@ -311,23 +311,25 @@ function pathMediaCached(src, key, sx, sy, rx, ry) {
 }
 // 第39弾: 受け手 (rx,ry) が発信源を聴く — 自艦も敵も同じ。sigOf(b) = 発信源のその帯域の強さ (直近1秒の最大値)
 // 受け取る強さ = 強さ × (1 − 距離/受信の最大距離) × 経路の減衰。しきい値の半分を超えた帯域で方位が取れる。一番よく聴こえた帯域を返す
-function hearSource(src, key, rx, ry, sx, sy, sigOf, range, bands) {
+function hearSource(src, key, rx, ry, sx, sy, sigOf, range, bands, gainOf) {
     const d = Math.hypot(sx - rx, sy - ry);
-    if (d >= range) return null;
-    const pmd = pathMediaCached(src, key, sx, sy, rx, ry), da = 1 - d / range;
+    if (d >= range * (gainOf ? HI_RANGE : 1)) return null;
+    const pmd = pathMediaCached(src, key, sx, sy, rx, ry);
     let best = null, bestQ = 0, nb = 0;
     for (const b of bands) {
-        const sc = sensorConfig[b], sig = (sigOf(b) || 0) * da * pathAtten(pmd, b);
-        if (sig > sc.threshold * 0.5) { nb++; const q = sig / sc.threshold; if (q > bestQ) { bestQ = q; best = { band: b, sig, noise: pathNoise(pmd, b) }; } }
+        const g = gainOf ? gainOf(b) : 1, rb = range * g;
+        if (d >= rb) continue;
+        const sc = sensorConfig[b], sig = (sigOf(b) || 0) * (1 - d / rb) * pathAtten(pmd, b);
+        if (sig > sc.threshold * 0.5) { nb++; const q = sig / sc.threshold; if (q > bestQ) { bestQ = q; best = { band: b, sig, noise: pathNoise(pmd, b) * (g > 1 ? HI_NOISE : 1) }; } }
     }
     return best ? { band: best.band, sig: best.sig, noise: best.noise, nb, d } : null;
 }
 // 受信レベル (帯域ごと・しきい値に対する比)。バー表示用
-function hearLevels(src, key, rx, ry, sx, sy, sigOf, range, out, bands) {
+function hearLevels(src, key, rx, ry, sx, sy, sigOf, range, out, bands, gainOf) {
     const d = Math.hypot(sx - rx, sy - ry);
-    if (d >= range) return;
-    const pmd = pathMediaCached(src, key, sx, sy, rx, ry), da = 1 - d / range;
-    for (const b of bands) { const lvl = (sigOf(b) || 0) * da * pathAtten(pmd, b) / sensorConfig[b].threshold; if (lvl > out[b]) out[b] = lvl; }
+    if (d >= range * (gainOf ? HI_RANGE : 1)) return;
+    const pmd = pathMediaCached(src, key, sx, sy, rx, ry);
+    for (const b of bands) { const rb = range * (gainOf ? gainOf(b) : 1); if (d >= rb) continue; const lvl = (sigOf(b) || 0) * (1 - d / rb) * pathAtten(pmd, b) / sensorConfig[b].threshold; if (lvl > out[b]) out[b] = lvl; }
 }
 // 方位の誤差 (1σ, rad) — 自艦も敵も同じ式。強い信号ほど・追跡中ほど鋭い。経路の霧・嵐・熱雲で広がる・探知重視で鋭い
 const BEAR_DIV = 0.96; // 旧: 探知の配分と AI の解析精度の割り算 (均等で ≈0.96)
@@ -508,6 +510,12 @@ let currentSensor = 'heat'; // 'heat' | 'optic' | 'em' | 'higgs' (第21弾: ON�
 let sensorsOn = { heat: true, optic: false, em: false, higgs: false };
 let sensorOrder = ['heat']; // ONにした順 (先頭が無料)
 const SENSOR_LEAK = { heat: 0.06, optic: 0.06, em: 0.08, higgs: 0.06 };
+// 第43弾 (オーナー合意): 帯域ごとの感度 — OFF / 標準 / 高感度 (左列の帯域バーをタップするたびに循環)。自艦も敵も同じ式
+//   高感度 = その帯域の受信距離 ×1.35 / 自艦が漏らすシグネチャ (SENSOR_LEAK) が +1本分 (標準の2本目以降なら×2) / 自然の雑音も拾い 方位の誤差 ×1.3
+let sensorHi = { heat: false, optic: false, em: false, higgs: false };
+const HI_RANGE = 1.35, HI_NOISE = 1.3;
+const bandGainP = (b) => sensorsOn[b] && sensorHi[b] ? HI_RANGE : 1;                       // 自艦の帯域ごとの受信距離の倍率
+const bandGainE = (e) => (b) => e && e._hi && e._hi[b] ? HI_RANGE : 1;                      // 敵 (e._hi = 高感度にしている帯域)
 
 let dialogOpen = false;
 let dockingOpen = false;
@@ -3784,7 +3792,7 @@ class Ship {
             let _noiseSrc = null, _relayPost = null;
             if (player && player.hp > 0) {
                 if (_listen && this.type !== 'fighter' || _listen && distToPlayer < 2500) {
-                    const h = hearSource(player, 'e' + this.uid, this.x, this.y, player.x, player.y, b => sigToward(player, b, this.x, this.y), sigRange, enemyBands(this)); // 第21弾: 敵も聴いている帯域だけ
+                    const h = hearSource(player, 'e' + this.uid, this.x, this.y, player.x, player.y, b => sigToward(player, b, this.x, this.y), sigRange, enemyBands(this), bandGainE(this)); // 第21弾: 敵も聴いている帯域だけ / 第43弾: 感度
                     if (h) { playerSigDetected = true; detectedSigStrength = h.sig; domSig = h.band; _hBand = h.band; _hNoise = h.noise; _hNb = h.nb; this._heardBand = h.band; this._heardBandF = _frameCount; } // 第41弾: 聞こえた帯域 (帯域の選び方に使う)
                 }
                 // 接近探知 (デブリ擬態中は岩塊に紛れて至近でも掴めない — 至近を通過されてもやり過ごせる)
@@ -3805,13 +3813,13 @@ class Ship {
                 for (const L of lures) {
                     if (L.owner !== 'p' || L.kind !== 'ship' || L.phase !== 'on' || _fk.has(L)) continue;
                     if (_seeIt(L)) { _fk.add(L); if (comDemo) comThinkEvent('e', '偽艦影ブイを視認 — 囮だった', 'e' + this.uid); continue; }
-                    const h = hearSource(L, 'e' + this.uid, this.x, this.y, L.x, L.y, () => LURE_SIG * Math.min(1, L.life / 60), sigRange, enemyBands(this));
+                    const h = hearSource(L, 'e' + this.uid, this.x, this.y, L.x, L.y, () => LURE_SIG * Math.min(1, L.life / 60), sigRange, enemyBands(this), bandGainE(this));
                     if (h && h.sig > detectedSigStrength) { detectedSigStrength = h.sig; _noiseSrc = L; _hNoise = h.noise; _hBand = h.band; }
                 }
                 for (const nm of noiseMakers) {
                     if (_fk.has(nm)) continue;
                     if (_seeIt(nm)) { _fk.add(nm); if (comDemo) comThinkEvent('e', 'ノイズメーカーを視認 — 囮だった', 'e' + this.uid); continue; }
-                    const h = hearSource(nm, 'e' + this.uid, this.x, this.y, nm.x, nm.y, b => b === 'heat' ? NOISE_HEAT * Math.min(1, nm.life / 60) : 0, sigRange, enemyBands(this));
+                    const h = hearSource(nm, 'e' + this.uid, this.x, this.y, nm.x, nm.y, b => b === 'heat' ? NOISE_HEAT * Math.min(1, nm.life / 60) : 0, sigRange, enemyBands(this), bandGainE(this));
                     if (h && h.sig > detectedSigStrength) { detectedSigStrength = h.sig; _noiseSrc = nm; _hNoise = h.noise; _hBand = h.band; }
                 }
                 if (_noiseSrc) playerSigDetected = true;
@@ -3915,7 +3923,7 @@ class Ship {
             let pb = this.predictedBehavior || 'unknown';
             if (playerSigDetected && player) {
                 // 第39弾: 受け取った強さ (しきい値に対する比) から推定する — 旧: 自機の発信の値 (真値) をそのまま読んでいた
-                if (_listen) { const _rl = { heat: 0, optic: 0, em: 0, higgs: 0 }; hearLevels(player, 'e' + this.uid, this.x, this.y, player.x, player.y, b => sigToward(player, b, this.x, this.y), sigRange, _rl, enemyBands(this)); this._rxL = _rl; }
+                if (_listen) { const _rl = { heat: 0, optic: 0, em: 0, higgs: 0 }; hearLevels(player, 'e' + this.uid, this.x, this.y, player.x, player.y, b => sigToward(player, b, this.x, this.y), sigRange, _rl, enemyBands(this), bandGainE(this)); this._rxL = _rl; }
                 const _rl = this._rxL || { heat: 0, optic: 0, em: 0 };
                 const pm = { heat: _rl.heat * 0.3, optic: _rl.optic * 0.2, em: _rl.em * 0.3 }; // 受信レベル×しきい値 = 受け取った強さ
                 // 最寄りアクティブノードがプレイヤー近傍か (EMスパイク+ノード近接=収集)
@@ -4529,7 +4537,7 @@ class Ship {
             const _isF = this.type === 'fighter';
             const _thrusting = this._movedF === _frameCount || !(this._v > 0.005);
             const _bd = _isF ? [] : enemyBands(this), _lk = { heat: 0, optic: 0, em: 0, higgs: 0 }, _em = epm(this);
-            for (let bi = 1; bi < _bd.length; bi++) _lk[_bd[bi]] = SENSOR_LEAK[_bd[bi]] * _em.leakMul;
+            for (let bi = 0; bi < _bd.length; bi++) _lk[_bd[bi]] = SENSOR_LEAK[_bd[bi]] * _em.leakMul * ((bi > 0 ? 1 : 0) + (this._hi && this._hi[_bd[bi]] ? 1 : 0)); // 第43弾: 高感度はもう1本分
             const _al = this.gen || GEN_FOCUS.balance;
             const _ff = Math.max(0, this._fireFlash || 0) / 90;
             if (this._fireFlash > 0) this._fireFlash -= gameSpeedFactor;
@@ -6269,7 +6277,30 @@ document.getElementById('btn-attack-toggle')?.addEventListener('click', () => {
     playSound('ui');
 });
 
-document.getElementById('btn-scan').addEventListener('click', fireOmniSonar);
+document.getElementById('btn-scan').addEventListener('click', () => fireOmniSonar('std'));
+// 第43弾 (オーナー合意): 右列の「索敵」= タップで標準のソナー / 押し続けて(0.45秒〜)離すと強 / Shift+クリックで弱。押している間は反応する距離と聞かれる距離の円を出す
+(() => {
+    const el = document.getElementById('abar-scan');
+    if (!el) return;
+    el.addEventListener('pointerdown', (e) => {
+        if (e.button > 0) return;
+        e.stopPropagation();
+        try { el.setPointerCapture(e.pointerId); } catch (_) {}
+        _scanHold = { t0: performance.now(), level: e.shiftKey ? 'weak' : 'std', shift: !!e.shiftKey };
+        _refRing = { f: _frameCount, kind: 'sonar', level: _scanHold.level };
+    });
+    const tick = () => { if (_scanHold) { if (!_scanHold.shift) _scanHold.level = performance.now() - _scanHold.t0 >= 450 ? 'strong' : 'std'; if (_refRing && _refRing.kind === 'sonar') { _refRing.level = _scanHold.level; _refRing.f = _frameCount; } } requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+    const end = (e, fire) => {
+        if (!_scanHold) return;
+        const lv = _scanHold.level; _scanHold = null;
+        if (_refRing && _refRing.kind === 'sonar') _refRing.f = _frameCount;
+        if (fire && player && player.hp > 0 && !comDemo) fireOmniSonar(lv);
+        else _refRing = null;
+    };
+    el.addEventListener('pointerup', (e) => end(e, true));
+    el.addEventListener('pointercancel', (e) => end(e, false));
+})();
 
 // ── 潜航型ジャミング3種 ──
 document.getElementById('btn-jam-burst')?.addEventListener('click', () => {
@@ -6473,14 +6504,14 @@ const SENSOR_INFO = {
 // センサー(受信帯域)の同調。デスクトップのアイコン群・モバイルのGCB・バンドチューナーの全UIをここで同期する
 function setSensor(s, quiet) { // 第21弾: その帯域をONにする (他は切らない)
     if (!sensorConfig[s]) return;
-    if (!sensorsOn[s]) toggleBand(s, quiet); else _syncBandUI();
+    if (!sensorsOn[s]) switchBand(s, quiet); else _syncBandUI();
 }
-// 第21弾: 帯域の ON/OFF (最低1本はON)
-function toggleBand(s, quiet) {
+// 第21弾: 帯域の ON/OFF (最低1本はON)。第43弾: COMと内部の呼び出し用 (感度は変えない・OFFにする時は標準に戻す)
+function switchBand(s, quiet) {
     if (!sensorConfig[s]) return;
     if (sensorsOn[s]) {
         if (sensorOrder.length <= 1) { if (!quiet) logMessage('SENSOR: 最低1帯域は聴いておく', 'system-msg'); return; }
-        sensorsOn[s] = false; sensorOrder = sensorOrder.filter(b => b !== s);
+        sensorsOn[s] = false; sensorHi[s] = false; sensorOrder = sensorOrder.filter(b => b !== s);
     } else { sensorsOn[s] = true; sensorOrder.push(s); }
     currentSensor = sensorOrder[0];
     _syncBandUI();
@@ -6490,6 +6521,39 @@ function toggleBand(s, quiet) {
         playSound('ui');
     }
 }
+// 第43弾 (オーナー合意): 帯域バーをタップするたびに OFF → 標準 → 高感度 → OFF (最後の1本は 高感度 → 標準)
+function toggleBand(s, quiet) {
+    if (!sensorConfig[s]) return;
+    if (!sensorsOn[s]) { switchBand(s, true); _bandLevelMsg(s, quiet); return; }
+    if (!sensorHi[s]) { sensorHi[s] = true; _syncBandUI(); _showRefRing(s); _bandLevelMsg(s, quiet); return; }
+    if (sensorOrder.length <= 1) { sensorHi[s] = false; _syncBandUI(); _showRefRing(s); _bandLevelMsg(s, quiet); return; }
+    switchBand(s, true); _bandLevelMsg(s, quiet);
+}
+// COM用: 感度を指定 (lvl 0=OFF 1=標準 2=高感度)
+function setBandLevel(s, lvl, quiet) {
+    if (!sensorConfig[s]) return;
+    if (lvl <= 0) { if (sensorsOn[s]) switchBand(s, true); return; }
+    if (!sensorsOn[s]) switchBand(s, true);
+    const hi = lvl >= 2;
+    if (sensorHi[s] !== hi) { sensorHi[s] = hi; _syncBandUI(); }
+}
+function _bandLevelMsg(s, quiet) {
+    if (quiet) return;
+    const leak = sensorOrder.map((b, i) => (i > 0 ? 1 : 0) + (sensorHi[b] ? 1 : 0) > 0 ? (BAND_JP[b] || b) : null).filter(Boolean).join('・');
+    logMessage(`SENSOR: ${SENSOR_INFO[s].name} ${!sensorsOn[s] ? 'OFF' : sensorHi[s] ? '高感度 — 受信距離×' + HI_RANGE + '・漏れ+1本分・雑音で方位誤差が増える' : '標準'}` + (leak ? ` (自艦が漏らす: ${leak})` : ' (漏れなし)'), 'system-msg');
+    playSound('ui');
+}
+// 基準の艦 (巡航の攻撃型) がその帯域で聞こえる距離の円を3秒だけ出す (感度・ソナーを変えた時に半径の見当をつける)。第43弾
+let _refRing = null;
+const REF_ENGINE = { heat: 'thermonuclear', em: 'pulse', optic: 'photon', higgs: 'higgs' }; // その帯域を主に出すエンジン (基準の艦)
+function refReach(b, hi) {
+    if (!player) return 0;
+    const h = getHiggsIntensity(player.x, player.y);
+    const sg = emitSigs({ engine: REF_ENGINE[b] || 'thermonuclear', engineOn: true, thrust: 0.573, alloc: { sensors: 0.3, ai: 0.5 }, hHere: h, pulsePh: 0 });
+    const R = passiveRange() * (hi ? HI_RANGE : 1), sig = sg[b] * (1 - h * PATH_MEDIA.fog.a[b]);
+    return sig > 0 ? Math.max(0, R * (1 - sensorConfig[b].threshold * 0.5 / sig)) : 0;
+}
+function _showRefRing(b) { _refRing = { f: _frameCount, kind: 'band', b, hi: !!sensorHi[b] }; }
 function _syncBandUI() {
     document.querySelectorAll('.sns-btn').forEach(b => b.classList.toggle('active', sensorsOn[(b.id || '').replace('sensor-', '')]));
     if (typeof window.applySensorGcb === 'function') window.applySensorGcb(currentSensor);
@@ -6497,7 +6561,8 @@ function _syncBandUI() {
         const on = !!sensorsOn[b.dataset.band];
         b.classList.toggle('tuned', on);
         b.classList.toggle('off', !on);
-        b.classList.toggle('leak', on && sensorOrder.indexOf(b.dataset.band) > 0);
+        b.classList.toggle('leak', on && (sensorOrder.indexOf(b.dataset.band) > 0 || !!sensorHi[b.dataset.band]));
+        b.classList.toggle('hi', on && !!sensorHi[b.dataset.band]);
     });
 }
 // 第21弾: 敵が聴いている帯域 — 性格で本数 (攻撃的・隠れない個体ほど多く聴いて漏らす)。順は 熱→EM→ヒッグス→光学
@@ -6538,10 +6603,18 @@ function comBandPlan(P, heardBand, heardF, h) {
     else { const sw = BANDS[Math.floor(_frameCount / 1200) % 4]; order = [sw].concat(rank.filter(b => b !== sw)); }
     return order.slice(0, n);
 }
+// 第43弾: 高感度にするか (自機COMも敵も同じ) — 何も聞こえない捜索の間だけ、先頭の1帯域を高感度にする。
+//   見つけたい (攻撃的・慎重で先に気付きたい) ほど高感度 / 隠密ほど漏らしたくないので標準 (=標準の漏れ0)。聞こえたら標準に戻す
+function comWantsHi(P, searching) {
+    return !!searching && (P.caution ?? 0.4) * 0.5 + (P.aggression ?? 0.5) * 0.25 - (P.stealth ?? 0.4) * 0.7 + 0.1 >= 0.2;
+}
 function enemyBands(e) {
     if (!e._bp || _frameCount - (e._bpF || -1e9) >= 600) { // 10秒ごとに見直す
-        e._bp = comBandPlan(e.personality || { aggression: 0.5, stealth: 0.4, caution: 0.4 }, e._heardBand, e._heardBandF, getHiggsIntensity(e.x, e.y));
+        const _P = e.personality || { aggression: 0.5, stealth: 0.4, caution: 0.4 };
+        e._bp = comBandPlan(_P, e._heardBand, e._heardBandF, getHiggsIntensity(e.x, e.y));
         e._bpF = _frameCount;
+        const searching = !e.inVision && !(e.contactFreshness > 0.3) && !(e._heardBandF !== undefined && _frameCount - e._heardBandF < 1800);
+        e._hi = comWantsHi(_P, searching) ? { [e._bp[0]]: true } : {};
     }
     return e._bp;
 }
@@ -6656,7 +6729,7 @@ function setEnemyFocus(e, k) {
     if (comDemo && e.type !== 'fighter') comThinkEvent('e', '航行モード → ' + FOCUS_JP[k], 'e' + e.uid);
 }
 // 自艦が帯域で漏らす量 (2本目以降)
-function sensorLeak(kind) { return sensorsOn[kind] && sensorOrder.indexOf(kind) > 0 ? SENSOR_LEAK[kind] * PM.leakMul : 0; } // 第32弾: 多帯域受信機
+function sensorLeak(kind) { return sensorsOn[kind] ? SENSOR_LEAK[kind] * PM.leakMul * ((sensorOrder.indexOf(kind) > 0 ? 1 : 0) + (sensorHi[kind] ? 1 : 0)) : 0; } // 第32弾: 多帯域受信機
 ['heat', 'optic', 'em', 'higgs'].forEach(s => {
     const btn = document.getElementById(`sensor-${s}`);
     if (!btn) return;
@@ -7992,7 +8065,7 @@ function enemyFieldPick(e, pers) {
         const d = Math.hypot(f.x - e.x, f.y - e.y);
         // 第39弾: 自機と同じ聴き方 (hearSource) で、聞こえた帯域の数から見分ける — 2帯域以上で聞こえれば「お宝らしい」・1帯域だけなら「自然らしい」
         // (自機の識別の手掛かり「1つの帯域だけ」と同じ。旧: 敵は正体を直接知っていた)。1帯域しか聴いていない敵には見分けられない
-        const h = hearSource(f, 'e' + e.uid, e.x, e.y, f.x, f.y, b => fieldSig(f, b), PASSIVE_BASE * shipFx(e).rxRange, enemyBands(e));
+        const h = hearSource(f, 'e' + e.uid, e.x, e.y, f.x, f.y, b => fieldSig(f, b), PASSIVE_BASE * shipFx(e).rxRange, enemyBands(e), bandGainE(e));
         if (!h) continue;
         seen[f.sid] = true;
         const looksCache = enemyBands(e).length >= 2 ? h.nb >= 2 : Math.random() < 0.5;
@@ -8362,7 +8435,7 @@ function checkPassiveDetection() {
     for (const e of enemies) {
         if (e.hp <= 0) continue;
         if (e.type === 'fighter' && Math.hypot(e.x - px, e.y - py) > 2500) continue; // 艦載機は小さく静か — 近くでないと聴こえない (方位で追う相手ではない)
-        const h = hearSource(e, 'p', px, py, e.x, e.y, b => sigToward(e, b, px, py), range, sensorOrder);
+        const h = hearSource(e, 'p', px, py, e.x, e.y, b => sigToward(e, b, px, py), range, sensorOrder, bandGainP);
         if (h) {
             allContacts.push({ x: e.x, y: e.y, sig: h.sig, band: h.band, nb: h.nb, noise: h.noise, angle: Math.atan2(e.y - py, e.x - px), sourceId: enemySid(e), clN: e.type === 'fighter' ? 0 : clutterCount(e.x, e.y, e), ecm: epm(e).ecm });
             if (huntStats && huntStats.firstContact < 0) huntStats.firstContact = _frameCount - huntStats.startFrame; // 戦闘詳報: 初接触
@@ -8373,18 +8446,18 @@ function checkPassiveDetection() {
     // 第21弾: 敵の偽艦影ブイも艦と同じように聴こえる (区別はつかない)
     for (const L of lures) {
         if (L.owner !== 'e' || L.kind !== 'ship' || L.phase !== 'on' || _srcKnown[L.sid]) continue; // 第40弾: 特定した囮は聞き流す
-        const h = hearSource(L, 'p', px, py, L.x, L.y, () => LURE_SIG * Math.min(1, L.life / 60), range, sensorOrder);
+        const h = hearSource(L, 'p', px, py, L.x, L.y, () => LURE_SIG * Math.min(1, L.life / 60), range, sensorOrder, bandGainP);
         if (h) allContacts.push({ x: L.x, y: L.y, sig: h.sig, band: h.band, nb: h.nb, noise: h.noise, angle: Math.atan2(L.y - py, L.x - px), sourceId: L.sid, clN: 0 });
     }
     // 第34弾: 輸送船 (全帯域0.6)
     for (const cv of convoys) {
-        const h = hearSource(cv, 'p', px, py, cv.x, cv.y, () => CONVOY_SIG, range, sensorOrder);
+        const h = hearSource(cv, 'p', px, py, cv.x, cv.y, () => CONVOY_SIG, range, sensorOrder, bandGainP);
         if (h) allContacts.push({ x: cv.x, y: cv.y, sig: h.sig, band: h.band, nb: h.nb, noise: h.noise, angle: Math.atan2(cv.y - py, cv.x - px), sourceId: cv.sid, clN: 0 });
     }
     // 第31弾: 自然の信号・お宝の信号も同じ物理で聴こえる (ONの帯域だけ方位が取れる)
     for (const f of fieldSignals) {
         if (_srcKnown[f.sid]) continue; // 第40弾: 特定した自然の信号・コンテナは聞き流す
-        const h = hearSource(f, 'p', px, py, f.x, f.y, b => fieldSig(f, b), range, sensorOrder);
+        const h = hearSource(f, 'p', px, py, f.x, f.y, b => fieldSig(f, b), range, sensorOrder, bandGainP);
         if (h) allContacts.push({ x: f.x, y: f.y, sig: h.sig, band: h.band, nb: h.nb, noise: h.noise, angle: Math.atan2(f.y - py, f.x - px), sourceId: f.sid, clN: 0 });
     }
     if (allContacts.length === 0) return;
@@ -8765,6 +8838,13 @@ function lpmSelectFire() {
     if (hit) { if (hit !== lockedSignalId) window._lockSignal(hit); issueFireOrder(); return; }
     freeFireAt(_lpmWorld.x, _lpmWorld.y);
 }
+// 第43弾: 長押しメニュー「指向ソナー」— 押した点の方向へすぐ撃つ (旧: 索敵 → 指向ソナー → 方向を指す の3手)
+function lpmSelectDirSonar() {
+    hideLongPressMenu();
+    if (!_lpmWorld || !player || player.hp <= 0 || comDemo) return;
+    fireDirectionalSonar(Math.atan2(_lpmWorld.y - player.y, _lpmWorld.x - player.x), 'std');
+}
+function lpmSelectSigList() { hideLongPressMenu(); if (window.openSigPanel) window.openSigPanel(); }
 function lpmSelectStop() {
     hideLongPressMenu();
     if (!player || player.hp <= 0) return;
@@ -8933,8 +9013,10 @@ function applyTrackContact(e, sa) {
 // ============================================================
 // 全周囲ソナー
 // ============================================================
-function fireOmniSonar() {
+function fireOmniSonar(power) {
     if (!player || player.hp <= 0) return;
+    if (typeof power !== 'string' || !SONAR_POWER[power]) power = comDemo && _com ? comSonarPower(_com.pp) : 'std'; // 第43弾: ボタン (イベント) は標準・COMは性格で
+    const SP = SONAR_POWER[power];
     if (omniSonarCooldown > 0) {
         logMessage(`SENSOR: 全周囲ソナー再充電中... (残り ${Math.ceil(omniSonarCooldown / 60)}秒)`, 'warning-msg');
         return;
@@ -8942,7 +9024,7 @@ function fireOmniSonar() {
     const sensorLv  = gameState.upgrades.sensor;
     const baseRange = OMNI_SONAR_RANGE[sensorLv];
     const stormAtPlayer = getStormIntensity(player.x, player.y);
-    const omniRange = baseRange * SONAR_FRAC * playerFx().sonar * genGain * (1 - stormAtPlayer * STORM_SONAR_DEGRADE) * PM.sonarRange; // 第32弾: ソナー拡張 (第39弾: 探知重視×1.33)
+    const omniRange = baseRange * SONAR_FRAC * playerFx().sonar * genGain * (1 - stormAtPlayer * STORM_SONAR_DEGRADE) * PM.sonarRange * SP.r; // 第32弾: ソナー拡張 (第39弾: 探知重視×1.33)
     const sc = sensorConfig[currentSensor];
 
     playSound('ui');
@@ -8970,14 +9052,14 @@ function fireOmniSonar() {
         if (!_contactLabels[f.sid]) _contactLabels[f.sid] = _contactLabelNext++;
         solveFix(sa); identStep(f.sid, f.sid === lockedSignalId, 1, sa);
     }
-    omniSonarCooldown = 900;
+    omniSonarCooldown = Math.round(900 * SP.cd);
     // 第15弾: 探信音は遠くまで届く — 反響が返る距離の2.2倍以内の敵は、こちらの位置をほぼ正確に掴む
     pingHeardBy(omniRange * 2.2 * PM.sonarHeard, null, 0);
     const rStr = Math.round(omniRange);
     const stormSuffix = stormAtPlayer > 0.3 ? ` ⚡EM嵐による減衰 (${Math.round(stormAtPlayer * STORM_SONAR_DEGRADE * 100)}%低下)` : '';
     logMessage(detected > 0
-        ? `SONAR[全周囲] Lv${sensorLv}: ${detected}件の反応捕捉 (範囲: ${rStr}u) ─ 位置暴露注意${stormSuffix}`
-        : `SONAR[全周囲] Lv${sensorLv}: 有効範囲 ${rStr}u 内に反応なし${stormSuffix}`,
+        ? `SONAR[全周囲・${SP.jp}] Lv${sensorLv}: ${detected}件の反応捕捉 (範囲: ${rStr}u・聞かれる ${Math.round(omniRange * 2.2 * PM.sonarHeard)}u) ─ 位置暴露注意${stormSuffix}`
+        : `SONAR[全周囲・${SP.jp}] Lv${sensorLv}: 有効範囲 ${rStr}u 内に反応なし${stormSuffix}`,
         'system-msg');
     // ソナー伝播速度を遅く (1/3)、色はシアン系で鮮やかに
     effects.push({ x: player.x, y: player.y, r: 0, maxR: omniRange, a: 0.9, c: `rgba(0,255,220,1)`, type: 'sonar', speed: omniRange/60 });
@@ -8987,14 +9069,16 @@ function fireOmniSonar() {
 // ============================================================
 // 指向性ソナー
 // ============================================================
-function fireDirectionalSonar(targetAngle) {
+function fireDirectionalSonar(targetAngle, power) {
     if (!player || player.hp <= 0) return;
     if (dirSonarCooldown > 0) return;
+    if (typeof power !== 'string' || !SONAR_POWER[power]) power = comDemo && _com ? comSonarPower(_com.pp) : 'std';
+    const SP = SONAR_POWER[power];
     if (targetAngle === undefined) targetAngle = Math.atan2(mouseWorldY - player.y, mouseWorldX - player.x);
     const sensorLv  = gameState.upgrades.sensor;
     const halfAngle = DIR_SONAR_HALF_ANGLE[sensorLv];
     const stormAtPlayer2 = getStormIntensity(player.x, player.y);
-    const maxRange  = DIR_SONAR_MAX_RANGE * SONAR_FRAC * playerFx().sonar * genGain * (1 - stormAtPlayer2 * STORM_SONAR_DEGRADE);
+    const maxRange  = DIR_SONAR_MAX_RANGE * SONAR_FRAC * playerFx().sonar * genGain * (1 - stormAtPlayer2 * STORM_SONAR_DEGRADE) * SP.r;
 
     playSound('ui');
     cancelSilentRunning('アクティブソナー使用');
@@ -9012,14 +9096,14 @@ function fireDirectionalSonar(targetAngle) {
         pingContact(e, acc, dist);
         detected++;
     });
-    dirSonarCooldown = 300;
-    // 指向性は照射方向にだけ強く響く (コーン内は2倍・それ以外は0.5倍の距離まで聞こえる)
-    pingHeardBy(maxRange * 2, targetAngle, halfAngle, maxRange * 0.5);
+    dirSonarCooldown = Math.round(300 * SP.cd);
+    // 指向性は照射方向にだけ強く響く (コーン内は2倍・それ以外は SONAR_SIDE_LEAK 倍の距離まで聞こえる。第43弾: 旧0.5倍=側面でも1万u先まで聞こえた)
+    pingHeardBy(maxRange * 2, targetAngle, halfAngle, maxRange * SONAR_SIDE_LEAK);
     dirSonarVisual = { angle: targetAngle, halfAngle, range: maxRange, life: 1.0 };
     const deg = Math.round(targetAngle * 180 / Math.PI);
     logMessage(detected > 0
-        ? `SONAR[指向性] Lv${sensorLv}: 方位${deg}° → ${detected}件捕捉`
-        : `SONAR[指向性] Lv${sensorLv}: 方位${deg}° → 反応なし`,
+        ? `SONAR[指向性・${SP.jp}] Lv${sensorLv}: 方位${deg}° → ${detected}件捕捉`
+        : `SONAR[指向性・${SP.jp}] Lv${sensorLv}: 方位${deg}° → 反応なし`,
         'system-msg');
 }
 
@@ -9374,24 +9458,57 @@ function toggleDensityView(on) {
     if (b) b.classList.toggle('on', densityViewOn);
     logMessage('MAP: 濃度表示 ' + (densityViewOn ? 'ON — 全マップの霧の濃さと地形を重ねる' : 'OFF — 自艦の周りだけ'), 'system-msg');
 }
+// 第43弾 (オーナー合意): 濃度表示は「聴いている帯域に効く層だけ」— 帯域ごとに地形が効く強さ (PATH_MEDIA) の最大値を、その層の濃さにする
+//   例: EMだけ聴いていれば磁気嵐だけ / 熱なら霧(弱)・熱雲・岩礁(弱)。0.15未満の層は描かない。範囲の円 (破線) は撤去し、縁は2段で薄れる
+//   範囲は 3000u (HIGGS帯をONなら10000u)・高感度の帯域があれば×1.35
 function drawDensityOverlay(ctx) {
     if (!player || player.hp <= 0) return;
     if (!higgsOverlayCanvas && higgsGrid) higgsOverlayCanvas = _bakeHiggsOverlay();
-    const layers = [[higgsOverlayCanvas, 0.55, HG_N * HG_CELL], [debrisCanvas, 0.7, FIELD_SIZE], [stormCanvas, 0.6, FIELD_SIZE], [thermalCanvas, 0.6, FIELD_SIZE]];
+    const w = { fog: 0, storm: 0, thermal: 0, debris: 0 };
+    let anyHi = false;
+    for (const b of BANDS) if (sensorsOn[b]) { for (const m in w) w[m] = Math.max(w[m], PATH_MEDIA[m].a[b]); if (sensorHi[b]) anyHi = true; }
+    const layers = [[higgsOverlayCanvas, 0.55, HG_N * HG_CELL, 'fog'], [debrisCanvas, 0.7, FIELD_SIZE, 'debris'], [stormCanvas, 0.6, FIELD_SIZE, 'storm'], [thermalCanvas, 0.6, FIELD_SIZE, 'thermal']];
+    const dR = (sensorsOn.higgs ? DENSITY_HIGGS_R : DENSITY_NEAR_R) * (anyHi ? HI_RANGE : 1);
     ctx.save();
     ctx.imageSmoothingEnabled = true;
-    const dR = sensorsOn.higgs ? DENSITY_HIGGS_R : DENSITY_NEAR_R;
-    if (!densityViewOn) {
-        ctx.beginPath(); ctx.arc(player.x, player.y, dR, 0, Math.PI * 2); ctx.clip();
+    for (const [cv, a, size, m] of layers) {
+        if (!cv || w[m] < 0.15) continue;
+        const k = a * Math.min(1, w[m] / 0.9) * (sensorsOn.higgs ? 1.2 : 0.85) * 0.5;
+        for (const f of [1, 0.7]) { // 縁は2段で薄れる (外側の帯は半分の濃さ)
+            ctx.save(); ctx.beginPath(); ctx.arc(player.x, player.y, dR * f, 0, Math.PI * 2); ctx.clip();
+            ctx.globalAlpha = Math.min(1, k); ctx.drawImage(cv, 0, 0, size, size); ctx.restore();
+        }
     }
-    const k = densityViewOn ? 1 : sensorsOn.higgs ? 0.75 : 0.55;
-    for (const [cv, a, size] of layers) { if (!cv) continue; ctx.globalAlpha = a * k; ctx.drawImage(cv, 0, 0, size, size); }
     ctx.restore();
-    if (!densityViewOn) {
-        ctx.save(); ctx.globalAlpha = 0.18; ctx.strokeStyle = '#7fd8ff'; ctx.lineWidth = 1 / camera.zoom;
-        ctx.setLineDash([12 / camera.zoom, 10 / camera.zoom]);
-        ctx.beginPath(); ctx.arc(player.x, player.y, dR, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+}
+// 第43弾: 基準の艦 (巡航の攻撃型) が聞こえる距離 / ソナーの距離の円 — 感度を変えた時・ソナーのチャージ中だけ出る
+let _scanHold = null; // 索敵ボタンを押している間 {t0, level}
+function drawRefRing(ctx) {
+    if (!player || player.hp <= 0) return;
+    const rr = _refRing; if (!rr) return;
+    const age = (_frameCount - rr.f) / 60, hold = rr.kind === 'sonar' && _scanHold;
+    if (!hold && age > 3) { _refRing = null; return; }
+    const al = hold ? 1 : Math.min(1, (3 - age) / 1);
+    ctx.save();
+    ctx.lineWidth = 1.5 / camera.zoom; ctx.setLineDash([10 / camera.zoom, 8 / camera.zoom]);
+    if (rr.kind === 'band') {
+        const R = refReach(rr.b, rr.hi), col = sensorConfig[rr.b].r;
+        if (R > 50) {
+            ctx.globalAlpha = 0.8 * al; ctx.strokeStyle = 'rgb(' + col + ')';
+            ctx.beginPath(); ctx.arc(player.x, player.y, R, 0, Math.PI * 2); ctx.stroke();
+            queueTag(player.x, player.y - R, (BAND_JP[rr.b] || rr.b) + (rr.hi ? ' 高感度' : ' 標準'), '(' + (ENGINE_SHORT[REF_ENGINE[rr.b]] || '') + 'の巡航艦が聞こえる距離) 約' + Math.round(R / 100) * 100 + 'u', 'rgb(' + col + ')', 'top', al);
+        } else queueTag(player.x, player.y - 200, (BAND_JP[rr.b] || rr.b) + (rr.hi ? ' 高感度' : ' 標準'), 'この場所では ' + (ENGINE_SHORT[REF_ENGINE[rr.b]] || '') + 'の巡航艦も聞こえない', '#9aa', 'top', al);
+    } else {
+        const lv = rr.level || 'std', SP = SONAR_POWER[lv];
+        const R = OMNI_SONAR_RANGE[gameState.upgrades.sensor] * SONAR_FRAC * playerFx().sonar * genGain * (1 - getStormIntensity(player.x, player.y) * STORM_SONAR_DEGRADE) * PM.sonarRange * SP.r;
+        ctx.globalAlpha = 0.85 * al; ctx.strokeStyle = '#00ffdc';
+        ctx.beginPath(); ctx.arc(player.x, player.y, R, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = 0.5 * al; ctx.strokeStyle = '#ff9a66';
+        ctx.beginPath(); ctx.arc(player.x, player.y, R * 2.2 * PM.sonarHeard, 0, Math.PI * 2); ctx.stroke();
+        queueTag(player.x, player.y - R, 'ソナー' + SP.jp, '反応 ' + Math.round(R / 100) * 100 + 'u', '#00ffdc', 'top', al);
+        queueTag(player.x, player.y - R * 2.2 * PM.sonarHeard, '聞かれる範囲', Math.round(R * 2.2 * PM.sonarHeard / 100) * 100 + 'u', '#ff9a66', 'top', al * 0.8);
     }
+    ctx.restore();
 }
 
 function drawPassiveAntenna(ctx) {
@@ -12062,16 +12179,27 @@ function updateDistressBeacon() {
 // カウンタープレイ: 濃いヒッグスに潜れば反射が埋もれる / デコイが偽エコーを返す。
 // 第39弾: 探信の距離は自機と同じ式 (全周ソナーの Lv1 × 均等の配分 × 探知重視 × 磁気嵐)
 const SONAR_FRAC = 0.30;
-function enemyPingRange(e) { return OMNI_SONAR_RANGE[1] * SONAR_FRAC * shipFx(e).sonar * (1 - getStormIntensity(e.x, e.y) * STORM_SONAR_DEGRADE); }
+// 第43弾 (オーナー合意): ソナーの出力 — 弱/標準/強。距離 (と、聞かれる距離=反響距離の2.2倍) が出力に比例し、再充電も長くなる
+const SONAR_POWER = { weak: { r: 0.6, cd: 0.6, jp: '弱' }, std: { r: 1, cd: 1, jp: '標準' }, strong: { r: 1.5, cd: 1.6, jp: '強' } };
+const SONAR_SIDE_LEAK = 0.12; // 指向性ソナーの照射方向の外 (側面・後方) に聞こえる距離 = 最大距離 × この値 (旧0.5)
+// COMの出力の選び方 (自機COMも敵も同じ): 隠密≥0.6=弱 (聞かれたくない) / 攻撃性≥0.7で隠密<0.5=強 (遠くから確実に) / 他=標準
+function comSonarPower(P) {
+    if ((P.stealth ?? 0.4) >= 0.6) return 'weak';
+    if ((P.aggression ?? 0.5) >= 0.7 && (P.stealth ?? 0.4) < 0.5) return 'strong';
+    return 'std';
+}
+function enemyPingRange(e, pw) { return OMNI_SONAR_RANGE[1] * SONAR_FRAC * shipFx(e).sonar * (1 - getStormIntensity(e.x, e.y) * STORM_SONAR_DEGRADE) * (SONAR_POWER[pw || 'std'].r); }
 function firePingFromEnemy(e) {
     if (!player || player.hp <= 0) return;
-    const ENEMY_PING_RANGE = enemyPingRange(e);
+    const _pw = comSonarPower(e.personality || {});
+    const ENEMY_PING_RANGE = enemyPingRange(e, _pw);
     // 演出: 音波リング (フォグ無視 — 音はヒッグスの霧を越えて聞こえる)
     effects.push({ x: e.x, y: e.y, r: 0, maxR: ENEMY_PING_RANGE, a: 0.7, c: '#ff8866', type: 'circle' });
     effects.push({ x: e.x, y: e.y, r: 0, maxR: ENEMY_PING_RANGE * 0.55, a: 0.5, c: '#ffbb99', type: 'circle' });
     const distP = Math.hypot(player.x - e.x, player.y - e.y);
     playSound('enemyPing', Math.max(0.15, Math.min(1, 1 - distP / 16000)));
-    // プレイヤーへの情報: 探信音の正確な方位 (敵は自ら方位を晒した)
+    // プレイヤーへの情報: 探信音の正確な方位 (敵は自ら方位を晒した)。第43弾: 聞こえるのは反響距離の2.2倍まで (自艦のソナーが敵に聞かれる距離と同じ。旧: どこでも聞こえた)
+    if (distP <= ENEMY_PING_RANGE * 2.2) {
     const compassDeg = Math.round((Math.atan2(e.x - player.x, -(e.y - player.y)) * 180 / Math.PI + 360) % 360);
     const ang = Math.atan2(e.y - player.y, e.x - player.x);
     const esid = enemySid(e);
@@ -12090,6 +12218,7 @@ function firePingFromEnemy(e) {
     logMessage(`SONAR: 敵アクティブソナー探信音！ — 方位 ${compassDeg}° (敵は接触を失っている。方位は正確だ)`, 'warning-msg');
     threatObs.pingF = _frameCount; threatObs.pingAng = ang; // 第23弾: 観測できる兆候
     if (huntStats) huntStats.pings++;
+    }
     // 敵への情報: 反射エコー。デコイが近くにあれば偽エコーで誤誘導。
     let echo = null, echoDist = ENEMY_PING_RANGE;
     for (const d of decoys) {
@@ -12271,14 +12400,14 @@ function rxLevels(includeOff, all) {
     for (const e of enemies) {
         if (e.hp <= 0 || e._dying) continue;
         if (!all && rxKnown(enemySid(e))) continue;
-        hearLevels(e, 'p', px, py, e.x, e.y, b => sigToward(e, b, px, py), range, out, bands);
+        hearLevels(e, 'p', px, py, e.x, e.y, b => sigToward(e, b, px, py), range, out, bands, bandGainP);
     }
-    for (const cv of convoys) { if (!all && rxKnown(cv.sid)) continue; hearLevels(cv, 'p', px, py, cv.x, cv.y, () => CONVOY_SIG, range, out, bands); } // 第34弾: 輸送船
-    for (const f of fieldSignals) { if (!all && rxKnown(f.sid)) continue; hearLevels(f, 'p', px, py, f.x, f.y, b => fieldSig(f, b), range, out, bands); } // 第31弾: 自然/お宝の信号
+    for (const cv of convoys) { if (!all && rxKnown(cv.sid)) continue; hearLevels(cv, 'p', px, py, cv.x, cv.y, () => CONVOY_SIG, range, out, bands, bandGainP); } // 第34弾: 輸送船
+    for (const f of fieldSignals) { if (!all && rxKnown(f.sid)) continue; hearLevels(f, 'p', px, py, f.x, f.y, b => fieldSig(f, b), range, out, bands, bandGainP); } // 第31弾: 自然/お宝の信号
     for (const L of lures) { // 第21弾: 敵の偽艦影ブイ
         if (L.owner !== 'e' || L.kind !== 'ship' || L.phase !== 'on') continue;
         if (!all && rxKnown(L.sid)) continue;
-        hearLevels(L, 'p', px, py, L.x, L.y, () => LURE_SIG * Math.min(1, L.life / 60), range, out, bands);
+        hearLevels(L, 'p', px, py, L.x, L.y, () => LURE_SIG * Math.min(1, L.life / 60), range, out, bands, bandGainP);
     }
     // 第39弾: 相手の痕跡 (熱の痕跡・霧の痕跡) も、その帯域で聴いていればバーが動く
     const readR = range * 0.25;
@@ -12715,11 +12844,16 @@ function comPilotStep() {
         c.bpF = now;
         const want = comBandPlan(P, c.heardBand, c.heardBandF, getHiggsIntensity(player.x, player.y));
         if (want.join() !== sensorOrder.join()) {
-            for (const b of want) if (!sensorsOn[b]) toggleBand(b, true);
-            for (const b of BANDS) if (!want.includes(b) && sensorsOn[b] && sensorOrder.length > 1) toggleBand(b, true);
+            for (const b of want) if (!sensorsOn[b]) switchBand(b, true);
+            for (const b of BANDS) if (!want.includes(b) && sensorsOn[b] && sensorOrder.length > 1) switchBand(b, true);
             sensorOrder = want.filter(b => sensorsOn[b]).concat(sensorOrder.filter(b => !want.includes(b))); currentSensor = sensorOrder[0]; _syncBandUI();
             comThink('p', 'bands', '聴く帯域 → ' + want.map(b => BAND_JP[b] || b).join('・') + (c.heardBand && now - c.heardBandF < 3600 ? ' (相手を' + (BAND_JP[c.heardBand] || c.heardBand) + 'で聞いた)' : ' (何も聞こえない — 聴き回す)'));
         }
+        // 第43弾: 感度は敵と同じ comWantsHi (何も聞こえない捜索の間だけ先頭の帯域を高感度)
+        const _srch = !contact && !(c.heardBandF !== undefined && now - c.heardBandF < 1800), _wantHi = comWantsHi(P, _srch);
+        let _chg = false;
+        for (const b of BANDS) { const hi = _wantHi && b === sensorOrder[0]; if (sensorsOn[b] && !!sensorHi[b] !== hi) { setBandLevel(b, hi ? 2 : 1, true); _chg = true; } }
+        if (_chg) comThink('p', 'gain', '感度 → ' + (_wantHi ? (BAND_JP[sensorOrder[0]] || sensorOrder[0]) + 'を高感度 (捜索・受信距離×' + HI_RANGE + '・漏れ+1本分)' : '標準 (聞こえた/隠れる — 漏らさない)'));
     }
     // 第41弾: 追跡する信号の乗り換えは方針どおり — 追跡を始めて commitSec 秒は、もっと艦影らしい信号 (switchMargin 以上) でなければ変えない
     {
@@ -14047,6 +14181,7 @@ function renderWorld() {
         // マップモード中はフォグを抑制して全体を戦術マップとして表示(索敵済みの情報のみ可視)。
         if (player && (player.hp > 0 || player._dying > 0) && !mapMode) drawFogOfWar(ctx); // 第22弾: 撃沈の演出中も霧は残す
         if (player && player.hp > 0) drawDensityOverlay(ctx); // 第21弾: 霧の濃さと地形 (自艦の周り / ボタンで全マップ)
+        if (player && player.hp > 0) drawRefRing(ctx); // 第43弾
 
         // ── 第16弾: 「見えているもの」と「自分のもの」は霧の上に描く ──
         // 視界の内側の敵艦は100%の不透明度で (旧: 霧のグラデーションと雲の加算合成の下に描かれ半透明に見えた)。
