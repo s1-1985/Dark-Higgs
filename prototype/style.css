@@ -2107,7 +2107,7 @@ body.in-game #hud-top, body.in-game #hud-left, body.in-game #hud-right { display
     display: flex; flex-direction: column; align-items: stretch; gap: 4px;
     padding: 4px 3px 5px;
     background: rgba(0,6,10,0.8); border: 1px solid rgba(255,255,255,0.10); border-radius: 5px;
-    cursor: pointer; --bc: #8aa;
+    cursor: pointer; --bc: #8aa; position: relative;
 }
 /* 第40弾: #hud-left .band-btn の --bc (灰色) に負けて、受信バーが全部灰色になっていた → 同じ強さのセレクタで帯域の色を指定 */
 .band-btn[data-band="heat"],  #hud-left .band-btn[data-band="heat"]  { --bc: #ff8a3c; }
@@ -2442,6 +2442,8 @@ body.in-game.com-demo.think-on #think-panel.wide { max-height: 62%; }
 /* 第43弾: 高感度 (帯域バーをもう一度タップ) — ラベルに ▲・枠が太く光る (受信距離×1.35 / 漏れ+1本分 / 方位誤差増) */
 .band-btn.hi { box-shadow: 0 0 8px var(--bc), inset 0 0 6px var(--bc); border-width: 2px !important; }
 .band-btn.hi .bt-label::after { content: '▲'; font-size: 7px; margin-left: 2px; color: var(--bc); }
+.band-btn.lo .bt-label::after { content: '▽'; font-size: 7px; margin-left: 2px; color: var(--bc); opacity: 0.8; }
+.band-btn[data-lv]:not([data-lv=""])::before { content: attr(data-lv); position: absolute; left: 3px; top: 2px; font-size: 8px; font-weight: 700; color: var(--bc); }
 .band-btn.leak::after { content: ''; position: absolute; top: 3px; right: 3px; width: 5px; height: 5px; border-radius: 50%; background: #ff8a6a; box-shadow: none; }
 
 #lpm-lures .lpm-drow button { flex: 1; border-color: #c48bff; color: #e0c8ff; background: #140a1e; }
