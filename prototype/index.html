@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261107a">
+    <link rel="stylesheet" href="style.css?v=20261107b">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -93,7 +93,7 @@
                 <button class="hud-act" data-group="drone" id="abar-grp-drone" title="搭載 — 戦闘機・砲台・Techなど (完成品はすぐ出せる / 資材は組み立て)">
                     <img src="assets/icon_drone.png" alt="" class="abar-icon"><span>搭載</span><em class="abar-cargo"></em>
                 </button>
-                <button class="hud-act" id="abar-scan" title="索敵 — タップ=ソナー。指向ソナー・信号一覧は地図の長押しメニューから">
+                <button class="hud-act" data-group="scan" id="abar-scan" title="索敵 — ソナー出力(弱/中/強)のトグルと、全周囲・指向性ソナー (今の出力で打つ)">
                     <img src="assets/icon_scan.png" alt="" class="abar-icon"><span>索敵</span>
                 </button>
                 <button class="hud-act" id="abar-silent" onclick="cycleStance()" title="出力 — 潜航(静か) / 巡航 / 全速(速い・うるさい) (S)">
@@ -141,11 +141,15 @@
                 <button class="act-icon-btn btn-info focus-btn" id="btn-focus-weapon" data-focus="weapon" title="配分の重点: 兵装 (リロード×0.8・散布×0.7・相手の回避×0.85)"><b class="fx-mark">兵</b><span>兵装重視</span></button>
                 <button class="act-icon-btn btn-info focus-btn" id="btn-focus-analysis" data-focus="analysis" title="配分の重点: 解析 (AI 80 — 助言が速く細かい・回避+3pt・相手の回避×0.9・解析の速さ×1.4。演算の電磁波が増える)"><b class="fx-mark">析</b><span>解析重視</span></button>
                 <button class="act-icon-btn btn-info" id="btn-focus-mt" title="詳細 (MT) — 機関・兵装・探知・AIのゲインを0〜200%で個別に。上限の合計はない。100%を超えた分はその系統のシグネチャが2乗で増える"><b class="fx-mark">MT</b><span>詳細</span></button>
-                <button class="act-icon-btn btn-info" id="btn-scan" title="全周囲ソナー">
+                <button class="act-icon-btn btn-info" id="btn-sonar-power" data-keepopen="1" title="ソナーの出力 — タップで 弱 → 中 → 強。出力が大きいほど遠くまで届くが、聞かれる距離も伸び再充電も長い (全周囲・指向性とも)">
+                    <i class="ico" style="--ico:url(assets/icons/icon_sonar.png)"></i>
+                    <span id="sonar-power-label">出力 中</span>
+                </button>
+                <button class="act-icon-btn btn-info" id="btn-scan" title="全周囲ソナー — 今の出力で打つ">
                     <i class="ico" style="--ico:url(assets/icons/icon_sonar.png)"></i>
                     <span>SONAR</span>
                 </button>
-                <button class="act-icon-btn btn-info" id="btn-dir-sonar" title="指向性ソナー">
+                <button class="act-icon-btn btn-info" id="btn-dir-sonar" title="指向性ソナー — 今の出力で、次にタップした方向へ打つ (出力で届く距離が変わる)">
                     <i class="ico" style="--ico:url(assets/icons/icon_dirsonar.png)"></i>
                     <span>DIR</span>
                 </button>
@@ -739,7 +743,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261107a"></script>
+    <script src="game.js?v=20261107b"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -775,7 +779,7 @@
     // 実ボタンは #action-store に置いたまま。開く時だけポップオーバーへ移し、閉じたら戻す (IDとイベントは不変)
     (function() {
         var ACTION_GROUPS = {
-            scan:  ['btn-scan', 'btn-dir-sonar', 'btn-sig-panel'],
+            scan:  ['btn-sonar-power', 'btn-scan', 'btn-dir-sonar'],
             ew:    ['btn-jam-burst', 'btn-jam-cont', 'btn-jam-pulse', 'btn-drone-decoy', 'btn-drone-scout', 'btn-hack'],
             nav:   ['btn-cancel', 'btn-camera-follow', 'btn-attack-toggle', 'btn-game-speed'],
             drone: ['btn-drone-attack','btn-drone-mech','btn-drone-build','btn-drone-scout','btn-drone-decoy',
@@ -816,7 +820,7 @@
             btn.addEventListener('click', function(e) { e.stopPropagation(); popOpen(btn.dataset.group, btn); });
         });
         // 子ボタンを押したら少し待って閉じる (アクションを先に発火させる)
-        _apop.addEventListener('click', function() { setTimeout(popClose, 70); });
+        _apop.addEventListener('click', function(e) { if (e.target.closest && e.target.closest('[data-keepopen]')) return; setTimeout(popClose, 70); }); // 第45弾: ソナー出力のトグルは開いたまま
         // 外側を触ったら閉じる (フィールドのタッチは preventDefault で click が出ないため pointerdown で拾う)
         document.addEventListener('pointerdown', function(e) {
             if (!_open) return;

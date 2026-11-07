@@ -6285,9 +6285,22 @@ document.getElementById('btn-attack-toggle')?.addEventListener('click', () => {
     playSound('ui');
 });
 
-document.getElementById('btn-scan').addEventListener('click', () => fireOmniSonar('std'));
-// 第44弾 (オーナー): 右列の「索敵」= タップで標準のソナー (長押しは廃止)。指向ソナー・信号一覧は地図の長押しメニュー
-(() => { const el = document.getElementById('abar-scan'); if (el) el.addEventListener('click', (e) => { e.stopPropagation(); fireOmniSonar('std'); }); })();
+document.getElementById('btn-scan').addEventListener('click', () => fireOmniSonar()); // 第45弾: 出力は「ソナー出力」のトグル (sonarLevel)
+// 第45弾 (オーナー): 右列「索敵」→ [ソナー出力 弱/中/強のトグル] [全周囲] [指向性]。全周囲・指向性は今の出力で打つ (指向性も出力で届く距離が変わる)
+let sonarLevel = 'std'; // 'weak' | 'std' | 'strong'
+function cycleSonarLevel() {
+    sonarLevel = sonarLevel === 'weak' ? 'std' : sonarLevel === 'std' ? 'strong' : 'weak';
+    const SP = SONAR_POWER[sonarLevel];
+    const lb = document.getElementById('sonar-power-label'); if (lb) lb.textContent = '出力 ' + SP.jp;
+    const bt = document.getElementById('btn-sonar-power'); if (bt) bt.dataset.lv = sonarLevel;
+    if (player && player.hp > 0) {
+        const R = sonarOmniRange(sonarLevel);
+        _refRing = { kind: 'sonar', f: _frameCount, level: sonarLevel, R, H: R * 2.2 * PM.sonarHeard };
+        logMessage('SONAR: 出力 ' + SP.jp + ' — 全周囲 反応' + Math.round(R / 100) * 100 + 'u・聞かれる' + Math.round(R * 2.2 * PM.sonarHeard / 100) * 100 + 'u / 指向性 最大' + Math.round(sonarDirRange(sonarLevel) / 1000) + 'ku・再充電 全周囲' + Math.round(900 * SP.cd / 60) + '秒', 'system-msg');
+    }
+    playSound('ui');
+}
+document.getElementById('btn-sonar-power')?.addEventListener('click', (e) => { e.stopPropagation(); cycleSonarLevel(); });
 
 // ── 潜航型ジャミング3種 ──
 document.getElementById('btn-jam-burst')?.addEventListener('click', () => {
@@ -8928,7 +8941,7 @@ function lpmSelectFire() {
 function lpmSelectDirSonar() {
     hideLongPressMenu();
     if (!_lpmWorld || !player || player.hp <= 0 || comDemo) return;
-    fireDirectionalSonar(Math.atan2(_lpmWorld.y - player.y, _lpmWorld.x - player.x), 'std');
+    fireDirectionalSonar(Math.atan2(_lpmWorld.y - player.y, _lpmWorld.x - player.x));
 }
 function lpmSelectSigList() { hideLongPressMenu(); if (window.openSigPanel) window.openSigPanel(); }
 function lpmSelectStop() {
@@ -9099,9 +9112,11 @@ function applyTrackContact(e, sa) {
 // ============================================================
 // 全周囲ソナー
 // ============================================================
+function sonarOmniRange(level) { return OMNI_SONAR_RANGE[gameState.upgrades.sensor] * SONAR_FRAC * playerFx().sonar * genGain * (1 - getStormIntensity(player.x, player.y) * STORM_SONAR_DEGRADE) * PM.sonarRange * SONAR_POWER[level].r; }
+function sonarDirRange(level) { return DIR_SONAR_MAX_RANGE * SONAR_FRAC * playerFx().sonar * genGain * (1 - getStormIntensity(player.x, player.y) * STORM_SONAR_DEGRADE) * SONAR_POWER[level].r; }
 function fireOmniSonar(power) {
     if (!player || player.hp <= 0) return;
-    if (typeof power !== 'string' || !SONAR_POWER[power]) power = comDemo && _com ? comSonarPower(_com.pp) : 'std'; // 第43弾: ボタン (イベント) は標準・COMは性格で
+    if (typeof power !== 'string' || !SONAR_POWER[power]) power = comDemo && _com ? comSonarPower(_com.pp) : sonarLevel; // 第45弾: ボタンは「ソナー出力」のトグル・COMは性格で
     const SP = SONAR_POWER[power];
     if (omniSonarCooldown > 0) {
         logMessage(`SENSOR: 全周囲ソナー再充電中... (残り ${Math.ceil(omniSonarCooldown / 60)}秒)`, 'warning-msg');
@@ -9160,7 +9175,7 @@ function fireOmniSonar(power) {
 function fireDirectionalSonar(targetAngle, power) {
     if (!player || player.hp <= 0) return;
     if (dirSonarCooldown > 0) return;
-    if (typeof power !== 'string' || !SONAR_POWER[power]) power = comDemo && _com ? comSonarPower(_com.pp) : 'std';
+    if (typeof power !== 'string' || !SONAR_POWER[power]) power = comDemo && _com ? comSonarPower(_com.pp) : sonarLevel;
     const SP = SONAR_POWER[power];
     if (targetAngle === undefined) targetAngle = Math.atan2(mouseWorldY - player.y, mouseWorldX - player.x);
     const sensorLv  = gameState.upgrades.sensor;
@@ -12272,7 +12287,7 @@ function updateDistressBeacon() {
 // 第39弾: 探信の距離は自機と同じ式 (全周ソナーの Lv1 × 均等の配分 × 探知重視 × 磁気嵐)
 const SONAR_FRAC = 0.30;
 // 第43弾 (オーナー合意): ソナーの出力 — 弱/標準/強。距離 (と、聞かれる距離=反響距離の2.2倍) が出力に比例し、再充電も長くなる
-const SONAR_POWER = { weak: { r: 0.6, cd: 0.6, jp: '弱' }, std: { r: 1, cd: 1, jp: '標準' }, strong: { r: 1.5, cd: 1.6, jp: '強' } };
+const SONAR_POWER = { weak: { r: 0.6, cd: 0.6, jp: '弱' }, std: { r: 1, cd: 1, jp: '中' }, strong: { r: 1.5, cd: 1.6, jp: '強' } };
 const SONAR_SIDE_LEAK = 0.12; // 指向性ソナーの照射方向の外 (側面・後方) に聞こえる距離 = 最大距離 × この値 (旧0.5)
 // COMの出力の選び方 (自機COMも敵も同じ): 隠密≥0.6=弱 (聞かれたくない) / 攻撃性≥0.7で隠密<0.5=強 (遠くから確実に) / 他=標準
 function comSonarPower(P) {
