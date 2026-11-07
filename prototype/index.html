@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261107b">
+    <link rel="stylesheet" href="style.css?v=20261108a">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -186,6 +186,10 @@
                     <i class="ico" style="--ico:url(assets/icons/icon_pulse.png)"></i>
                     <span>PULSE</span>
                 </button>
+                <button class="act-icon-btn btn-info" id="btn-drone-recall" title="出ているドローン全機に帰還を指示 (自艦の護衛へ戻る)">
+                    <i class="ico" style="--ico:url(assets/icons/icon_fighter.png)"></i>
+                    <span>全機帰還</span>
+                </button>
                 <!-- 第16弾: 搭載物 (全艦種・積める種類だけ表示)。数字=完成品の数 / 「資材」=資材から組み立て -->
                 <button class="act-icon-btn btn-info drone-btn" id="btn-drone-attack" data-dtype="attack" title="戦闘機 (1枠) — 見えている敵へ自動射撃" style="display:none">
                     <i class="ico" style="--ico:url(assets/icons/icon_fighter.png)"></i>
@@ -240,6 +244,31 @@
                 <button class="act-icon-btn btn-info drone-btn" id="btn-item-lure" data-dtype="lure" title="偽艦影ブイ (1枠) — 押してから地点をタップ。そこへ射出し、巡航中の艦なみの熱・光・EM・航跡を60秒出しながらゆっくり動く">
                     <i class="ico" style="--ico:url(assets/icons/icon_lure.png)"></i>
                     <span>偽艦影</span><em class="cg-n"></em>
+                </button>
+                <!-- 第46弾: 散布弾・吹き飛ばし弾・帯域ごとのビーコン -->
+                <button class="act-icon-btn btn-info drone-btn" id="btn-item-fogspray" data-dtype="fogspray" title="散布弾 (1枠) — 自艦を中心に半径3000uの霧を濃くする (50秒)。音も光も隠れるが自分の有視界も縮む">
+                    <i class="ico" style="--ico:url(assets/icons/icon_disperse.png)"></i>
+                    <span>散布</span><em class="cg-n"></em>
+                </button>
+                <button class="act-icon-btn btn-info drone-btn" id="btn-item-fogblow" data-dtype="fogblow" title="吹き飛ばし弾 (1枠) — 自艦を中心に半径3000uの霧を30秒晴らす (30秒で戻る)。見通せるが隠れもできない">
+                    <i class="ico" style="--ico:url(assets/icons/icon_density.png)"></i>
+                    <span>吹飛</span><em class="cg-n"></em>
+                </button>
+                <button class="act-icon-btn btn-info drone-btn" id="btn-item-bcn_heat" data-dtype="bcn_heat" title="熱ビーコン (1枠) — 押してから地点をタップ。そこへ射出し、熱だけを強く90秒出す (動かない)。敵はその帯域で聴いていれば寄ってくる">
+                    <i class="ico" style="--ico:url(assets/icons/icon_lure.png)"></i>
+                    <span>熱偽</span><em class="cg-n"></em>
+                </button>
+                <button class="act-icon-btn btn-info drone-btn" id="btn-item-bcn_optic" data-dtype="bcn_optic" title="光ビーコン (1枠) — 押してから地点をタップ。そこへ射出し、光だけを強く90秒出す (動かない)。敵はその帯域で聴いていれば寄ってくる">
+                    <i class="ico" style="--ico:url(assets/icons/icon_lure.png)"></i>
+                    <span>光偽</span><em class="cg-n"></em>
+                </button>
+                <button class="act-icon-btn btn-info drone-btn" id="btn-item-bcn_em" data-dtype="bcn_em" title="EMビーコン (1枠) — 押してから地点をタップ。そこへ射出し、電磁波だけを強く90秒出す (動かない)。敵はその帯域で聴いていれば寄ってくる">
+                    <i class="ico" style="--ico:url(assets/icons/icon_lure.png)"></i>
+                    <span>EM偽</span><em class="cg-n"></em>
+                </button>
+                <button class="act-icon-btn btn-info drone-btn" id="btn-item-bcn_higgs" data-dtype="bcn_higgs" title="霧ビーコン (1枠) — 押してから地点をタップ。そこへ射出し、霧の乱れだけを強く90秒出す (動かない)。敵はその帯域で聴いていれば寄ってくる">
+                    <i class="ico" style="--ico:url(assets/icons/icon_lure.png)"></i>
+                    <span>霧偽</span><em class="cg-n"></em>
                 </button>
                 <!-- 第26弾: 修理はリペアキットだけ (出撃前の積み込みでしか積めない) -->
                 <button class="act-icon-btn btn-info drone-btn" id="btn-item-repair" data-dtype="repair" title="リペアキット (1枠) — 6秒で耐久+700 (攻撃型なら5個で全回復)。出撃前の積み込みでしか積めず、補給も資材からの組み立てもできない">
@@ -743,7 +772,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261107b"></script>
+    <script src="game.js?v=20261108a"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -782,10 +811,10 @@
             scan:  ['btn-sonar-power', 'btn-scan', 'btn-dir-sonar'],
             ew:    ['btn-jam-burst', 'btn-jam-cont', 'btn-jam-pulse', 'btn-drone-decoy', 'btn-drone-scout', 'btn-hack'],
             nav:   ['btn-cancel', 'btn-camera-follow', 'btn-attack-toggle', 'btn-game-speed'],
-            drone: ['btn-drone-attack','btn-drone-mech','btn-drone-build','btn-drone-scout','btn-drone-decoy',
+            drone: ['btn-drone-recall','btn-drone-attack','btn-drone-mech','btn-drone-build','btn-drone-scout','btn-drone-decoy',
                     'btn-drone-buoy','btn-drone-barrier','btn-drone-higgs', 'btn-hack'],
             engine: ['btn-eng-thermonuclear', 'btn-eng-pulse', 'btn-eng-higgs', 'btn-eng-photon', 'btn-focus-balance', 'btn-focus-engine', 'btn-focus-sensor', 'btn-focus-weapon', 'btn-focus-analysis', 'btn-focus-mt'],
-            escape: ['btn-item-repair', 'btn-item-flash', 'btn-item-noise', 'btn-item-smoke', 'btn-item-fsos', 'btn-item-lure', 'btn-boost', 'btn-coast'],
+            escape: ['btn-item-repair', 'btn-item-flash', 'btn-item-noise', 'btn-item-smoke', 'btn-item-fsos', 'btn-item-lure', 'btn-item-bcn_heat', 'btn-item-bcn_optic', 'btn-item-bcn_em', 'btn-item-bcn_higgs', 'btn-item-fogspray', 'btn-item-fogblow', 'btn-boost', 'btn-coast'],
         };
         var _apop  = document.getElementById('action-popover');
         var _store = document.getElementById('action-store');
