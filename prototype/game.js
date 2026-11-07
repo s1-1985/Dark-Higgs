@@ -512,10 +512,15 @@ let sensorOrder = ['heat']; // ONにした順 (先頭が無料)
 const SENSOR_LEAK = { heat: 0.06, optic: 0.06, em: 0.08, higgs: 0.06 };
 // 第43弾 (オーナー合意): 帯域ごとの感度 — OFF / 標準 / 高感度 (左列の帯域バーをタップするたびに循環)。自艦も敵も同じ式
 //   高感度 = その帯域の受信距離 ×1.35 / 自艦が漏らすシグネチャ (SENSOR_LEAK) が +1本分 (標準の2本目以降なら×2) / 自然の雑音も拾い 方位の誤差 ×1.3
-let sensorHi = { heat: false, optic: false, em: false, higgs: false };
+// 第44弾 (オーナー): 感度は 弱 / 中 / 強 の3段階 — 帯域バーをタップ: OFF → 弱 → 中 → 強 → OFF (全帯域をOFFにもできる)
+//   受信距離 弱×0.7 / 中×1 / 強×1.35・漏れ 弱=2本目以降の半分 / 中=従来 (最初の1本は無料・2本目以降 +1本分) / 強=中の+1本分・方位誤差は強で×1.3
+let sensorLv = { heat: 2, optic: 2, em: 2, higgs: 2 }; // ONの帯域の感度 (1弱 2中 3強)
+const LV_RANGE = [1, 0.7, 1, 1.35], LV_JP = ['', '弱', '中', '強'];
 const HI_RANGE = 1.35, HI_NOISE = 1.3;
-const bandGainP = (b) => sensorsOn[b] && sensorHi[b] ? HI_RANGE : 1;                       // 自艦の帯域ごとの受信距離の倍率
-const bandGainE = (e) => (b) => e && e._hi && e._hi[b] ? HI_RANGE : 1;                      // 敵 (e._hi = 高感度にしている帯域)
+const bandGainP = (b) => sensorsOn[b] ? LV_RANGE[sensorLv[b] || 2] : 1;                    // 自艦の帯域ごとの受信距離の倍率
+const bandGainE = (e) => (b) => e && e._lv && e._lv[b] ? LV_RANGE[e._lv[b]] : 1;            // 敵 (e._lv = 帯域ごとの感度。無ければ中)
+// その帯域が自艦/敵から漏らす信号 (SENSOR_LEAK に掛ける倍率): 2本目以降の漏れ (弱は半分) + 強の追加1本分。idx = ONにした順の位置
+const leakMult = (idx, lv) => (idx > 0 ? (lv === 1 ? 0.5 : 1) : 0) + (lv === 3 ? 1 : 0);
 
 let dialogOpen = false;
 let dockingOpen = false;
@@ -4537,7 +4542,7 @@ class Ship {
             const _isF = this.type === 'fighter';
             const _thrusting = this._movedF === _frameCount || !(this._v > 0.005);
             const _bd = _isF ? [] : enemyBands(this), _lk = { heat: 0, optic: 0, em: 0, higgs: 0 }, _em = epm(this);
-            for (let bi = 0; bi < _bd.length; bi++) _lk[_bd[bi]] = SENSOR_LEAK[_bd[bi]] * _em.leakMul * ((bi > 0 ? 1 : 0) + (this._hi && this._hi[_bd[bi]] ? 1 : 0)); // 第43弾: 高感度はもう1本分
+            for (let bi = 0; bi < _bd.length; bi++) _lk[_bd[bi]] = SENSOR_LEAK[_bd[bi]] * _em.leakMul * leakMult(bi, (this._lv && this._lv[_bd[bi]]) || 2); // 第44弾: 感度 弱/中/強
             const _al = this.gen || GEN_FOCUS.balance;
             const _ff = Math.max(0, this._fireFlash || 0) / 90;
             if (this._fireFlash > 0) this._fireFlash -= gameSpeedFactor;
@@ -5577,19 +5582,22 @@ function generateSector() {
 
     // 第21弾: ヒッグス濃度は円の集まり (bgMist) ではなくマス目 (細かく・まばら)。bgMist は空のまま
     generateHiggsGrid();
+    // 第44弾 (オーナー): 試合ごとに地形の傾向を振る — 熱雲が多いマップ・磁気嵐が多いマップ・岩礁帯が多いマップ・霧のゆらぎが多いマップなど (コロニー・ノードの数は一定)
+    rollMapTheme();
+    const _nDebris = Math.max(8, Math.round(20 * mapTheme.d)), _nStorm = Math.max(5, Math.round(12 * mapTheme.s)), _nThermal = Math.max(6, Math.round(14 * mapTheme.t));
     // デブリ帯 (岩礁帯): 2倍・均等分散 (旧10→20)
-    for (let i = 0; i < 20; i++) {
-        const p = _rndSector(i, 20, MAP_RADIUS * 0.90);
+    for (let i = 0; i < _nDebris; i++) {
+        const p = _rndSector(i, _nDebris, MAP_RADIUS * 0.90);
         debrisField.push({ ...p, r: Math.random() * 3500 + 1800, density: Math.random() * 0.5 + 0.25 });
     }
     // 磁気嵐帯: 2倍・均等分散 (旧6→12)
-    for (let i = 0; i < 12; i++) {
-        const p = _rndSector(i, 12, MAP_RADIUS * 0.85);
+    for (let i = 0; i < _nStorm; i++) {
+        const p = _rndSector(i, _nStorm, MAP_RADIUS * 0.85);
         stormField.push({ ...p, r: Math.random() * 4000 + 2200, density: Math.random() * 0.55 + 0.25 });
     }
     // 熱雲(プラズマ雲): 2倍・均等分散 (旧7→14)
-    for (let i = 0; i < 14; i++) {
-        const p = _rndSector(i, 14, MAP_RADIUS * 0.88);
+    for (let i = 0; i < _nThermal; i++) {
+        const p = _rndSector(i, _nThermal, MAP_RADIUS * 0.88);
         thermalField.push({ ...p, r: Math.random() * 3800 + 1600, density: Math.random() * 0.50 + 0.20 });
     }
     // bgMistをオフスクリーンキャンバスに事前焼き付け (毎フレームのcreateRadialGradientを排除)
@@ -5731,7 +5739,7 @@ function generateSector() {
     for (let i = 0; i < 5; i++) {
         const lp = randomLandmarkSpot(_lmPlaced, _so[i % 6]);
         const der = new Structure(lp.x, lp.y, 'derelict');
-        der.discovered = true; // 第21弾 (オーナー指示): 難破船も初期配置で海図に載る (旧: 視界に入るまで出なかった)
+        der.discovered = false; // 第44弾 (オーナー): 難破船は見つけるまでヒッグスの下 (有視界・ドローンの視界・ソナーで見つかる。旧: 第21弾で最初から海図に載っていた)
         structures.push(der);
     }
     _so = _sectorOrder();
@@ -5836,7 +5844,7 @@ function startGame(shipType) {
     _syncOrientPause();
     resizeCanvas(); // HUD表示後にミニマップの実寸を測り直す
     cameraFollowPlayer = true; updateCameraFollowBtn();
-    setSensor(currentSensor, true);
+    if (sensorOrder.length) setSensor(currentSensor, true); // 第44弾: 全OFFにしていたらそのまま
     _xoState = null;
     // 修復/建設状態をリセット
     repairActive = false;
@@ -6278,29 +6286,8 @@ document.getElementById('btn-attack-toggle')?.addEventListener('click', () => {
 });
 
 document.getElementById('btn-scan').addEventListener('click', () => fireOmniSonar('std'));
-// 第43弾 (オーナー合意): 右列の「索敵」= タップで標準のソナー / 押し続けて(0.45秒〜)離すと強 / Shift+クリックで弱。押している間は反応する距離と聞かれる距離の円を出す
-(() => {
-    const el = document.getElementById('abar-scan');
-    if (!el) return;
-    el.addEventListener('pointerdown', (e) => {
-        if (e.button > 0) return;
-        e.stopPropagation();
-        try { el.setPointerCapture(e.pointerId); } catch (_) {}
-        _scanHold = { t0: performance.now(), level: e.shiftKey ? 'weak' : 'std', shift: !!e.shiftKey };
-        _refRing = { f: _frameCount, kind: 'sonar', level: _scanHold.level };
-    });
-    const tick = () => { if (_scanHold) { if (!_scanHold.shift) _scanHold.level = performance.now() - _scanHold.t0 >= 450 ? 'strong' : 'std'; if (_refRing && _refRing.kind === 'sonar') { _refRing.level = _scanHold.level; _refRing.f = _frameCount; } } requestAnimationFrame(tick); };
-    requestAnimationFrame(tick);
-    const end = (e, fire) => {
-        if (!_scanHold) return;
-        const lv = _scanHold.level; _scanHold = null;
-        if (_refRing && _refRing.kind === 'sonar') _refRing.f = _frameCount;
-        if (fire && player && player.hp > 0 && !comDemo) fireOmniSonar(lv);
-        else _refRing = null;
-    };
-    el.addEventListener('pointerup', (e) => end(e, true));
-    el.addEventListener('pointercancel', (e) => end(e, false));
-})();
+// 第44弾 (オーナー): 右列の「索敵」= タップで標準のソナー (長押しは廃止)。指向ソナー・信号一覧は地図の長押しメニュー
+(() => { const el = document.getElementById('abar-scan'); if (el) el.addEventListener('click', (e) => { e.stopPropagation(); fireOmniSonar('std'); }); })();
 
 // ── 潜航型ジャミング3種 ──
 document.getElementById('btn-jam-burst')?.addEventListener('click', () => {
@@ -6506,14 +6493,12 @@ function setSensor(s, quiet) { // 第21弾: その帯域をONにする (他は�
     if (!sensorConfig[s]) return;
     if (!sensorsOn[s]) switchBand(s, quiet); else _syncBandUI();
 }
-// 第21弾: 帯域の ON/OFF (最低1本はON)。第43弾: COMと内部の呼び出し用 (感度は変えない・OFFにする時は標準に戻す)
+// 第21弾: 帯域の ON/OFF。第44弾: 最後の1本もOFFにできる (全OFF=何も聴かない・自艦は漏らさない)。COMと内部の呼び出し用 — ONにした時の感度は中
 function switchBand(s, quiet) {
     if (!sensorConfig[s]) return;
-    if (sensorsOn[s]) {
-        if (sensorOrder.length <= 1) { if (!quiet) logMessage('SENSOR: 最低1帯域は聴いておく', 'system-msg'); return; }
-        sensorsOn[s] = false; sensorHi[s] = false; sensorOrder = sensorOrder.filter(b => b !== s);
-    } else { sensorsOn[s] = true; sensorOrder.push(s); }
-    currentSensor = sensorOrder[0];
+    if (sensorsOn[s]) { sensorsOn[s] = false; sensorLv[s] = 2; sensorOrder = sensorOrder.filter(b => b !== s); }
+    else { sensorsOn[s] = true; sensorLv[s] = 2; sensorOrder.push(s); }
+    currentSensor = sensorOrder[0] || currentSensor;
     _syncBandUI();
     if (!quiet) {
         const leak = sensorOrder.slice(1).map(b => BAND_JP[b] || b).join('・');
@@ -6521,39 +6506,40 @@ function switchBand(s, quiet) {
         playSound('ui');
     }
 }
-// 第43弾 (オーナー合意): 帯域バーをタップするたびに OFF → 標準 → 高感度 → OFF (最後の1本は 高感度 → 標準)
+// 第44弾 (オーナー): 帯域バーをタップするたびに OFF → 弱 → 中 → 強 → OFF
 function toggleBand(s, quiet) {
     if (!sensorConfig[s]) return;
-    if (!sensorsOn[s]) { switchBand(s, true); _bandLevelMsg(s, quiet); return; }
-    if (!sensorHi[s]) { sensorHi[s] = true; _syncBandUI(); _showRefRing(s); _bandLevelMsg(s, quiet); return; }
-    if (sensorOrder.length <= 1) { sensorHi[s] = false; _syncBandUI(); _showRefRing(s); _bandLevelMsg(s, quiet); return; }
-    switchBand(s, true); _bandLevelMsg(s, quiet);
+    if (!sensorsOn[s]) { sensorsOn[s] = true; sensorOrder.push(s); sensorLv[s] = 1; currentSensor = sensorOrder[0]; }
+    else if (sensorLv[s] < 3) sensorLv[s]++;
+    else { sensorsOn[s] = false; sensorLv[s] = 2; sensorOrder = sensorOrder.filter(b => b !== s); currentSensor = sensorOrder[0] || currentSensor; }
+    _syncBandUI(); _showRefRing(s); _bandLevelMsg(s, quiet);
 }
-// COM用: 感度を指定 (lvl 0=OFF 1=標準 2=高感度)
+// COM用: 感度を指定 (lvl 0=OFF 1=弱 2=中 3=強)
 function setBandLevel(s, lvl, quiet) {
     if (!sensorConfig[s]) return;
     if (lvl <= 0) { if (sensorsOn[s]) switchBand(s, true); return; }
     if (!sensorsOn[s]) switchBand(s, true);
-    const hi = lvl >= 2;
-    if (sensorHi[s] !== hi) { sensorHi[s] = hi; _syncBandUI(); }
+    if (sensorLv[s] !== lvl) { sensorLv[s] = lvl; _syncBandUI(); }
 }
 function _bandLevelMsg(s, quiet) {
     if (quiet) return;
-    const leak = sensorOrder.map((b, i) => (i > 0 ? 1 : 0) + (sensorHi[b] ? 1 : 0) > 0 ? (BAND_JP[b] || b) : null).filter(Boolean).join('・');
-    logMessage(`SENSOR: ${SENSOR_INFO[s].name} ${!sensorsOn[s] ? 'OFF' : sensorHi[s] ? '高感度 — 受信距離×' + HI_RANGE + '・漏れ+1本分・雑音で方位誤差が増える' : '標準'}` + (leak ? ` (自艦が漏らす: ${leak})` : ' (漏れなし)'), 'system-msg');
+    const leak = sensorOrder.map((b, i) => leakMult(i, sensorLv[b]) > 0 ? (BAND_JP[b] || b) : null).filter(Boolean).join('・');
+    const lv = sensorLv[s];
+    logMessage(`SENSOR: ${SENSOR_INFO[s].name} ${!sensorsOn[s] ? 'OFF' : '感度 ' + LV_JP[lv] + ' — 受信距離×' + LV_RANGE[lv] + (lv === 3 ? '・漏れ+1本分・雑音で方位誤差×1.3' : lv === 1 ? '・漏れ少なめ' : '')}` + (!sensorOrder.length ? ' (全帯域OFF — 何も聴こえないが漏らさない)' : leak ? ` (自艦が漏らす: ${leak})` : ' (漏れなし)'), 'system-msg');
     playSound('ui');
 }
 // 基準の艦 (巡航の攻撃型) がその帯域で聞こえる距離の円を3秒だけ出す (感度・ソナーを変えた時に半径の見当をつける)。第43弾
 let _refRing = null;
 const REF_ENGINE = { heat: 'thermonuclear', em: 'pulse', optic: 'photon', higgs: 'higgs' }; // その帯域を主に出すエンジン (基準の艦)
-function refReach(b, hi) {
+function refReach(b, lv) {
     if (!player) return 0;
     const h = getHiggsIntensity(player.x, player.y);
     const sg = emitSigs({ engine: REF_ENGINE[b] || 'thermonuclear', engineOn: true, thrust: 0.573, alloc: { sensors: 0.3, ai: 0.5 }, hHere: h, pulsePh: 0 });
-    const R = passiveRange() * (hi ? HI_RANGE : 1), sig = sg[b] * (1 - h * PATH_MEDIA.fog.a[b]);
+    const R = passiveRange() * LV_RANGE[lv || 2], sig = sg[b] * (1 - h * PATH_MEDIA.fog.a[b]);
     return sig > 0 ? Math.max(0, R * (1 - sensorConfig[b].threshold * 0.5 / sig)) : 0;
 }
-function _showRefRing(b) { _refRing = { f: _frameCount, kind: 'band', b, hi: !!sensorHi[b] }; }
+let _refHi = null; // 感度を変えた帯域 {b,f} — 円を3秒だけ強調する
+function _showRefRing(b) { _refHi = { b, f: _frameCount }; }
 function _syncBandUI() {
     document.querySelectorAll('.sns-btn').forEach(b => b.classList.toggle('active', sensorsOn[(b.id || '').replace('sensor-', '')]));
     if (typeof window.applySensorGcb === 'function') window.applySensorGcb(currentSensor);
@@ -6561,8 +6547,11 @@ function _syncBandUI() {
         const on = !!sensorsOn[b.dataset.band];
         b.classList.toggle('tuned', on);
         b.classList.toggle('off', !on);
-        b.classList.toggle('leak', on && (sensorOrder.indexOf(b.dataset.band) > 0 || !!sensorHi[b.dataset.band]));
-        b.classList.toggle('hi', on && !!sensorHi[b.dataset.band]);
+        const lv = sensorLv[b.dataset.band];
+        b.classList.toggle('leak', on && leakMult(sensorOrder.indexOf(b.dataset.band), lv) > 0);
+        b.classList.toggle('hi', on && lv === 3);
+        b.classList.toggle('lo', on && lv === 1);
+        b.dataset.lv = on ? LV_JP[lv] : '';
     });
 }
 // 第21弾: 敵が聴いている帯域 — 性格で本数 (攻撃的・隠れない個体ほど多く聴いて漏らす)。順は 熱→EM→ヒッグス→光学
@@ -6607,14 +6596,14 @@ function comBandPlan(P, heardBand, heardF, h) {
 //   見つけたい (攻撃的・慎重で先に気付きたい) ほど高感度 / 隠密ほど漏らしたくないので標準 (=標準の漏れ0)。聞こえたら標準に戻す
 function comWantsHi(P, searching) {
     return !!searching && (P.caution ?? 0.4) * 0.5 + (P.aggression ?? 0.5) * 0.25 - (P.stealth ?? 0.4) * 0.7 + 0.1 >= 0.2;
-}
+} // 第44弾: 真=強 / 偽=中 (COMは弱を使わない)
 function enemyBands(e) {
     if (!e._bp || _frameCount - (e._bpF || -1e9) >= 600) { // 10秒ごとに見直す
         const _P = e.personality || { aggression: 0.5, stealth: 0.4, caution: 0.4 };
         e._bp = comBandPlan(_P, e._heardBand, e._heardBandF, getHiggsIntensity(e.x, e.y));
         e._bpF = _frameCount;
         const searching = !e.inVision && !(e.contactFreshness > 0.3) && !(e._heardBandF !== undefined && _frameCount - e._heardBandF < 1800);
-        e._hi = comWantsHi(_P, searching) ? { [e._bp[0]]: true } : {};
+        e._lv = comWantsHi(_P, searching) ? { [e._bp[0]]: 3 } : {};
     }
     return e._bp;
 }
@@ -6729,7 +6718,7 @@ function setEnemyFocus(e, k) {
     if (comDemo && e.type !== 'fighter') comThinkEvent('e', '航行モード → ' + FOCUS_JP[k], 'e' + e.uid);
 }
 // 自艦が帯域で漏らす量 (2本目以降)
-function sensorLeak(kind) { return sensorsOn[kind] ? SENSOR_LEAK[kind] * PM.leakMul * ((sensorOrder.indexOf(kind) > 0 ? 1 : 0) + (sensorHi[kind] ? 1 : 0)) : 0; } // 第32弾: 多帯域受信機
+function sensorLeak(kind) { return sensorsOn[kind] ? SENSOR_LEAK[kind] * PM.leakMul * leakMult(sensorOrder.indexOf(kind), sensorLv[kind]) : 0; } // 第32弾: 多帯域受信機
 ['heat', 'optic', 'em', 'higgs'].forEach(s => {
     const btn = document.getElementById(`sensor-${s}`);
     if (!btn) return;
@@ -7926,7 +7915,10 @@ function srcKnown(sid) { return !!_srcKnown[sid]; }
 function markSrcKnown(sid, kind, by, x, y) {
     const was = _srcKnown[sid];
     _srcKnown[sid] = { kind, by, x, y, f: _frameCount };
-    if (was) return;
+    if (was) { // 第44弾: 解析で誤認していた物が、近づいて目視で正体が分かった
+        if (was.kind !== kind && by === 'eye') { const no = _contactLabels[sid]; logMessage('SIGNAL: ' + (no ? 'SIG-' + String(no).padStart(2, '0') + ' は' : '') + SRC_KIND_JP[was.kind] + 'ではなく' + SRC_KIND_JP[kind] + 'だった — 目視で訂正 (誤認していた)', 'warning-msg'); matchRecEvent('srcFix', x, y, SRC_KIND_JP[was.kind] + '→' + SRC_KIND_JP[kind] + 'に訂正'); }
+        return;
+    }
     for (let i = passiveBearings.length - 1; i >= 0; i--) if (passiveBearings[i].sourceId === sid) passiveBearings.splice(i, 1);
     if (lockedSignalId === sid) { lockedSignalId = null; }
     const no = _contactLabels[sid];
@@ -7937,7 +7929,11 @@ function updateSrcKnown() {
     if (_frameCount % 30) return;
     for (const sid in _sigIdent) {
         const id = _sigIdent[sid], k = _srcKnown[sid];
-        if (k && k.by === 'eye') continue;
+        if (k && k.by === 'eye') { // 第44弾: 見えている間だけ位置を更新 — 有視界の外へ出たら最後に見た位置が海図に残る (漂う霧のゆらぎの今の位置は分からない)
+            const f0 = fieldSignals.find(q => q.sid === sid) || lures.find(q => q.sid === sid);
+            if (f0 && inPlayerVision(f0.x, f0.y)) { k.x = f0.x; k.y = f0.y; }
+            continue;
+        }
         if (id.sure) {
             if (id.L > 0) continue; // 艦影 (見えた艦は推定円のまま)
             const f = fieldSignals.find(q => q.sid === sid), L = !f && lures.find(q => q.sid === sid);
@@ -7958,7 +7954,43 @@ function updateSrcKnown() {
     for (const sid in _srcKnown) if (!fieldSignals.some(f => f.sid === sid) && !lures.some(l => l.sid === sid)) delete _srcKnown[sid];
 }
 // 特定した発信元の描く位置: 目視で分かった物は今の位置 / 解析で分かった物は推定の中心 (見えたらその場で目視に切り替わる)
-function srcDrawPos(sid, obj) { const k = _srcKnown[sid]; if (!k || k.by === 'eye' || !obj) return obj; return { x: k.x, y: k.y }; }
+function srcDrawPos(sid, obj) { const k = _srcKnown[sid]; if (!k || !obj) return obj; if (k.by === 'eye' && inPlayerVision(obj.x, obj.y)) return obj; return { x: k.x, y: k.y }; } // 第44弾: 目視で分かった物も、有視界の外では最後に見た位置
+// ═══ 第44弾 (オーナー): マップの傾向 (毎試合ランダム) と、信号の置き場所 ═══
+//   傾向 mapTheme {t:熱雲, s:磁気嵐, d:岩礁帯, c:霧のゆらぎ} は 地形の数と、その地形に対応する信号 (熱泉=熱雲の中心・嵐の放電=磁気嵐の中心・霧のゆらぎ=霧の濃い所・漂流コンテナ=岩礁帯) の数に掛かる。
+//   半分は均等 (0.85〜1.15)、残りはどれか1つが多く (1.7〜2.2倍・他は0.5〜0.75倍)・時々 2つが多い
+let mapTheme = { t: 1, s: 1, d: 1, c: 1, name: '均等' };
+function rollMapTheme() {
+    const r = () => 0.85 + Math.random() * 0.3, th = { t: r(), s: r(), d: r(), c: r(), name: '均等' };
+    if (Math.random() < 0.5) {
+        const keys = ['t', 's', 'd', 'c'], pickN = Math.random() < 0.22 ? 2 : 1, dom = [];
+        while (dom.length < pickN) { const k = keys[Math.floor(Math.random() * 4)]; if (!dom.includes(k)) dom.push(k); }
+        for (const k of keys) th[k] = dom.includes(k) ? 1.7 + Math.random() * 0.5 : 0.5 + Math.random() * 0.25;
+        th.name = dom.map(k => ({ t: '熱雲', s: '磁気嵐', d: '岩礁帯', c: '霧のゆらぎ' })[k]).join('・') + 'が多い';
+    }
+    mapTheme = th;
+}
+// その種類の信号を置く場所 — 対応する背景の地形の中 (熱泉=熱雲の中心 / 嵐の放電=磁気嵐の中心 / 霧のゆらぎ=霧が濃い所 / 漂流コンテナ=岩礁帯の中が多め)
+function _fieldSpotFor(kind) {
+    const ok = (x, y, sep) => Math.hypot(x - MAP_CX, y - MAP_CY) < FIELD_SPREAD_R && !(player && Math.hypot(x - player.x, y - player.y) < 2500) && !fieldSignals.some(f => Math.hypot(f.x - x, f.y - y) < sep);
+    const inCloud = (arr, jit, sep) => {
+        const cand = arr.filter(m => Math.hypot(m.x - MAP_CX, m.y - MAP_CY) < FIELD_SPREAD_R);
+        for (let k = 0; k < 24 && cand.length; k++) {
+            const m = cand[Math.floor(Math.random() * cand.length)], a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * m.r * jit;
+            const x = m.x + Math.cos(a) * d, y = m.y + Math.sin(a) * d;
+            if (ok(x, y, sep)) return { x, y };
+        }
+        return null;
+    };
+    let sp = null;
+    if (kind === 'vent') sp = inCloud(thermalField, 0.15, 1500);
+    else if (kind === 'storm') sp = inCloud(stormField, 0.15, 1500);
+    else if (kind === 'cloud') { // 霧の濃い所: 80か所を引いて、いちばん濃い5か所のどれか
+        const c = [];
+        for (let k = 0; k < 80; k++) { const a = Math.random() * Math.PI * 2, r = 3000 + Math.sqrt(Math.random()) * (FIELD_SPREAD_R - 3000), x = MAP_CX + Math.cos(a) * r, y = MAP_CY + Math.sin(a) * r; if (ok(x, y, 2000)) c.push({ x, y, h: higgsBaseAt(x, y) }); }
+        c.sort((a, b) => b.h - a.h); if (c.length) sp = c[Math.floor(Math.random() * Math.min(5, c.length))];
+    } else if (kind === 'cache' && Math.random() < 0.65) sp = inCloud(debrisField, 0.7, 2000);
+    return sp || _fieldSpot();
+}
 function _fieldSpot() {
     for (let k = 0; k < 30; k++) {
         const a = Math.random() * Math.PI * 2, r = 3000 + Math.sqrt(Math.random()) * (FIELD_SPREAD_R - 3000);
@@ -7970,7 +8002,7 @@ function _fieldSpot() {
     const a = Math.random() * Math.PI * 2; return { x: MAP_CX + Math.cos(a) * 12000, y: MAP_CY + Math.sin(a) * 12000 };
 }
 function makeFieldSignal(kind) {
-    const k = FIELD_KINDS[kind], p = _fieldSpot(), str = k.lo + Math.random() * (k.hi - k.lo);
+    const k = FIELD_KINDS[kind], p = _fieldSpotFor(kind), str = k.lo + Math.random() * (k.hi - k.lo);
     const b = { heat: 0.03, optic: 0.03, em: 0.03, higgs: 0.03 };
     if (k.band) b[k.band] = str;
     else { for (const x of BANDS) b[x] = str * (0.85 + Math.random() * 0.3); b.optic += 0.04; }
@@ -7980,9 +8012,14 @@ function makeFieldSignal(kind) {
 }
 function generateFieldSignals() {
     fieldSignals = []; _fieldRespawn = [];
-    const kinds = ['cloud', 'storm', 'vent'];
-    for (let i = 0; i < FIELD_NATURE_N; i++) fieldSignals.push(makeFieldSignal(kinds[i % 3]));
-    for (let i = 0; i < FIELD_CACHE_N; i++) fieldSignals.push(makeFieldSignal('cache'));
+    // 第44弾: 自然の信号12個を 傾向の重み (熱泉=熱雲・嵐=磁気嵐・霧のゆらぎ) で割り振る (どの種類も最低1つ)。コンテナは岩礁帯が多いほど少し増える
+    const w = { vent: mapTheme.t, storm: mapTheme.s, cloud: mapTheme.c }, ws = w.vent + w.storm + w.cloud, cnt = {};
+    let left = FIELD_NATURE_N;
+    for (const k in w) { cnt[k] = Math.max(1, Math.round(FIELD_NATURE_N * w[k] / ws)); left -= cnt[k]; }
+    while (left !== 0) { const k = ['vent', 'storm', 'cloud'].sort((a, b) => (left > 0 ? w[b] - w[a] : w[a] - w[b]))[0]; if (left < 0 && cnt[k] <= 1) { cnt.cloud = Math.max(1, cnt.cloud); break; } cnt[k] += left > 0 ? 1 : -1; left += left > 0 ? -1 : 1; }
+    for (const k of ['cloud', 'storm', 'vent']) for (let i = 0; i < cnt[k]; i++) fieldSignals.push(makeFieldSignal(k));
+    const nCache = Math.max(5, Math.min(12, Math.round(FIELD_CACHE_N * (0.7 + 0.3 * mapTheme.d))));
+    for (let i = 0; i < nCache; i++) fieldSignals.push(makeFieldSignal('cache'));
 }
 // その帯域でその信号が出している強さ (出現と消える時は5秒でなめらかに)
 function fieldSig(f, band) {
@@ -8237,13 +8274,56 @@ function drawKnownMark(ctx, x, y, known, k, inv, t) {
     if (known.by === 'ana') { ctx.globalAlpha = 0.35; ctx.setLineDash([4 * inv, 6 * inv]); ctx.beginPath(); ctx.arc(x, y, R * 0.82, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
     ctx.restore();
 }
+// 第44弾 (オーナー): ドローンの有視界 — 自分のドローン (戦闘機・Tech・哨戒機・ブイ) が見えている範囲の縁 (24本の視線) を霧の上に描く。通信が途切れている間は薄い (見えていても自艦には届かない)
+const DRONE_VIS_COL = { attack: '255,170,90', mech: '255,140,200', scout: '120,230,255', buoy: '160,200,255' };
+// 通信が届いている自分のドローンの視界の内か (24本の視線の縁より近い)
+function droneVisionSees(x, y) {
+    for (const d of playerDrones) {
+        if (d.hp <= 0 || !d._visPts || !(d._q >= DRONE_LINK_WEAK)) continue;
+        const dx = x - d.x, dy = y - d.y, dist = Math.hypot(dx, dy);
+        if (dist > (d._visR || 0)) continue;
+        const f = ((Math.atan2(dy, dx) / (Math.PI * 2)) % 1 + 1) % 1 * 24, i = Math.floor(f) % 24, t = f - Math.floor(f);
+        if (dist <= d._visPts[i] * (1 - t) + d._visPts[(i + 1) % 24] * t) return true;
+    }
+    return false;
+}
+function drawDroneVision(ctx) {
+    if (!playerDrones.length) return;
+    const inv = 1 / camera.zoom;
+    ctx.save();
+    ctx.lineWidth = 1.2 * inv; ctx.setLineDash([6 * inv, 7 * inv]);
+    for (const d of playerDrones) {
+        const pts = d.hp > 0 && d._visPts; if (!pts) continue;
+        const linked = d._q >= DRONE_LINK_WEAK, col = DRONE_VIS_COL[d.type] || '200,220,255';
+        ctx.beginPath();
+        for (let k = 0; k < 24; k++) { const a = k / 24 * Math.PI * 2, r = pts[k]; const x = d.x + Math.cos(a) * r, y = d.y + Math.sin(a) * r; if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
+        ctx.closePath();
+        ctx.globalAlpha = linked ? 0.07 : 0.03; ctx.fillStyle = 'rgb(' + col + ')'; ctx.fill();
+        ctx.globalAlpha = linked ? 0.5 : 0.2; ctx.strokeStyle = 'rgb(' + col + ')'; ctx.stroke();
+    }
+    ctx.restore();
+}
+// 第44弾 (オーナー): 偽装 (囮) を解析で別の種類 (漂流コンテナ・自然の信号) と誤認した時は、誤認した物を霧の上に描く。近づいて目視で正体が分かると `_srcKnown` が 'eye' (囮) に変わり、これは出なくなる
+const _phantomPool = {};
+function _phantomMarks() {
+    const out = [];
+    for (const L of lures) {
+        const kn = _srcKnown[L.sid];
+        if (!kn || kn.by !== 'ana' || !FIELD_KINDS[kn.kind]) continue;
+        const o = _phantomPool[L.sid] || (_phantomPool[L.sid] = { sid: L.sid, age: 999, life: Infinity, on: true, takeP: 0, takeE: 0, ph: (L.x * 0.001) % 6.28, b: {}, flip: 0 });
+        o.kind = kn.kind; o.x = L.x; o.y = L.y; o._phantom = true;
+        out.push(o);
+    }
+    return out;
+}
 function drawFieldSignals(ctx) {
     const inv = 1 / camera.zoom, t = _frameCount / 60;
-    for (const f0 of fieldSignals) {
+    for (const f0 of fieldSignals.concat(_phantomMarks())) {
         // 第40弾: 特定した発信元 (目視・解析) は霧の外でも海図として霧の上に描く。未特定のものは見えている時だけ
+        // 第44弾: 解析で特定したものは推定の中心に・目視で特定したものは有視界の外では最後に見た位置に描く (誤認した囮は誤認した種類で `_phantomMarks`)
         const known = _srcKnown[f0.sid];
         if (!known && !higgsViewOff && !(player && inPlayerVision(f0.x, f0.y))) continue;
-        const f = known && known.by === 'ana' && !higgsViewOff ? Object.assign(Object.create(f0), srcDrawPos(f0.sid, f0)) : f0;
+        const f = known && !higgsViewOff ? Object.assign(Object.create(f0), srcDrawPos(f0.sid, f0)) : f0;
         const k = FIELD_KINDS[f.kind], fade = Math.min(1, f.age / FIELD_FADE, f.life / FIELD_FADE);
         ctx.save();
         if (known) drawKnownMark(ctx, f.x, f.y, known, k, inv, t);
@@ -8681,7 +8761,13 @@ function _drawEstCircle(ctx, sid, sa, locked) {
     for (let k = 0; k < 4; k++) { const a0 = k * Math.PI / 2, c0 = Math.cos(a0), s0 = Math.sin(a0); ctx.moveTo(cx + c0 * (R - 5 * inv), cy + s0 * (R - 5 * inv)); ctx.lineTo(cx + c0 * (R + 4 * inv), cy + s0 * (R + 4 * inv)); }
     ctx.stroke();
     // 名札 (円の上): 「SIG-xx 艦n%」だけ (第28弾: 説明書きは消す — オーナー)。中心に居るとは限らない
-    { const idn = identInfo(sid); queueTag(cx, cy - R, 'SIG-' + sigNo(sid), idn.known ? idn.short : '不明', col, 'top', (locked ? 1 : 0.75) * sa._fa); }
+    { const idn = identInfo(sid); queueTag(cx, cy - R, 'SIG-' + sigNo(sid), idn.known ? idn.short : '不明', col, 'top', (locked ? 1 : 0.75) * sa._fa);
+      // 第44弾 (オーナー): 解析で艦影と特定した (艦影75%以上・または確認) 信号は、推定の中心に艦のしるしを霧の上に描く (中心に居るとは限らない。囮を艦と誤認していればそのまま艦として出る)
+      if (idn.known && idn.p >= 0.75) {
+          const gs = Math.max(120, 11 * inv);
+          ctx.globalAlpha = 0.9 * sa._fa; ctx.strokeStyle = '#ff6a5a'; ctx.fillStyle = 'rgba(255,106,90,0.25)'; ctx.lineWidth = 1.6 * inv; ctx.setLineDash([]);
+          ctx.beginPath(); ctx.moveTo(cx + gs, cy); ctx.lineTo(cx - gs * 0.7, cy - gs * 0.6); ctx.lineTo(cx - gs * 0.4, cy); ctx.lineTo(cx - gs * 0.7, cy + gs * 0.6); ctx.closePath(); ctx.fill(); ctx.stroke();
+      } }
     if (!locked) { ctx.restore(); return; }
     ctx.globalAlpha = 0.85;
     ctx.font = 'bold ' + Math.round(11 * inv) + 'px Orbitron, monospace';
@@ -9039,6 +9125,7 @@ function fireOmniSonar(power) {
         pingContact(e, acc, dist);
         detected++;
     });
+    for (const st of structures) if (st.type === 'derelict' && !st.discovered && Math.hypot(st.x - player.x, st.y - player.y) <= omniRange) { st.discovered = true; logMessage('SONAR: 反響の中に難破船 — 海図に載せた', 'system-msg'); matchRecEvent('derFound', st.x, st.y, '難破船をソナーで発見'); } // 第44弾
     // 第31弾: 嵐の放電・熱泉・漂流コンテナも小さく反響する (霧のゆらぎは反響しない)
     for (const f of fieldSignals) {
         if (f.kind === 'cloud') continue;
@@ -9053,6 +9140,7 @@ function fireOmniSonar(power) {
         solveFix(sa); identStep(f.sid, f.sid === lockedSignalId, 1, sa);
     }
     omniSonarCooldown = Math.round(900 * SP.cd);
+    _refRing = { kind: 'sonar', f: _frameCount, level: power, R: omniRange, H: omniRange * 2.2 * PM.sonarHeard };
     // 第15弾: 探信音は遠くまで届く — 反響が返る距離の2.2倍以内の敵は、こちらの位置をほぼ正確に掴む
     pingHeardBy(omniRange * 2.2 * PM.sonarHeard, null, 0);
     const rStr = Math.round(omniRange);
@@ -9466,7 +9554,7 @@ function drawDensityOverlay(ctx) {
     if (!higgsOverlayCanvas && higgsGrid) higgsOverlayCanvas = _bakeHiggsOverlay();
     const w = { fog: 0, storm: 0, thermal: 0, debris: 0 };
     let anyHi = false;
-    for (const b of BANDS) if (sensorsOn[b]) { for (const m in w) w[m] = Math.max(w[m], PATH_MEDIA[m].a[b]); if (sensorHi[b]) anyHi = true; }
+    for (const b of BANDS) if (sensorsOn[b]) { for (const m in w) w[m] = Math.max(w[m], PATH_MEDIA[m].a[b]); if (sensorLv[b] === 3) anyHi = true; }
     const layers = [[higgsOverlayCanvas, 0.55, HG_N * HG_CELL, 'fog'], [debrisCanvas, 0.7, FIELD_SIZE, 'debris'], [stormCanvas, 0.6, FIELD_SIZE, 'storm'], [thermalCanvas, 0.6, FIELD_SIZE, 'thermal']];
     const dR = (sensorsOn.higgs ? DENSITY_HIGGS_R : DENSITY_NEAR_R) * (anyHi ? HI_RANGE : 1);
     ctx.save();
@@ -9481,32 +9569,35 @@ function drawDensityOverlay(ctx) {
     }
     ctx.restore();
 }
-// 第43弾: 基準の艦 (巡航の攻撃型) が聞こえる距離 / ソナーの距離の円 — 感度を変えた時・ソナーのチャージ中だけ出る
-let _scanHold = null; // 索敵ボタンを押している間 {t0, level}
+// 第44弾 (オーナー): センサーが届く範囲は常時表示 — ONの帯域ごとに、その帯域を主に出すエンジンの巡航艦が聞こえる距離の細い破線円 (感度を変えた直後の3秒は濃く・名札つき)
+//   ソナーを打った直後の3秒は 反応する距離 (シアン) と 聞かれる距離 (橙)
+let _refCache = { f: -1e9, v: {} };
 function drawRefRing(ctx) {
     if (!player || player.hp <= 0) return;
-    const rr = _refRing; if (!rr) return;
-    const age = (_frameCount - rr.f) / 60, hold = rr.kind === 'sonar' && _scanHold;
-    if (!hold && age > 3) { _refRing = null; return; }
-    const al = hold ? 1 : Math.min(1, (3 - age) / 1);
+    const inv = 1 / camera.zoom;
+    if (_frameCount - _refCache.f >= 20) { _refCache.f = _frameCount; for (const b of BANDS) _refCache.v[b] = sensorsOn[b] ? refReach(b, sensorLv[b]) : 0; }
     ctx.save();
-    ctx.lineWidth = 1.5 / camera.zoom; ctx.setLineDash([10 / camera.zoom, 8 / camera.zoom]);
-    if (rr.kind === 'band') {
-        const R = refReach(rr.b, rr.hi), col = sensorConfig[rr.b].r;
-        if (R > 50) {
-            ctx.globalAlpha = 0.8 * al; ctx.strokeStyle = 'rgb(' + col + ')';
-            ctx.beginPath(); ctx.arc(player.x, player.y, R, 0, Math.PI * 2); ctx.stroke();
-            queueTag(player.x, player.y - R, (BAND_JP[rr.b] || rr.b) + (rr.hi ? ' 高感度' : ' 標準'), '(' + (ENGINE_SHORT[REF_ENGINE[rr.b]] || '') + 'の巡航艦が聞こえる距離) 約' + Math.round(R / 100) * 100 + 'u', 'rgb(' + col + ')', 'top', al);
-        } else queueTag(player.x, player.y - 200, (BAND_JP[rr.b] || rr.b) + (rr.hi ? ' 高感度' : ' 標準'), 'この場所では ' + (ENGINE_SHORT[REF_ENGINE[rr.b]] || '') + 'の巡航艦も聞こえない', '#9aa', 'top', al);
-    } else {
-        const lv = rr.level || 'std', SP = SONAR_POWER[lv];
-        const R = OMNI_SONAR_RANGE[gameState.upgrades.sensor] * SONAR_FRAC * playerFx().sonar * genGain * (1 - getStormIntensity(player.x, player.y) * STORM_SONAR_DEGRADE) * PM.sonarRange * SP.r;
-        ctx.globalAlpha = 0.85 * al; ctx.strokeStyle = '#00ffdc';
+    ctx.lineWidth = 1.2 * inv; ctx.setLineDash([8 * inv, 10 * inv]);
+    for (const b of BANDS) {
+        const R = _refCache.v[b]; if (!(R > 80)) continue;
+        const hot = _refHi && _refHi.b === b && _frameCount - _refHi.f < 180, col = sensorConfig[b].r;
+        const a = hot ? Math.min(1, (180 - (_frameCount - _refHi.f)) / 60) : 0;
+        ctx.globalAlpha = 0.22 + 0.5 * a; ctx.strokeStyle = 'rgb(' + col + ')';
         ctx.beginPath(); ctx.arc(player.x, player.y, R, 0, Math.PI * 2); ctx.stroke();
-        ctx.globalAlpha = 0.5 * al; ctx.strokeStyle = '#ff9a66';
-        ctx.beginPath(); ctx.arc(player.x, player.y, R * 2.2 * PM.sonarHeard, 0, Math.PI * 2); ctx.stroke();
-        queueTag(player.x, player.y - R, 'ソナー' + SP.jp, '反応 ' + Math.round(R / 100) * 100 + 'u', '#00ffdc', 'top', al);
-        queueTag(player.x, player.y - R * 2.2 * PM.sonarHeard, '聞かれる範囲', Math.round(R * 2.2 * PM.sonarHeard / 100) * 100 + 'u', '#ff9a66', 'top', al * 0.8);
+        queueTag(player.x + R * Math.cos(-0.8 - BANDS.indexOf(b) * 0.35), player.y + R * Math.sin(-0.8 - BANDS.indexOf(b) * 0.35), (BAND_JP[b] || b) + ' ' + LV_JP[sensorLv[b]], Math.round(R / 100) * 100 + 'u', 'rgb(' + col + ')', 'center', 0.5 + 0.5 * a);
+    }
+    const rr = _refRing;
+    if (rr && rr.kind === 'sonar') {
+        const age = (_frameCount - rr.f) / 60;
+        if (age > 3) _refRing = null;
+        else {
+            const al = Math.min(1, 3 - age), R = rr.R;
+            ctx.setLineDash([10 * inv, 8 * inv]); ctx.lineWidth = 1.5 * inv;
+            ctx.globalAlpha = 0.85 * al; ctx.strokeStyle = '#00ffdc'; ctx.beginPath(); ctx.arc(player.x, player.y, R, 0, Math.PI * 2); ctx.stroke();
+            ctx.globalAlpha = 0.5 * al; ctx.strokeStyle = '#ff9a66'; ctx.beginPath(); ctx.arc(player.x, player.y, rr.H, 0, Math.PI * 2); ctx.stroke();
+            queueTag(player.x, player.y - R, 'ソナー' + SONAR_POWER[rr.level].jp, '反応 ' + Math.round(R / 100) * 100 + 'u', '#00ffdc', 'top', al);
+            queueTag(player.x, player.y - rr.H, '聞かれる範囲', Math.round(rr.H / 100) * 100 + 'u', '#ff9a66', 'top', al * 0.8);
+        }
     }
     ctx.restore();
 }
@@ -11273,11 +11364,12 @@ function drawLures(ctx) {
         // 第40弾: 相手の偽艦影ブイも、見て正体が分かったら海図に載せて霧の上に描く (推定円は出さない)
         if (L.owner !== 'p') {
             const kn = _srcKnown[L.sid];
-            if (!kn || L.kind !== 'ship') continue;
-            drawKnownMark(ctx, L.x, L.y, kn, null, zc, t / 1000);
+            if (!kn || L.kind !== 'ship' || kn.by === 'ana') continue; // 第44弾: 解析で別の物と誤認している間は誤認した物を描く (`_phantomMarks`)
+            const lp = srcDrawPos(L.sid, L);
+            drawKnownMark(ctx, lp.x, lp.y, kn, null, zc, t / 1000);
             const _li2 = SPRITES.lure_ship;
             ctx.globalAlpha = 0.7;
-            if (spriteReady(_li2)) { const z = Math.max(120, 28 * zc); ctx.drawImage(_li2, L.x - z / 2, L.y - z / 2, z, z); }
+            if (spriteReady(_li2)) { const z = Math.max(120, 28 * zc); ctx.drawImage(_li2, lp.x - z / 2, lp.y - z / 2, z, z); }
             ctx.globalAlpha = 1;
             continue;
         }
@@ -12852,8 +12944,8 @@ function comPilotStep() {
         // 第43弾: 感度は敵と同じ comWantsHi (何も聞こえない捜索の間だけ先頭の帯域を高感度)
         const _srch = !contact && !(c.heardBandF !== undefined && now - c.heardBandF < 1800), _wantHi = comWantsHi(P, _srch);
         let _chg = false;
-        for (const b of BANDS) { const hi = _wantHi && b === sensorOrder[0]; if (sensorsOn[b] && !!sensorHi[b] !== hi) { setBandLevel(b, hi ? 2 : 1, true); _chg = true; } }
-        if (_chg) comThink('p', 'gain', '感度 → ' + (_wantHi ? (BAND_JP[sensorOrder[0]] || sensorOrder[0]) + 'を高感度 (捜索・受信距離×' + HI_RANGE + '・漏れ+1本分)' : '標準 (聞こえた/隠れる — 漏らさない)'));
+        for (const b of BANDS) { const want = _wantHi && b === sensorOrder[0] ? 3 : 2; if (sensorsOn[b] && sensorLv[b] !== want) { setBandLevel(b, want, true); _chg = true; } }
+        if (_chg) comThink('p', 'gain', '感度 → ' + (_wantHi ? (BAND_JP[sensorOrder[0]] || sensorOrder[0]) + 'を強 (捜索・受信距離×' + HI_RANGE + '・漏れ+1本分)' : '中 (聞こえた/隠れる — 漏らさない)'));
     }
     // 第41弾: 追跡する信号の乗り換えは方針どおり — 追跡を始めて commitSec 秒は、もっと艦影らしい信号 (switchMargin 以上) でなければ変えない
     {
@@ -13020,7 +13112,7 @@ function comPilotStep() {
     if (!contact && D.partHunt && partSlotsUsed() < partSlotsMax()) { // 第41弾: 寄り道は 貪欲さ − 隠密性×0.45 ≥ 0.05 の時だけ・距離も方針で
         let ps = null, pd = D.partRange;
         for (const st of structures) {
-            const ok = st.type === 'derelict' ? !st.salvaged : st.type === 'colony' ? !st._partP && !st.hacked : false;
+            const ok = st.type === 'derelict' ? !st.salvaged && st.discovered : st.type === 'colony' ? !st._partP && !st.hacked : false; // 第44弾: 見つけた難破船だけ
             if (!ok) continue; const d = Math.hypot(st.x - player.x, st.y - player.y); if (d < pd) { pd = d; ps = st; }
         }
         for (const n of resourceNodes) { if (n._partP || n.owner === 'player') continue; const d = Math.hypot(n.x - player.x, n.y - player.y); if (d < pd) { pd = d; ps = n; } }
@@ -13490,6 +13582,7 @@ function xoEvaluate() {
     // 第31弾: 監視網の円 (自分のノード/コロニーの近くで強いシグネチャ)
     { let z = null; for (const q of sigZones) if (q.side === 'p' && (!z || q.life > z.life)) z = q;
       if (z) return { tone: 'go', text: '監視網の円 SIG-' + sigNo(z.sid) + ' (方位' + compassDeg(Math.atan2(z.y - player.y, z.x - player.x)) + '° ' + Math.round(Math.hypot(z.x - player.x, z.y - player.y) / 100) * 100 + 'u) — 円の中のどこかで強いシグネチャ' }; }
+    if (!sensorOrder.length) { const rxa0 = rxLevels(true); const hot = BANDS.filter(b => rxa0[b] >= 0.5).map(b => BAND_JP[b] || b).join('・'); return { tone: 'info', text: '全帯域OFF — 何も聴こえない代わりに自艦は漏らさない' + (hot ? ' (' + hot + 'に反応あり — 帯域バーをタップで聴ける)' : ' (聴く帯域をONにしないと相手に気付けない)') }; } // 第44弾
     // 第31弾 (オーナー): OFFの帯域に反応 → ONにすれば方位が取れる
     { const rxa = rxLevels(true); let ob = null; for (const b of BANDS) if (!sensorsOn[b] && rxa[b] >= 0.5 && (!ob || rxa[b] > rxa[ob])) ob = b;
       if (ob) return { tone: 'info', text: 'OFFの' + (BAND_JP[ob] || ob) + '帯に反応 — ONにすれば方位が取れる (2本目以降は自艦も漏れる)' }; }
@@ -14067,8 +14160,9 @@ function stepWorld() {
         // 構造物・ステーションの発見チェック (有視界距離内に入ると発見)
         if (player && player.hp > 0) {
             [...structures, ...stations].forEach(s => {
-                if (!s.discovered && inPlayerVision(s.x, s.y)) { // 第21弾: 有視界の形 (視線) で
+                if (!s.discovered && (inPlayerVision(s.x, s.y) || droneVisionSees(s.x, s.y))) { // 第21弾: 有視界の形 (視線) で / 第44弾: ドローンの視界でも
                     s.discovered = true;
+                    if (s.type === 'derelict') { logMessage('SIGNAL: 難破船を発見 — 近くに留まれば部品を回収できる (以後、海図に残る)', 'system-msg'); matchRecEvent('derFound', s.x, s.y, '難破船を発見'); }
                 }
             });
         }
@@ -14195,6 +14289,7 @@ function renderWorld() {
         drawNoiseMakers(ctx);
         drawLures(ctx); // 第21弾
         drawFieldSignals(ctx); // 第31弾
+        drawDroneVision(ctx); // 第44弾: ドローンの有視界
         drawMines(ctx); // 第32弾
         drawLootTraces(ctx); drawConvoys(ctx); // 第34弾
         drawOwnOrdnanceMarkers(ctx);
