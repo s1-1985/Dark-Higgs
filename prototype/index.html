@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261109d">
+    <link rel="stylesheet" href="style.css?v=20261109e">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -769,7 +769,7 @@
     </div>
 
     <!-- §4-4: 長押しラジアルメニュー (移動/射撃/キャンセル) -->
-    <div id="long-press-menu" style="display:none; position:fixed; z-index:800; pointer-events:auto; user-select:none; width:108px; background:rgba(0,8,18,0.96); border:1px solid rgba(0,255,170,0.5); border-radius:6px; padding:6px; font-family:'Orbitron',monospace; font-size:9px; box-shadow:0 0 14px rgba(0,255,170,0.12);">
+    <div id="long-press-menu" style="display:none; position:fixed; max-height:calc(100vh - 12px); overflow-y:auto; overscroll-behavior:contain; z-index:800; pointer-events:auto; user-select:none; width:108px; background:rgba(0,8,18,0.96); border:1px solid rgba(0,255,170,0.5); border-radius:6px; padding:6px; font-family:'Orbitron',monospace; font-size:9px; box-shadow:0 0 14px rgba(0,255,170,0.12);">
         <button onclick="lpmSelectMove()" style="display:block; width:100%; background:#001a0e; border:1px solid #00ffaa; color:#00ffaa; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">▶ 移動</button>
         <button onclick="lpmSelectFire()" style="display:block; width:100%; background:#1a0008; border:1px solid #ff4466; color:#ff4466; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">⊕ 射撃</button>
         <button onclick="lpmSelectStop()" style="display:block; width:100%; background:#140a00; border:1px solid #ffaa44; color:#ffbb66; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">■ 停止</button>
@@ -781,7 +781,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261109d"></script>
+    <script src="game.js?v=20261109e"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
