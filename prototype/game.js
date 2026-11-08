@@ -418,7 +418,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261109d';
+const SPRITE_VER = '20261109e';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -9126,6 +9126,7 @@ function _drawEstCircle(ctx, sid, sa, locked) {
 }
 
 // §4-4: 長押しラジアルメニュー表示/非表示
+const _lpmOpen = {}; // 第53弾: 個別の指示を開いている種類
 function showLongPressMenu(sx, sy) {
     const menu = document.getElementById('long-press-menu');
     if (!menu) return;
@@ -9141,13 +9142,16 @@ function showLongPressMenu(sx, sy) {
             h.push('<div class="lpm-drow"><span>' + DRONE_SPEC[t].label + '×' + counts[t] + '<small>' + (o && o.kind !== 'return' ? (o.kind === 'patrol' ? '哨戒中' : '攻撃中') : '護衛中') + '</small></span>'
                 + '<button data-t="' + t + '" data-k="patrol">哨戒</button><button data-t="' + t + '" data-k="attack">攻撃</button><button data-t="' + t + '" data-k="return">帰還</button>'
                 + (t === 'scout' ? '<button data-t="scout" data-k="ping" title="哨戒機の周り' + SCOUT_PING_R + 'uの艦の位置が分かる。哨戒機の位置が聞かれる (30秒に1回)">探信</button>' : '') + '</div>');
-            if (counts[t] > 1) { // 第50弾: 1機ずつの指示
+            if (counts[t] > 1) { // 第50弾: 1機ずつの指示 (第53弾: 「個別 ▾」を押すと開く — 機数が多いとメニューが長くなって見切れていた)
+                h.push('<div class="lpm-drow lpm-tog"><button data-tog="' + t + '">個別の指示 ▾ (' + counts[t] + '機)</button></div>');
+                h.push('<div class="lpm-units" data-units="' + t + '" style="display:' + (_lpmOpen[t] ? 'block' : 'none') + '">');
                 for (const d of playerDrones) {
                     if (d.type !== t || d.hp <= 0) continue;
                     const oo = d._own;
                     h.push('<div class="lpm-drow lpm-unit"><span>' + _droneName(d) + '<small>' + (oo ? (oo.kind === 'patrol' ? '哨戒中' : oo.kind === 'attack' ? '攻撃中' : '帰還中') : '全機と同じ') + (d._ammo !== undefined ? ' · 弾' + Math.round(d._ammo) : '') + '</small></span>'
                         + '<button data-t="' + t + '" data-no="' + d._no + '" data-k="patrol">哨戒</button><button data-t="' + t + '" data-no="' + d._no + '" data-k="attack">攻撃</button><button data-t="' + t + '" data-no="' + d._no + '" data-k="return">帰還</button></div>');
                 }
+                h.push('</div>');
             }
         }
         box.innerHTML = h.length ? '<div class="lpm-dhead">ドローン → この地点</div>' + h.join('') : '';
@@ -9235,6 +9239,13 @@ function droneOrder(type, kind, x, y, no) {
     const box = document.getElementById('lpm-drones');
     if (!box) return;
     box.addEventListener('click', (ev) => {
+        const tg = ev.target.closest('button[data-tog]');
+        if (tg) { // 個別の指示の開閉 (メニューは閉じない)
+            const t = tg.dataset.tog; _lpmOpen[t] = !_lpmOpen[t];
+            const u = box.querySelector('[data-units="' + t + '"]'); if (u) u.style.display = _lpmOpen[t] ? 'block' : 'none';
+            const m = document.getElementById('long-press-menu'); if (m) { const vh = window.innerHeight, r = m.getBoundingClientRect(); if (r.bottom > vh - 6) m.style.top = Math.max(6, vh - r.height - 6) + 'px'; }
+            return;
+        }
         const b = ev.target.closest('button[data-t]');
         if (!b || !_lpmWorld || !player) return;
         hideLongPressMenu();
@@ -12133,8 +12144,10 @@ class Drone {
             if (o) { const p = this._orbitPt(ax, ay, DRONE_ATTACK_ORBIT, 1); gx = p.x; gy = p.y; }
             else if (player) {
                 // 護衛: 自艦の斜め後ろに付き従う
-                const h = (player.angle || 0) + Math.PI * 0.75;
-                gx = player.x + Math.cos(h) * 380; gy = player.y + Math.sin(h) * 380;
+                // 第53弾: 同じ種類は番号ごとに別の位置に付く (全員が同じ点を目指して重なっていた) — 斜め後ろを中心に左右へ振り分け・外側ほど遠く
+                const k = (this._no || 1) - 1, side = k % 2 ? 1 : -1, step = Math.ceil(k / 2);
+                const h = (player.angle || 0) + Math.PI * 0.75 + (k ? side * (0.35 + 0.3 * (step - 1)) : 0), rr = 380 + 80 * step;
+                gx = player.x + Math.cos(h) * rr; gy = player.y + Math.sin(h) * rr;
             } else { gx = this.x; gy = this.y; }
             const ma = Math.atan2(gy - this.y, gx - this.x);
             if (Math.hypot(gx - this.x, gy - this.y) > 40) { const da = ((ma - this.angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI; this.angle += Math.max(-TECH_TURN, Math.min(TECH_TURN, da)); }

@@ -2606,3 +2606,7 @@ body.in-game #zoom-ctl #btn-pause.on { background: rgba(80,60,0,0.85); color: #f
 #debug-panel .dbg-sec { padding: 4px 8px; border-bottom: 1px solid #33152a; }
 #debug-panel .dbg-sec h4 { margin: 2px 0 3px; font-size: 9px; color: #ff99dd; font-weight: normal; }
 #debug-panel .dbg-info { white-space: pre-wrap; color: #cfa; line-height: 1.5; font-size: 8px; }
+
+/* 第53弾: 長押しメニューの個別指示の開閉 */
+#lpm-drones .lpm-tog button { flex: 1; text-align: left; }
+#lpm-drones .lpm-units { margin-bottom: 2px; }
