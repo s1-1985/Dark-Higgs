@@ -418,6 +418,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
+const SPRITE_VER = '20261108e';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -459,6 +460,8 @@ const SPRITE_FILES = {
     drone_buoy:         'assets/drone_buoy.png',
     bg_space: 'assets/bg_space.jpg', bg_gas: 'assets/bg_gas.jpg', // 第38弾: 背景
     fx_saber_slash:     'assets/fx_saber_slash.png', fx_saber_blade: 'assets/fx_saber_blade.png', fx_saber_hit: 'assets/fx_saber_hit.png', // 第36弾
+    drone_mech_e: 'assets/drone_mech_e.png', drone_scout_e: 'assets/drone_scout_e.png', drone_missile_e: 'assets/drone_missile_e.png', // 第49弾: 敵側のデザイン (黒×赤)
+    bcn_heat: 'assets/bcn_heat.png', bcn_optic: 'assets/bcn_optic.png', bcn_em: 'assets/bcn_em.png', bcn_higgs: 'assets/bcn_higgs.png', // 第49弾: 帯域ビーコン
     drone_mech:         'assets/drone_mech.png', // 第20弾: 人型 (Higgsfield生成・透過256px)
     drone_barrier:      'assets/drone_barrier.png',      // 第22弾: ビームの盾 (Higgsfield生成・透過256px)
     fx_barrier_shield:  'assets/fx_barrier_shield.png',  // 第22弾: 盾の泡 (黒背景・加算)
@@ -486,7 +489,7 @@ const SPRITE_FILES = {
 const SPRITES = {};
 for (const k in SPRITE_FILES) {
     const img = new Image();
-    img.src = SPRITE_FILES[k];
+    img.src = SPRITE_FILES[k] + '?v=' + SPRITE_VER; // 第49弾: 絵を差し替えても古い画像がキャッシュに残らないように
     SPRITES[k] = img;
 }
 // 敵タイプ → スプライトキー
@@ -1231,9 +1234,9 @@ const DRONE_PATROL_R = 800, DRONE_ATTACK_ORBIT = 600, DRONE_SIGHT = 1200, DRONE_
 const DRONE_VIS = { attack: 900, scout: 2000, mech: 1000, buoy: 800 }; // 第36弾: 哨戒機 1000→2000・戦闘機 600→900・Tech 500→1000
 // ═══ 第36弾 (オーナー指示・数値は実装で決めた値): ドローンの機動 ═══
 // 戦闘機: 一撃離脱。機首の前±12°に入った時だけ機銃。突き抜けて離脱し、旋回して次の航過。後退・停止はしない
-const FTR_TURN = 0.05, FTR_ACC = 0.12, FTR_ARC = 12 * Math.PI / 180, FTR_GUN_RANGE = 900, FTR_ENGAGE_R = 2200;
+const FTR_TURN = 0.065, FTR_ACC = 0.12, FTR_ARC = 12 * Math.PI / 180, FTR_GUN_RANGE = 900, FTR_ENGAGE_R = 2200;
 const ENEMY_FTR_SPEED = 4.4; // 自機の戦闘機と同じ
-const FTR_FIRE_CD = 7, FTR_DMG_SCALE = 0.25, FTR_BREAK_D = 260, FTR_EXTEND_F = 80, FTR_REATTACK_D = 1300;
+const FTR_FIRE_CD = 7, FTR_DMG_SCALE = 0.25, FTR_BREAK_D = 220, FTR_EXTEND_F = 40, FTR_REATTACK_D = 600; // 第49弾: 一撃離脱を短く (旧 260/80/1300 — 敵の周りを大きくぐるぐる回って攻撃が減っていた)
 // 哨戒機: 機首の向きにだけ進む・自艦の前方を半径1800uで周回。聴音 (方位を送る)・航跡の検出・ミサイルの早期警戒・探信 (指示で1回)
 const SCOUT_TURN = 0.03, SCOUT_ESCORT_R = 1800, SCOUT_LISTEN_R = 6000, SCOUT_WAKE_R = 2500, SCOUT_MSL_WARN_R = 3000, SCOUT_PING_R = 3500, SCOUT_PING_CD = 1800;
 // Tech (人型兵器): 推進器で全方向に動く・慣性あり。中=小銃3連射 / 遠=肩のミサイル (4発・自艦の近くで30秒に1発補充) / 近=ビームサーベル
@@ -2021,13 +2024,10 @@ canvas.addEventListener('mousedown', (e) => {
         if (pendingLure) { const ty = pendingLure; pendingLure = null; deployDrone(ty, worldX, worldY); return; } // 第21弾: 囮の射出地点
         { const _mcr = canvas.getBoundingClientRect(); if (tryTapBlip(e.clientX - _mcr.left, e.clientY - _mcr.top) || tryTapCircle(e.clientX - _mcr.left, e.clientY - _mcr.top)) return; }
         // Find clicked enemy
-        let clickedEnemy = enemies.find(en => en.visible && Math.hypot(en.x - worldX, en.y - worldY) < en.radius * 2);
+        let clickedEnemy = pickEnemyAt(worldX, worldY, en => en.radius * 2 + 10 / camera.zoom);
 
         if (clickedEnemy) {
-            player.targetEntity = clickedEnemy;
-            player.manualTarget = true; // 手動ターゲット指定 (自動ロックオン上書き防止)
-            createClickEffect(clickedEnemy.x, clickedEnemy.y, '#ff4d4d');
-            logMessage(`TACTICAL: ターゲットをロック。射撃解を計算中...`, 'system-msg');
+            lockEntity(clickedEnemy); // 第49弾: 手動ロック (もう一度で解除・自動の上書きを防ぐ)
         } else {
             // 第20弾: マウスでも長押し(0.5秒・動かさない)で 移動/射撃/ドローン指示 のメニュー (旧: タッチだけだった)
             clearTimeout(_mouseHold.timer);
@@ -2241,13 +2241,8 @@ canvas.addEventListener('touchend', (e) => {
         const { x: worldX, y: worldY } = screenToWorld(touch.startX, touch.startY);
         // タッチはロックオン判定を広く取る（指で画面を押すと視認が難しいため）
         const tapRadius = en => en.radius * 6 + 20;
-        let clickedEnemy = enemies.find(en => en.visible && Math.hypot(en.x - worldX, en.y - worldY) < tapRadius(en));
-        if (clickedEnemy) {
-            player.targetEntity = clickedEnemy;
-            player.manualTarget = true;
-            createClickEffect(clickedEnemy.x, clickedEnemy.y, '#ff4d4d');
-            logMessage(`TACTICAL: ターゲットをロック。射撃解を計算中...`, 'system-msg');
-        }
+        let clickedEnemy = pickEnemyAt(worldX, worldY, tapRadius);
+        if (clickedEnemy) lockEntity(clickedEnemy); // 第49弾
         // 空き領域タップは何もしない (ウェイポイントは長押しで)
     }
     // 第16弾: ピンチ後に1本指が残っても、全部の指を離すまではパンしない
@@ -2981,7 +2976,7 @@ class Projectile {
             }
         } else if (this.type === 'missile') {
             // ミサイル弾体スプライト
-            const _mslImg = SPRITES['drone_missile'];
+            const _mslImg = (this.isPlayer === false && spriteReady(SPRITES['drone_missile_e'])) ? SPRITES['drone_missile_e'] : SPRITES['drone_missile']; // 第49弾: 敵のミサイルは敵側のデザイン
             if (spriteReady(_mslImg)) {
                 ctx.drawImage(_mslImg, -16, -16, 32, 32); // 透過スプライト (第16弾)
             } else {
@@ -3104,6 +3099,82 @@ function beamRevealsShooter(ox, oy, byPlayer, shooter) {
 // ═══════════════════════════════════════════════════════════════
 let _curWeapon = 'kinetic';
 function currentWeapon() { return _curWeapon; }
+
+// ═══ 第49弾 (オーナー): ロックオン — どの目標を狙っているか分かり、プレイヤーが任意で切り替えられる ═══
+// 目標 = 敵艦・艦載機 (見えている/推定で掴んでいる) か、敵艦に結び付かない推定円 (信号)。タップ / Tab / 戦闘バーの ◀▶ で切り替え、解除もできる。
+// ロックした目標は 自動攻撃 (完全ロック) ・射撃命令 (推定) ・ドローンの優先目標 になる。
+const _ENT_JP = { destroyer: '攻撃型', corvette: '潜航型', carrier: '空母', fighter: '艦載機' };
+function lockableTargets() {
+    const out = [];
+    if (!player) return out;
+    const seen = new Set();
+    for (const e of enemies) {
+        if (e.hp <= 0 || e._dying) continue;
+        const full = !!e.inVision;
+        if (!full && !(e.visible && e.contactLife > 0)) continue;
+        const ex = full ? e.x : (e.displayX ?? e.x), ey = full ? e.y : (e.displayY ?? e.y);
+        out.push({ kind: 'ent', e, full, d: Math.hypot(ex - player.x, ey - player.y), ship: e.type !== 'fighter' }); seen.add(e.uid);
+    }
+    for (const sid in _signalAnalysis) { // 推定円 (敵艦に結び付く信号は、その艦。結び付かない囮・不明な信号もロックできる)
+        const sa = _signalAnalysis[sid]; if (!sa || !sa.fix || _srcKnown[sid]) continue;
+        const est = trackEstimate(sa, 0), d = Math.hypot(est.x - player.x, est.y - player.y);
+        if (/^e-/.test(sid)) { const e = enemyBySid(sid); if (!e || e.hp <= 0 || seen.has(e.uid)) continue; out.push({ kind: 'sig', sid, e, full: false, d, ship: e.type !== 'fighter' }); seen.add(e.uid); }
+        else out.push({ kind: 'sig', sid, full: false, d, ship: false });
+    }
+    out.sort((a, b) => (b.ship - a.ship) || a.d - b.d);
+    return out;
+}
+let _lockF = -1e9;
+function lockEntity(e) {
+    if (!player || !e || e.hp <= 0) return;
+    if (player.manualTarget && player.targetEntity === e) { clearLockTarget(); return; } // もう一度タップ=解除
+    player.targetEntity = e; player.manualTarget = true; _lockF = _frameCount;
+    const sid = enemySid(e); if (_signalAnalysis[sid]) window._lockSignal(sid);
+    createClickEffect(e.x, e.y, '#ff4d4d');
+    const lk = playerLockInfo(e);
+    logMessage('LOCK: ' + (_ENT_JP[e.type] || '敵') + 'をロック (' + (lk.full ? '目視' : '推定') + '・' + Math.round(lk.dist / 100) * 100 + 'u)' + (lk.full ? '' : ' — 長押し→射撃 か 戦闘バーの「撃つ」で推定点へ'), 'system-msg');
+    playSound('ui');
+}
+function lockSignalTarget(sid) {
+    window._lockSignal(sid); _lockF = _frameCount;
+    const e = /^e-/.test(sid) ? enemyBySid(sid) : null;
+    if (e && e.hp > 0) { player.targetEntity = e; player.manualTarget = true; }
+    else { player.targetEntity = null; player.manualTarget = false; }
+    logMessage('LOCK: SIG-' + sigNo(sid) + ' をロック (推定円・' + identInfo(sid).txt + ') — 戦闘バーの「撃つ」で推定点へ撃つ', 'system-msg');
+    playSound('ui');
+}
+function clearLockTarget() {
+    if (!player) return;
+    player.targetEntity = null; player.manualTarget = false; player._fireOrder = null;
+    window._lockSignal(null); _lockF = _frameCount;
+    logMessage('LOCK: ロックを解除 (自動で最寄りを狙う)', 'system-msg'); playSound('ui');
+}
+function cycleLockTarget(dir) {
+    const L = lockableTargets();
+    if (!L.length) { logMessage('LOCK: ロックできる目標が無い', 'warning-msg'); return; }
+    const te = player.manualTarget ? player.targetEntity : null;
+    let i = L.findIndex(t => (t.e && t.e === te) || (!te && t.sid && t.sid === lockedSignalId));
+    i = (i + (dir || 1) + L.length * 2) % L.length;
+    const t = L[i];
+    if (t.kind === 'ent') { if (player.manualTarget && player.targetEntity === t.e) return; player.manualTarget = false; lockEntity(t.e); }
+    else lockSignalTarget(t.sid);
+}
+function lockLabel() {
+    const te = player && player.targetEntity;
+    if (te && te.hp > 0) { const lk = playerLockInfo(te); if (lk.full || lk.assumed) return (player.manualTarget ? '' : '自動 ') + (_ENT_JP[te.type] || '敵') + ' ' + (lk.full ? '目視' : '推定') + ' ' + Math.round(lk.dist / 100) * 100 + 'u'; }
+    if (lockedSignalId) return 'SIG-' + sigNo(lockedSignalId) + ' ' + identInfo(lockedSignalId).short;
+    return '—';
+}
+// タップ位置に一番近い見えている敵 (艦を優先)
+function pickEnemyAt(wx, wy, radFn) {
+    let best = null, bd = Infinity;
+    for (const en of enemies) {
+        if (!en.visible || en.hp <= 0) continue;
+        const d = Math.hypot(en.x - wx, en.y - wy) - (en.type !== 'fighter' ? en.radius * 0.5 : 0);
+        if (d < radFn(en) && d < bd) { bd = d; best = en; }
+    }
+    return best;
+}
 
 // 目標に対するロック状態: full=有視界(またはその直後の保持) / assumed=センサー推定のみ
 function playerLockInfo(te) {
@@ -5229,16 +5300,27 @@ class Ship {
 
     // ロックオン・レティクル: 完全ロック(視野内)=緑実線 / 想定ロック(推定位置)=琥珀破線。画面上で一定の大きさ
     _drawLockReticle(ctx) {
-        if (!player || player.targetEntity !== this || this.hp <= 0) return;
+        if (!player || this.hp <= 0) return;
+        const zc = 1 / camera.zoom;
+        const isLock = player.targetEntity === this;
+        if (!isLock) { // 第49弾: ロックできる他の目標は細い印だけ (タップで切り替え)
+            if (!this.inVision || Math.hypot(this.x - player.x, this.y - player.y) > 7000) return;
+            const lr0 = Math.max(this.radius * 2.6 + 4, 12 * zc), b0 = lr0 * 0.4;
+            ctx.save(); ctx.translate(this.x, this.y); ctx.strokeStyle = 'rgba(255,110,110,0.40)'; ctx.lineWidth = 1 * zc;
+            for (let q = 0; q < 4; q++) { const sx = (q & 1) ? 1 : -1, sy = (q & 2) ? 1 : -1; ctx.beginPath(); ctx.moveTo(sx * lr0, sy * (lr0 - b0)); ctx.lineTo(sx * lr0, sy * lr0); ctx.lineTo(sx * (lr0 - b0), sy * lr0); ctx.stroke(); }
+            ctx.restore(); return;
+        }
         const full = !!this.inVision;
         if (!full && !(this.contactLife > 0)) return;
         const lx = full ? this.x : this.displayX, ly = full ? this.y : this.displayY;
-        const zc = 1 / camera.zoom;
-        const lr = Math.max(this.radius * 3.2 + 6, 16 * zc);
+        const manual = !!player.manualTarget;
+        const t = Date.now() / 1000, pulse = 1 + 0.06 * Math.sin(t * 5);
+        const lr = Math.max(this.radius * 3.2 + 6, 16 * zc) * pulse;
+        const col = full ? (manual ? 'rgba(255,90,90,0.95)' : 'rgba(0,255,170,0.9)') : 'rgba(255,170,0,0.9)';
         ctx.save();
         ctx.translate(lx, ly);
-        ctx.strokeStyle = full ? 'rgba(0,255,170,0.9)' : 'rgba(255,170,0,0.85)';
-        ctx.lineWidth = 1.6 * zc;
+        ctx.strokeStyle = col;
+        ctx.lineWidth = (manual ? 2.2 : 1.6) * zc;
         if (!full) ctx.setLineDash([6 * zc, 6 * zc]);
         const b = lr * 0.55; // コーナーブラケットの腕の長さ
         for (let q = 0; q < 4; q++) {
@@ -5251,7 +5333,13 @@ class Ship {
             ctx.stroke();
         }
         ctx.setLineDash([]);
+        if (manual) { // 手動ロックは外側をゆっくり回る十字 (自動と見分ける)
+            ctx.globalAlpha = 0.6; ctx.rotate(t * 0.8);
+            for (let q = 0; q < 4; q++) { ctx.rotate(Math.PI / 2); ctx.beginPath(); ctx.moveTo(lr * 1.18, 0); ctx.lineTo(lr * 1.42, 0); ctx.stroke(); }
+        }
         ctx.restore();
+        const d0 = Math.round(Math.hypot(lx - player.x, ly - player.y) / 100) * 100;
+        queueTag(lx, ly - lr * 1.5, (manual ? 'LOCK ' : '自動 ') + (_ENT_JP[this.type] || '敵'), (full ? '目視 ' : '推定 ') + d0 + 'u', full ? (manual ? '#ff6a6a' : '#00ffaa') : '#ffb000', 'top', 1);
     }
 
     // センサー痕跡(不確実性サークル + AIロックオン候補) — フォグ/ヒッグスの「手前」に描く専用パス
@@ -8908,7 +8996,7 @@ function _drawEstCircle(ctx, sid, sa, locked) {
     for (let k = 0; k < 4; k++) { const a0 = k * Math.PI / 2, c0 = Math.cos(a0), s0 = Math.sin(a0); ctx.moveTo(cx + c0 * (R - 5 * inv), cy + s0 * (R - 5 * inv)); ctx.lineTo(cx + c0 * (R + 4 * inv), cy + s0 * (R + 4 * inv)); }
     ctx.stroke();
     // 名札 (円の上): 「SIG-xx 艦n%」だけ (第28弾: 説明書きは消す — オーナー)。中心に居るとは限らない
-    { const idn = identInfo(sid); queueTag(cx, cy - R, 'SIG-' + sigNo(sid), idn.known ? idn.short : '不明', col, 'top', (locked ? 1 : 0.75) * sa._fa);
+    { const idn = identInfo(sid); queueTag(cx, cy - R, (locked ? 'LOCK ' : '') + 'SIG-' + sigNo(sid), idn.known ? idn.short : '不明', locked ? '#ff7a6a' : col, 'top', (locked ? 1 : 0.75) * sa._fa);
       // 第44弾 (オーナー): 解析で艦影と特定した (艦影75%以上・または確認) 信号は、推定の中心に艦のしるしを霧の上に描く (中心に居るとは限らない。囮を艦と誤認していればそのまま艦として出る)
       if (idn.known && idn.p >= 0.75) {
           const gs = Math.max(120, 11 * inv);
@@ -9396,9 +9484,7 @@ function tryTapCircle(sx, sy) {
     }
     if (!best) return false;
     if (best.sid === lockedSignalId) return false; // 追跡中の円は移動のタップに譲る
-    window._lockSignal(best.sid);
-    playSound('ui');
-    logMessage(`TRACK: SIG-${sigNo(best.sid)} を追跡 (${identInfo(best.sid).txt})`, 'system-msg');
+    lockSignalTarget(best.sid); // 第49弾: 推定円もロックできる (追跡+射撃の目標)
     return true;
 }
 // タップ位置の近くに受信ブリップがあればその信号を追跡する。処理したら true
@@ -9409,9 +9495,7 @@ function tryTapBlip(sx, sy) {
         if (d < bd) { bd = d; best = b; }
     }
     if (!best || best.sid === 'intel') return false;
-    window._lockSignal(best.sid);
-    playSound('ui');
-    logMessage(`TRACK: SIG-${sigNo(best.sid)} を追跡`, 'system-msg');
+    lockSignalTarget(best.sid); // 第49弾: リング上の点もロック
     if (typeof window.syncSigLockedBar === 'function') window.syncSigLockedBar();
     return true;
 }
@@ -11592,7 +11676,7 @@ function drawLures(ctx) {
         ctx.globalAlpha = a;
         ctx.strokeStyle = L.kind === 'sos' ? '#00e5ff' : L.band ? ({ heat: '#ff8a4c', optic: '#ffe066', em: '#c48bff', higgs: '#66aaff' })[L.band] : '#c48bff'; ctx.fillStyle = ctx.strokeStyle; ctx.lineWidth = 1.5 * zc;
         const r = 8 * zc;
-        const _li = SPRITES[L.kind === 'sos' ? 'lure_sos' : 'lure_ship']; // 第21弾: 囮の絵
+        const _li = SPRITES[L.kind === 'sos' ? 'lure_sos' : (L.band && spriteReady(SPRITES['bcn_' + L.band]) ? 'bcn_' + L.band : 'lure_ship')]; // 第21弾: 囮の絵 (第49弾: ビーコンは帯域ごとの専用の絵)
         if (spriteReady(_li)) { const z = 34 * zc; ctx.drawImage(_li, L.x - z / 2, L.y - z / 2, z, z); }
         else { ctx.beginPath(); ctx.arc(L.x, L.y, r, 0, Math.PI * 2); ctx.stroke(); }
         if (L.phase === 'on') { ctx.beginPath(); ctx.arc(L.x, L.y, r * 2.2 + (t % 1200) / 1200 * r * 2, 0, Math.PI * 2); ctx.globalAlpha = a * 0.4; ctx.stroke(); }
@@ -11652,6 +11736,10 @@ class Drone {
     // 第20弾: このドローンが狙える敵 — 自艦が掴んでいる敵か、ドローン自身の目(1200u)で見えた敵。
     // 指示点(ax,ay)から leash を越えては追わない。自分で見つけた敵はデータリンクで自艦に知らせる
     _seeEnemy(range, ax, ay, leash) {
+        // 第49弾: プレイヤーが手動でロックした目標は、見えて・届く範囲ならドローンも最優先で狙う
+        const pt = player && player.manualTarget ? player.targetEntity : null;
+        if (pt && pt.hp > 0 && !pt._dying && (pt.visible || (this._seen && this._seen.has(pt))) && Math.hypot(pt.x - this.x, pt.y - this.y) < range * 1.5 && Math.hypot(pt.x - ax, pt.y - ay) <= leash) { this._lockPref = true; return pt; }
+        this._lockPref = false;
         let best = null, bd = range;
         for (const e of enemies) {
             if (e.hp <= 0 || e._dying) continue;
@@ -11736,10 +11824,16 @@ class Drone {
                 if (d < FTR_BREAK_D) { this._st = 'extend'; this._extT = FTR_EXTEND_F; this._jink = Math.random() < 0.5 ? -1 : 1; }
             } else {
                 // 離脱: 少しだけ横へ逃げながら直進し、十分離れたら反転 (旋回の速さで大きな弧を描く)
+                // 第49弾: 一定時間 (FTR_EXTEND_F) だけ真っすぐ抜けたら、すぐ全力で旋回して相手へ向き直る (旧: 1300u離れるまで直進 → 大きな円を描いて攻撃が減っていた)
                 this._extT -= 1;
-                const ex = this.x + Math.cos(this.angle + 0.25 * this._jink) * 400, ey = this.y + Math.sin(this.angle + 0.25 * this._jink) * 400;
-                this._fly(ex, ey, vMax, turn * 0.5, acc);
-                if (this._extT <= 0 && d > FTR_REATTACK_D) this._st = 'run';
+                if (this._extT > 0 || d < FTR_REATTACK_D) {
+                    const ex = this.x + Math.cos(this.angle + 0.25 * this._jink) * 400, ey = this.y + Math.sin(this.angle + 0.25 * this._jink) * 400;
+                    this._fly(ex, ey, vMax, turn * 0.5, acc);
+                } else {
+                    const lead2 = d / 12, ttx = tgt.x + (tgt.vx || Math.cos(tgt.angle || 0) * (tgt.currentSpeed || tgt._spd || 0)) * lead2, tty = tgt.y + (tgt.vy || Math.sin(tgt.angle || 0) * (tgt.currentSpeed || tgt._spd || 0)) * lead2;
+                    const da2 = this._fly(ttx, tty, vMax * 0.9, turn, acc);
+                    if (Math.abs(da2) < 0.45) this._st = 'run'; // 相手のほうへ向き直ったら次の突入
+                }
             }
             return;
         }
@@ -11798,7 +11892,7 @@ class Drone {
                     const pr = new Projectile(this.x, this.y, tgt, true, 'missile', TECH_MSL_SCALE); pr.fromDrone = true; projectiles.push(pr);
                     this.msl--; this._mslCD = TECH_MSL_CD;
                 } else if (d < TECH_RIFLE_RANGE && this.fireCD <= 0) {
-                    { const _dp = new Projectile(this.x, this.y, tgt, true, 'kinetic', TECH_RIFLE_SCALE); _dp.fromDrone = true; projectiles.push(_dp); }
+                    { const _dp = new Projectile(this.x, this.y, tgt, true, 'kinetic', TECH_RIFLE_SCALE); _dp.fromDrone = true; projectiles.push(_dp); this._flashF = _frameCount; }
                     this._burst = (this._burst || 0) + 1;
                     if (this._burst >= 3) { this._burst = 0; this.fireCD = TECH_RIFLE_CD; } else this.fireCD = 8;
                 }
@@ -11907,6 +12001,7 @@ class Drone {
                 const L = this._lastSeen, dt = _frameCount - L.f;
                 tgt = { x: L.x + L.vx * dt, y: L.y + L.vy * dt, hp: L.e.hp, angle: L.e.angle, _ghost: true };
             }
+            this._tgtEnt = tgt && !tgt._ghost ? tgt : null; // 第49弾: 今狙っている相手 (線で見せる)
             if (this.type === 'scout') this._scoutDuties();
             if (this.type === 'attack') this._fighterStep(tgt, o, ax, ay);
             else if (this.type === 'mech') this._techStep(tgt, o, ax, ay);
@@ -11954,6 +12049,13 @@ class Drone {
     }
     draw(ctx) {
         const a = Math.min(1, this.life / 90);
+        // 第49弾: ドローンが今狙っている相手への細い線 (見えている相手だけ。ロックした目標なら太く赤く)
+        { const tg = this._tgtEnt;
+          if (tg && tg.hp > 0 && (tg.inVision || tg.visible) && Math.hypot(tg.x - this.x, tg.y - this.y) < 2600) {
+              const lp = !!this._lockPref;
+              ctx.save(); ctx.globalAlpha = lp ? 0.55 : 0.28; ctx.strokeStyle = lp ? '#ff6a5a' : '#ffb060'; ctx.lineWidth = (lp ? 1.6 : 1) / camera.zoom;
+              ctx.setLineDash([5 / camera.zoom, 6 / camera.zoom]); ctx.beginPath(); ctx.moveTo(this.x, this.y); ctx.lineTo(tg.x, tg.y); ctx.stroke(); ctx.restore();
+          } }
         ctx.save();
         ctx.globalAlpha = a;
         ctx.translate(this.x, this.y);
@@ -11962,15 +12064,32 @@ class Drone {
         if (_zs > 1) ctx.scale(_zs, _zs);
         if (this.type === 'mech' && spriteReady(SPRITES['drone_mech'])) {
             // 第20弾: 人型スプライト (上が前)。艦首方向へ向く
-            ctx.rotate(this.angle + Math.PI / 2);
+            // 第49弾 (オーナー「Techにアニメーション」): 手続きのアニメ — バックパックの推進炎 (速さで長く・ゆらぐ) ・浮遊の上下 ・進む向きへの傾き ・小銃/斬撃の閃光
+            const _mt = _frameCount + this._id * 7, _mv = Math.hypot(this.vx || 0, this.vy || 0);
+            const _rot = this.angle + Math.PI / 2;
+            const _lean = Math.max(-0.16, Math.min(0.16, ((this.vx || 0) * -Math.sin(this.angle) + (this.vy || 0) * Math.cos(this.angle)) * 0.12)); // 横へ動く向きへ傾く
+            const _bob = Math.sin(_mt * 0.07) * 0.9 + (_mv < 0.3 ? Math.sin(_mt * 0.035) * 0.8 : 0);
+            ctx.rotate(_rot + _lean);
+            // 推進炎 (機体の後ろ=画像の下側・左右2つ)
+            { const fl = 5 + _mv * 4 + Math.sin(_mt * 0.7) * 1.6 + (this._dash > 0 ? 9 : 0);
+              ctx.globalCompositeOperation = 'lighter';
+              for (const fx of [-6, 6]) { const g = ctx.createLinearGradient(fx, 12, fx, 12 + fl);
+                  g.addColorStop(0, 'rgba(160,240,255,0.85)'); g.addColorStop(0.5, 'rgba(60,170,255,0.45)'); g.addColorStop(1, 'rgba(0,80,255,0)');
+                  ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(fx - 2.2, 12); ctx.lineTo(fx + 2.2, 12); ctx.lineTo(fx, 12 + fl); ctx.closePath(); ctx.fill(); }
+              ctx.globalCompositeOperation = 'source-over'; }
+            ctx.translate(0, _bob);
             ctx.drawImage(SPRITES['drone_mech'], -20, -20, 40, 40);
+            if (this._flashF && _frameCount - this._flashF < 4) { // 小銃の発砲の閃光
+                ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = 'rgba(255,230,140,0.9)'; ctx.beginPath(); ctx.arc(-13, -19, 3 + Math.random() * 2, 0, Math.PI * 2); ctx.fill(); ctx.globalCompositeOperation = 'source-over';
+            }
             if ((this._dash > 0 || this._slash > 0) && spriteReady(SPRITES.fx_saber_blade)) { // 第36弾: ビームサーベルを抜いている
                 ctx.globalCompositeOperation = 'lighter';
                 const sw = this._slash > 0 ? (1 - this._slash / 24) * 2.4 - 1.2 : -0.5;
                 ctx.save(); ctx.translate(12, -6); ctx.rotate(sw); ctx.drawImage(SPRITES.fx_saber_blade, -4, -46, 8, 46); ctx.restore();
                 ctx.globalCompositeOperation = 'source-over';
             }
-            ctx.rotate(-(this.angle + Math.PI / 2));
+            ctx.translate(0, -_bob);
+            ctx.rotate(-(_rot + _lean));
         } else if (this.type === 'mech') {
             // 人型 (スプライト読み込み前のベクター): 肩の重砲・胴・脚。艦首方向へ向く
             ctx.rotate(this.angle + Math.PI / 2);
@@ -13195,6 +13314,11 @@ function setCombatMode(k, v) {
     if (typeof playSound === 'function') playSound('ui');
     logMessage('操艦: 戦闘モード — ' + _CM_JP[combatMode.mode] + '・間合い' + _CM_JP[combatMode.range] + '・' + _CM_JP[combatMode.prio] + '優先' + (combatMode.mode === 'manual' ? ' (移動は自分で指示)' : ''), 'system-msg');
 }
+(() => { // 第49弾: 戦闘バーの目標の操作
+    const on = (id, f) => document.getElementById(id)?.addEventListener('click', (ev) => { ev.stopPropagation(); if (!comDemo && player && player.hp > 0) f(); });
+    on('cb-next', () => cycleLockTarget(1)); on('cb-prev', () => cycleLockTarget(-1));
+    on('cb-clear', () => clearLockTarget()); on('cb-fire', () => issueFireOrder());
+})();
 let _cbVis = null, _cbWhy = null;
 function updateCombatBar() {
     const bar = document.getElementById('combat-bar');
@@ -13210,6 +13334,7 @@ function updateCombatBar() {
     }
     if (show !== _cbVis) { _cbVis = show; bar.classList.toggle('hidden', !show); if (show) syncCombatBar(); }
     if (show) {
+        const tn = document.getElementById('cb-tname'); if (tn) { const L = lockLabel(); if (tn.textContent !== L) tn.textContent = L; }
         const why = combatMode.mode === 'manual' ? '' : (_CMWHY_JP[player._cmWhy] || '');
         if (why !== _cbWhy) { _cbWhy = why; const st = document.getElementById('cb-state'); if (st) st.textContent = why; }
     }
@@ -14142,6 +14267,7 @@ window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
     if (k === '+' || k === '=' || k === ';') { zoomStep(1.25); return; } // ズームは押しっぱなしでも続ける
     if (k === '-') { zoomStep(0.8); return; }
+    if (k === 'tab') { e.preventDefault(); if (!e.repeat && !comDemo) cycleLockTarget(e.shiftKey ? -1 : 1); return; } // 第49弾: 目標の切替
     if (e.repeat) return;
     if (k === 'f') issueFireOrder();
     else if (k === 't') trackNextSignal();

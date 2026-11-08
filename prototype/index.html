@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261108d">
+    <link rel="stylesheet" href="style.css?v=20261108e">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -305,6 +305,7 @@
                 <div class="cb-grp" data-k="mode"><span class="cb-lab">機動</span><button data-v="face" title="艦首を相手に向けたまま間合いを保つ">正対</button><button data-v="flank" title="相手の後方へ大きく回り込む (後方被弾×1.5を狙う)">回り込み</button><button data-v="manual" title="自分で操艦する">手動</button></div>
                 <div class="cb-grp" data-k="range"><span class="cb-lab">間合い</span><button data-v="auto" title="今の兵装に合わせる (実弾600u・ミサイル1800u・ビーム5000u)">兵装</button><button data-v="near" title="600u">近</button><button data-v="mid" title="1800u">中</button><button data-v="far" title="5000u">遠</button></div>
                 <div class="cb-grp" data-k="prio"><span class="cb-lab">優先</span><button data-v="attack" title="射角に入れて撃ち続ける">攻撃</button><button data-v="evade" title="相手の射角から外れる・近づくミサイルを横へかわす">回避</button></div>
+                <div class="cb-grp cb-target" id="cb-target"><span class="cb-lab">目標</span><span id="cb-tname">—</span><button id="cb-prev" title="前の目標 (Shift+Tab)">◀</button><button id="cb-next" title="次の目標 (Tab) — 敵艦・艦載機・推定円を順に">▶</button><button id="cb-fire" title="ロックした目標へ撃つ (推定なら推定点へ・F)">撃つ</button><button id="cb-clear" title="ロック解除 (自動で最寄りを狙う)">解除</button></div>
                 <span id="cb-state"></span>
             </div>
             <!-- 第36弾: GENの詳細設定 (MT) — 各ゲイン0〜200%・合計の上限なし -->
@@ -772,7 +773,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261108d"></script>
+    <script src="game.js?v=20261108e"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
