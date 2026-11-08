@@ -408,10 +408,10 @@ const ENGINE_THRUST = {
 
 // バーニア位置定義 [lxFrac, lyFrac] × vr(=radius*2.8)。bow=+X、stern=-X。
 // 移動時のみCanvasグロー描画。スプライト自体にはスラスター不要（船体のみ生成）。
-const THRUSTER_DEFS = { // 第47弾: 新スプライト (Higgsfield・Star Citizen風) の噴射口に合わせて実測
-    assault: [[-0.93,-0.51],[-0.93, 0.47]],                                            // 2基 (大型ナセル)
-    stealth: [[-0.93, 0.0]],                                                           // 1基
-    carrier: [[-0.96,-0.32],[-0.96,-0.17],[-0.96, 0.0],[-0.96, 0.17],[-0.96, 0.34]],  // 5基
+const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higgsfield) の噴射口に合わせて実測
+    assault: [[-0.95,-0.38],[-0.95, 0.35]],                                                    // 2基 (大型ナセル)
+    stealth: [[-0.96, 0.0]],                                                                   // 1基
+    carrier: [[-0.98,-0.32],[-0.98,-0.19],[-0.98,-0.08],[-0.98, 0.06],[-0.98, 0.18],[-0.98, 0.31]], // 6基
 };
 
 // ============================================================
@@ -1134,10 +1134,26 @@ const SHIP_DRONES = {
 // 第17弾: 既定の積み方に離脱用の消耗品を入れる (オーナー合意 2026-10-25)。第20弾: 弾(ammoK=実弾の枠/ammoM=ミサイルの枠)を加える
 const DEFAULT_LOADOUT = {
     // 第26弾: リペアキットを各1個 (空母は資材を1枠・攻撃型はミサイルを1枠・潜航型はミサイルを1枠減らして入れる — 実装で決めた既定)
-    carrier: { ammoK: 1, ammoM: 3, attack: 2, build: 1, scout: 1, flash: 1, smoke: 1, mat: 4, repair: 1 },
-    assault: { ammoK: 3, ammoM: 3, attack: 1, flash: 1, smoke: 1, mat: 0, repair: 1 },
-    stealth: { ammoK: 1, ammoM: 1, decoy: 1, noise: 1, flash: 1, mat: 0, repair: 1 },
+    // 第48弾 (オーナー): 積める武器の「種類」を艦種で制限 (攻撃型3・潜航型2・空母1)。w=積んだ武器 (既定: 攻撃型=全部 / 潜航型=実弾+ミサイル / 空母=ミサイルだけ)
+    carrier: { w: ['missile'], ammoK: 0, ammoM: 4, attack: 2, build: 1, scout: 1, flash: 1, smoke: 1, mat: 4, repair: 1 },
+    assault: { w: ['kinetic', 'missile', 'beam'], ammoK: 3, ammoM: 3, attack: 1, flash: 1, smoke: 1, mat: 0, repair: 1 },
+    stealth: { w: ['kinetic', 'missile'], ammoK: 1, ammoM: 1, decoy: 1, noise: 1, flash: 1, mat: 0, repair: 1 },
 };
+const WEAPON_TYPE_CAP = { assault: 3, stealth: 2, carrier: 1 }; // 艦種ごとに積める武器の種類数
+const ALL_WEAPONS = ['kinetic', 'missile', 'beam'];
+// 積んだ武器を整える (重複・不明を除き、種類数の上限で切る。空なら既定)。弾を積んでいない種類の枠は0にする
+function normalizeWset(ship, w) {
+    const cap = WEAPON_TYPE_CAP[ship] || 3, out = [];
+    for (const k of (Array.isArray(w) ? w : [])) if (ALL_WEAPONS.includes(k) && !out.includes(k) && out.length < cap) out.push(k);
+    return out.length ? out : DEFAULT_LOADOUT[ship].w.slice();
+}
+function fixLoadoutWeapons(lo, ship) {
+    lo.w = normalizeWset(ship, lo.w);
+    if (!lo.w.includes('kinetic')) lo.ammoK = 0;
+    if (!lo.w.includes('missile')) lo.ammoM = 0;
+    return lo;
+}
+const _WPN_NAME = { kinetic: '実弾', missile: 'ミサイル', beam: 'ビーム' };
 let cargo = { stock: {}, mat: 0, asm: null, ammoK: 0, ammoM: 0 }; // asm = { type, t, total, ready } / ammoK=実弾の残り(斉射) / ammoM=ミサイルの残り(発)
 // ═══ 第17弾: 緊急離脱 (オーナー合意 2026-10-25) ═══
 // 閃光弾: 自艦の位置で炸裂。半径内の敵はセンサー損傷(探知×0.1)・敵ミサイルは誘導を失う。閃光の瞬間の位置は周囲の敵に知られる
@@ -3121,6 +3137,7 @@ function hitChanceR(w, r, seek) {
 }
 
 function playerWeaponReady(s, w) {
+    if (s === player && !playerHasWeapon(w)) return false; // 第48弾: 積んでいない武器は撃てない
     // 第20弾: 実弾・ミサイルは積んだ弾が尽きたら撃てない (補給所/コロニーで補給)
     if (w === 'kinetic') return !s.kineticReloading && s.kineticAmmo > 0 && (s !== player || cargo.ammoK > 0);
     if (w === 'missile') return !s.missileReloading && (s !== player || cargo.ammoM > 0);
@@ -3422,14 +3439,23 @@ class Ship {
         this.x += Math.cos(this.angle) * this._v; this.y += Math.sin(this.angle) * this._v;
         this.speed = this._v; this.currentSpeed = this._v;
     }
+    // 第48弾: 艦種の標準の武器 (序盤/終盤) が積んでいなければ、積んでいる中で近い役割のものへ
+    _wpref(w) {
+        const ws = this.wset;
+        if (!ws || ws.includes(w)) return w;
+        const alt = { kinetic: ['missile', 'beam'], missile: ['beam', 'kinetic'], beam: ['missile', 'kinetic'] }[w] || [];
+        for (const k of alt) if (ws.includes(k)) return k;
+        return ws[0] || w;
+    }
     _usableWeapon(pref, d) {
         // 第20弾: 艦載機は機銃(実弾)だけ。旧: 実弾の射程外だとミサイルへ切り替え、弾数の管理外で撃ち放題だった (自機の戦闘機も機銃だけ)
         if (this.type === 'fighter') return d <= 760 ? 'kinetic' : null;
-        const ok = (w) => w === 'kinetic' ? d <= 760 && (this.ammoK === undefined || this.ammoK > 0) && !(this._kReload > 0)
+        const ws = this.wset; // 第48弾: 積んでいない武器は撃てない
+        const ok = (w) => (ws && !ws.includes(w)) ? false : w === 'kinetic' ? d <= 760 && (this.ammoK === undefined || this.ammoK > 0) && !(this._kReload > 0)
                         : w === 'missile' ? d <= ENEMY_MISSILE_ENGAGE * 1.05 * epm(this).mslRange && (this.ammoM === undefined || this.ammoM > 0) && !(this._mReload > 0)
                         : w === 'beam' ? !(this._bReload > 0) : false;
         if (ok(pref)) return pref;
-        for (const w of ['missile', 'kinetic']) if (w !== pref && ok(w)) return w;
+        for (const w of ['missile', 'kinetic', 'beam']) if (w !== pref && ok(w)) return w;
         return null;
     }
     _relocateAfterFire(far, aimAng, retreat) {
@@ -3672,6 +3698,7 @@ class Ship {
                 const da = _angDiff(Math.atan2(ty - this.y, tx - this.x), this.angle);
                 if (autoAttackEnabled && lk.full && this.fireCooldown <= 0 && this._weaponJamTimer <= 0) {
                     for (const w of [wType, 'kinetic', 'missile']) {
+                        if (!playerHasWeapon(w)) continue;
                         if (lk.dist < weaponRange(w) && Math.abs(da) < (WEAPON_FIRE_ARC[w] || Math.PI / 4) && playerWeaponReady(this, w)) { playerFireWeapon(this, te, w, lk); break; }
                     }
                 }
@@ -4121,7 +4148,10 @@ class Ship {
             let _supplyActive = false;
             if (!_hideActive && this.type !== 'fighter' && this.ammoM !== undefined) {
                 const _profS = ENEMY_COMBAT[this.type] || ENEMY_COMBAT.destroyer;
-                const _needS = (this.ammoK <= 0 && this.ammoM <= 0) || (this.ammoM <= 0 && (_profS.weaponEarly !== 'kinetic' || this.ammoK < (this._fullK || 1) * 0.25));
+                // 第48弾: 弾を使う武器を積んでいる時だけ補給を考える (ビームだけの艦は弾の補給が要らない)。ミサイルを積んでいなければ実弾が25%を切った時だけ
+      const _hasAmmoW = (this._fullK || 0) > 0 || (this._fullM || 0) > 0;
+      const _kLow = this.ammoK < (this._fullK || 1) * 0.25;
+      const _needS = _hasAmmoW && ((this.ammoK <= 0 && this.ammoM <= 0) || (this.ammoM <= 0 && ((this._fullM || 0) > 0 ? (this._wpref(_profS.weaponEarly) !== 'kinetic' || _kLow) : _kLow)));
                 if (_needS && !this._supply) {
                     let best = null, bd = Infinity, kind = '';
                     for (const c of structures) { if (c.type !== 'colony' || c.hacked || c._usedE) continue; const d = Math.hypot(c.x - this.x, c.y - this.y); if (d < bd) { bd = d; best = c; kind = 'コロニー'; } }
@@ -4231,9 +4261,9 @@ class Ship {
                 // 自機の長距離射撃に一方的に削られていた。近接火器(kinetic)の間合いは従来どおり fireRange。
                 const engageRange = Math.max(fireRange, ENEMY_MISSILE_ENGAGE);
                 // ── 第22弾: 戦艦の戦闘機動 (毎フレーム・慣性つき)。機動の選び方は10秒続ける (相手の兵装が変わった時と耐久が半分を切った時は選び直す) ──
-                let _plannedW = gameState.sector <= 3 ? prof.weaponEarly : prof.weaponLate;
-                if (this.predictedBehavior === 'kinetic' && _plannedW === 'kinetic') _plannedW = 'missile';
-                if (outmatched && _plannedW === 'kinetic') _plannedW = 'missile';
+                let _plannedW = this._wpref(gameState.sector <= 3 ? prof.weaponEarly : prof.weaponLate);
+                if (this.predictedBehavior === 'kinetic' && _plannedW === 'kinetic') _plannedW = this._wpref('missile');
+                if (outmatched && _plannedW === 'kinetic') _plannedW = this._wpref('missile');
                 if (ENEMY_CLASS[this.type]) {
                     const _ms = this._maxSpeeds();
                     const oppW = player && player._lastFireType && _frameCount - (player._lastFireF || -1e9) < 1200 && this.contactFreshness > 0.3 ? player._lastFireType : null;
@@ -4270,13 +4300,13 @@ class Ship {
                     }
                     const diff = _angDiff(ta, this.angle);
                     // 艦種別の武器選択 (序盤/終盤) + 既存の行動推定適応
-                    let wType = gameState.sector <= 3 ? prof.weaponEarly : prof.weaponLate;
+                    let wType = this._wpref(gameState.sector <= 3 ? prof.weaponEarly : prof.weaponLate);
                     // 適応: プレイヤーが実弾近接戦と推定 & 自分も近接武器なら長射程へ (アウトレンジ)
-                    if (this.predictedBehavior === 'kinetic' && wType === 'kinetic') wType = 'missile';
-                    if (outmatched && wType === 'kinetic') wType = 'missile';
+                    if (this.predictedBehavior === 'kinetic' && wType === 'kinetic') wType = this._wpref('missile');
+                    if (outmatched && wType === 'kinetic') wType = this._wpref('missile');
                     this.weaponType = wType;
                     // kinetic は射程800しか飛ばないので、それを超える間合いでは強制的にミサイルへ
-                    if (wType === 'kinetic' && distToBelief > 760) wType = 'missile';
+                    if (wType === 'kinetic' && distToBelief > 760) wType = this._wpref('missile');
                     // 第20弾: 弾数・リロード・ビームのチャージ (自機と同じ)。使えない兵装は持ち替え、何も無ければ撃たない
                     wType = this._usableWeapon(wType, distToBelief);
                     // 第39弾: 見えていない相手には、推定円が十分に小さい時だけ撃つ (自機COMと同じ基準: 見込み ≥ 65% − 35%×攻撃性)。方位しか無ければ撃たない
@@ -5788,6 +5818,14 @@ function generateSector() {
         const _th = document.getElementById('think-who');
         if (_th) _th.textContent = '自機COM ' + SHIP_JP[comCfg.ship] + ' [' + persLabel(_com.pp) + ']  vs  敵COM ' + SHIP_JP[comCfg.enemy] + ' [' + persLabel(boss.personality) + ']';
     }
+    // 第48弾: 敵の武器の種類も艦種の上限 (攻撃型3・潜航型2・空母1)。COM対戦は積み込みの設定どおり。通常の敵は性格で選ぶ (潜航型: 隠密/慎重ならビーム+ミサイル・他は実弾+ミサイル)
+    { const _es2 = { destroyer: 'assault', corvette: 'stealth', carrier: 'carrier' }[boss.type] || 'assault';
+      const _cl2 = comDemo && comCfg && comCfg.lo && comCfg.lo.e && comCfg.lo.e[_es2];
+      let _w2 = _cl2 && _cl2.w ? normalizeWset(_es2, _cl2.w) : DEFAULT_LOADOUT[_es2].w.slice();
+      if (!_cl2 && _es2 === 'stealth' && boss.personality && ((boss.personality.stealth ?? 0) >= 0.6 || (boss.personality.caution ?? 0) >= 0.6)) _w2 = ['missile', 'beam'];
+      boss.wset = _w2;
+      if (!_w2.includes('kinetic')) { boss._fullK = 0; boss.ammoK = 0; }
+      if (!_w2.includes('missile')) { boss._fullM = 0; boss.ammoM = 0; } }
     // 第21弾: 敵のエンジン (性格で選ぶ。速さはエンジンの倍率) / 自機のエンジン切替をリセット
     { const _env0 = comEnvAt(boss.x, boss.y), _ev0 = comEngineEval(boss.personality || {}, 'search', _env0); // 第42弾: 出現した所の環境と性格で (自機COMと同じ)
       boss.engine = _ev0.engine; boss._engSwT = 0; boss._engM = { engRevF: _frameCount, engSit: 'search' };
@@ -5983,6 +6021,7 @@ const ENEMY_USES = ['flash', 'noise', 'smoke', 'fsos', 'lure', 'bcn_heat', 'bcn_
 function comLoadout(side, ship) {
     const st = comCfg && comCfg.lo && comCfg.lo[side] && comCfg.lo[side][ship];
     const lo = Object.assign({ mat: 0 }, st || DEFAULT_LOADOUT[ship]);
+    fixLoadoutWeapons(lo, ship); // 第48弾
     if (side === 'e') { // 敵が使わない物 (資材・設置物・人型など) は外す — 枠を空けて弾や消耗品に回せるように
         lo.mat = 0;
         for (const t of SHIP_DRONES[ship] || []) if (!(ENEMY_USES.includes(t) || (t === 'attack' && ship === 'carrier'))) lo[t] = 0;
@@ -5990,7 +6029,9 @@ function comLoadout(side, ship) {
     return lo;
 }
 function loSummary(lo, ship, enemySide) {
-    const parts = ['実弾' + (lo.ammoK || 0), 'ミサイル' + (lo.ammoM || 0)];
+    const wl = normalizeWset(ship, lo.w), parts = ['武器:' + wl.map(k => _WPN_NAME[k]).join('+')];
+    if (wl.includes('kinetic')) parts.push('実弾' + (lo.ammoK || 0));
+    if (wl.includes('missile')) parts.push('ミサイル' + (lo.ammoM || 0));
     for (const t of SHIP_DRONES[ship] || []) if (lo[t] && (!enemySide || ENEMY_USES.includes(t) || (t === 'attack' && ship === 'carrier'))) parts.push(DRONE_SPEC[t].label + lo[t]);
     if (!enemySide && lo.mat) parts.push('資材' + lo.mat);
     return parts.join('・') + ' (' + loadoutSlots(lo, ship) + '/' + HOLD_CAP[ship] + '枠)';
@@ -6006,8 +6047,14 @@ function _renderLoadout() {
     const e = _loEdit; if (!e) return;
     const cap = HOLD_CAP[e.ship], used = loadoutSlots(e.lo, e.ship);
     const rows = [];
+    // 第48弾: 積む武器の種類 (艦種ごとに上限)。積んでいない武器の弾は積めない
+    e.lo.w = normalizeWset(e.ship, e.lo.w);
+    { const capW = WEAPON_TYPE_CAP[e.ship];
+      rows.push('<div class="lo-row lo-wset"><span class="lo-name">武器の種類<small>この艦は' + capW + '種まで — ビームは枠を使わない (撃つと位置が割れる・連射できない)</small></span>'
+        + ALL_WEAPONS.map(k => '<button data-w="' + k + '" class="' + (e.lo.w.includes(k) ? 'on' : '') + '">' + _WPN_NAME[k] + '</button>').join('') + '</div>'); }
     // 第20弾: 弾も同じ枠 (1枠=実弾48斉射 / ミサイル3発)
     for (const [k, lbl, per] of [['ammoK', '実弾', AMMO_PER_SLOT.kinetic + '斉射'], ['ammoM', 'ミサイル', AMMO_PER_SLOT.missile + '発']]) {
+        if (!e.lo.w.includes(k === 'ammoK' ? 'kinetic' : 'missile')) continue;
         rows.push('<div class="lo-row lo-ammo"><span class="lo-name">' + lbl + '<small>1枠=' + per + ' — 計' + (e.lo[k] || 0) * AMMO_PER_SLOT[k === 'ammoK' ? 'kinetic' : 'missile'] + '</small></span>'
             + '<button data-k="' + k + '" data-d="-1"' + (e.lo[k] > 0 ? '' : ' disabled') + '>−</button><b>' + (e.lo[k] || 0) + '</b>'
             + '<button data-k="' + k + '" data-d="1"' + (used + 1 <= cap ? '' : ' disabled') + '>＋</button></div>');
@@ -6034,6 +6081,15 @@ function _renderLoadout() {
     const ov = document.getElementById('loadout-overlay');
     if (!ov) return;
     document.getElementById('lo-rows').addEventListener('click', (ev) => {
+        const wb = ev.target.closest('button[data-w]'); // 第48弾: 武器の種類の切替 (上限を超えたら一番古い物が外れる)
+        if (wb && _loEdit) {
+            const lo = _loEdit.lo, k = wb.dataset.w, cap = WEAPON_TYPE_CAP[_loEdit.ship];
+            let w = normalizeWset(_loEdit.ship, lo.w);
+            if (w.includes(k)) { if (w.length > 1) w = w.filter(x => x !== k); }
+            else { w.push(k); if (w.length > cap) w.shift(); }
+            lo.w = w; fixLoadoutWeapons(lo, _loEdit.ship);
+            _renderLoadout(); playSound('ui'); return;
+        }
         const b = ev.target.closest('button[data-k]');
         if (!b || b.disabled || !_loEdit) return;
         const k = b.dataset.k, d = +b.dataset.d;
@@ -6455,6 +6511,7 @@ document.getElementById('btn-repair-drone')?.addEventListener('click', () => {
 })();
 
 document.getElementById('weapon-select')?.addEventListener('change', e => {
+    if (!playerHasWeapon(e.target.value)) { e.target.value = _curWeapon; return; } // 第48弾
     _curWeapon = e.target.value || 'kinetic';
     player && (player._fireOrder = null); // 武器を変えたら出しかけの射撃命令は取り消す
 });
@@ -9047,6 +9104,7 @@ function freeFireAt(wx, wy) {
     if (comDemo) return;
     if (player._weaponJamTimer > 0) { logMessage('WEP: 火器管制ダウン — 復旧まで発砲不能', 'warning-msg'); return; }
     const wType = document.getElementById('weapon-select')?.value;
+    if (!playerHasWeapon(wType)) { logMessage('WEP: ' + (_WPN_NAME[wType] || wType) + 'は積んでいない', 'warning-msg'); return; } // 第48弾
     // 第46弾: 全兵装が任意の地点へ撃てる。射程より遠い地点は、その方向へ射程いっぱいまで撃つ
     const _dd = Math.hypot(wx - player.x, wy - player.y), _rg = weaponRange(wType);
     let _far = false;
@@ -11030,18 +11088,30 @@ function drawDecoys(ctx) {
 function shipLoadout(ship) {
     const src = (gameState.loadout && gameState.loadout[ship]) || DEFAULT_LOADOUT[ship] || {};
     // 第20弾: 弾の項目が無い古い積み込み計画 (第19弾まで) は既定に戻す (枠の大きさも変わったため)
-    if (!('ammoK' in src)) return Object.assign({ mat: 0 }, DEFAULT_LOADOUT[ship]);
-    const lo = { mat: Math.max(0, src.mat | 0), ammoK: Math.max(0, src.ammoK | 0), ammoM: Math.max(0, src.ammoM | 0) };
+    if (!('ammoK' in src)) return fixLoadoutWeapons(Object.assign({ mat: 0 }, DEFAULT_LOADOUT[ship]), ship);
+    const lo = { mat: Math.max(0, src.mat | 0), ammoK: Math.max(0, src.ammoK | 0), ammoM: Math.max(0, src.ammoM | 0), w: src.w };
     for (const t of SHIP_DRONES[ship] || []) lo[t] = Math.max(0, src[t] | 0);
-    return loadoutSlots(lo, ship) <= (HOLD_CAP[ship] || 0) ? lo : Object.assign({ mat: 0 }, DEFAULT_LOADOUT[ship]);
+    fixLoadoutWeapons(lo, ship); // 第48弾: 積んでいない武器の弾は積めない
+    return loadoutSlots(lo, ship) <= (HOLD_CAP[ship] || 0) ? lo : fixLoadoutWeapons(Object.assign({ mat: 0 }, DEFAULT_LOADOUT[ship]), ship);
 }
 function loadoutSlots(lo, ship) {
     let n = (lo.mat || 0) + (lo.ammoK || 0) + (lo.ammoM || 0);
     for (const t of SHIP_DRONES[ship] || []) n += (lo[t] || 0) * DRONE_SPEC[t].w;
     return n;
 }
+// 第48弾: 今の艦が積んでいる武器 (自艦)。武器切替・自動攻撃・COM・AIの助言は全部これだけを使う
+let _wset = ['kinetic', 'missile', 'beam'];
+function playerHasWeapon(w) { return _wset.includes(w); }
+function applyWeaponSet(w) {
+    _wset = w.slice();
+    const sel = document.getElementById('weapon-select');
+    if (sel) for (const o of sel.options) o.disabled = !_wset.includes(o.value);
+    if (!_wset.includes(_curWeapon)) { _curWeapon = _wset[0]; if (sel) sel.value = _curWeapon; if (player) player._fireOrder = null; }
+    if (typeof window.syncWeaponUI === 'function') window.syncWeaponUI();
+}
 function resetCargo() {
     const lo = shipLoadout(gameState.shipType);
+    applyWeaponSet(lo.w);
     cargo = { stock: {}, mat: lo.mat * MAT_PER_SLOT, asm: null, ammoK: lo.ammoK * AMMO_PER_SLOT.kinetic, ammoM: lo.ammoM * AMMO_PER_SLOT.missile };
     for (const t of SHIP_DRONES[gameState.shipType] || []) cargo.stock[t] = lo[t] || 0;
     if (player) player.kineticAmmo = Math.min(player.kineticMaxAmmo || KINETIC_MAG, cargo.ammoK);
@@ -12753,6 +12823,7 @@ function xoEscapeStep() {
     else if (player.currentSpeed >= flankV * 0.8) toggleCoast(true);
 }
 function switchWeapon(w) {
+    if (!playerHasWeapon(w)) { logMessage('WEP: ' + (_WPN_NAME[w] || w) + 'は積んでいない — この艦は' + _wset.map(k => _WPN_NAME[k]).join('・') + 'だけ', 'warning-msg'); return; }
     const sel = document.getElementById('weapon-select');
     if (sel && sel.value !== w) { sel.value = w; sel.dispatchEvent(new Event('change')); }
     if (typeof window.syncWeaponUI === 'function') window.syncWeaponUI();
@@ -13288,12 +13359,12 @@ function comPilotStep() {
         // 第20弾: 撃てるものから持ち替える — ミサイル(リロード済み) → 実弾(射程内) → ビーム(射程の外側・溜まっていれば) → 届くもの
         // (ビームは射角±10°で2秒溜めるので、至近の撃ち合いでは実弾を止めてしまう)
         const wNow = currentWeapon();
-        const mOk = cargo.ammoM > 0 && lk.dist > 250 && lk.dist < weaponRange('missile') * 0.9;
-        const kOk = lk.dist < weaponRange('kinetic') * 0.9 && cargo.ammoK > 0;
+        const mOk = playerHasWeapon('missile') && cargo.ammoM > 0 && lk.dist > 250 && lk.dist < weaponRange('missile') * 0.9;
+        const kOk = playerHasWeapon('kinetic') && lk.dist < weaponRange('kinetic') * 0.9 && cargo.ammoK > 0;
         const wWant = mOk && playerWeaponReady(player, 'missile') ? 'missile'
             : kOk ? 'kinetic'
-            : playerWeaponReady(player, 'beam') ? 'beam'
-            : mOk ? 'missile' : 'beam';
+            : playerHasWeapon('beam') && playerWeaponReady(player, 'beam') ? 'beam'
+            : mOk ? 'missile' : playerHasWeapon('beam') ? 'beam' : _wset[0];
         if (wWant !== wNow && (wNow !== 'beam' || !(player._beamCharge > 0))) {
             switchWeapon(wWant);
             comThinkEvent('p', '有視界 ' + Math.round(lk.dist / 100) * 100 + 'u → ' + _WPN_JP[wWant] + 'に持ち替える');
@@ -13317,7 +13388,7 @@ function comPilotStep() {
         const lm = sa && sa.misses && sa.misses[sa.misses.length - 1], lo = sa && sa.obs[sa.obs.length - 1];
         const hc = assumedHitChance(te, w, lk);
         let bw = w, bh = hc;
-        for (const w2 of ['beam', 'missile']) { const h2 = assumedHitChance(te, w2, lk); if (h2 > bh + 0.15) { bw = w2; bh = h2; } }
+        for (const w2 of ['beam', 'missile']) { if (!playerHasWeapon(w2)) continue; const h2 = assumedHitChance(te, w2, lk); if (h2 > bh + 0.15) { bw = w2; bh = h2; } }
         const no = sigNo(enemySid(te));
         if (lm && (!lo || lo.f < lm.f + 90)) held = 'SIG-' + no + ' 推定点は外れた → 新しい方位を取るまで撃たない';
         else if (bw !== w && bh >= fireThr) {
@@ -13725,6 +13796,7 @@ function xoEvaluate() {
         // 武器の向き不向き: 他の武器の方がはるかに当たるなら切替を勧める
         let bestW = w, bestHc = hc;
         for (const w2 of ['beam', 'missile']) {
+            if (!playerHasWeapon(w2)) continue;
             const h2 = assumedHitChance(te, w2, lk);
             if (h2 > bestHc + 0.15) { bestW = w2; bestHc = h2; }
         }
@@ -13772,7 +13844,7 @@ function xoEvaluate() {
             // 届いて当たり得る兵装があるなら、近づくより持ち替えを勧める (近づけば聞かれ、撃たれる)
             let reach = null, reachHc = 0;
             for (const w2 of ['missile', 'beam']) {
-                if (w2 === w || weaponRange(w2) < _dEst) continue;
+                if (w2 === w || !playerHasWeapon(w2) || weaponRange(w2) < _dEst) continue;
                 const lp = leadPoint(sa, w2), h2 = lp ? hitChanceR(w2, lp.r, PM.seeker ? 1300 : 900) : 0;
                 if (!reach || h2 > reachHc) { reach = w2; reachHc = h2; }
             }
