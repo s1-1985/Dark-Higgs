@@ -418,7 +418,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261109f';
+const SPRITE_VER = '20261109g';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -492,6 +492,21 @@ for (const k in SPRITE_FILES) {
     img.src = SPRITE_FILES[k] + '?v=' + SPRITE_VER; // 第49弾: 絵を差し替えても古い画像がキャッシュに残らないように
     SPRITES[k] = img;
 }
+// 第55弾 (オーナー報告: 自艦が絵でなく暗い六角形の代替図形で出ていた): 絵の読み込みに失敗した (通信の失敗・配信の更新中など) まま二度と読み込まれなかった →
+// 失敗した絵は数秒ごとに別のURLで読み直す (最大10回)。読み込めるまでは従来どおり代替図形で描く
+const _spriteTry = {};
+setInterval(() => {
+    for (const k in SPRITES) {
+        const im = SPRITES[k];
+        if (!(im.complete && im.naturalWidth === 0)) continue;
+        const n = _spriteTry[k] || 0;
+        if (n >= 10) continue;
+        _spriteTry[k] = n + 1;
+        const ni = new Image();
+        ni.src = SPRITE_FILES[k] + '?v=' + SPRITE_VER + '&r=' + (n + 1);
+        SPRITES[k] = ni;
+    }
+}, 4000);
 // 敵タイプ → スプライトキー
 const ENEMY_SPRITE_KEY = { corvette: 'e_corvette', fighter: 'e_fighter', destroyer: 'e_destroyer', carrier: 'e_carrier' };
 function spriteReady(img) { return img && img.complete && img.naturalWidth > 0; }
