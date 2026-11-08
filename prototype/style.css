@@ -2588,3 +2588,11 @@ body.in-game #zoom-ctl #btn-pause.on { background: rgba(80,60,0,0.85); color: #f
 .lo-row.lo-wset { flex-wrap: wrap; }
 .lo-row.lo-wset button { width: auto; height: 28px; border-radius: 14px; padding: 0 12px; font-size: 12px; }
 .lo-row.lo-wset button.on { border-color: #00ffaa; color: #00ffaa; background: rgba(0,255,170,0.16); }
+
+/* 第49弾: 戦闘バーの目標 (ロックオン) */
+#combat-bar .cb-target #cb-tname { font-size: 11px; color: #ffb0a0; min-width: 96px; max-width: 150px; text-align: center; padding: 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+#combat-bar .cb-target button { border-color: rgba(255,120,100,0.35); color: #ffc0b0; }
+#combat-bar .cb-target #cb-fire { color: #ffd27a; border-color: #ffb000; }
+/* 第50弾: ドローンの個別指示の行 */
+#lpm-drones .lpm-unit { margin-left: 8px; opacity: 0.9; }
+#lpm-drones .lpm-unit span { font-size: 8px; }
