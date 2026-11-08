@@ -418,7 +418,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261109g';
+const SPRITE_VER = '20261109h';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -9701,12 +9701,16 @@ function drawShipRing(ctx) {
     const R = RING_R;
     const t = Date.now(), tSec = t * 0.001;
     // ── 第23弾: 「気配」(敵の内部状態を読んでいた) は撤去。観測した兆候 (探信・照準波・ビームのチャージ・ミサイル) の方角だけ波打つ
+    // 第56弾: 脅威は複数同時 (THREATS)。最も重い段階でリングの色が決まる
     const gazes = [];
     let maxGaze = 0;
-    if (playerExposureLevel >= 2 && threatObs.ang !== null) {
-        maxGaze = playerExposureLevel >= 3 ? 1 : 0.6;
-        gazes.push({ ang: threatObs.ang, gaze: maxGaze });
-    } else if (playerExposureLevel >= 2) maxGaze = playerExposureLevel >= 3 ? 1 : 0.6;
+    for (const th of THREATS) {
+        const g = THR_LVL[th.kind] >= 3 ? 1 : THR_LVL[th.kind] === 2 ? 0.6 : 0.25;
+        const fade = Math.min(1, (th.exp - _frameCount) / 40) * Math.min(1, (_frameCount - th.born) / 12 + 0.3);
+        gazes.push({ ang: th.ang, gaze: g, kind: th.kind, sig: th.sig, conf: th.conf, label: th.label, fade });
+        if (g > maxGaze && th.kind !== 'sig') maxGaze = g;
+    }
+    if (playerExposureLevel >= 2 && maxGaze === 0) maxGaze = playerExposureLevel >= 3 ? 1 : 0.6; // 被弾・全周囲の探信など方角の無い兆候
     const gazeAt = () => R; // 第40弾: リングは歪ませない (旧: 兆候の方角でリングがギザギザに波打ち、読みにくかった)
     const ringCol = maxGaze > 0.55 ? '#ff6a6a' : maxGaze > 0.2 ? '#ffc070' : '#5fe0c4';
     ctx.save();
@@ -9729,6 +9733,7 @@ function drawShipRing(ctx) {
     for (const deg of [0, 90, 180, 270]) {
         // 第39弾: 方位の点灯 (ログ・AIが言った方位) が近くにある時は目盛りの数字を出さない (旧: 数字どうしが重なった)
         if (_ringMarks.some(m => m.life > 0 && Math.abs(_angDiff(m.deg * Math.PI / 180, deg * Math.PI / 180)) < 0.32)) continue;
+        if (THREATS.some(th => Math.abs(_angDiff(th.ang, _degToScreen(deg))) < 0.4)) continue; // 第56弾: 脅威の名札と重ねない
         const a = _degToScreen(deg);
         ctx.globalAlpha = 0.55;
         ctx.fillText(String(deg), cx + Math.cos(a) * (R + 17), cy + Math.sin(a) * (R + 17));
@@ -9738,25 +9743,49 @@ function drawShipRing(ctx) {
     ctx.strokeStyle = ringCol;
     ctx.lineWidth = 1.3 + maxGaze;
     ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
-    // 兆候の方角: リングの外側に滑らかに光る弧 (中心ほど濃く太い・脈打つ)
+    // 兆候の方角 (複数): 根拠ごとに形を変える。弧の広がり = 方角の不確かさ (AIの解析が浅いほど広く、ずれている)
+    ctx.font = 'bold 8px Orbitron, monospace';
     for (const g of gazes) {
-        const pulse = 0.75 + Math.sin(tSec * (g.gaze > 0.8 ? 9 : 5)) * 0.25;
-        ctx.strokeStyle = g.gaze > 0.8 ? '#ff4a5a' : '#ffaa50';
-        for (let k = 0; k < 4; k++) {
-            const span = 0.75 - k * 0.17;
-            ctx.globalAlpha = (0.16 + k * 0.17) * pulse;
-            ctx.lineWidth = 3 + k * 1.5;
-            ctx.beginPath(); ctx.arc(cx, cy, R + 4, g.ang - span, g.ang + span); ctx.stroke();
-        }
-        // 外向きの小さな山形2つ (そちらから見られている/撃たれている)
+        const pulse = 0.75 + Math.sin(tSec * (g.gaze > 0.8 ? 9 : g.gaze > 0.5 ? 6 : 2.5)) * 0.25;
         const c = Math.cos(g.ang), s2 = Math.sin(g.ang);
-        ctx.globalAlpha = 0.9 * pulse; ctx.lineWidth = 2;
-        for (let k = 0; k < 2; k++) {
-            const r0 = R + 14 + k * 7;
-            ctx.beginPath();
-            ctx.moveTo(cx + c * r0 - s2 * 6, cy + s2 * r0 + c * 6); ctx.lineTo(cx + c * (r0 + 5), cy + s2 * (r0 + 5)); ctx.lineTo(cx + c * r0 + s2 * 6, cy + s2 * r0 - c * 6);
-            ctx.stroke();
+        const half = Math.max(0.1, Math.min(1.0, g.sig * 0.9));
+        const col = g.kind === 'sig' ? '#ffd27a' : g.gaze > 0.8 ? '#ff4a5a' : '#ffaa50';
+        ctx.strokeStyle = col; ctx.fillStyle = col;
+        if (g.kind === 'sig') { // AIが信号から割り出した方角: 細い破線の弧 (不確かさの幅)
+            ctx.setLineDash([5, 4]);
+            ctx.globalAlpha = (0.35 + 0.4 * g.conf) * g.fade; ctx.lineWidth = 2.2;
+            ctx.beginPath(); ctx.arc(cx, cy, R + 5, g.ang - half, g.ang + half); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.globalAlpha = (0.55 + 0.4 * g.conf) * g.fade; ctx.lineWidth = 1.6;
+            ctx.beginPath(); ctx.moveTo(cx + c * (R + 9), cy + s2 * (R + 9)); ctx.lineTo(cx + c * (R + 16), cy + s2 * (R + 16)); ctx.stroke();
+        } else {
+            for (let k = 0; k < 4; k++) {
+                const span = Math.max(0.12, 0.75 - k * 0.17) * (half > 0.2 ? half / 0.2 * 0.5 + 0.5 : 1);
+                ctx.globalAlpha = (0.16 + k * 0.17) * pulse * g.fade;
+                ctx.lineWidth = 3 + k * 1.5;
+                ctx.beginPath(); ctx.arc(cx, cy, R + 4, g.ang - span, g.ang + span); ctx.stroke();
+            }
+            ctx.globalAlpha = 0.9 * pulse * g.fade; ctx.lineWidth = 2;
+            if (g.kind === 'msl') { // 内向きの山形 (向かってくる)
+                for (let k = 0; k < 2; k++) {
+                    const r0 = R + 20 - k * 8;
+                    ctx.beginPath();
+                    ctx.moveTo(cx + c * r0 - s2 * 6, cy + s2 * r0 + c * 6); ctx.lineTo(cx + c * (r0 - 6), cy + s2 * (r0 - 6)); ctx.lineTo(cx + c * r0 + s2 * 6, cy + s2 * r0 - c * 6);
+                    ctx.stroke();
+                }
+            } else if (g.kind === 'kin') { // 実弾: 点が並ぶ
+                for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.arc(cx + c * (R + 12 + k * 5), cy + s2 * (R + 12 + k * 5), 1.6, 0, Math.PI * 2); ctx.fill(); }
+            } else { // ロック・艦載機・ビーム: 外向きの山形
+                for (let k = 0; k < 2; k++) {
+                    const r0 = R + 14 + k * 7;
+                    ctx.beginPath();
+                    ctx.moveTo(cx + c * r0 - s2 * 6, cy + s2 * r0 + c * 6); ctx.lineTo(cx + c * (r0 + 5), cy + s2 * (r0 + 5)); ctx.lineTo(cx + c * r0 + s2 * 6, cy + s2 * r0 - c * 6);
+                    ctx.stroke();
+                }
+            }
         }
+        ctx.globalAlpha = 0.85 * g.fade; ctx.textAlign = 'center';
+        ctx.fillText(g.label ? g.label : (THR_TAG[g.kind] || ''), cx + c * (R + 34), cy + s2 * (R + 34));
     }
     // (3) 艦首: リングの内側に小さな三角。引いて艦が数px以下になったら中心にも小さな艦影の印
     if (camera.zoom * player.radius * 5.6 < 14) {
@@ -9862,20 +9891,7 @@ function drawShipRing(ctx) {
         ctx.globalAlpha = 0.25 * hf; ctx.lineWidth = 9; ctx.beginPath(); ctx.arc(cx, cy, R, h.ang - 0.5, h.ang + 0.5); ctx.stroke();
         ctx.globalAlpha = 0.9 * hf; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(cx, cy, R, h.ang - 0.38, h.ang + 0.38); ctx.stroke();
     }
-    // (8) 接近するミサイル (推進波を捉えたもの): リングの内側に赤い矢印
-    for (const pr of projectiles) {
-        if (pr.isPlayer || pr.type !== 'missile' || !pr._torpAlerted || !pr.active) continue;
-        const a = Math.atan2(pr.y - player.y, pr.x - player.x), c = Math.cos(a), s2 = Math.sin(a);
-        // 第40弾: 内向きの山形3つ (流れるように明滅) — こちらへ向かってくる
-        ctx.strokeStyle = '#ff3a48'; ctx.lineWidth = 2.4;
-        for (let k = 0; k < 3; k++) {
-            const r0 = R + 18 - k * 9, ph = ((t * 0.004 + k * 0.33) % 1);
-            ctx.globalAlpha = 0.35 + 0.65 * (1 - ph);
-            ctx.beginPath();
-            ctx.moveTo(cx + c * r0 - s2 * 7, cy + s2 * r0 + c * 7); ctx.lineTo(cx + c * (r0 - 7), cy + s2 * (r0 - 7)); ctx.lineTo(cx + c * r0 + s2 * 7, cy + s2 * r0 - c * 7);
-            ctx.stroke();
-        }
-    }
+    // (8) 接近するミサイル: 第56弾で THREATS (脅威の複数方向) に統合 — 真のミサイルの角度は使わない
     // (10) 資材から組み立て中: リングの内側に進み具合 (組み立て中はEMと熱が漏れている)
     if (cargo.asm) {
         const ca = cargo.asm, p = ca.ready ? 1 : 1 - ca.t / ca.total;
@@ -13158,6 +13174,112 @@ function firePingFromEnemy(e) {
 // 常時フィードバックを与える。エスカレーション時は警告音、追跡中は心音が鳴る。
 const FC_ILLUM_RANGE = 12000; // 第23弾: 火器管制の照準波が届く (感知できる) 距離 — 実装で決めた値
 const threatObs = { kind: '', ang: null, deg: null, pingF: -1e9, pingAng: 0, lastKind: '' };
+// ═══ 第56弾: スレッドリング — 「脅威がどの方向に居るか」を観測できた根拠だけで、複数同時に示す ═══
+// 根拠 (オーナー指定): ①ロックオンされ方向が明確 ②実弾が飛んできて有視界で方角が分かる ③ミサイルが飛んできてシグネチャか有視界で方角が分かる
+//   ④各種シグネチャを受信しAIが方角を割り出した。敵の艦載機・ドローンにも同じに反応する。
+// 真の敵艦の方向は渡さない: ④は受信した信号の方位の記録 (囮・ノイズメーカー・ビーコンの信号も同じに入る=騙される) から。
+//   解析が低いほどAIは誤る (方角のずれ・弧の広がり・艦でないものを艦と判断/艦を見落とす) — 数値は実装で決めた値
+const THR_LIFE = { lock: 150, drn: 90, kin: 100, msl: 24, beam: 120, sig: 200 }; // 根拠が途切れてから残るフレーム数
+const THR_LVL = { lock: 2, drn: 2, sig: 1, kin: 3, msl: 3, beam: 3 };            // 露出の段階 (静穏0 / 受信1 / 照射2 / 攻撃3)
+const THR_OBS = { lock: 'fc', drn: 'fc', sig: 'rx', kin: 'kin', msl: 'msl', beam: 'beam' };
+const THR_TAG = { lock: 'LOCK', drn: '艦載機', sig: 'AI', kin: '実弾', msl: 'MSL', beam: 'BEAM' };
+const THR_MAX = 8, THR_SIG_MIN_STR = 0.3, THR_ERR_LOW = 0.45, THR_OFF_CHANCE = 0.55;
+const THREATS = []; // {key,kind,ang,sig,conf,label,exp,born,jit,jf}
+const _thrLogged = {};
+function _thrPut(key, kind, ang, sd, conf, label, logText) {
+    let t = THREATS.find(q => q.key === key);
+    if (!t) {
+        if (THREATS.length >= THR_MAX) { let w = 0; for (let i = 1; i < THREATS.length; i++) if (THREATS[i].exp < THREATS[w].exp) w = i; THREATS.splice(w, 1); }
+        t = { key, kind, ang: ang, sig: sd * 2, conf, label: '', exp: 0, born: _frameCount, jit: _gauss() * sd, jf: _frameCount + 120, shown: false };
+        THREATS.push(t);
+        if (logText && !_thrLogged[key]) { _thrLogged[key] = _frameCount; logMessage('WARN: 方位' + compassDeg(ang + t.jit) + '° ' + logText, 'warning-msg'); ringMarkBearing(compassDeg(ang + t.jit), kind === 'sig' ? '#ffcc66' : '#ff6a6a'); }
+    }
+    if (_frameCount > t.jf) { t.jit = _gauss() * sd; t.jf = _frameCount + 120; }
+    const aim = ang + t.jit;
+    if (t.kind !== kind || !t.shown) { t.ang = aim; t.shown = true; } else t.ang += _angDiff(aim, t.ang) * 0.3;
+    t.kind = kind; t.sig = Math.max(0.05, t.sig + (sd * 2 - t.sig) * 0.3); t.conf = conf; t.label = label || '';
+    t.exp = _frameCount + THR_LIFE[kind];
+    return t;
+}
+// ④ AIの判断: 受信した信号から方角を割り出す (解析が低いほど誤る)
+function thrAIJudge(sid, b) {
+    const sa = _signalAnalysis[sid];
+    const af = sa ? Math.min(1, Math.max(0, anaPct(sa.ana || 0) / 100)) : 0; // 解析の進み具合 0〜1
+    let ang = b.angle;
+    let sd = (b.halfWidth || 0.1) * 0.5;
+    if (sa && af >= 0.35 && sa.fix) { // 解析が進めば、方位の記録から解いた推定位置への方角 (囮が出した信号なら囮の方角)
+        const te = trackEstimate(sa, 0);
+        const d = Math.hypot(te.x - player.x, te.y - player.y);
+        if (te && d > 200 && te.r < d * 0.7) { ang = Math.atan2(te.y - player.y, te.x - player.x); sd = Math.max(0.03, Math.min(sd, Math.atan2(te.r, d) * 0.6)); }
+    }
+    // 解析が低いと誤判断: その信号ごとに一度だけ「誤った方角」を決め、解析が進むほど消える
+    if (sa) {
+        if (sa._thrOff === undefined) sa._thrOff = Math.random() < THR_OFF_CHANCE ? (Math.random() < 0.5 ? -1 : 1) * (0.5 + Math.random() * 1.3) : 0;
+        ang += sa._thrOff * Math.pow(1 - af, 1.6);
+    }
+    sd = Math.sqrt(sd * sd + Math.pow(THR_ERR_LOW * (1 - af), 2) + 0.0009);
+    return { ang, sd, af };
+}
+function updateThreats() {
+    const px = player.x, py = player.y;
+    // ① ロックオン (火器管制の照準波): 交戦中で自艦を掴んでいる敵艦。艦載機は有視界に入って自艦を狙っているもの
+    for (const e of enemies) {
+        if (e.hp <= 0 || e._dying) continue;
+        const d = Math.hypot(e.x - px, e.y - py), key = 'L' + e.uid;
+        if (e.type === 'fighter') {
+            if (e._kind === 'scout' || e._seeT !== player || d > 1300 || !inPlayerVision(e.x, e.y)) continue;
+            _thrPut(key, 'drn', Math.atan2(e.y - py, e.x - px), 0.03, 0.9, '艦載機', '艦載機が自艦を狙っている (有視界・' + Math.round(d / 100) * 100 + 'u)');
+            continue;
+        }
+        const fcsOn = e.aiState === 'combat' && (e.contactFreshness || 0) > 0.4 && d < FC_ILLUM_RANGE * (epm(e).fcsLeak ? 1.5 : 1) && !(e._noiseLk && e._noiseLk === e.playerLastKnownPos);
+        if (fcsOn) {
+            const sd = 0.05 * (epm(e).ecm ? 1.5 : 1) * (player._daze > 0 ? 2 : 1);
+            _thrPut(key, 'lock', Math.atan2(e.y - py, e.x - px), sd, 0.9, 'ロック', '火器管制の照準波を感知 — ロックオンされている。射線から外れろ');
+        }
+        if ((e._beamCharge || 0) > 0 && d < passiveRange()) _thrPut('B' + e.uid, 'beam', Math.atan2(e.y - py, e.x - px), 0.1, 0.7, 'ビーム', 'ビームのチャージ反応 — 射線から外れろ');
+    }
+    // ②③ 飛んでくる弾: 自艦へ向かっているものだけ (逸れる弾・囮を追うミサイルは脅威にしない)
+    for (const p of projectiles) {
+        if (!p.active || p.isPlayer || (p.type !== 'kinetic' && p.type !== 'missile')) continue;
+        const dx = p.x - px, dy = p.y - py, d = Math.hypot(dx, dy);
+        if (d > 3000 || d < 1) continue;
+        const closing = Math.cos(_angDiff(p.angle, Math.atan2(-dy, -dx)));
+        if (p.type === 'kinetic') {
+            if (d > 1500 || closing < 0.6 || !inPlayerVision(p.x, p.y)) continue; // 実弾は有視界で見えた時だけ
+            _thrPut('K' + (p._uid || (p._uid = ++_thrUid)), 'kin', Math.atan2(dy, dx), 0.04, 0.9, '実弾', '実弾が飛来 (有視界)');
+        } else {
+            const vis = inPlayerVision(p.x, p.y);
+            if (closing < 0.35 || !(p._torpAlerted || vis)) continue; // ミサイルは推進波か有視界
+            _thrPut('M' + (p._uid || (p._uid = ++_thrUid)), 'msl', Math.atan2(dy, dx), vis ? 0.04 : 0.14, 0.9, 'ミサイル', 'ミサイルが接近 — ' + (vis ? '有視界' : '推進波'));
+        }
+    }
+    // ④ 受信したシグネチャからAIが割り出した方角
+    const best = {};
+    for (const b of passiveBearings) {
+        if (b.life <= 0 || b.relay || b.intel || b.life < PASSIVE_BEARING_LIFE - 500) continue;
+        const q = best[b.sourceId]; if (!q || b.life > q.life) best[b.sourceId] = b;
+    }
+    for (const sid in best) {
+        const b = best[sid];
+        if (_srcKnown[sid]) continue; // 特定した発信元は聞き流す
+        const idn = identInfo(sid), id = _sigIdent[sid];
+        if (id && id.sure && idn.p < 0.5 && _identTruth(sid) !== 'small') continue; // 確認済みの囮・自然
+        if (idn.known && idn.p < 0.25 && !(id && id.sure)) continue; // AIが「艦影でない」と判断した信号 (解析が浅いと誤る)
+        if ((b.strength || 0) < THR_SIG_MIN_STR && idn.p < 0.55) continue;
+        const j = thrAIJudge(sid, b);
+        _thrPut('S' + sid, 'sig', j.ang, j.sd, 0.35 + 0.6 * j.af, 'SIG-' + sigNo(sid) + ' ' + idn.short, null);
+    }
+    // 古いものを消す・一番重いものを返す
+    let top = null;
+    for (let i = THREATS.length - 1; i >= 0; i--) {
+        const t = THREATS[i];
+        if (_frameCount > t.exp) { THREATS.splice(i, 1); continue; }
+        if (!top || THR_LVL[t.kind] > THR_LVL[top.kind] || (THR_LVL[t.kind] === THR_LVL[top.kind] && t.born > top.born)) top = t;
+    }
+    for (const k in _thrLogged) if (_frameCount - _thrLogged[k] > 900) delete _thrLogged[k];
+    return top;
+}
+let _thrUid = 0;
 function updateHuntTension() {
     if (!player || player.hp <= 0) return;
     // ── デブリ擬態判定: 岩礁帯(デブリ帯)で完全停止+静粛 → 漂う岩塊に艦影が紛れる ──
@@ -13171,30 +13293,18 @@ function updateHuntTension() {
     //   3 攻撃 = 被弾8秒以内・ミサイルの高速推進波・ビームのチャージ反応
     const T = threatObs;
     T.kind = ''; T.ang = null; T.deg = null;
+    // 第56弾: 脅威は「複数の方向」を持つ — ロックオン / 実弾 / ミサイル / ビームのチャージ / 艦載機 / 信号からのAIの判断 (→ updateThreats)
+    const thrTop = updateThreats();
     let lvl = 0;
-    for (const b of passiveBearings) if (b.life > PASSIVE_BEARING_LIFE - 600 && !b.relay && !b.intel) { lvl = 1; T.kind = 'rx'; T.ang = b.angle; break; }
-    if (_frameCount - T.pingF < 900) { lvl = 2; T.kind = 'ping'; T.ang = T.pingAng; }
-    let fc = null, bc = null;
-    for (const e of enemies) {
-        if (e.hp <= 0 || e._dying || e.type === 'fighter') continue;
-        const d = Math.hypot(e.x - player.x, e.y - player.y);
-        // 火器管制の照準波: 交戦中で自艦を掴んでいる敵は照準のEMを当ててくる → 方位が分かる (照射元)
-        if (e.aiState === 'combat' && (e.contactFreshness || 0) > 0.4 && d < FC_ILLUM_RANGE * (epm(e).fcsLeak ? 1.5 : 1) && !(e._noiseLk && e._noiseLk === e.playerLastKnownPos)) fc = e;
-        if ((e._beamCharge || 0) > 0 && d < passiveRange()) bc = e;
-    }
-    if (fc) { lvl = 2; T.kind = 'fc'; T.ang = Math.atan2(fc.y - player.y, fc.x - player.x) + (Math.random() - 0.5) * 0.12; }
+    if (thrTop) { lvl = THR_LVL[thrTop.kind]; T.kind = THR_OBS[thrTop.kind]; T.ang = thrTop.ang; }
+    if (_frameCount - T.pingF < 900 && lvl < 2) { lvl = 2; T.kind = 'ping'; T.ang = T.pingAng; }
     const hit = playerHitLog[playerHitLog.length - 1];
-    const msl = projectiles.find(p => p.active && !p.isPlayer && p.type === 'missile' && p._torpAlerted);
-    if (hit && _frameCount - hit.f < 480 && !hit.byFighter) { lvl = 3; T.kind = 'hit'; T.ang = null; T.deg = hit.deg; }
-    if (bc) { lvl = 3; T.kind = 'beam'; T.ang = Math.atan2(bc.y - player.y, bc.x - player.x) + (Math.random() - 0.5) * 0.1; }
-    if (msl) { lvl = 3; T.kind = 'msl'; T.ang = Math.atan2(msl.y - player.y, msl.x - player.x); }
+    if (hit && _frameCount - hit.f < 480 && !hit.byFighter && lvl < 3) { lvl = 3; T.kind = 'hit'; T.ang = null; T.deg = hit.deg; }
     if (T.ang !== null && T.kind !== 'hit') T.deg = compassDeg(T.ang);
     if (lvl > playerExposureLevel || (lvl >= 2 && T.kind !== T.lastKind)) {
         if (lvl > playerExposureLevel) playSound('alert');
         const dg = T.deg !== undefined && T.deg !== null ? '方位' + T.deg + '° ' : '';
-        if (T.kind === 'fc') logMessage('WARN: ' + dg + '火器管制の照準波を感知 — 撃たれる。射線から外れろ', 'warning-msg');
-        else if (T.kind === 'beam') logMessage('WARN: ' + dg + 'ビームのチャージ反応 — 射線から外れろ', 'warning-msg');
-        else if (T.kind === 'hit' && lvl > playerExposureLevel) { logMessage('CRITICAL: 攻撃を受けている — 交戦か離脱か', 'warning-msg'); if (huntStats) huntStats.timesEngaged++; }
+        if (T.kind === 'hit' && lvl > playerExposureLevel) { logMessage('CRITICAL: 攻撃を受けている — 交戦か離脱か', 'warning-msg'); if (huntStats) huntStats.timesEngaged++; }
     } else if (lvl === 0 && playerExposureLevel >= 2) {
         logMessage('TAC: 照射も攻撃も止んだ', 'system-msg');
     }
@@ -14386,9 +14496,9 @@ function xoEvaluate() {
     if (playerExposureLevel >= 3 && player.hp / player.maxHp < XO_ESCAPE_HP)
         return { tone: 'bad', text: xoEscapeAdvice(), act: { label: '離脱', fn: xoEscapeStep } };
     // 1) 接近するミサイル
-    const msl = projectiles.find(p => p.active && !p.isPlayer && p.type === 'missile' && p._torpAlerted);
+    const msl = THREATS.find(t => t.kind === 'msl'); // 第56弾: 観測できた方角 (推進波か有視界) だけ
     if (msl) {
-        const ang = Math.atan2(msl.y - player.y, msl.x - player.x);
+        const ang = msl.ang;
         if ((SHIP_DRONES[gameState.shipType] || []).includes('decoy') && (cargo.stock.decoy || 0) > 0 && activeDeployCount() < (CARGO_CAP[gameState.shipType] || 0))
             return { tone: 'bad', text: `ミサイル接近 方位${compassDeg(ang)}° — デコイで逸らせ`, act: { label: 'デコイ', fn: () => deployDrone('decoy') } };
         return { tone: 'bad', text: `ミサイル接近 方位${compassDeg(ang)}° — 横へ回避`, act: { label: '回避', fn: () => xoEvade(ang) } };
@@ -14533,6 +14643,11 @@ function xoEvaluate() {
         return { tone: 'info', text: '耐久' + Math.round(player.hp / player.maxHp * 100) + '% — 今のうちにリペアキットで修理 (6秒で+' + REPAIR_KIT_HP + '・残り' + cargo.stock.repair + '個。補給はできない)', act: { label: '修理', fn: () => deployDrone('repair') } };
     if (player._kitT > 0) return { tone: 'info', text: '修理中 — あと' + Math.ceil(player._kitT / 60) + '秒 (耐久' + Math.round(player.hp / player.maxHp * 100) + '%)' };
     // 第23弾: 観測した兆候を根拠に言う (旧: 「追跡されている」=敵の内部状態を読んでいた)
+    { // 第56弾: 複数の方向から脅威 — 根拠ごとに方位を並べる (弧の広さ=AIの自信。信号からの判断は解析が浅いと外れる)
+        const ts = THREATS.filter(t => t.kind !== 'sig' || t.conf >= 0.5).sort((a, b) => THR_LVL[b.kind] - THR_LVL[a.kind]);
+        if (ts.length >= 2 && ts.some(t => THR_LVL[t.kind] >= 2))
+            return { tone: 'bad', text: '複数方向から脅威 — ' + ts.slice(0, 4).map(t => '方位' + compassDeg(t.ang) + '°(' + (t.kind === 'sig' ? '信号から' + (t.conf < 0.6 ? '推測' : '判断') : t.label) + ')').join('・') + '。射線の重なる方向から離れろ' };
+    }
     if (playerExposureLevel >= 2) {
         const dg = threatObs.deg !== null && threatObs.deg !== undefined ? '方位' + threatObs.deg + '°' : '';
         if (threatObs.kind === 'fc') return { tone: 'bad', text: dg + 'から火器管制の照準波 — 撃たれる。射線から外れろ' + (silentRunning ? '' : ' (潜航で気配も消せ)'), act: silentRunning ? null : { label: '潜航', fn: () => setStance('silent') } };
