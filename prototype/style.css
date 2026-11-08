@@ -2596,3 +2596,13 @@ body.in-game #zoom-ctl #btn-pause.on { background: rgba(80,60,0,0.85); color: #f
 /* 第50弾: ドローンの個別指示の行 */
 #lpm-drones .lpm-unit { margin-left: 8px; opacity: 0.9; }
 #lpm-drones .lpm-unit span { font-size: 8px; }
+
+/* 第51弾: デバッグパネル */
+#debug-panel { position: fixed; right: 100px; top: 54px; width: 300px; max-height: 80vh; overflow-y: auto; z-index: 900; background: rgba(8,0,12,0.94); border: 1px solid #ff66cc; border-radius: 6px; font-family: 'Orbitron', monospace; font-size: 9px; color: #ffd0ee; pointer-events: auto; }
+#debug-panel .dbg-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid #55223f; position: sticky; top: 0; background: rgba(8,0,12,0.98); }
+#debug-panel .dbg-head small { flex: 1; color: #aa7799; }
+#debug-panel button, #debug-panel select { font-family: inherit; font-size: 9px; background: #1a0614; color: #ffc4e8; border: 1px solid #ff66cc; border-radius: 3px; padding: 4px 6px; cursor: pointer; margin: 2px; }
+#debug-panel button.on { background: #ff66cc; color: #200010; }
+#debug-panel .dbg-sec { padding: 4px 8px; border-bottom: 1px solid #33152a; }
+#debug-panel .dbg-sec h4 { margin: 2px 0 3px; font-size: 9px; color: #ff99dd; font-weight: normal; }
+#debug-panel .dbg-info { white-space: pre-wrap; color: #cfa; line-height: 1.5; font-size: 8px; }

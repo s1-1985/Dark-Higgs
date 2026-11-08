@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261109b">
+    <link rel="stylesheet" href="style.css?v=20261109c">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -731,6 +731,7 @@
                     <button class="btn btn-small com-only" id="btn-com-exit" onclick="exitComDemo()">COM対戦を終えてロビーへ</button>
                     <button class="btn btn-small" id="mm-fullscreen" onclick="toggleFullscreen()">全画面 切替</button>
                     <button class="btn btn-small" id="mm-fps" onclick="toggleFpsDisplay()">FPS表示: OFF</button>
+                    <button class="btn btn-small" id="mm-debug" onclick="toggleDebugMode()">デバッグモード: OFF</button>
                     <button class="btn btn-primary btn-small" id="mm-save">データ保存</button>
                     <button class="btn btn-danger btn-small" id="mm-reset">リセット</button>
                     <button class="btn btn-small" id="mm-close">閉じる</button>
@@ -738,6 +739,13 @@
             </div>
         </div>
 
+    </div>
+
+
+    <!-- 第51弾: デバッグモード (オプション → デバッグモード。通常プレイ・COM対戦の両方) -->
+    <div id="debug-panel" style="display:none">
+        <div class="dbg-head"><b>DEBUG</b><small>保存は無効</small><button onclick="toggleDebugMode(false)">✕</button></div>
+        <div class="dbg-body" id="dbg-body"></div>
     </div>
 
     <!-- §4-4: シグネチャ解析パネル (右列 索敵 → SIG一覧 で開く) -->
@@ -773,7 +781,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261109b"></script>
+    <script src="game.js?v=20261109c"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
