@@ -418,7 +418,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261109e';
+const SPRITE_VER = '20261109f';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -11918,6 +11918,72 @@ function drawNoiseMakers(ctx) {
 }
 
 // ── ドローン本体 ──
+// ═══ 第54弾 (オーナー: 戦闘機同士がお互いにぐるぐる回るだけで戦いにならない — 実際の戦闘機の動きを調べて取り入れる) ═══
+// 調べた基本 (BFM/ACM): ①追尾の曲線 — 遠くは「先回り(リード)」で距離を詰め、近づいたら「後ろ寄り(ラグ)」で追い越し(オーバーシュート)を避け、撃つ時だけ機首を相手に向ける(ピュア/リードで射撃)
+//   ②エネルギー — 速さは持ち物。旋回で速さを失う代わりに小回りが利く (角度で戦う=ターン&バーン)。速いまま一撃して離脱し、速さを取り戻して戻る (エネルギーで戦う=ブーム&ズーム)
+//   ③防御 — 後ろに付かれたら相手の射線に対して直角にブレイク旋回→速さを取り戻して離脱。④ぐるぐる (同じ円を回るだけ) になったら、片方が離脱して間合いを作り直す
+// ゲームへのアレンジ (2D): 速さに応じて旋回の速さが変わる (遅いほど小回り・速いほど大回り)・強く曲がると速さが落ちる・まっすぐ飛べば戻る。状態 = 接近 / 攻撃 / 離脱(ブーム&ズーム) / 回り込み / ブレイク。
+// 戻り値 {fire, ax, ay} = 撃っていい瞬間と見越しの狙い点 (撃つ処理は呼び出し側 — 弾数・連射間隔・威力は種類ごとに違うので)
+const DF_VMIN = 0.45, DF_BLEED = 0.022, DF_EXT_MIN = 110, DF_SEP = 760, DF_CIRC_T = 230, DF_BULLET = 12;
+function _dfKin(t) { // 相手の針路と速さ (u/frame)
+    if (t === player) return { h: t.angle || 0, s: t.currentSpeed || 0 };
+    if (t.type === 'mech' && t.vx !== undefined) return { h: Math.atan2(t.vy || 0, t.vx || 1), s: Math.hypot(t.vx || 0, t.vy || 0) };
+    return { h: t.angle || 0, s: t.v ?? t._v ?? t.currentSpeed ?? t._spd ?? 0 };
+}
+function _dfShooter(t) { return t.type === 'attack' || t.type === 'mech' || (t.type === 'fighter' && (!t._kind || t._kind === 'mech')); } // 相手が撃ち返してくる機か
+function dogfightStep(f, tgt, vkey, vMax) {
+    const S = f._df || (f._df = { st: 'intercept', t: 0, circ: 0, side: Math.random() < 0.5 ? -1 : 1, vk: 0.93 + Math.random() * 0.14 });
+    S.t++;
+    const vTop = vMax * S.vk; // 機ごとに最高速が少しちがう (まったく同じ性能同士で円を描き続けないように)
+    let v = f[vkey] || 0;
+    const dx = tgt.x - f.x, dy = tgt.y - f.y, d = Math.hypot(dx, dy) || 1, a = Math.atan2(dy, dx), K = _dfKin(tgt);
+    const back = Math.atan2(f.y - tgt.y, f.x - tgt.x);                 // 相手から見た自機の方位
+    const aspect = Math.abs(_angDiff(back, K.h + Math.PI));            // 0=自機が相手の真後ろ / π=正面
+    const tAta = Math.abs(_angDiff(back, K.h));                        // 相手の機首が自機に向いている度合い (0=向いている)
+    // 見越しの狙い点 (弾が届く間の相手の動き)
+    const lt = Math.min(90, d / DF_BULLET), ax = tgt.x + Math.cos(K.h) * K.s * lt, ay = tgt.y + Math.sin(K.h) * K.s * lt;
+    const aimA = Math.atan2(ay - f.y, ax - f.x), ataAim = Math.abs(_angDiff(aimA, f.angle));
+    const gunOK = ataAim < FTR_ARC && d < FTR_GUN_RANGE;
+    const shooter = _dfShooter(tgt);
+    // ぐるぐる検出: 近いのに撃てない時間が続いたら離脱して間合いを作り直す
+    if ((S.st === 'attack' || S.st === 'intercept') && d < 780 && !gunOK) S.circ++; else S.circ = Math.max(0, S.circ - 2);
+    const enter = (st) => { S.st = st; S.t = 0; };
+    if (S.circ > DF_CIRC_T) { S.side = -S.side; S.circ = 0; enter('extend'); }
+    // 状態の切替
+    if (S.st !== 'defend' && shooter && d < 820 && tAta < 0.42 && aspect > 1.1) enter('defend'); // 後ろ寄りでない (=向き合っている/後ろを取られた) で狙われている → ブレイク
+    switch (S.st) {
+        case 'intercept': if (d < 1150 && aspect < 1.35) enter('attack'); else if (d < 230) enter('extend'); break;
+        case 'attack': if (d < 100 || (aspect > 2.1 && ataAim > 1.9)) enter('extend'); else if (d > 1500) enter('intercept'); break;
+        case 'extend': if ((S.t >= DF_EXT_MIN && d > DF_SEP && v > vTop * 0.82) || S.t > 380) enter('turnback'); break;
+        case 'turnback': if ((d < 1100 && aspect < 1.5) || S.t > 260) enter('intercept'); break;
+        case 'defend': if (S.t > 75 || tAta > 1.25 || d > 1200) enter('extend'); break;
+    }
+    let wantA = aimA, vT = vTop, tf = 1;
+    if (S.st === 'intercept') {           // 先回り (リード): 遠くから距離を詰める
+        wantA = aimA; vT = vTop;
+    } else if (S.st === 'attack') {       // 近づいたら後ろ寄り (ラグ) → 撃つ時だけ機首を向ける。追い越さないよう相手の速さに合わせる
+        const lagA = Math.atan2(tgt.y - Math.sin(K.h) * 160 - f.y, tgt.x - Math.cos(K.h) * 160 - f.x);
+        wantA = gunOK || d > 600 ? aimA : lagA;
+        vT = d > 600 ? vTop : Math.max(vMax * DF_VMIN, Math.min(vTop, K.s * 1.1 + 0.4));
+    } else if (S.st === 'extend') {       // 離脱 (ブーム&ズーム): ほぼまっすぐ・全速・少し横へ
+        wantA = f.angle + S.side * 0.12; vT = vTop; tf = 0.45;
+    } else if (S.st === 'turnback') {     // 回り込み: 相手の真後ろ (少し横) を目指して大きく曲がる = 次は後ろから入る
+        const bx = tgt.x - Math.cos(K.h) * 650 + Math.cos(K.h + Math.PI / 2) * S.side * 260, by = tgt.y - Math.sin(K.h) * 650 + Math.sin(K.h + Math.PI / 2) * S.side * 260;
+        wantA = Math.atan2(by - f.y, bx - f.x); vT = vTop * 0.95;
+    } else if (S.st === 'defend') {       // ブレイク旋回: 相手の射線に直角へ全力で曲がる
+        wantA = back + S.side * Math.PI / 2; vT = vTop * 0.9; tf = 1.15;
+    }
+    // 旋回: 遅いほど小回り・速いほど大回り。強く曲がると速さが落ちる (エネルギー)
+    const turnMax = FTR_TURN * (1.3 - 0.6 * Math.min(1, v / vMax)) * tf;
+    const da = _angDiff(wantA, f.angle), turn = Math.max(-turnMax, Math.min(turnMax, da));
+    f.angle += turn;
+    v += Math.max(-0.15, Math.min(FTR_ACC, vT - v));
+    v -= DF_BLEED * vMax * Math.abs(turn) / (FTR_TURN * 1.3);
+    v = Math.max(vMax * DF_VMIN, Math.min(vTop * 1.02, v));
+    f[vkey] = v;
+    f.x += Math.cos(f.angle) * v; f.y += Math.sin(f.angle) * v;
+    return { fire: gunOK, ax, ay, st: S.st };
+}
 class Drone {
     constructor(type, x, y) {
         const spec = DRONE_SPEC[type] || DRONE_SPEC.attack;
@@ -12047,40 +12113,21 @@ class Drone {
         const lead = 0.45 * (dir || 1);
         return { x: cx + Math.cos(a + lead) * R, y: cy + Math.sin(a + lead) * R };
     }
-    // 戦闘機: 一撃離脱。目標へ突っ込み、機首の前 (±FTR_ARC) に入った時だけ機銃を撃つ → 通り過ぎて離脱 → 大きく旋回して次の航過。後退も停止もしない
+    // 戦闘機 (第54弾: 実際の空中戦の動きに作り直し — `dogfightStep`。接近→攻撃(後ろ寄りで追い越さない)→離脱(ブーム&ズーム)→回り込み・狙われたらブレイク旋回)
     _fighterStep(tgt, o, ax, ay) {
         const vMax = this.speed, turn = FTR_TURN, acc = FTR_ACC;
         if (tgt) {
-            const d = Math.hypot(tgt.x - this.x, tgt.y - this.y);
-            if (this._st !== 'extend') {
-                // 突入: 相手の今の動きから見越して機首を向ける
-                const lead = d / 12;
-                const tx = tgt.x + (tgt.vx || Math.cos(tgt.angle || 0) * (tgt.currentSpeed || tgt._spd || 0)) * lead;
-                const ty = tgt.y + (tgt.vy || Math.sin(tgt.angle || 0) * (tgt.currentSpeed || tgt._spd || 0)) * lead;
-                const da = this._fly(tx, ty, vMax, turn, acc);
-                if (!tgt._ghost && Math.abs(da) < FTR_ARC && d < FTR_GUN_RANGE && this.fireCD <= 0 && tgt.hp > 0 && this._ammo > 0) {
-                    { const _dp = new Projectile(this.x, this.y, { x: tx, y: ty, hp: 1, _real: tgt }, true, 'kinetic', FTR_DMG_SCALE * (this._auto ? DRONE_AUTO_HIT : 1)); _dp.fromDrone = true; projectiles.push(_dp); }
-                    this.fireCD = FTR_FIRE_CD; this._ammo--; this._fireF = _frameCount;
-                }
-                if (d < FTR_BREAK_D) { this._st = 'extend'; this._extT = FTR_EXTEND_F; this._jink = Math.random() < 0.5 ? -1 : 1; }
-            } else {
-                // 離脱: 少しだけ横へ逃げながら直進し、十分離れたら反転 (旋回の速さで大きな弧を描く)
-                // 第49弾: 一定時間 (FTR_EXTEND_F) だけ真っすぐ抜けたら、すぐ全力で旋回して相手へ向き直る (旧: 1300u離れるまで直進 → 大きな円を描いて攻撃が減っていた)
-                this._extT -= 1;
-                if (this._extT > 0 || d < FTR_REATTACK_D) {
-                    const ex = this.x + Math.cos(this.angle + 0.25 * this._jink) * 400, ey = this.y + Math.sin(this.angle + 0.25 * this._jink) * 400;
-                    this._fly(ex, ey, vMax, turn * 0.5, acc);
-                } else {
-                    const lead2 = d / 12, ttx = tgt.x + (tgt.vx || Math.cos(tgt.angle || 0) * (tgt.currentSpeed || tgt._spd || 0)) * lead2, tty = tgt.y + (tgt.vy || Math.sin(tgt.angle || 0) * (tgt.currentSpeed || tgt._spd || 0)) * lead2;
-                    const da2 = this._fly(ttx, tty, vMax * 0.9, turn, acc);
-                    if (Math.abs(da2) < 0.45) this._st = 'run'; // 相手のほうへ向き直ったら次の突入
-                }
+            const r = dogfightStep(this, tgt, 'v', vMax);
+            this._st = r.st;
+            if (!tgt._ghost && r.fire && this.fireCD <= 0 && tgt.hp > 0 && this._ammo > 0) {
+                { const _dp = new Projectile(this.x, this.y, { x: r.ax, y: r.ay, hp: 1, _real: tgt }, true, 'kinetic', FTR_DMG_SCALE * (this._auto ? DRONE_AUTO_HIT : 1)); _dp.fromDrone = true; projectiles.push(_dp); }
+                this.fireCD = FTR_FIRE_CD; this._ammo--; this._fireF = _frameCount;
             }
             return;
         }
         this._st = 'run';
         // 敵が居ない: 指示点 (哨戒/攻撃) か自艦の周りを周回 (巡航の速さ)
-        const R = o ? (o.kind === 'patrol' ? DRONE_PATROL_R : DRONE_ATTACK_ORBIT) : 700;
+        const R = this._rtb ? 420 : (o ? (o.kind === 'patrol' ? DRONE_PATROL_R : DRONE_ATTACK_ORBIT) : 700); // 弾切れで戻る時は補給の距離 (900u) の内を回る
         const p = this._orbitPt(ax, ay, R, 1);
         this._fly(p.x, p.y, vMax * 0.75, turn, acc);
     }
@@ -12233,7 +12280,7 @@ class Drone {
             let o = this._order;
             // 第50弾: 弾切れ → 自動で自艦の近くへ戻って補給 (帰還指示でも自艦の近くで補給される)
             const _amMax = DRONE_AMMO[this.type];
-            const _empty = _amMax && this._ammo <= 0 && (this.type !== 'mech' || ((this.msl || 0) <= 0 && this._saberN <= 0)); // Techは小銃・ミサイル・サーベルが全部尽きたら
+            const _empty = _amMax && this._ammo <= 0 && (this.type !== 'mech' || (this.msl || 0) <= 0); // 第54弾: 弾切れ (Techは小銃とミサイルが尽きたら。サーベルが残っていても戻って補給)
             if (_empty && !this._rtb) { this._rtb = true; logMessage('DRONE: ' + _droneName(this) + ' 弾切れ — 自艦の近くへ戻って補給', 'warning-msg'); }
             const _ret = !!(o && o.kind === 'return') || this._rtb;
             if (_ret) o = null; // 帰還は「指示点なし=自艦の護衛」と同じ動き。ただし護衛の範囲の外の敵は追わない
@@ -12456,6 +12503,27 @@ class Drone {
         const tag = _tagMap[this.type] || this.type.slice(0, 3).toUpperCase();
         ctx.fillText(tag + ((this.type === 'attack' || this.type === 'scout' || this.type === 'mech') && playerDrones.filter(d => d.type === this.type && d.hp > 0).length > 1 ? this._no : ''), 0, -12);
         ctx.restore();
+        // 第54弾 (オーナー): ヒットポイントと残弾数のインジケータ — 機の下に画面上で一定の大きさ (HP=緑→赤・弾=琥珀・Techはミサイル3つ・サーベル5つの点)
+        { const spec = DRONE_SPEC[this.type], mx = DRONE_AMMO[this.type];
+          if (spec && spec.hp && (this.type === 'attack' || this.type === 'mech' || this.type === 'scout' || this.type === 'build')) {
+              const inv = 1 / camera.zoom, w = 30 * inv, h = 3 * inv, y0 = 17 * inv;
+              ctx.save(); ctx.translate(this.x, this.y);
+              const hf = Math.max(0, Math.min(1, this.hp / spec.hp));
+              ctx.globalAlpha = 0.75; ctx.fillStyle = '#000'; ctx.fillRect(-w / 2 - inv, y0 - inv, w + 2 * inv, h + 2 * inv);
+              ctx.globalAlpha = 0.95; ctx.fillStyle = hf < 0.3 ? '#ff4a3a' : hf < 0.6 ? '#ffb030' : '#46e68a'; ctx.fillRect(-w / 2, y0, w * hf, h);
+              if (mx) {
+                  const af = Math.max(0, Math.min(1, this._ammo / mx)), y1 = y0 + h + 2.5 * inv;
+                  ctx.globalAlpha = 0.75; ctx.fillStyle = '#000'; ctx.fillRect(-w / 2 - inv, y1 - inv, w + 2 * inv, h + 2 * inv);
+                  ctx.globalAlpha = 0.95; ctx.fillStyle = af < 0.2 ? '#ff4a3a' : '#ffd24a'; ctx.fillRect(-w / 2, y1, w * af, h);
+                  if (this.type === 'mech') { // ミサイル (橙) とサーベル (桃) の残り
+                      const y2 = y1 + h + 3.5 * inv, r = 1.4 * inv;
+                      for (let i = 0; i < TECH_MSL_MAX; i++) { ctx.globalAlpha = i < (this.msl || 0) ? 0.95 : 0.25; ctx.fillStyle = '#ff9a4a'; ctx.beginPath(); ctx.arc(-w / 2 + r + i * 4 * inv, y2, r, 0, 6.3); ctx.fill(); }
+                      for (let i = 0; i < TECH_SABER_N; i++) { ctx.globalAlpha = i < (this._saberN || 0) ? 0.95 : 0.25; ctx.fillStyle = '#ff9df0'; ctx.beginPath(); ctx.arc(w / 2 - r - i * 4 * inv, y2, r, 0, 6.3); ctx.fill(); }
+                  }
+                  if (this._rtb) { ctx.globalAlpha = 0.9; ctx.fillStyle = '#ffd24a'; ctx.font = (8 * inv) + 'px Orbitron'; ctx.textAlign = 'center'; ctx.fillText('RTB', 0, y1 + h + 14 * inv); }
+              }
+              ctx.restore();
+          } }
         ctx.globalAlpha = 1;
     }
 }
@@ -12521,21 +12589,13 @@ function enemyFighterStep(f) {
     };
     const vMax = ENEMY_FTR_SPEED;
     if (tgt) {
-        if (f._st !== 'extend') {
-            const tv = tgt === player ? (player.currentSpeed || 0) : (tgt.v || Math.hypot(tgt.vx || 0, tgt.vy || 0));
-            const lead = td / 12, tx = tgt.x + Math.cos(tgt.angle || 0) * tv * lead, ty = tgt.y + Math.sin(tgt.angle || 0) * tv * lead;
-            const da = fly(tx, ty, vMax, FTR_TURN);
-            if (Math.abs(da) < FTR_ARC && td < FTR_GUN_RANGE && !(f.fireCD > 0) && f._ammo > 0) {
-                f._ammo--;
-                const pr = new Projectile(f.x, f.y, { x: tx, y: ty, hp: 1 }, false, 'kinetic', FTR_DMG_SCALE * (f._auto ? DRONE_AUTO_HIT : 1)); pr.fromDrone = true;
-                pr.owner = f; projectiles.push(pr);
-                f.fireCD = FTR_FIRE_CD; f.fireFlashTimer = Math.max(f.fireFlashTimer || 0, 20);
-            }
-            if (td < FTR_BREAK_D) { f._st = 'extend'; f._extT = FTR_EXTEND_F; f._jink = Math.random() < 0.5 ? -1 : 1; }
-        } else {
-            f._extT--;
-            fly(f.x + Math.cos(f.angle + 0.25 * f._jink) * 400, f.y + Math.sin(f.angle + 0.25 * f._jink) * 400, vMax, FTR_TURN * 0.5);
-            if (f._extT <= 0 && td > FTR_REATTACK_D) f._st = 'run';
+        const r = dogfightStep(f, tgt, '_v', vMax); // 第54弾: 自機の戦闘機と同じ空中戦の動き
+        f._st = r.st;
+        if (r.fire && !(f.fireCD > 0) && f._ammo > 0) {
+            f._ammo--;
+            const pr = new Projectile(f.x, f.y, { x: r.ax, y: r.ay, hp: 1 }, false, 'kinetic', FTR_DMG_SCALE * (f._auto ? DRONE_AUTO_HIT : 1)); pr.fromDrone = true;
+            pr.owner = f; projectiles.push(pr);
+            f.fireCD = FTR_FIRE_CD; f.fireFlashTimer = Math.max(f.fireFlashTimer || 0, 20);
         }
         f.aiState = 'combat';
         f.huntTarget = { x: tgt.x, y: tgt.y }; f.huntTimer = 1200; // 見失っても最後に見た所へ戻って探す (自機の戦闘機の追跡記憶と同じ役目)
@@ -12632,7 +12692,7 @@ function enemyTechStep(f) {
     }
     let tgt = f._seeT && f._seeT.hp > 0 ? f._seeT : null;
     // 第52弾: 小銃・ミサイル・サーベルが全部尽きたら母艦へ戻り、資材1個で全弾補給 (自機のTechと同じ)
-    const _emptyT = f._ammo <= 0 && (f.msl || 0) <= 0 && f._saberN <= 0;
+    const _emptyT = f._ammo <= 0 && (f.msl || 0) <= 0; // 第54弾: 小銃とミサイルが尽きたら戻る
     if (_emptyT) tgt = null;
     if ((_emptyT || (f._ammo <= DRONE_AMMO.mech * 0.2 && !tgt)) && Math.hypot(carrier.x - f.x, carrier.y - f.y) < DRONE_RESUP_R) { if (enemySpendMat(DRONE_RESUP_COST.mech)) { f._ammo = DRONE_AMMO.mech; f.msl = TECH_MSL_MAX; f._saberN = TECH_SABER_N; } }
     let gx, gy;
