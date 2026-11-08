@@ -2583,3 +2583,8 @@ body.in-game #zoom-ctl #btn-pause.on { background: rgba(80,60,0,0.85); color: #f
 .part-card.rare, .pc.rare { border-color: #ffcf88 !important; box-shadow: 0 0 10px rgba(255,190,90,0.35); }
 .rare .pc-cat { color: #ffcf88; }
 .rare .pc-ico { color: #ffcf88; }
+
+/* 第48弾: 積み込み画面の武器の種類 */
+.lo-row.lo-wset { flex-wrap: wrap; }
+.lo-row.lo-wset button { width: auto; height: 28px; border-radius: 14px; padding: 0 12px; font-size: 12px; }
+.lo-row.lo-wset button.on { border-color: #00ffaa; color: #00ffaa; background: rgba(0,255,170,0.16); }
