@@ -2665,3 +2665,18 @@ body.in-game #zoom-ctl #btn-pause.on { background: rgba(80,60,0,0.85); color: #f
 #hud-left .ai-btn.low { border-color: #7a8a9a; } #hud-left .ai-btn.low .ai-seg i.on { background: #7a8a9a; border-color: #7a8a9a; }
 #hud-left .ai-btn .ai-val { font-size: 6px; letter-spacing: 0; white-space: nowrap; opacity: 0.9; }
 #hud-left .ai-btn:active { transform: scale(0.96); }
+
+/* ═══ 第60弾: 積み込み画面の武器の種類 ═══ */
+.lo-var { flex-wrap: wrap; align-items: flex-start; }
+.lo-var .lo-name small { display: block; margin-top: 3px; line-height: 1.45; }
+.lo-var .up { color: #7dff9a; margin-right: 3px; } .lo-var .dn { color: #ff9a8a; margin: 0 3px 0 6px; }
+.lo-chips { display: flex; flex-wrap: wrap; gap: 5px; flex: 1 1 100%; margin-top: 4px; }
+.lo-chips button { font-size: 11px; padding: 4px 9px; border-radius: 12px; border: 1px solid rgba(127,214,255,0.4); background: rgba(10,40,50,0.55); color: #cfeee6; cursor: pointer; font-family: inherit; }
+.lo-chips button.on { background: #00ffaa; color: #021; border-color: #00ffaa; font-weight: 700; }
+
+.lo-row.lo-var { grid-column: 1 / -1; flex-direction: column; align-items: stretch; }
+.lo-row .lo-chips button { width: auto; height: auto; min-width: 0; padding: 4px 10px; border-radius: 12px; white-space: nowrap; font-size: 11px; line-height: 1.3; }
+.lo-row.lo-var .lo-name small { display: block; margin: 3px 0 0; }
+
+.lo-row.lo-var { flex-direction: row !important; flex-wrap: wrap !important; }
+.lo-row.lo-var .lo-name, .lo-row.lo-var .lo-chips { flex: 1 1 100% !important; min-width: 0; }
