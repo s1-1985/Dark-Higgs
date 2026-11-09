@@ -427,7 +427,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261109q';
+const SPRITE_VER = '20261109r';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -4109,6 +4109,12 @@ class Ship {
             // 旧: 真の位置に乱数の誤差を足していた・速さは真の速さだった
             const _sa = this._sa || (this._sa = Object.assign(_newSignalAnalysis(), { who: this }));
             _sa.rMax = sigRange * 1.6;
+            if (_listen && this.type !== 'fighter' && !_hardDetect && (_frameCount + this.uid) % 30 === 0 && _sa.fix) { // 第64弾: 敵も同じ — 自分の有視界で推定円の中に何も居ないと確認できたら、その円を除外する
+                const _R = Math.max(VIS_CLOSE, myDetectRange), _me = this;
+                const _see = (x, y) => { const d = Math.hypot(x - _me.x, y - _me.y); return d < _R && losReach(_me.x, _me.y, Math.atan2(y - _me.y, x - _me.x), _R) >= d; };
+                const _vm = visualNegative(_sa, _see, _see(player.x, player.y));
+                if (_vm) { recordMissSa(_sa, _vm); this._lkGuess = false; }
+            }
             if (_listen && this.type !== 'fighter' && (_frameCount + this.uid) % 120 < 60) searchMark(this, this.x, this.y, sigRange * SEARCH_HEAR_FRAC); // 第39弾: 聴いた範囲を覚える
             if (_listen) {
                 const _lo = _sa.obs[_sa.obs.length - 1];
@@ -8455,8 +8461,38 @@ function markSrcKnown(sid, kind, by, x, y) {
     if (no) logMessage('SIGNAL: SIG-' + String(no).padStart(2, '0') + ' は' + (by === 'ana' ? '解析で' : '') + SRC_KIND_JP[kind] + 'と判明 — 海図に載せ、以後センサーは聞き流す', 'system-msg');
     matchRecEvent('srcKnown', x, y, (no ? 'SIG-' + String(no).padStart(2, '0') + ' ' : '') + SRC_KIND_JP[kind] + 'と判明 (' + (by === 'ana' ? '解析' : '目視') + ')');
 }
+// ═══ 第64弾 (オーナー「予測地点にゴーストが出ていても、有視界で居ないと目視確認できたら誤認/位置違いとする」): 目視による否定の観測 ═══
+// 推定円のほぼ全体 (17点中16点以上) が見えている (有視界・通信のあるドローンの視界) のに、その発信源が見えていない → 円の中に居ない。
+// 「外れた射撃」と同じく、その円を除外する観測として推定に入れる (自艦も敵も同じ式)。8秒に1回。
+const VN_SAMPLES = 17, VN_NEED = 16, VN_COOLDOWN = 480, VN_MAX_R = 3200;
+function visualNegative(sa, canSee, srcSeen) {
+    if (!sa || !sa.fix || srcSeen || _frameCount - (sa._vnF || -1e9) < VN_COOLDOWN) return null;
+    const te = trackEstimate(sa, 0); if (!te || !(te.r > 0) || te.r > VN_MAX_R) return null;
+    let n = canSee(te.x, te.y) ? 1 : 0;
+    for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; if (canSee(te.x + Math.cos(a) * te.r * 0.6, te.y + Math.sin(a) * te.r * 0.6)) n++; if (canSee(te.x + Math.cos(a + 0.39) * te.r * 0.95, te.y + Math.sin(a + 0.39) * te.r * 0.95)) n++; }
+    if (n < VN_NEED) return null;
+    sa._vnF = _frameCount; sa._vnN = (sa._vnN || 0) + 1;
+    return { x: te.x, y: te.y, r: Math.max(500, te.r * 1.05) };
+}
+function updateVisualNegatives() {
+    if (!player || player.hp <= 0) return;
+    const canSee = (x, y) => inPlayerVision(x, y) || droneVisionSees(x, y);
+    for (const sid in _signalAnalysis) {
+        if (_srcKnown[sid]) continue; // 特定済みの発信元は海図の物 (推定円は無い)
+        const sa = _signalAnalysis[sid]; if (!sa || !sa.fix || sa.relay) continue;
+        // その発信源が (見える所に) 居れば「見えている」＝ここでの否定ではない。真の位置は「見えるか」の判定にだけ使う (推定には入れない)
+        let o = enemyBySid(sid); if (!o) o = lures.find(q => q.sid === sid) || fieldSignals.find(q => q.sid === sid) || convoys.find(q => q.sid === sid);
+        if (!o) continue;
+        const m = visualNegative(sa, canSee, canSee(o.x, o.y));
+        if (!m) continue;
+        recordMiss(sid, m);
+        const id = _sigIdent[sid]; if (id && !id.sure) id.L = Math.max(-4, (id.L || 0) - 0.5); // 居ない所を指す信号は 艦影の見込みも下がる
+        logMessage('AI: SIG-' + sigNo(sid) + ' の推定位置を目視 — 何も居ない。位置が違うか艦影ではなかった (この円を除外・' + (sa._vnN) + '回目)', 'system-msg');
+    }
+}
 function updateSrcKnown() {
     if (_frameCount % 30) return;
+    updateVisualNegatives();
     for (const sid in _sigIdent) {
         const id = _sigIdent[sid], k = _srcKnown[sid];
         if (k && k.by === 'eye') { // 第44弾: 見えている間だけ位置を更新 — 有視界の外へ出たら最後に見た位置が海図に残る (漂う霧のゆらぎの今の位置は分からない)
