@@ -427,7 +427,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261109v';
+const SPRITE_VER = '20261109w';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -737,6 +737,7 @@ function sfx(id, vol, opt) {
     const e = _sfxMan[id]; if (!e) return false;
     if (vol === undefined) vol = 1;
     if (sfxVolume <= 0) return true;
+    if (/^(sonar_|alm_|hit_player|expl_|det_impact)/.test(id)) bgmDuck(id.charAt(0)==='s' ? 2.5 : 1.8);
     let fi = 0;
     if (e.f.length > 1) { fi = Math.floor(Math.random() * e.f.length); if (fi === _sfxLastIdx[id]) fi = (fi + 1) % e.f.length; }
     const file = e.f[fi], buf = _sfxBufs[file];
@@ -798,6 +799,117 @@ try { if (audioCtx) sfxLoadManifest(); } catch (e) {}
 // ═══════════════════════════════════════════════════════════════
 let ambientOn = localStorage.getItem('darkEchoAmbient') !== '0';
 let _amb = null;
+// ═══ 第69弾: BGM (ChatGPT製・assets/bgm/*.mp3) ═══
+// 状況 (プレイヤーが観測できる兆候だけ) で曲を切り替える。2つのデッキをクロスフェード・ループの継ぎ目も重ねる (MP3の先頭/末尾の余白対策)。
+// 曲は全て D・4/4・60BPM基準 (docs/BGM_SPEC.md §0.4)。ループ周期 = 長さ−BGM_XF (4秒=1小節) → 小節の格子を保つ。
+var BGM_DIR = 'assets/bgm/', BGM_XF = 4, BGM_TRIM = 1.25;
+var _bgmMan = null, _bgmBufs = {}, _bgmFetching = {}, _bgmBus = null, _bgmDeck = null, _bgmOld = [];
+var _bgmCurves = null, _bgmHoldUntil = 0, _bgmDuckUntil = 0, _bgmLvl = 0, _bgmLvlAt = 0, _bgmLastSt = {}, _bgmPlaying = '';
+var bgmVolume = (function () { try { const v = parseFloat(localStorage.getItem('darkEchoBgmVol')); return isNaN(v) ? 0.8 : Math.max(0, Math.min(1, v)); } catch (e) { return 0.8; } })();
+function setBgmVolume(v) { bgmVolume = Math.max(0, Math.min(1, v)); try { localStorage.setItem('darkEchoBgmVol', String(bgmVolume)); } catch (e) {} if (_bgmBus && audioCtx) _bgmBus.gain.setTargetAtTime(bgmVolume * BGM_TRIM, audioCtx.currentTime, 0.1); }
+function _bgmInit() {
+    if (_bgmBus) return true; if (!audioCtx) return false;
+    _bgmBus = audioCtx.createGain(); _bgmBus.gain.value = bgmVolume * BGM_TRIM; _bgmBus.connect(audioCtx.destination); return true;
+}
+function _bgmFetch(id) {
+    const e = _bgmMan && _bgmMan[id]; if (!e || _bgmBufs[id] || _bgmFetching[id] || !audioCtx) return;
+    _bgmFetching[id] = true;
+    fetch(BGM_DIR + e.f + '?v=' + SPRITE_VER).then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+        .then(ab => new Promise((ok, ng) => { const p = audioCtx.decodeAudioData(ab, ok, ng); if (p && p.then) p.then(ok, ng); }))
+        .then(buf => { _bgmBufs[id] = buf; }).catch(() => { _bgmFetching[id] = false; });
+}
+function bgmLoadManifest() {
+    if (_bgmMan !== null || !audioCtx) return; _bgmMan = {};
+    fetch(BGM_DIR + 'manifest.json?v=' + SPRITE_VER).then(r => r.json()).then(m => { _bgmMan = m.tracks || {}; _bgmFetch('bgm_title_loop'); }).catch(() => { _bgmMan = null; });
+}
+function bgmPrefetchAll() { if (_bgmMan) for (const id in _bgmMan) _bgmFetch(id); }
+// デッキ: ループ1周ごとに src を予約。次の周は XF 秒前から重ねる
+function _bgmIter(d, t, first) {
+    const src = audioCtx.createBufferSource(); src.buffer = d.buf;
+    const g = audioCtx.createGain(), XF = BGM_XF;
+    if (!_bgmCurves) { _bgmCurves = { i: new Float32Array(32), o: new Float32Array(32) }; for (let k = 0; k < 32; k++) { _bgmCurves.i[k] = Math.sin(k / 31 * Math.PI / 2); _bgmCurves.o[k] = Math.cos(k / 31 * Math.PI / 2); } }
+    if (first) g.gain.setValueAtTime(1, t); else g.gain.setValueCurveAtTime(_bgmCurves.i, t, XF); // 等パワーで重ねる (継ぎ目の音量の凹みを避ける)
+    g.gain.setValueCurveAtTime(_bgmCurves.o, t + d.dur - XF, XF);
+    src.connect(g); g.connect(d.g); src.start(t); src.stop(t + d.dur + 0.1);
+    d.srcs.push(src); if (d.srcs.length > 6) d.srcs.shift();
+}
+function _bgmSchedule(d) {
+    if (!d || d.dead) return; const now = audioCtx.currentTime;
+    while (d.next < now + 2) { _bgmIter(d, d.next, d.first); d.first = false; d.next += d.dur - BGM_XF; }
+}
+function bgmPlay(id, quant, xf) {
+    if (!_bgmMan || !_bgmMan[id] || !_bgmInit()) return false;
+    if (_bgmDeck && _bgmDeck.id === id && !_bgmDeck.dead) return true;
+    const buf = _bgmBufs[id]; if (!buf) { _bgmFetch(id); return false; }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const now = audioCtx.currentTime, old = _bgmDeck;
+    let t = now + 0.05;
+    if (old && quant) { const k = Math.ceil((now - old.t0) / BGM_XF - 0.05); t = Math.min(old.t0 + k * BGM_XF, now + BGM_XF); if (t < now + 0.05) t = now + 0.05; }
+    xf = old ? (quant ? BGM_XF : (xf || 1.5)) : 2;
+    const d = { id, buf, dur: _bgmMan[id].d || buf.duration, t0: t, next: t, first: true, g: audioCtx.createGain(), srcs: [], dead: false };
+    d.g.gain.setValueAtTime(0.0001, t); d.g.gain.linearRampToValueAtTime(1, t + xf); d.g.connect(_bgmBus);
+    if (old) { old.g.gain.cancelScheduledValues(now); old.g.gain.setValueAtTime(old.g.gain.value, now); old.g.gain.setValueAtTime(old.g.gain.value, t); old.g.gain.linearRampToValueAtTime(0, t + xf); old.dead = true; _bgmOld.push({ d: old, end: t + xf + 0.3 }); }
+    _bgmDeck = d; _bgmPlaying = id; _bgmSchedule(d); return true;
+}
+function bgmFadeOut(sec) {
+    const d = _bgmDeck; if (!d || !audioCtx) return; const now = audioCtx.currentTime;
+    d.g.gain.cancelScheduledValues(now); d.g.gain.setValueAtTime(d.g.gain.value, now); d.g.gain.linearRampToValueAtTime(0, now + sec);
+    d.dead = true; _bgmOld.push({ d, end: now + sec + 0.3 }); _bgmDeck = null; _bgmPlaying = '';
+}
+function bgmSting(id, vol) {
+    if (!audioCtx || !_bgmMan || !_bgmMan[id] || bgmVolume <= 0 || !_bgmInit()) return false;
+    const buf = _bgmBufs[id]; if (!buf) { _bgmFetch(id); return false; }
+    const now = audioCtx.currentTime; if (_bgmLastSt[id] !== undefined && now - _bgmLastSt[id] < 20) return false;
+    _bgmLastSt[id] = now; if (audioCtx.state === 'suspended') audioCtx.resume();
+    const src = audioCtx.createBufferSource(); src.buffer = buf; const g = audioCtx.createGain(); g.gain.value = vol === undefined ? 1 : vol;
+    src.connect(g); g.connect(_bgmBus); src.start(now); src.onended = () => { try { g.disconnect(); } catch (e) {} };
+    return true;
+}
+// SE が大事な音を鳴らす間は BGM を少し下げる
+function bgmDuck(sec) { if (audioCtx) _bgmDuckUntil = Math.max(_bgmDuckUntil, audioCtx.currentTime + sec); }
+function _bgmVisible(id) { const e = document.getElementById(id); return !!(e && !e.classList.contains('hidden')); }
+function bgmMatchStart() { _bgmLvl = 0; _bgmLvlAt = 0; _bgmHoldUntil = 0; _bgmLastSt = {}; bgmPrefetchAll(); }
+function bgmEnd(kind) { // 'victory' | 'defeat'
+    if (!audioCtx || !_bgmMan) return; const id = kind === 'victory' ? 'bgm_st_victory' : 'bgm_st_defeat';
+    bgmFadeOut(1.5); const dur = (_bgmMan[id] && _bgmMan[id].d) || 10; bgmSting(id, 1);
+    _bgmHoldUntil = audioCtx.currentTime + Math.max(0, dur - 2);
+}
+// 兆候 (0静穏 1受信 2照射 3攻撃) → 曲の段階。上がるのは即・下がるのは一段ずつ (攻撃の後12秒・以後30秒ごと)
+function _bgmLevel(now) {
+    const raw = Math.max(0, Math.min(3, playerExposureLevel | 0));
+    if (raw >= _bgmLvl) { if (raw > _bgmLvl) { const from = _bgmLvl; _bgmLvl = raw; _bgmOnRise(from, raw); } _bgmLvlAt = now; }
+    else if (now - _bgmLvlAt >= (_bgmLvl === 3 ? 12 : 30)) { const from = _bgmLvl; _bgmLvl--; _bgmLvlAt = now; if (from === 3) bgmSting('bgm_st_clear', 0.9); }
+    return _bgmLvl;
+}
+function _bgmOnRise(from, to) {
+    if (to === 3) bgmSting('bgm_st_combat', 1); else if (to === 2) bgmSting('bgm_st_alert', 0.9); else if (to === 1 && from === 0) bgmSting('bgm_st_contact', 0.8);
+}
+function bgmTick() {
+    if (!audioCtx || !_bgmMan || !_bgmInit()) return;
+    const now = audioCtx.currentTime;
+    for (let i = _bgmOld.length - 1; i >= 0; i--) if (now > _bgmOld[i].end) { const d = _bgmOld[i].d; try { d.srcs.forEach(s => { try { s.stop(); } catch (e) {} }); d.g.disconnect(); } catch (e) {} _bgmOld.splice(i, 1); }
+    if (_bgmDeck) _bgmSchedule(_bgmDeck);
+    _bgmBus.gain.setTargetAtTime(bgmVolume * BGM_TRIM * (now < _bgmDuckUntil ? 0.55 : 1), now, 0.2);
+    if (bgmVolume <= 0) { if (_bgmDeck) bgmFadeOut(0.5); return; }
+    if (now < _bgmHoldUntil) return;
+    let want = '', quant = true;
+    if (_bgmVisible('replay-overlay') || _bgmVisible('debrief-overlay') || _bgmVisible('game-over-overlay')) want = 'bgm_result_loop';
+    else if (_bgmVisible('ship-select-lobby')) want = 'bgm_title_loop';
+    else if (_bgmVisible('docking-menu')) want = 'bgm_dock_loop';
+    else if (typeof player !== 'undefined' && player && player.hp > 0 && !player._dying && gameLoopRunning) {
+        const L = _bgmLevel(now);
+        if (L >= 3) { want = 'bgm_combat_loop'; quant = false; }
+        else if (surgePhase === 'warn' || surgePhase === 'active') want = 'bgm_surge_loop';
+        else if (lullPhase === 'warn' || lullPhase === 'active') want = 'bgm_lull_loop';
+        else if (L === 2) { want = 'bgm_alert_loop'; quant = false; }
+        else if (playerCoasting) want = 'bgm_hide_loop';
+        else want = L === 1 ? 'bgm_contact_loop' : 'bgm_calm_loop';
+    }
+    if (want && want !== _bgmPlaying) bgmPlay(want, quant, 1.5);
+}
+try { if (audioCtx) { bgmLoadManifest(); setInterval(bgmTick, 250); } } catch (e) {}
+// 自動再生の制限: 最初の操作で音を出せる状態にする (タイトル曲が鳴り始める)
+(function () { const go = () => { try { if (audioCtx.state === 'suspended') audioCtx.resume(); } catch (e) {} window.removeEventListener('pointerdown', go, true); window.removeEventListener('keydown', go, true); }; window.addEventListener('pointerdown', go, true); window.addEventListener('keydown', go, true); })();
 function startAmbient() {
     if (!ambientOn || _amb || !audioCtx) return;
     if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -6328,6 +6440,7 @@ function toggleHiggsView(off) {
 function updateLandmarkBanner() { /* ランドマーク距離表示廃止 */ }
 
 function startGame(shipType) {
+    try { bgmMatchStart(); sfx('sys_battle_start', 0.9); } catch (e) {}
     gameState.shipType = shipType;
     // 敵艦種: ロビーで選択された値をセット
     const _selEt = document.querySelector('.enemy-select-btn.active')?.dataset?.type || 'assault';
@@ -11225,6 +11338,7 @@ function showDeathBanner(cause) {
     setTimeout(() => el.classList.remove('active'), 4200);
 }
 function showGameOver() {
+    try { bgmEnd('defeat'); sfx('sys_defeat', 1); } catch (e) {}
     document.getElementById('go-sector').textContent = gameState.sector;
     document.getElementById('go-credits').textContent = gameState.credits;
     document.getElementById('go-kills').textContent = enemiesKilled;
@@ -15755,7 +15869,7 @@ function updateSfxLoops() {
     const hasAmb = !!(_sfxMan.amb_drone_loop && _sfxBufs[_sfxMan.amb_drone_loop.f[0]]);
     if (hasAmb && ambientOn && alive) {
         if (_amb) stopAmbient();
-        sfxLoop('amb_drone_loop', true, 0.5);
+        sfxLoop('amb_drone_loop', true, bgmVolume > 0 && _bgmPlaying ? 0.3 : 0.5);
         sfxLoop('amb_tension_loop', playerExposureLevel >= 2, playerExposureLevel >= 3 ? 0.55 : 0.35);
     } else { sfxLoop('amb_drone_loop', false); sfxLoop('amb_tension_loop', false); }
     const msl = alive && THREATS.some(t => t.kind === 'msl');
@@ -15765,10 +15879,11 @@ function updateSfxLoops() {
     sfxLoopsGC();
 }
 function initSfxVolumeUI() {
-    const el = document.getElementById('sfx-vol'); if (!el) return;
-    const l = document.getElementById('sfx-vol-l');
-    el.value = String(Math.round(sfxVolume * 100)); if (l) l.textContent = el.value + '%';
-    el.addEventListener('input', () => { setSfxVolume(el.value / 100); if (l) l.textContent = el.value + '%'; });
+    const wire = (ids, get, set) => { ids.forEach(id => { const el = document.getElementById(id); if (!el) return; const l = document.getElementById(id + '-l');
+        el.value = String(Math.round(get() * 100)); if (l) l.textContent = el.value + '%';
+        el.addEventListener('input', () => { set(el.value / 100); ids.forEach(o => { const e2 = document.getElementById(o), l2 = document.getElementById(o + '-l'); if (e2) e2.value = el.value; if (l2) l2.textContent = el.value + '%'; }); }); }); };
+    wire(['sfx-vol', 'sfx-vol-m'], () => sfxVolume, setSfxVolume);
+    wire(['bgm-vol', 'bgm-vol-m'], () => bgmVolume, setBgmVolume);
 }
 function stepWorld() {
         _frameCount++;
@@ -15899,6 +16014,7 @@ function stepWorld() {
 
             if (allEnemiesDown || sdWin) {
                 sectorCleared = true;
+                try { bgmEnd('victory'); sfx('sys_victory', 1); } catch (e) {}
                 matchRecEvent('clear', player.x, player.y, allEnemiesDown ? 'セクター制圧 (敵艦撃沈)' : 'セクター制圧 (全コロニーをハック)');
                 // 第23弾: スカーミッシュ — 勝敗が付いたら試合終了。作戦報告を出し、その上に試合の記録を開く (COM対戦も通常も)
                 setTimeout(() => { if (!comDemo && typeof openDebrief === 'function') openDebrief(); openReplay(); }, 3500);
