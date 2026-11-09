@@ -427,7 +427,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261109r';
+const SPRITE_VER = '20261109s';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -5474,7 +5474,7 @@ class Ship {
         //  ① 推定円で示している (追跡由来の) 相手には描かない — 円そのものが不確かさの表示
         //  ② 位置は反応のたびに飛ばさず、なめらかに寄せる / 消える時もゆっくり薄れる
         //  ③ 向きは描かない (音だけで艦首の向きは分からない — 旧: 真の向きで三角形を回していた)
-        const live = this.contactLife > 0 && !this.inVision && !this.trackR;
+        const live = this.contactLife > 0 && !this.inVision && !this.trackR && !(this.displayX !== undefined && (inPlayerVision(this.displayX, this.displayY) || droneVisionSees(this.displayX, this.displayY))); // 第65弾: 反応の印の位置が見えているのに居ないなら描かない
         const tgtA = live ? Math.min(1, this.contactLife / 90) * (0.35 + this.contactAccuracy * 0.5) : 0;
         this._ghA = (this._ghA || 0) + (tgtA - (this._ghA || 0)) * (tgtA > (this._ghA || 0) ? 0.08 : 0.03);
         if (live) {
@@ -8483,7 +8483,16 @@ function updateVisualNegatives() {
         // その発信源が (見える所に) 居れば「見えている」＝ここでの否定ではない。真の位置は「見えるか」の判定にだけ使う (推定には入れない)
         let o = enemyBySid(sid); if (!o) o = lures.find(q => q.sid === sid) || fieldSignals.find(q => q.sid === sid) || convoys.find(q => q.sid === sid);
         if (!o) continue;
-        const m = visualNegative(sa, canSee, canSee(o.x, o.y));
+        const seen = canSee(o.x, o.y);
+        let m = visualNegative(sa, canSee, seen);
+        if (!m && !seen && _frameCount - (sa._vnP || -1e9) > 240) { // 第65弾: 円の全体が見えていなくても、推定の中心とその周り (半径 min(円の半径×0.5, 300u)) が見えているのに居ないなら、その近傍は除外する
+            const te = trackEstimate(sa, 0);
+            if (te && te.r > 0 && canSee(te.x, te.y)) {
+                const rho = Math.min(te.r * 0.5, 300); let n = 0;
+                for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; if (canSee(te.x + Math.cos(a) * rho, te.y + Math.sin(a) * rho)) n++; }
+                if (n >= 8) { sa._vnP = _frameCount; sa._vnN = (sa._vnN || 0) + 1; m = { x: te.x, y: te.y, r: Math.max(150, rho * 1.3) }; }
+            }
+        }
         if (!m) continue;
         recordMiss(sid, m);
         const id = _sigIdent[sid]; if (id && !id.sure) id.L = Math.max(-4, (id.L || 0) - 0.5); // 居ない所を指す信号は 艦影の見込みも下がる
@@ -9330,7 +9339,7 @@ function _drawEstCircle(ctx, sid, sa, locked) {
     // 名札 (円の上): 「SIG-xx 艦n%」だけ (第28弾: 説明書きは消す — オーナー)。中心に居るとは限らない
     { const idn = identInfo(sid); queueTag(cx, cy - R, (locked ? 'LOCK ' : '') + 'SIG-' + sigNo(sid), idn.known ? idn.short : '不明', locked ? '#ff7a6a' : col, 'top', (locked ? 1 : 0.75) * sa._fa);
       // 第44弾 (オーナー): 解析で艦影と特定した (艦影75%以上・または確認) 信号は、推定の中心に艦のしるしを霧の上に描く (中心に居るとは限らない。囮を艦と誤認していればそのまま艦として出る)
-      if (idn.known && idn.p >= 0.75) {
+      if (idn.known && idn.p >= 0.75 && !(inPlayerVision(cx, cy) || droneVisionSees(cx, cy))) { // 第65弾 (オーナー「有視界の中で近いのに居ない所にゴースト」): 中心が見えているのに艦のしるしは出さない
           const gs = Math.max(120, 11 * inv);
           ctx.globalAlpha = 0.9 * sa._fa; ctx.strokeStyle = '#ff6a5a'; ctx.fillStyle = 'rgba(255,106,90,0.25)'; ctx.lineWidth = 1.6 * inv; ctx.setLineDash([]);
           ctx.beginPath(); ctx.moveTo(cx + gs, cy); ctx.lineTo(cx - gs * 0.7, cy - gs * 0.6); ctx.lineTo(cx - gs * 0.4, cy); ctx.lineTo(cx - gs * 0.7, cy + gs * 0.6); ctx.closePath(); ctx.fill(); ctx.stroke();
