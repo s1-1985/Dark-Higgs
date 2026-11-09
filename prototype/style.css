@@ -2598,15 +2598,59 @@ body.in-game #zoom-ctl #btn-pause.on { background: rgba(80,60,0,0.85); color: #f
 #lpm-drones .lpm-unit span { font-size: 8px; }
 
 /* 第51弾: デバッグパネル */
-#debug-panel { position: fixed; right: 100px; top: 54px; width: 300px; max-height: 80vh; overflow-y: auto; z-index: 900; background: rgba(8,0,12,0.94); border: 1px solid #ff66cc; border-radius: 6px; font-family: 'Orbitron', monospace; font-size: 9px; color: #ffd0ee; pointer-events: auto; }
-#debug-panel .dbg-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid #55223f; position: sticky; top: 0; background: rgba(8,0,12,0.98); }
-#debug-panel .dbg-head small { flex: 1; color: #aa7799; }
-#debug-panel button, #debug-panel select { font-family: inherit; font-size: 9px; background: #1a0614; color: #ffc4e8; border: 1px solid #ff66cc; border-radius: 3px; padding: 4px 6px; cursor: pointer; margin: 2px; }
-#debug-panel button.on { background: #ff66cc; color: #200010; }
-#debug-panel .dbg-sec { padding: 4px 8px; border-bottom: 1px solid #33152a; }
-#debug-panel .dbg-sec h4 { margin: 2px 0 3px; font-size: 9px; color: #ff99dd; font-weight: normal; }
-#debug-panel .dbg-info { white-space: pre-wrap; color: #cfa; line-height: 1.5; font-size: 8px; }
+/* 第58弾: デバッグパネルを作り直し (タブ・2行ボタン・選んで付与) */
+#debug-panel { position: fixed; right: 108px; top: 52px; width: 380px; max-height: 80vh; display: flex; flex-direction: column; z-index: 900; background: linear-gradient(180deg, rgba(14,8,26,0.97), rgba(6,10,20,0.97)); border: 1px solid #7a5cff; border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04) inset; font-family: 'Noto Sans JP', 'Hiragino Sans', 'Yu Gothic', system-ui, sans-serif; font-size: 12px; color: #e6e0ff; pointer-events: auto; overflow: hidden; }
+#debug-panel .dbg-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; background: rgba(122,92,255,0.14); border-bottom: 1px solid rgba(122,92,255,0.35); }
+#debug-panel .dbg-head b { font-family: 'Orbitron', monospace; letter-spacing: 2px; color: #cbbcff; font-size: 12px; }
+#debug-panel .dbg-head small { flex: 1; color: #ffb4a0; font-size: 10px; border: 1px solid rgba(255,140,110,0.5); border-radius: 10px; padding: 1px 7px; text-align: center; max-width: 90px; }
+#debug-panel .dbg-head button { background: transparent; border: 0; color: #cbbcff; font-size: 16px; cursor: pointer; padding: 0 4px; }
+#debug-panel .dbg-body { overflow-y: auto; padding: 0 12px 12px; }
+#debug-panel .dbg-tabs { display: flex; gap: 4px; position: sticky; top: 0; z-index: 2; padding: 10px 0 8px; background: linear-gradient(180deg, rgba(10,9,22,1), rgba(10,9,22,0.92)); }
+#debug-panel .dbg-tab { flex: 1; background: rgba(255,255,255,0.04); color: #b8aee8; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 7px 0; font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; }
+#debug-panel .dbg-tab.on { background: #7a5cff; color: #fff; border-color: #a592ff; }
+#debug-panel .dbg-pane { display: none; } #debug-panel .dbg-pane.on { display: block; }
+#debug-panel .dbg-grp { margin-top: 10px; } #debug-panel .dbg-grp:first-child { margin-top: 2px; }
+#debug-panel .dbg-gt { font-size: 11px; color: #9a8fd0; letter-spacing: 1px; margin: 0 0 5px 2px; }
+#debug-panel .dbg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+#debug-panel .dbg-b { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; font-family: inherit; background: rgba(255,255,255,0.05); color: #f0ecff; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; padding: 7px 9px; cursor: pointer; min-height: 44px; }
+#debug-panel .dbg-b b { font-size: 12px; font-weight: 700; } #debug-panel .dbg-b i { font-style: normal; font-size: 10px; color: #a79fd0; line-height: 1.35; }
+#debug-panel .dbg-b:hover { background: rgba(122,92,255,0.2); border-color: #a592ff; }
+#debug-panel .dbg-b.flash { background: #7a5cff; } #debug-panel .dbg-b.flash i { color: #fff; }
+#debug-panel .dbg-tg b::after { content: 'OFF'; margin-left: 8px; font-size: 10px; font-weight: 700; color: #8b84b4; border: 1px solid #4b4578; border-radius: 9px; padding: 0 6px; }
+#debug-panel .dbg-tg.on { background: rgba(80,220,160,0.18); border-color: #52dca0; } #debug-panel .dbg-tg.on b::after { content: 'ON'; color: #052; background: #52dca0; border-color: #52dca0; }
+#debug-panel .dbg-danger { border-color: rgba(255,110,110,0.5); } #debug-panel .dbg-danger b { color: #ff9a9a; }
+#debug-panel .dbg-sel { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: stretch; margin-bottom: 6px; }
+#debug-panel select { font-family: inherit; font-size: 12px; background: #120d26; color: #f0ecff; border: 1px solid rgba(255,255,255,0.18); border-radius: 7px; padding: 6px 8px; min-width: 0; }
+#debug-panel .dbg-sel .dbg-b { min-height: 38px; }
+#debug-panel .dbg-info { white-space: pre-wrap; color: #bff5d8; line-height: 1.55; font-size: 11px; margin-top: 8px; background: rgba(0,0,0,0.35); border-radius: 7px; padding: 8px 10px; font-family: ui-monospace, Menlo, monospace; }
+@media (max-width: 760px) { #debug-panel { left: 0; right: 0; top: auto; bottom: 0; width: auto; max-height: 58vh; border-radius: 12px 12px 0 0; } }
 
 /* 第53弾: 長押しメニューの個別指示の開閉 */
 #lpm-drones .lpm-tog button { flex: 1; text-align: left; }
 #lpm-drones .lpm-units { margin-bottom: 2px; }
+
+/* ═══ 第58弾: 部品カード・部品画面のUI刷新 (イラスト・分類色・枠ゲージ) ═══ */
+.draft-box { background: linear-gradient(180deg, #06161a, #020d10); border-color: rgba(0,255,170,0.35); }
+.draft-cards { gap: 12px; justify-content: center; }
+.part-card { --cc: #7fd6ff; flex: 1 1 210px; max-width: 250px; border: 1px solid color-mix(in srgb, var(--cc) 55%, transparent); border-radius: 10px; padding: 0 0 10px; background: linear-gradient(180deg, rgba(14,34,44,0.9), rgba(6,16,22,0.95)); gap: 6px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.4); transition: transform .12s, box-shadow .12s; }
+.part-card:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(0,0,0,0.5), 0 0 0 1px var(--cc); }
+.part-card.cat-kin { --cc: #ffb35c; } .part-card.cat-msl { --cc: #ff6b6b; } .part-card.cat-beam { --cc: #b58cff; } .part-card.cat-fcs { --cc: #ffe066; }
+.part-card.cat-sen { --cc: #5fe0ff; } .part-card.cat-eng { --cc: #6aa8ff; } .part-card.cat-hull { --cc: #9fd6a8; } .part-card.cat-ew { --cc: #ff7ad9; }
+.pc-art { position: relative; height: 132px; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 50% 55%, color-mix(in srgb, var(--cc) 30%, transparent), transparent 68%), repeating-linear-gradient(0deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 6px); border-bottom: 1px solid color-mix(in srgb, var(--cc) 35%, transparent); }
+.pc-img { width: 118px; height: 118px; object-fit: contain; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.6)); }
+.pc-art.noimg::after { content: '◆'; font-size: 40px; color: var(--cc); opacity: 0.6; }
+.pc-cat { position: absolute; left: 8px; top: 8px; font-size: 10px; font-weight: 700; letter-spacing: 1px; color: #04120e; background: var(--cc); border-radius: 9px; padding: 1px 8px; }
+.pc-slot { position: absolute; right: 8px; top: 8px; font-size: 10px; color: #fff; border: 1px solid #fff8; border-radius: 9px; padding: 0 7px; background: rgba(0,0,0,0.45); }
+.pc-rare { position: absolute; left: 8px; bottom: 8px; font-size: 9px; font-weight: 700; letter-spacing: 2px; color: #3a2400; background: linear-gradient(90deg, #ffcf88, #ffe9b8); border-radius: 4px; padding: 0 6px; }
+.pc-name { font-size: 15px; font-weight: 700; color: #f0fff8; padding: 0 12px; margin-top: 2px; }
+.pc-up, .pc-down { display: flex; gap: 7px; align-items: flex-start; margin: 0 10px; padding: 5px 8px; border-radius: 6px; font-size: 11.5px; line-height: 1.4; }
+.pc-up { background: rgba(125,255,154,0.1); color: #9bffb4; } .pc-down { background: rgba(255,130,110,0.1); color: #ffa898; }
+.pc-up b, .pc-down b { flex: none; width: 15px; height: 15px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; line-height: 1; margin-top: 1px; }
+.pc-up b { background: #7dff9a; color: #052; } .pc-down b { background: #ff8a78; color: #300; }
+.pc-btn { margin: auto 10px 0; }
+.part-card.rare { border-color: #ffcf88; box-shadow: 0 0 14px rgba(255,190,90,0.35); }
+.slot-gauge { display: inline-flex; gap: 3px; margin-left: 10px; vertical-align: middle; }
+.slot-gauge i { width: 14px; height: 10px; border: 1px solid #00ffaa; border-radius: 2px; background: transparent; }
+.slot-gauge i.on { background: #00ffaa; box-shadow: 0 0 6px #00ffaa88; }
+#parts-title small { margin-left: 8px; font-size: 11px; color: #9fc9bb; }
+@media (max-height: 520px) { .pc-art { height: 86px; } .pc-img { width: 76px; height: 76px; } .part-card { flex-basis: 170px; max-width: 200px; } .pc-up, .pc-down { font-size: 10.5px; padding: 3px 6px; } }

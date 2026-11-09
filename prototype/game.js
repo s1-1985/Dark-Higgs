@@ -418,7 +418,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261109j';
+const SPRITE_VER = '20261109k';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -8196,17 +8196,21 @@ function drawConvoys(ctx) {
 
 // ── 画面: ドラフト (3つから1つ) / 部品の一覧 (ドックでは付け替え) ──
 function _partCard(id, btnLabel, onClick, disabled) {
+    // 第58弾 (オーナー「モノグラムでなくイラストに・使いづらい」): 艦と同じタッチのイラストを大きく・長所/代償を色つきの帯で・分類は色で
     const P = PARTS[id], d = document.createElement('div');
-    d.className = 'part-card';
-    d.innerHTML = '<div class="pc-top"><i class="ico pc-ico"></i><div><div class="pc-cat"></div><div class="pc-name"></div></div></div><div class="pc-up"></div><div class="pc-down"></div>';
-    d.querySelector('.pc-ico').style.setProperty('--ico', 'url(assets/icons/part_' + id + '.png)'); // 第35弾: 部品ごとのアイコン
-    d.querySelector('.pc-cat').textContent = PART_CATS[P.cat] + (partW(id) > 1 ? '・枠' + partW(id) : '') + (P.rare ? '・レア (輸送船)' : ''); if (P.rare) d.classList.add('rare');
+    d.className = 'part-card cat-' + P.cat + (P.rare ? ' rare' : '');
+    d.innerHTML = '<div class="pc-art"><img class="pc-img" alt=""><span class="pc-cat"></span>' + (partW(id) > 1 ? '<span class="pc-slot">枠 ' + partW(id) + '</span>' : '') + (P.rare ? '<span class="pc-rare">RARE</span>' : '') + '</div>'
+        + '<div class="pc-name"></div><div class="pc-up"><b>＋</b><span></span></div><div class="pc-down"><b>−</b><span></span></div>';
+    const img = d.querySelector('.pc-img'); img.src = 'assets/parts/part_' + id + '.png?v=' + SPRITE_VER; img.onerror = () => { img.style.display = 'none'; d.querySelector('.pc-art').classList.add('noimg'); };
+    d.querySelector('.pc-cat').textContent = PART_CATS[P.cat];
     d.querySelector('.pc-name').textContent = P.name;
-    d.querySelector('.pc-up').textContent = '＋ ' + P.up;
-    d.querySelector('.pc-down').textContent = '− ' + P.down;
+    d.querySelector('.pc-up span').textContent = P.up;
+    d.querySelector('.pc-down span').textContent = P.down;
     if (btnLabel) { const b = document.createElement('button'); b.className = 'btn btn-info pc-btn'; b.textContent = btnLabel; b.disabled = !!disabled; b.addEventListener('click', onClick); d.appendChild(b); }
     return d;
 }
+// 取り付け枠のゲージ (使用中=点灯・空き=枠線)
+function _slotGauge() { let h = ''; const used = partSlotsUsed(), max = partSlotsMax(); for (let i = 0; i < max; i++) h += '<i class="' + (i < used ? 'on' : '') + '"></i>'; return '<span class="slot-gauge">' + h + '</span>'; }
 function _openDraftUI() {
     const ov = document.getElementById('draft-overlay'); if (!ov || !_draft) return;
     document.getElementById('draft-title').textContent = '部品を拾った — ' + _SRC_JP[_draft.src];
@@ -8220,7 +8224,7 @@ function _nextDraft() { const q = _draftQ.shift(); if (q) { _draft = q; _openDra
 function openPartsUI() {
     const ov = document.getElementById('parts-overlay'); if (!ov) return;
     const edit = partsDocked() && !comDemo;
-    document.getElementById('parts-title').textContent = '部品 — 取り付け枠 ' + partSlotsUsed() + '/' + partSlotsMax();
+    document.getElementById('parts-title').innerHTML = '部品 ' + _slotGauge() + '<small>' + partSlotsUsed() + ' / ' + partSlotsMax() + '</small>';
     document.getElementById('parts-sub').textContent = edit ? 'ドック: 外すと予備へ・予備から付けられる' : '付け替えは自分のコロニーのドック (600u以内) でだけ';
     const on = document.getElementById('parts-on'), sp = document.getElementById('parts-spare');
     on.innerHTML = ''; sp.innerHTML = '';
@@ -15966,37 +15970,50 @@ const _dbgBoss = () => enemies.find(e => e.type !== 'fighter' && e.hp > 0 && !e.
 function toggleDebugMode(on) {
     debugMode = on === undefined ? !debugMode : !!on;
     const b = document.getElementById('mm-debug'); if (b) { b.textContent = 'デバッグモード: ' + (debugMode ? 'ON' : 'OFF'); b.classList.toggle('btn-warn-on', debugMode); }
-    const p = document.getElementById('debug-panel'); if (p) p.style.display = debugMode ? 'block' : 'none';
+    const p = document.getElementById('debug-panel'); if (p) p.style.display = debugMode ? 'flex' : 'none';
     if (debugMode) { _dbgBuild(); document.getElementById('mobile-menu-modal')?.classList.add('hidden'); logMessage('DEBUG: デバッグモードON — 保存は無効 (戦歴・クレジットに残らない)', 'warning-msg'); }
     else { _dbgGod = false; _dbgFreeze = false; }
 }
 function _dbgOpts(list, lab) { return list.map(k => '<option value="' + k + '">' + (lab ? lab(k) : k) + '</option>').join(''); }
 function _dbgBuild() {
     const box = document.getElementById('dbg-body'); if (!box) return;
-    const partIds = Object.keys(PARTS), items = Object.keys(DRONE_SPEC).filter(t => !DRONE_SPEC[t].buildOnly || true);
-    box.innerHTML =
-      '<div class="dbg-sec"><h4>自艦</h4>'
-      + '<button data-d="healP">耐久 全回復</button><button data-d="god" id="dbg-god">無敵 OFF</button><button data-d="ammoP">弾・資材 満タン</button><button data-d="matP">資材 +14</button><button data-d="cdP">再装填/再使用を全リセット</button>'
-      + '<br><select id="dbg-item">' + _dbgOpts(items, t => DRONE_SPEC[t].label) + '</select><button data-d="giveItem">未取得アイテム付与 (+1)</button>'
-      + '<br><select id="dbg-part">' + _dbgOpts(partIds, id => PARTS[id].name) + '</select><button data-d="givePart">部品を付与</button>'
-      + '<br><select id="dbg-drone">' + _dbgOpts(['attack', 'mech', 'scout', 'build', 'barrier', 'buoy', 'decoy', 'higgs'], t => DRONE_SPEC[t].label) + '</select><button data-d="spawnDroneP">ドローン配置 (即時)</button><button data-d="techNow">Tech組み立てを即完成</button></div>'
-      + '<div class="dbg-sec"><h4>敵艦</h4>'
-      + '<button data-d="healE">耐久 全回復</button><button data-d="killE">撃沈</button><button data-d="freeze" id="dbg-freeze">凍結 OFF</button><button data-d="ammoE">弾 満タン</button><button data-d="matE">資材 +14</button>'
-      + '<br><select id="dbg-eitem">' + _dbgOpts(['flash', 'noise', 'smoke', 'fsos', 'lure', 'fogspray', 'fogblow', 'repair', 'bcn_heat', 'bcn_optic', 'bcn_em', 'bcn_higgs'], t => DRONE_SPEC[t].label) + '</select><button data-d="giveItemE">敵にアイテム付与 (+1)</button>'
-      + '<br><select id="dbg-epart">' + _dbgOpts(ENEMY_PART_OK, id => PARTS[id].name) + '</select><button data-d="givePartE">敵に部品を付与</button>'
-      + '<br><select id="dbg-edrone"><option value="mech">Tech</option><option value="scout">哨戒機</option><option value="fighter">艦載機</option></select><button data-d="spawnDroneE">敵のドローン配置 (即時)</button>'
-      + '<br><button data-d="pullE">敵を自艦の前方2000uへ</button><button data-d="gotoE">自艦を敵の1500uへ</button><button data-d="tellE">敵に自艦の位置を教える</button></div>'
-      + '<div class="dbg-sec"><h4>世界</h4>'
-      + '<button data-d="fogClear">霧を全消去</button><button data-d="discover">難破船を全発見</button><button data-d="lull">凪を起こす</button><button data-d="surge">サージを起こす</button><button data-d="convoy">輸送船を出す</button><button data-d="clear">この試合を終える</button>'
-      + '<br><button data-d="viewOff">ヒッグス表示 切替</button><button data-d="info" id="dbg-info-btn">内部状態表示 ON</button><button data-d="dump">状態を思考ログへ</button></div>'
-      + '<div class="dbg-sec"><div class="dbg-info" id="dbg-info"></div></div>';
+    const partIds = Object.keys(PARTS), items = Object.keys(DRONE_SPEC);
+    // 第58弾 (オーナー「意味が分からない・使いづらい」): タブに分け、ボタンは「名前＋何が起きるか」の2行・選択肢は「選ぶ→付与」の1行にした
+    const B = (d, name, hint, extra) => '<button class="dbg-b' + (extra || '') + '" data-d="' + d + '"' + (d === 'god' ? ' id="dbg-god"' : d === 'freeze' ? ' id="dbg-freeze"' : d === 'info' ? ' id="dbg-info-btn"' : '') + '><b>' + name + '</b><i>' + hint + '</i></button>';
+    const R = (sel, btn) => '<div class="dbg-sel">' + sel + btn + '</div>';
+    const G = (t, body) => '<div class="dbg-grp"><div class="dbg-gt">' + t + '</div>' + body + '</div>';
+    const stratOpts = '<option value="">(自動: 性格と状況で選ぶ)</option>' + Object.keys(COM_STRATS).map(k => '<option value="' + k + '">' + COM_STRATS[k].split(' ')[0] + '</option>').join('');
+    const tabs = {
+        p: G('体力・補給', '<div class="dbg-grid">' + B('healP', '耐久を全回復', '自艦のHPを最大にする') + B('god', '無敵', '押すたびに ON/OFF — 被弾してもHPが減らない', ' dbg-tg') + B('ammoP', '弾と資材を満タン', '実弾・ミサイル・資材・完成品を積み込み計画まで') + B('matP', '資材 +14', 'Tech1機ぶん。積載の上限は無視') + B('cdP', '再装填を全リセット', '武器のリロード・ソナー・噴射をすぐ使える状態に') + '</div>')
+            + G('アイテムを付与', R('<select id="dbg-item">' + _dbgOpts(items, t => DRONE_SPEC[t].label) + '</select>', B('giveItem', '付与 +1', '選んだ物を在庫に1つ足す')))
+            + G('部品を付与', R('<select id="dbg-part">' + _dbgOpts(partIds, id => PARTS[id].name) + '</select>', B('givePart', '付与', '選んだ部品を取り付ける (枠が満杯なら予備へ)')))
+            + G('ドローン', R('<select id="dbg-drone">' + _dbgOpts(['attack', 'mech', 'scout', 'build', 'barrier', 'buoy', 'decoy', 'higgs'], t => DRONE_SPEC[t].label) + '</select>', B('spawnDroneP', '今すぐ出す', '資材を使わず自艦の周りに配置')) + '<div class="dbg-grid">' + B('techNow', 'Techを即完成', '組み立て中のTechを今すぐ完成させる') + '</div>')
+            + G('COMの戦略 (COM対戦の自機COMのみ)', R('<select id="dbg-stratp">' + stratOpts + '</select>', B('stratP', '戦略を適用', '次の戦略をこれに固定する (自動に戻すには上の「自動」を選んで適用)'))),
+        e: G('体力・弾', '<div class="dbg-grid">' + B('healE', '耐久を全回復', '敵艦のHPを最大に') + B('killE', '撃沈', '敵艦を今すぐ沈める') + B('freeze', '凍結', '押すたびに ON/OFF — 敵が動かず撃たない (自艦の挙動の確認用)', ' dbg-tg') + B('ammoE', '弾を満タン', '敵の実弾・ミサイルを積み込みまで') + B('matE', '資材 +14', '敵の資材 (Tech建造・補給用)') + '</div>')
+            + G('アイテムを付与', R('<select id="dbg-eitem">' + _dbgOpts(['flash', 'noise', 'smoke', 'fsos', 'lure', 'fogspray', 'fogblow', 'repair', 'bcn_heat', 'bcn_optic', 'bcn_em', 'bcn_higgs'], t => DRONE_SPEC[t].label) + '</select>', B('giveItemE', '付与 +1', '敵の在庫に1つ足す (使うかは敵の判断)')))
+            + G('部品を付与', R('<select id="dbg-epart">' + _dbgOpts(ENEMY_PART_OK, id => PARTS[id].name) + '</select>', B('givePartE', '付与', '敵に差し込める部品だけ')))
+            + G('ドローン', R('<select id="dbg-edrone"><option value="mech">Tech</option><option value="scout">哨戒機</option><option value="fighter">艦載機</option></select>', B('spawnDroneE', '今すぐ出す', '敵の近くに配置')))
+            + G('位置', '<div class="dbg-grid">' + B('pullE', '敵を自艦の前へ', '自艦の前方2000uに敵を移す') + B('gotoE', '自艦を敵の近くへ', '敵の西1500uに自艦を移す') + B('tellE', '自艦の位置を教える', '敵が自艦を追跡し始める') + '</div>')
+            + G('COMの戦略', R('<select id="dbg-strate">' + '<option value="">(自動)</option><option value="ambush">拠点の待ち伏せ</option><option value="bait">餌で誘う</option><option value="guard">拠点を守る</option><option value="gather">収集 (従来の巡回)</option></select>', B('stratE', '戦略を適用', '気配が無い間の次の戦略を固定する'))),
+        w: G('環境', '<div class="dbg-grid">' + B('fogClear', '霧を全消去', '濃度を0に (試合中は戻らない)') + B('discover', '難破船を全発見', '海図に載せる') + B('viewOff', 'ヒッグス表示 切替', '霧の暗幕を外し、真の位置を描く (見た目だけ)') + '</div>')
+            + G('イベントを起こす', '<div class="dbg-grid">' + B('lull', '凪', '予兆から始まる') + B('surge', 'ヒッグスサージ', '予兆から始まる') + B('convoy', '輸送船を出す', '拿捕・撃沈の練習用') + '</div>')
+            + G('試合', '<div class="dbg-grid">' + B('clear', 'この試合を終える', '敵を撃沈して勝利にする', ' dbg-danger') + '</div>'),
+        s: G('内部状態', '<div class="dbg-grid">' + B('info', '表示 ON/OFF', '下の数値を更新するか', ' dbg-tg') + B('dump', '思考ログへ出す', 'COM対戦のログに今の状態を書く') + '</div><div class="dbg-info" id="dbg-info">…</div>')
+    };
+    const names = { p: '自艦', e: '敵艦', w: '世界', s: '状態' };
+    box.innerHTML = '<div class="dbg-tabs">' + Object.keys(names).map(k => '<button class="dbg-tab' + (k === (window._dbgTab || 'p') ? ' on' : '') + '" data-tab="' + k + '">' + names[k] + '</button>').join('') + '</div>'
+        + Object.keys(tabs).map(k => '<div class="dbg-pane' + (k === (window._dbgTab || 'p') ? ' on' : '') + '" data-pane="' + k + '">' + tabs[k] + '</div>').join('');
+    // 状態の見かけを反映
+    const g = document.getElementById('dbg-god'); if (g) g.classList.toggle('on', _dbgGod);
+    const f = document.getElementById('dbg-freeze'); if (f) f.classList.toggle('on', _dbgFreeze);
+    const i = document.getElementById('dbg-info-btn'); if (i) i.classList.toggle('on', _dbgInfoOn);
 }
 function _dbgAct(a) {
     const e = _dbgBoss(), say = (t) => logMessage('DEBUG: ' + t, 'system-msg');
     const sel = (id) => document.getElementById(id)?.value;
     switch (a) {
         case 'healP': if (player) { player.hp = player.maxHp; say('自艦の耐久を全回復'); } break;
-        case 'god': _dbgGod = !_dbgGod; { const b = document.getElementById('dbg-god'); if (b) { b.textContent = '無敵 ' + (_dbgGod ? 'ON' : 'OFF'); b.classList.toggle('on', _dbgGod); } } break;
+        case 'god': _dbgGod = !_dbgGod; { const b = document.getElementById('dbg-god'); if (b) b.classList.toggle('on', _dbgGod); } say('無敵 ' + (_dbgGod ? 'ON' : 'OFF')); break;
         case 'ammoP': { const lo = shipLoadout(gameState.shipType); refillAmmo(); cargo.mat = Math.max(cargo.mat, cargoMatCap()); for (const t of SHIP_DRONES[gameState.shipType] || []) if (!DRONE_SPEC[t].buildOnly) cargo.stock[t] = Math.max(cargo.stock[t] || 0, lo[t] || 0); _hudCache.cargo = null; say('弾・積み込み計画・資材を満タン'); break; }
         case 'matP': cargo.mat += 14; _hudCache.cargo = null; say('資材 +14 (計' + cargo.mat + '個・積載の上限は無視)'); break;
         case 'cdP': if (player) { omniSonarCooldown = 0; dirSonarCooldown = 0; boostCD = 0; player.missileReloading = false; player.beamReloading = false; player.kineticReloading = false; player._kitT = 0; say('再装填・ソナー・噴射の再使用を即時に'); } break;
@@ -16006,7 +16023,7 @@ function _dbgAct(a) {
         case 'techNow': if (cargo.asm && cargo.asm.type === 'mech') { cargo.asm.t = 0; say('Techの組み立てを完了'); } else say('Techを組み立てていない'); break;
         case 'healE': if (e) { e.hp = e.maxHp; say('敵の耐久を全回復'); } break;
         case 'killE': if (e) { e.hp = 0; say('敵を撃沈'); } break;
-        case 'freeze': _dbgFreeze = !_dbgFreeze; { const b = document.getElementById('dbg-freeze'); if (b) { b.textContent = '凍結 ' + (_dbgFreeze ? 'ON' : 'OFF'); b.classList.toggle('on', _dbgFreeze); } } break;
+        case 'freeze': _dbgFreeze = !_dbgFreeze; { const b = document.getElementById('dbg-freeze'); if (b) b.classList.toggle('on', _dbgFreeze); } say('敵の凍結 ' + (_dbgFreeze ? 'ON' : 'OFF')); break;
         case 'ammoE': if (e) { e.ammoK = e._fullK || e.ammoK; e.ammoM = e._fullM || e.ammoM; say('敵の弾を満タン'); } break;
         case 'matE': enemyMat += 14; say('敵の資材 +14 (計' + enemyMat + '個)'); break;
         case 'giveItemE': if (e) { const t = sel('dbg-eitem'); if (t === 'flash') e.itemFlash = (e.itemFlash || 0) + 1; else if (t === 'noise') e.itemNoise = (e.itemNoise || 0) + 1; else if (t === 'smoke') e.itemSmoke = (e.itemSmoke || 0) + 1; else if (t === 'fsos') e.lureSOS = (e.lureSOS || 0) + 1; else if (t === 'lure') e.lureShip = (e.lureShip || 0) + 1; else if (t === 'fogspray') e.itemSpray = (e.itemSpray || 0) + 1; else if (t === 'fogblow') e.itemBlow = (e.itemBlow || 0) + 1; else if (t === 'repair') e.itemRepair = (e.itemRepair || 0) + 1; else if (t.startsWith('bcn_')) { e.itemBcn = e.itemBcn || {}; e.itemBcn[t.slice(4)] = (e.itemBcn[t.slice(4)] || 0) + 1; } say('敵に ' + DRONE_SPEC[t].label + ' +1'); } break;
@@ -16022,7 +16039,9 @@ function _dbgAct(a) {
         case 'convoy': spawnConvoy(); say('輸送船を出す'); break;
         case 'clear': if (e) { e.hp = 0; say('敵を撃沈して試合を終える'); } break;
         case 'viewOff': toggleHiggsView(); break;
-        case 'info': _dbgInfoOn = !_dbgInfoOn; { const b = document.getElementById('dbg-info-btn'); if (b) b.textContent = '内部状態表示 ' + (_dbgInfoOn ? 'ON' : 'OFF'); } break;
+        case 'info': _dbgInfoOn = !_dbgInfoOn; { const b = document.getElementById('dbg-info-btn'); if (b) b.classList.toggle('on', _dbgInfoOn); } break;
+        case 'stratP': { const v = sel('dbg-stratp') || null; window.__stratForce = v; if (_com) { _com.st = null; _com.stratCD = 0; } say('自機COMの戦略 → ' + (v ? COM_STRATS[v].split(' ')[0] : '自動')); break; }
+        case 'stratE': { const v = sel('dbg-strate') || null; window.__stratForceE = v; if (e) { e._strat = null; e._stratCD = 0; e._lastScentF = -1e9; } say('敵COMの戦略 → ' + (v || '自動')); break; }
         case 'dump': { const t = _dbgInfoText(); comThinkEvent('p', 'DEBUG\n' + t); say('状態を思考ログへ出した (COM対戦中のみ表示)'); break; }
     }
 }
@@ -16042,5 +16061,9 @@ function _dbgInfoText() {
 (() => {
     const b = document.getElementById('debug-panel');
     if (!b) return;
-    b.addEventListener('click', (ev) => { const x = ev.target.closest('button[data-d]'); if (x) _dbgAct(x.dataset.d); });
+    b.addEventListener('click', (ev) => {
+        const t = ev.target.closest('button[data-tab]');
+        if (t) { window._dbgTab = t.dataset.tab; b.querySelectorAll('.dbg-tab').forEach(q => q.classList.toggle('on', q === t)); b.querySelectorAll('.dbg-pane').forEach(q => q.classList.toggle('on', q.dataset.pane === window._dbgTab)); return; }
+        const x = ev.target.closest('button[data-d]'); if (x) { _dbgAct(x.dataset.d); x.classList.add('flash'); setTimeout(() => x.classList.remove('flash'), 250); }
+    });
 })();
