@@ -350,6 +350,13 @@ function searchMark(who, x, y, R) {
 // まだ聴いていない (か、聴いてから時間がたった) マスのうち、近くて・マップの内側寄りの所
 function searchNext(who, x, y) {
     const m = searchMem(who);
+    // 第62弾 (オーナー「COMが同じ所をぐるぐる回る」): 一度選んだ行き先は、着く(＝聴いた)か90秒たつまで変えない。
+    // 旧: 呼ばれるたびに選び直し、聴いたマスの更新と乱数で1万5千u離れたマスの間を24秒ごとに往復していた (自機COM・敵とも同じ関数)
+    const sg = who._sGoal;
+    if (sg && _frameCount - sg.f < 5400) {
+        const gi = Math.max(0, Math.min(SEARCH_N - 1, Math.floor((sg.x - (MAP_CX - SEARCH_N * SEARCH_CELL / 2)) / SEARCH_CELL))), gj = Math.max(0, Math.min(SEARCH_N - 1, Math.floor((sg.y - (MAP_CY - SEARCH_N * SEARCH_CELL / 2)) / SEARCH_CELL)));
+        if (Math.min(SEARCH_FORGET, _frameCount - m[gj * SEARCH_N + gi]) >= SEARCH_FORGET * 0.5 && Math.hypot(sg.x - x, sg.y - y) >= SEARCH_CELL) return { x: sg.x, y: sg.y };
+    }
     let best = null, bv = -Infinity;
     for (let j = 0; j < SEARCH_N; j++) for (let i = 0; i < SEARCH_N; i++) {
         const cx = _scell(i), cy = _scell(j), dc = Math.hypot(cx - MAP_CX, cy - MAP_CY);
@@ -362,9 +369,11 @@ function searchNext(who, x, y) {
         let lm = 0; const side = who === player ? 'player' : 'enemy';
         for (const st of structures) if (st.type === 'colony' && st.owner !== side && Math.abs(st.x - cx) < SEARCH_CELL / 2 && Math.abs(st.y - cy) < SEARCH_CELL / 2) { lm = 0.4; break; }
         if (!lm) for (const n of resourceNodes) if (n.owner !== side && Math.abs(n.x - cx) < SEARCH_CELL / 2 && Math.abs(n.y - cy) < SEARCH_CELL / 2) { lm = 0.25; break; }
-        const v = age / SEARCH_FORGET * 2 - d / 12000 - dc / 30000 + lm + Math.random() * 0.15;
+        const dirB = who._sDir === undefined ? 0 : 0.35 * Math.max(0, Math.cos(Math.atan2(cy - y, cx - x) - who._sDir)); // 今までの向きの先を少し優先 (掃き出しが行ったり来たりしない)
+        const v = age / SEARCH_FORGET * 2 - d / 12000 - dc / 30000 + lm + dirB + Math.random() * 0.15;
         if (v > bv) { bv = v; best = { x: cx, y: cy }; }
     }
+    if (best) { who._sGoal = { x: best.x, y: best.y, f: _frameCount }; who._sDir = Math.atan2(best.y - y, best.x - x); }
     return best || { x: MAP_CX, y: MAP_CY };
 }
 
@@ -418,7 +427,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261109o';
+const SPRITE_VER = '20261109q';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -6041,6 +6050,7 @@ function generateSector() {
         _com = comNewMemo(); _thinkLast = {};
         const _tl = document.getElementById('think-log'); if (_tl) _tl.textContent = '';
         const _th = document.getElementById('think-who');
+        _comMatchInfo = { ship: comCfg.ship, enemy: comCfg.enemy, pPre: comCfg.pPreset, ePre: comCfg.ePreset, pp: Object.assign({}, _com.pp), ep: Object.assign({}, boss.personality) }; // 第63弾: 試合の記録に双方の艦種と性格を出す
         if (_th) _th.textContent = '自機COM ' + SHIP_JP[comCfg.ship] + ' [' + persLabel(_com.pp) + ']  vs  敵COM ' + SHIP_JP[comCfg.enemy] + ' [' + persLabel(boss.personality) + ']';
     }
     // 第48弾: 敵の武器の種類も艦種の上限 (攻撃型3・潜航型2・空母1)。COM対戦は積み込みの設定どおり。通常の敵は性格で選ぶ (潜航型: 隠密/慎重ならビーム+ミサイル・他は実弾+ミサイル)
@@ -13970,6 +13980,7 @@ function comNewMemo() { return { pp: comPersonalityFor('p'), lastDeploy: -1e9, h
 let matchRec = null;
 const REC_EVENTS_MAX = 3000;
 const _AI_JP = { lurking: '潜伏', gathering: '収集', hunting: '追跡', combat: '交戦' };
+let _comMatchInfo = null;
 function matchRecStart() {
     const lm = [];
     for (const st of structures) if (st.type === 'colony' || st.type === 'derelict') lm.push({ k: st.type, x: st.x, y: st.y });
@@ -14016,6 +14027,16 @@ function openReplay() {
     for (const sm of matchRec.s) { const pts = [sm.P].concat(sm.E); for (const q of pts) { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); } }
     const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, half = Math.max(4000, (Math.max(x1 - x0, y1 - y0) / 2) * 1.15 + 600);
     _rp = { i: matchRec.s.length - 1, play: false, spd: 4, cx, cy, half, acc: 0, last: 0 };
+    { // 第63弾: COM対戦は 双方の艦種と性格 (プリセット名と4軸) を記録の上に出す
+        const mb = document.getElementById('rp-match'), I = _comMatchInfo;
+        if (mb) {
+            if (matchRec.com && I) {
+                const pn = k => (COM_PRESETS[k] && COM_PRESETS[k].label) || '';
+                const row = (cls, lab, ship, pre, p) => '<div class="rp-m ' + cls + '"><b>' + lab + '</b> ' + SHIP_JP[ship] + ' <span>' + (pn(pre) ? pn(pre) + ' ' : '') + persLabel(p) + '</span></div>';
+                mb.innerHTML = row('p', '自機COM', I.ship, I.pPre, I.pp) + row('e', '敵COM', I.enemy, I.ePre, I.ep); mb.style.display = '';
+            } else { mb.innerHTML = ''; mb.style.display = 'none'; }
+        }
+    }
     _rpRenderEvents();
     _rpDraw();
     _rpStartLoop();
@@ -14638,7 +14659,7 @@ function comPilotStep() {
             const ip = cvD < CONVOY_BOARD_R * 0.8 ? { x: cvT.x + cvT.vx * 30, y: cvT.y + cvT.vy * 30 } : interceptPoint(player.x, player.y, shipCruiseSpeed(gameState.shipType, genAlloc.engine, STANCE_GAIN.flank), cvT.x, cvT.y, cvT.vx, cvT.vy);
             // 第57弾 (オーナー): 人間は一度向けた針路をむやみに変えない — 追う目標が大きくずれる(2500u超)か30秒たつか止まった時だけ向け直す (旧: 2秒ごとに目的地が動き続けた)
             const _ca = c.cvAim;
-            if (!_ca || player.state !== 'moving' || Math.hypot(ip.x - _ca.x, ip.y - _ca.y) > 2500 || now - _ca.f > 1800) { player.setTarget(ip.x, ip.y); c.cvAim = { x: ip.x, y: ip.y, f: now }; _comSteered(c, 'convoy'); }
+            if (!_ca || player.state !== 'moving' || (Math.hypot(ip.x - _ca.x, ip.y - _ca.y) > 2500 && now - _ca.f > 900) || now - _ca.f > 1800) { /* 第62弾: 見えている位置と推定が数千uずれても15秒は針路を変えない */ player.setTarget(ip.x, ip.y); c.cvAim = { x: ip.x, y: ip.y, f: now }; _comSteered(c, 'convoy'); }
             comThink('p', 'convoy', '輸送船を追って拿捕する (' + _dirTxt(player.x, player.y, cvT.x, cvT.y) + '・' + Math.round(cvD / 100) * 100 + 'u)');
             if (powerStance !== 'flank' && cvD > CONVOY_BOARD_R) setStance('flank'); else if (cvD <= CONVOY_BOARD_R && powerStance === 'flank') setStance('cruise');
             return;
