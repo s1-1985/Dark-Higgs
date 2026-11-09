@@ -350,6 +350,13 @@ function searchMark(who, x, y, R) {
 // まだ聴いていない (か、聴いてから時間がたった) マスのうち、近くて・マップの内側寄りの所
 function searchNext(who, x, y) {
     const m = searchMem(who);
+    // 第62弾 (オーナー「COMが同じ所をぐるぐる回る」): 一度選んだ行き先は、着く(＝聴いた)か90秒たつまで変えない。
+    // 旧: 呼ばれるたびに選び直し、聴いたマスの更新と乱数で1万5千u離れたマスの間を24秒ごとに往復していた (自機COM・敵とも同じ関数)
+    const sg = who._sGoal;
+    if (sg && _frameCount - sg.f < 5400) {
+        const gi = Math.max(0, Math.min(SEARCH_N - 1, Math.floor((sg.x - (MAP_CX - SEARCH_N * SEARCH_CELL / 2)) / SEARCH_CELL))), gj = Math.max(0, Math.min(SEARCH_N - 1, Math.floor((sg.y - (MAP_CY - SEARCH_N * SEARCH_CELL / 2)) / SEARCH_CELL)));
+        if (Math.min(SEARCH_FORGET, _frameCount - m[gj * SEARCH_N + gi]) >= SEARCH_FORGET * 0.5 && Math.hypot(sg.x - x, sg.y - y) >= SEARCH_CELL) return { x: sg.x, y: sg.y };
+    }
     let best = null, bv = -Infinity;
     for (let j = 0; j < SEARCH_N; j++) for (let i = 0; i < SEARCH_N; i++) {
         const cx = _scell(i), cy = _scell(j), dc = Math.hypot(cx - MAP_CX, cy - MAP_CY);
@@ -362,9 +369,11 @@ function searchNext(who, x, y) {
         let lm = 0; const side = who === player ? 'player' : 'enemy';
         for (const st of structures) if (st.type === 'colony' && st.owner !== side && Math.abs(st.x - cx) < SEARCH_CELL / 2 && Math.abs(st.y - cy) < SEARCH_CELL / 2) { lm = 0.4; break; }
         if (!lm) for (const n of resourceNodes) if (n.owner !== side && Math.abs(n.x - cx) < SEARCH_CELL / 2 && Math.abs(n.y - cy) < SEARCH_CELL / 2) { lm = 0.25; break; }
-        const v = age / SEARCH_FORGET * 2 - d / 12000 - dc / 30000 + lm + Math.random() * 0.15;
+        const dirB = who._sDir === undefined ? 0 : 0.35 * Math.max(0, Math.cos(Math.atan2(cy - y, cx - x) - who._sDir)); // 今までの向きの先を少し優先 (掃き出しが行ったり来たりしない)
+        const v = age / SEARCH_FORGET * 2 - d / 12000 - dc / 30000 + lm + dirB + Math.random() * 0.15;
         if (v > bv) { bv = v; best = { x: cx, y: cy }; }
     }
+    if (best) { who._sGoal = { x: best.x, y: best.y, f: _frameCount }; who._sDir = Math.atan2(best.y - y, best.x - x); }
     return best || { x: MAP_CX, y: MAP_CY };
 }
 
@@ -418,7 +427,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261109o';
+const SPRITE_VER = '20261109p';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -14638,7 +14647,7 @@ function comPilotStep() {
             const ip = cvD < CONVOY_BOARD_R * 0.8 ? { x: cvT.x + cvT.vx * 30, y: cvT.y + cvT.vy * 30 } : interceptPoint(player.x, player.y, shipCruiseSpeed(gameState.shipType, genAlloc.engine, STANCE_GAIN.flank), cvT.x, cvT.y, cvT.vx, cvT.vy);
             // 第57弾 (オーナー): 人間は一度向けた針路をむやみに変えない — 追う目標が大きくずれる(2500u超)か30秒たつか止まった時だけ向け直す (旧: 2秒ごとに目的地が動き続けた)
             const _ca = c.cvAim;
-            if (!_ca || player.state !== 'moving' || Math.hypot(ip.x - _ca.x, ip.y - _ca.y) > 2500 || now - _ca.f > 1800) { player.setTarget(ip.x, ip.y); c.cvAim = { x: ip.x, y: ip.y, f: now }; _comSteered(c, 'convoy'); }
+            if (!_ca || player.state !== 'moving' || (Math.hypot(ip.x - _ca.x, ip.y - _ca.y) > 2500 && now - _ca.f > 900) || now - _ca.f > 1800) { /* 第62弾: 見えている位置と推定が数千uずれても15秒は針路を変えない */ player.setTarget(ip.x, ip.y); c.cvAim = { x: ip.x, y: ip.y, f: now }; _comSteered(c, 'convoy'); }
             comThink('p', 'convoy', '輸送船を追って拿捕する (' + _dirTxt(player.x, player.y, cvT.x, cvT.y) + '・' + Math.round(cvD / 100) * 100 + 'u)');
             if (powerStance !== 'flank' && cvD > CONVOY_BOARD_R) setStance('flank'); else if (cvD <= CONVOY_BOARD_R && powerStance === 'flank') setStance('cruise');
             return;
