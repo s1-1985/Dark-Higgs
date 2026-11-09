@@ -102,7 +102,7 @@ function trackNextSignal() {
     let idx = sigs.findIndex(b => b.sourceId === lockedSignalId);
     const next = sigs[(idx + 1) % sigs.length];
     window._lockSignal(next.sourceId);
-    playSound('ui');
+    sfxUI('ui_select');
     logMessage(next.relay
         ? `TRACK: SIG-${String(next.contactNo || '?').padStart(2, '0')} [${next.sensorLabel}] を追跡 — 聴音局の方位線と自艦の方位を重ねる`
         : `TRACK: SIG-${String(next.contactNo || '?').padStart(2, '0')} [${next.sensorLabel || next.sensor}] 方位${next.bearingDeg}° を追跡 — 場所を変えて方位を重ねると交点が出る`, 'system-msg');
@@ -427,7 +427,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261109u';
+const SPRITE_VER = '20261109v';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -578,7 +578,8 @@ function _sfxInit() {
     bus.connect(dry); dry.connect(comp);
     bus.connect(d1); bus.connect(d2); d1.connect(lp); d2.connect(lp); lp.connect(fb); fb.connect(d1); fb.connect(d2); lp.connect(wet); wet.connect(comp);
     comp.connect(audioCtx.destination);
-    _sfx = { bus };
+    _sfx = { bus, comp };
+    _sfx.sbus = audioCtx.createGain(); _sfx.sbus.gain.value = 0.9; _sfx.sbus.connect(audioCtx.destination); // 第68弾: 効果音ファイル用 (圧縮器と残響を通さない — 尾は音源に含まれている)
     const len = audioCtx.sampleRate * 2, buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate), ch = buf.getChannelData(0);
     let b0 = 0; for (let k = 0; k < len; k++) { const w = Math.random() * 2 - 1; b0 = 0.97 * b0 + 0.03 * w; ch[k] = w * 0.6 + b0 * 4; } // 白色+低域寄りのノイズ
     _noiseBuf = buf;
@@ -614,6 +615,7 @@ function _sfxFM(t0, dur, fc, ratio, depth, peak) {
 }
 function playSound(type, vol = 1) {
     if (!audioCtx) return;
+    { const _m = SFX_LEGACY[type]; if (_m && sfx(_m, vol)) return; } // 第68弾: 効果音ファイルがあればそれを鳴らす (無ければ下の合成にフォールバック)
     if (audioCtx.state === 'suspended') audioCtx.resume();
     if (!_sfxInit()) return;
     const now = audioCtx.currentTime;
@@ -691,6 +693,103 @@ function playSound(type, vol = 1) {
         break; }
     }
 }
+
+
+// ═══════════════════════════════════════════════════════════════
+// 第68弾: 効果音ファイル (ChatGPT制作・docs/SE_SPEC.md 第2版・約200種)。MP3 (assets/sfx/・manifest.json)
+// 読み込み: 起動時に manifest と先読みリストだけ、他は初めて鳴らす時に読む (初回はまだ無いので合成にフォールバック)。
+// 鳴らし方: sfx(id, vol) / ループは sfxLoop(id, on, vol)。ファイルを通すのは sbus (圧縮器・残響を通さない)。
+// ═══════════════════════════════════════════════════════════════
+var SFX_DIR = 'assets/sfx/';
+var _sfxMan = null;
+const _sfxBufs = {}, _sfxFetching = {}, _sfxLastAt = {}, _sfxLastIdx = {}, _sfxLoops = {};
+let _sfxActive = 0;
+var sfxVolume = 1;
+try { const _v = parseFloat(localStorage.getItem('darkEchoSfxVol')); if (isFinite(_v)) sfxVolume = Math.max(0, Math.min(1, _v)); } catch (e) {}
+// 古い合成の種類 → 新しいID (ここに無い種類は個別の呼び出し側で新しいIDを直接鳴らす)
+var SFX_LEGACY = { shoot_kinetic: 'wpn_kinetic_fire', shoot: 'wpn_kinetic_fire', shoot_missile: 'wpn_missile_launch', shoot_beam: 'wpn_beam_fire', beamCharge: 'wpn_beam_charge',
+    ping: 'sonar_scout_ping', enemyPing: 'alm_ping_omni', heartbeat: 'alm_heartbeat', flash: 'item_flash', ui: 'ui_tap', explosion: 'expl_medium' };
+// 個別の音量 (1=ファイルのまま)。ループ・環境は小さく・UIは控えめ
+var SFX_GAIN = { amb_drone_loop: 0.7, amb_tension_loop: 0.6, eng_hum_thermonuclear_loop: 0.35, eng_hum_pulse_loop: 0.35, eng_hum_higgs_loop: 0.35, eng_hum_photon_loop: 0.35,
+    drone_thruster_fighter_loop: 0.45, drone_thruster_tech_loop: 0.45, drone_thruster_scout_loop: 0.4, drone_saber_hum_loop: 0.5, ui_tap: 0.8, ui_slider_tick: 0.6, drone_fire_fighter: 0.7, hit_enemy_kinetic: 0.8, amb_echo: 0.7 };
+// 連打の間引き (秒)。無い音は 0.04
+var SFX_GAP = { ui_tap: 0.05, ui_slider_tick: 0.03, wpn_kinetic_fire: 0.05, hit_player_kinetic: 0.07, hit_enemy_kinetic: 0.07, drone_fire_fighter: 0.12, hit_player_drone_gun: 0.1, ship_blast_chain: 0.2, hit_enemy_drone: 0.1 };
+// 音程を揺らさない音 (ソナー・警報は一定の音程が命)
+var SFX_NOJIT = /^(sonar_|alm_|det_|ui_|sys_|draft_|env_|amb_|eng_hum)/;
+// 起動時に読んでおく (戦闘の基本の音)
+var SFX_PRELOAD = ['sonar_omni_weak', 'sonar_omni_mid', 'sonar_omni_strong', 'sonar_dir_weak', 'sonar_dir_mid', 'sonar_dir_strong', 'hit_player_missile', 'hit_player_kinetic', 'hit_player_beam', 'hit_enemy_missile', 'hit_enemy_kinetic', 'hit_enemy_beam',
+    'wpn_kinetic_fire', 'wpn_missile_launch', 'wpn_beam_charge', 'wpn_beam_fire', 'expl_small', 'expl_medium', 'expl_large', 'alm_missile_launch_detect', 'ui_tap', 'ui_confirm', 'ui_cancel'];
+function _sfxFetch(file) {
+    if (_sfxBufs[file] || _sfxFetching[file] || !audioCtx) return;
+    _sfxFetching[file] = true;
+    fetch(SFX_DIR + file + '?v=' + SPRITE_VER).then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+        .then(ab => new Promise((ok, ng) => { const p = audioCtx.decodeAudioData(ab, ok, ng); if (p && p.then) p.then(ok, ng); }))
+        .then(buf => { _sfxBufs[file] = buf; }).catch(() => { /* 読めない音は合成にフォールバックのまま */ });
+}
+function sfxLoadManifest() {
+    if (_sfxMan !== null || !audioCtx) return;
+    _sfxMan = {};
+    fetch(SFX_DIR + 'manifest.json?v=' + SPRITE_VER).then(r => r.json()).then(m => { _sfxMan = m.sounds || {}; for (const id of SFX_PRELOAD) { const e = _sfxMan[id]; if (e) for (const f of e.f) _sfxFetch(f); } }).catch(() => {});
+}
+// 単発。鳴らせたら true (ファイルが無い・まだ読めていない時は false → 呼び出し側が合成にフォールバック)
+function sfx(id, vol, opt) {
+    if (!audioCtx || !_sfxMan) return false;
+    const e = _sfxMan[id]; if (!e) return false;
+    if (vol === undefined) vol = 1;
+    if (sfxVolume <= 0) return true;
+    let fi = 0;
+    if (e.f.length > 1) { fi = Math.floor(Math.random() * e.f.length); if (fi === _sfxLastIdx[id]) fi = (fi + 1) % e.f.length; }
+    const file = e.f[fi], buf = _sfxBufs[file];
+    if (!buf) { _sfxFetch(e.f[0]); for (const f of e.f) _sfxFetch(f); return false; }
+    if (!_sfxInit()) return false;
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const now = audioCtx.currentTime, gap = SFX_GAP[id] ?? 0.04;
+    if (_sfxLastAt[id] !== undefined && now - _sfxLastAt[id] < gap) return true; // 連打は間引く (鳴らしたことにする)
+    if (_sfxActive >= 28) return true;
+    _sfxLastAt[id] = now; _sfxLastIdx[id] = fi;
+    const src = audioCtx.createBufferSource(); src.buffer = buf;
+    if (!SFX_NOJIT.test(id) && !(opt && opt.nojit)) src.playbackRate.value = 1 + (Math.random() * 0.06 - 0.03); // 毎回同じに聞こえない (±3%)
+    const g = audioCtx.createGain(); g.gain.value = Math.max(0, Math.min(1.6, vol * sfxVolume * (SFX_GAIN[id] ?? 1)));
+    src.connect(g); g.connect(_sfx.sbus);
+    _sfxActive++; src.onended = () => { _sfxActive--; try { g.disconnect(); } catch (e2) {} };
+    src.start(now);
+    return true;
+}
+// ループ。on=true で鳴らし続け (音量 vol に近づける)・false で止める
+function sfxLoop(id, on, vol) {
+    if (!audioCtx || !_sfxMan) return;
+    const e = _sfxMan[id]; if (!e) return;
+    const L = _sfxLoops[id], now = audioCtx.currentTime, tv = on ? Math.max(0, (vol === undefined ? 1 : vol)) * sfxVolume * (SFX_GAIN[id] ?? 1) : 0;
+    if (L) { L.g.gain.setTargetAtTime(tv, now, on ? 0.25 : 0.2); L.on = on; if (!on) { L.offAt = now; } return; }
+    if (!on) return;
+    const buf = _sfxBufs[e.f[0]]; if (!buf) { _sfxFetch(e.f[0]); return; }
+    if (!_sfxInit()) return;
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const src = audioCtx.createBufferSource(); src.buffer = buf; src.loop = true;
+    const g = audioCtx.createGain(); g.gain.value = 0.0001; g.gain.setTargetAtTime(tv, now, 0.25);
+    src.connect(g); g.connect(_sfx.sbus); src.start(now, Math.random() * buf.duration * 0.5);
+    _sfxLoops[id] = { src, g, on: true, offAt: 0 };
+}
+// 止めたループの片付け (毎秒)
+function sfxLoopsGC() { if (!audioCtx) return; const now = audioCtx.currentTime; for (const id in _sfxLoops) { const L = _sfxLoops[id]; if (!L.on && now - L.offAt > 1.5) { try { L.src.stop(); L.g.disconnect(); } catch (e) {} delete _sfxLoops[id]; } } }
+function sfxStopAllLoops() { for (const id in _sfxLoops) sfxLoop(id, false); }
+function setSfxVolume(v) { sfxVolume = Math.max(0, Math.min(1, v)); try { localStorage.setItem('darkEchoSfxVol', String(sfxVolume)); } catch (e) {} }
+// 爆発の大きさ別 (createExplosion の size: 20未満=小・40未満=中・それ以上=大)
+function sfxExplosion(size) { const id = size < 20 ? 'expl_small' : size < 40 ? 'expl_medium' : 'expl_large'; if (!sfx(id)) playSound('explosion'); }
+function sfxUI(id) { if (!sfx(id)) playSound('ui'); }
+function sfxOr(id, legacy, vol) { if (!sfx(id, vol)) playSound(legacy, vol); }
+// 自機の攻撃が敵に当たった音: 見えている=遠景の命中音 / 見えない=noteImpactObs が探知音を鳴らす
+function sfxHitEnemy(type, target, byDrone) {
+    if (!target || !inPlayerVision(target.x, target.y)) return;
+    const id = (target.type === 'fighter' || byDrone) ? 'hit_enemy_drone' : type === 'missile' ? 'hit_enemy_missile' : type === 'beam' ? 'hit_enemy_beam' : 'hit_enemy_kinetic';
+    if (!sfx(id)) playSound(type === 'missile' ? 'explosion' : 'hit', 0.6);
+}
+// 搭載物を展開した時の音 (戦闘機・哨戒機・砲台・バリア・ブイ・デコイ・散布など)
+function _sfxDeployId(type) {
+    return ({ attack: 'drone_launch_fighter', scout: 'drone_launch_scout', build: 'drone_deploy_turret', barrier: 'drone_deploy_barrier', buoy: 'drone_deploy_buoy', mech: 'item_assemble_tech_done', higgs: 'item_fogspray', decoy: 'item_lure_ship',
+        bcn_heat: 'item_beacon_heat', bcn_optic: 'item_beacon_optic', bcn_em: 'item_beacon_em', bcn_higgs: 'item_beacon_higgs', lure: 'item_lure_ship', fsos: 'item_lure_sos', repair: 'item_repair_start', flash: 'item_flash', noise: 'item_noise', smoke: 'item_smoke', fogspray: 'item_fogspray', fogblow: 'item_fogblow' })[type] || 'ui_confirm';
+}
+try { if (audioCtx) sfxLoadManifest(); } catch (e) {}
 
 // ═══════════════════════════════════════════════════════════════
 // 環境音システム (第5弾): ヒッグスの霧の閉塞感を持続低音ドローンで表現。
@@ -813,6 +912,7 @@ updateCareerPanel();
 // 環境音: 保存設定をトグルボタンへ反映 + ロビー初タッチで開始 (自動再生制限対応)
 (() => {
     const _ab = document.getElementById('btn-ambient');
+    try { initSfxVolumeUI(); } catch (e) {}
     if (_ab) _ab.textContent = ambientOn ? '♪ SOUND ON' : '♪ SOUND OFF';
     const _lb = document.getElementById('ship-select-lobby');
     if (_lb) _lb.addEventListener('pointerdown', () => startAmbient(), { once: true });
@@ -2026,7 +2126,7 @@ function zoomAt(newZoom, clientX, clientY) {
 // ボタン用: 数フレームかけて滑らかに (フィールド中心基準)
 function zoomStep(mult) {
     camera.zoomTarget = _clampZoom((camera.zoomTarget || camera.zoom) * mult);
-    playSound('ui');
+    sfxUI('ui_slider_tick');
 }
 function _tickZoomAnim() {
     if (camera.zoomTarget == null) return;
@@ -2587,6 +2687,12 @@ let playerHitLog = [];
 const _HIT_JP = { beam: 'ビームの直撃', missile: 'ミサイル', smart: 'AIミサイル', kinetic: '実弾', nearmiss: 'ミサイルの至近弾' };
 function notePlayerHit(kind, dmg, sx, sy, strike, byFighter) {
     if (!player) return;
+    { // 第68弾: 自艦の被弾の音 (艦内の骨に響く音。旧: 被弾は無音だった)
+        const _id = kind === 'nearmiss' ? 'hit_player_blast_near' : byFighter ? 'hit_player_drone_gun' : kind === 'missile' ? 'hit_player_missile' : kind === 'beam' ? 'hit_player_beam' : 'hit_player_kinetic';
+        if (!sfx(_id)) playSound(kind === 'missile' || kind === 'nearmiss' ? 'explosion' : 'hit');
+        if (strike && strike.preempt) sfx('hit_player_ambush');
+        if (strike && strike.rear) sfx('hit_player_rear');
+    }
     const h = { f: _frameCount, kind, dmg, hp: Math.max(0, player.hp), byFighter: !!byFighter,
         deg: compassDeg(Math.atan2(sy - player.y, sx - player.x)), dist: Math.round(Math.hypot(sx - player.x, sy - player.y) / 50) * 50,
         ambush: !!(strike && strike.preempt), back: !!(strike && strike.rear) };
@@ -2674,7 +2780,7 @@ function applyStrikeBonuses(byPlayer, attacker, target, hitAng, wType, fromDrone
             target._staggerTimer = AMBUSH_STAGGER_DUR;
             target._weaponJamTimer = Math.max(target._weaponJamTimer || 0, AMBUSH_WEAPON_JAM);
             logMessage('TAC: 奇襲成功！ 敵艦混乱 — 火器管制ダウン中は追撃ダメージ増', 'warning-msg');
-            playSound('alert');
+            sfxOr('alm_ambush_success', 'alert');
             if (huntStats) huntStats.ambushes++;
             if (gameState.career) gameState.career.ambushes++;
         } else if (target._staggerTimer > 0) {
@@ -2695,7 +2801,7 @@ function applyStrikeBonuses(byPlayer, attacker, target, hitAng, wType, fromDrone
             target._weaponJamTimer = Math.max(target._weaponJamTimer || 0, AMBUSH_WEAPON_JAM);
             logMessage('CRITICAL: 未探知の敵からの奇襲被弾 — 火器管制ダウン中！', 'warning-msg');
             effects.push({ x: target.x, y: target.y - 44, text: '奇襲被弾!', life: 1.2, type: 'floatText', c: '#ff3333' });
-            playSound('alert');
+            /* 第68弾: 被弾音は notePlayerHit */;
         } else if (target._staggerTimer > 0) {
             mult *= AMBUSH_FOLLOW_MULT;
         }
@@ -2764,6 +2870,7 @@ class Projectile {
                 }
                 createHitEffect(target.x, target.y, isPlayer ? '#00ffaa' : '#ff4d4d');
                 effects.push({ x: target.x, y: target.y - 30, text: _bStrike.preempt ? `奇襲! -${_beamDmg}` : `-${_beamDmg}`, life: 1.0, type: 'floatText', c: _bStrike.preempt ? '#ffff00' : (isPlayer ? '#00ffdd' : '#ff5555') });
+                if (isPlayer) sfxHitEnemy('beam', target);
                 if (isPlayer) { if (inPlayerVision(target.x, target.y)) logMessage(`HIT [BEAM] → ${_beamDmg} ダメージ`, 'warning-msg'); else noteImpactObs(target.x, target.y, 'beam'); } // 第59弾: 視界の外は閃光の観測だけ
                 // ビーム着弾スプライトエフェクト
                 const _bfxImg = SPRITES['fx_beam_impact'];
@@ -2886,7 +2993,7 @@ class Projectile {
             if (!this.isPlayer && !this._torpAlerted && player && player.hp > 0 &&
                 Math.hypot(player.x - this.x, player.y - this.y) < TORPEDO_ALERT_RANGE * (this.quiet ? 0.5 : 1)) { // 第33弾: 静音推進
                 this._torpAlerted = true;
-                playSound('alert');
+                sfxOr('alm_missile_launch_detect', 'alert');
                 logMessage('WARNING: 高速推進波を探知 — ミサイル接近中！ (デコイ/ジャミング/回避)', 'warning-msg');
             }
             // デコイに到達したらミサイルは消費される(無害化)
@@ -2993,6 +3100,7 @@ class Projectile {
             if (!preemptive) {
                 effects.push({ x: hitTarget.x, y: hitTarget.y - 30, text: `-${_hitDmg}`, life: 1.0, type: 'floatText', c: this.isPlayer ? '#ffdd00' : '#ff5555' });
             }
+            if (this.isPlayer) sfxHitEnemy(this.type, hitTarget, !!this.fromDrone);
             if (this.isPlayer) { if (inPlayerVision(hitTarget.x, hitTarget.y)) logMessage(`HIT [${this.type.toUpperCase()}] → ${_hitDmg} ダメージ`, 'warning-msg'); else noteImpactObs(hitTarget.x, hitTarget.y, this.type); } // 第59弾
             addShake((this.dmg * dmgMult) / 10);
             if (this.type === 'missile') spawnShrapnel(this.x, this.y, 6, 3); // 第21弾: ミサイルの破片
@@ -3217,7 +3325,7 @@ function lockEntity(e) {
     createClickEffect(e.x, e.y, '#ff4d4d');
     const lk = playerLockInfo(e);
     logMessage('LOCK: ' + (_ENT_JP[e.type] || '敵') + 'をロック (' + (lk.full ? '目視' : '推定') + '・' + Math.round(lk.dist / 100) * 100 + 'u)' + (lk.full ? '' : ' — 長押し→射撃 か 戦闘バーの「撃つ」で推定点へ'), 'system-msg');
-    playSound('ui');
+    sfxUI('wpn_lock_acquire');
 }
 function lockSignalTarget(sid) {
     window._lockSignal(sid); _lockF = _frameCount;
@@ -3225,13 +3333,13 @@ function lockSignalTarget(sid) {
     if (e && e.hp > 0) { player.targetEntity = e; player.manualTarget = true; }
     else { player.targetEntity = null; player.manualTarget = false; }
     logMessage('LOCK: SIG-' + sigNo(sid) + ' をロック (推定円・' + identInfo(sid).txt + ') — 戦闘バーの「撃つ」で推定点へ撃つ', 'system-msg');
-    playSound('ui');
+    sfxUI('wpn_lock_acquire');
 }
 function clearLockTarget() {
     if (!player) return;
     player.targetEntity = null; player.manualTarget = false; player._fireOrder = null;
     window._lockSignal(null); _lockF = _frameCount;
-    logMessage('LOCK: ロックを解除 (自動で最寄りを狙う)', 'system-msg'); playSound('ui');
+    logMessage('LOCK: ロックを解除 (自動で最寄りを狙う)', 'system-msg'); sfxUI('wpn_lock_release');
 }
 function cycleLockTarget(dir) {
     const L = lockableTargets();
@@ -3443,7 +3551,7 @@ function issueFireOrder() {
     // ※ manualTarget は立てない: 射撃命令は単発。終わればいつも通り視界内の最寄り(群がるファイター等)へ自動で向き直る
     player.targetEntity = te;
     player._fireOrder = { target: te, wType: w, ttl: 480 };
-    playSound('ui');
+    sfxUI('ui_confirm');
     logMessage(`WEP: 射撃命令 [${w.toUpperCase()}] — 艦首を向けて発射 (命中予測 ${Math.round(assumedHitChance(te, w, lk) * 100)}%)`, 'system-msg');
 }
 
@@ -5614,9 +5722,9 @@ function drawDamagePuffs(ctx) {
     }
     ctx.globalAlpha = 1;
 }
-function createExplosion(x, y, color, size) {
+function createExplosion(x, y, color, size, quiet) {
     addShake(size * 0.5);
-    playSound('explosion');
+    if (!quiet) sfxExplosion(size); // 第68弾: 大きさ別の爆発音 (quiet=呼び出し側が専用の音を鳴らす)
     // スプライトベース爆発エフェクト (加算合成: 黒=透明)
     const _exKey = size >= 20 ? 'fx_explosion_big' : 'fx_explosion_small';
     const _exImg = SPRITES[_exKey];
@@ -5728,6 +5836,7 @@ function noteImpactObs(x, y, kind) {
     const deg = compassDeg(ang);
     logMessage(aiRoundText('AI: 遠方で何かに命中 — ' + what + 'を受信 (方位' + deg + '°・約' + Math.round(dEst / 100) * 100 + 'u・確度' + Math.round(conf * 100) + '%)。' + (q >= 0.6 ? '撃った先で当たった可能性が高い' : '何に当たったかは分からない'), q), 'warning-msg');
     ringMarkBearing(deg, '#ffcc66');
+    { const _c = conf; if (!sfx(_c < 0.45 ? 'det_impact_unsure' : 'det_impact_' + (kind === 'beam' ? 'beam' : kind === 'missile' ? 'missile' : 'kinetic'), 0.4 + 0.6 * _c)) playSound('ping', 0.3); } // 第68弾: 視界外の命中を受信した音 (確度が低いとぼやけた版)
     // 閃光そのものも方位の手掛かり (短命の信号として記録 — 位置を測る材料になる)
     const sid = 'X-imp-' + (_impN++);
     passiveBearings.push({ ox: player.x, oy: player.y, angle: ang, halfWidth: Math.max(0.05, sd * 2), range: range, quality: conf, color: '255,200,80', sensor: seesOptic ? 'optic' : 'heat', strength: Math.min(1, 0.4 + p), sensorLabel: '閃光', bearingDeg: deg, halfWidthDeg: Math.round(sd * 2 * 57.3), sourceId: sid, contactNo: _contactLabelNext++, life: 240, maxLife: 240 });
@@ -6324,7 +6433,7 @@ function openLoadout(ship, fromDock, comSide) {
     document.getElementById('lo-ship').textContent = (comSide ? (comSide === 'p' ? 'COM対戦 自機: ' : 'COM対戦 敵: ') : '') + SHIP_JP[ship] + ' — 積載' + HOLD_CAP[ship] + '枠';
     _renderLoadout();
     document.getElementById('loadout-overlay').classList.remove('hidden');
-    playSound('ui');
+    sfxUI('ui_open');
 }
 function _renderLoadout() {
     const e = _loEdit; if (!e) return;
@@ -6568,7 +6677,7 @@ function aiLevelIdx() { const r = genAlloc.ai / 50; let bi = 1, bd = 9; AI_LEVEL
 function cycleAiLevel() {
     const n = (aiLevelIdx() + 1) % AI_LEVELS.length;
     setGenMT('ai', AI_LEVELS[n].g);
-    if (typeof playSound === 'function') playSound('ui');
+    if (typeof playSound === 'function') sfxUI('ui_level_' + (n + 1));
     logMessage('AI: 解析力 ' + AI_LEVELS[n].jp + (n >= 2 ? ' — 演算の電磁波・熱が漏れる (×' + (AI_LEVELS[n].g * AI_LEVELS[n].g).toFixed(1) + ')' : n === 0 ? ' — 漏れは減るが 解析が遅く 誤判断が増える' : ' — 均等'), 'system-msg');
     _syncAiBtn(true);
 }
@@ -6638,7 +6747,7 @@ function setGenFocus(key, quiet) {
     updateGenTotal();
     if (player) player.generatorOutput = genAlloc.engine;
     document.querySelectorAll('.gd-focus-btn, .focus-btn').forEach(b => b.classList.toggle('active', b.dataset.focus === key));
-    if (!quiet) playSound('ui');
+    if (!quiet) sfxUI('ui_select');
 }
 document.querySelectorAll('.gd-focus-btn').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); setGenFocus(b.dataset.focus); }));
 
@@ -6746,7 +6855,7 @@ function cycleSonarLevel() {
         _refRing = { kind: 'sonar', f: _frameCount, level: sonarLevel, R, H: R * SONAR_HEARD * PM.sonarHeard };
         logMessage('SONAR: 出力 ' + SP.jp + ' — 全周囲 反応' + Math.round(R / 100) * 100 + 'u・聞かれる' + Math.round(R * SONAR_HEARD * PM.sonarHeard / 100) * 100 + 'u / 指向性 最大' + Math.round(sonarDirRange(sonarLevel) / 1000) + 'ku・再充電 全周囲' + Math.round(900 * SP.cd / 60) + '秒', 'system-msg');
     }
-    playSound('ui');
+    sfxUI('ui_level_' + ({ weak: 1, std: 2, strong: 3 })[sonarLevel]);
 }
 document.getElementById('btn-sonar-power')?.addEventListener('click', (e) => { e.stopPropagation(); cycleSonarLevel(); });
 
@@ -6785,7 +6894,7 @@ function setMissileMode(m, quiet) {
     if (lbl) lbl.textContent = missileMode === 'smart' ? 'MSL:AI' : 'MSL:HON';
     const btn = document.getElementById('btn-missile-mode');
     if (btn) { btn.style.borderColor = missileMode === 'smart' ? '#aaddff' : '#ffaa33'; btn.style.color = missileMode === 'smart' ? '#aaddff' : '#ffcc66'; }
-    if (!quiet) { logMessage(`WEP: ミサイルモード → ${missileMode === 'smart' ? 'AI追跡型 (EM強・ジャミング耐性・大閃光)' : '熱源誘導型 (デコイ妨害可)'}`, 'system-msg'); playSound('ui'); }
+    if (!quiet) { logMessage(`WEP: ミサイルモード → ${missileMode === 'smart' ? 'AI追跡型 (EM強・ジャミング耐性・大閃光)' : '熱源誘導型 (デコイ妨害可)'}`, 'system-msg'); sfxUI('ui_select'); }
     if (typeof window.syncWeaponUI === 'function') window.syncWeaponUI();
 }
 document.getElementById('btn-missile-mode')?.addEventListener('click', () => setMissileMode(missileMode === 'homing' ? 'smart' : 'homing'));
@@ -6842,7 +6951,7 @@ function requestEngineSwitch(type) {
     engineSwitchTo = type; engineSwitchT = ENGINE_SWITCH_TIME;
     if (!playerCoasting) { if (boostT > 0) boostT = 0; playerCoasting = true; player._coastAng = player.angle; _engCoast = true; _updateEscapeBtns(); }
     logMessage('ENG: ' + ENGINE_JP[type] + 'へ切替開始 — 10秒は推力ゼロ (惰性) でEMが漏れる', 'warning-msg');
-    playSound('ui');
+    sfxUI('eng_switch_start');
     _syncEngineUI();
 }
 function updateEngineSwitch() {
@@ -6965,7 +7074,7 @@ function switchBand(s, quiet) {
     if (!quiet) {
         const leak = sensorOrder.slice(1).map(b => BAND_JP[b] || b).join('・');
         logMessage(`SENSOR: ${SENSOR_INFO[s].name} ${sensorsOn[s] ? 'ON' : 'OFF'} — 聴いている帯域 ${sensorOrder.length}本` + (leak ? ` (漏れる: ${leak})` : ' (漏れなし)'), 'system-msg');
-        playSound('ui');
+        sfxUI(sensorsOn[s] ? 'ui_toggle_on' : 'ui_toggle_off');
     }
 }
 // 第44弾 (オーナー): 帯域バーをタップするたびに OFF → 弱 → 中 → 強 → OFF
@@ -6988,7 +7097,7 @@ function _bandLevelMsg(s, quiet) {
     const leak = sensorOrder.map((b, i) => leakMult(i, sensorLv[b]) > 0 ? (BAND_JP[b] || b) : null).filter(Boolean).join('・');
     const lv = sensorLv[s];
     logMessage(`SENSOR: ${SENSOR_INFO[s].name} ${!sensorsOn[s] ? 'OFF' : '感度 ' + LV_JP[lv] + ' — 受信距離×' + LV_RANGE[lv] + (lv === 3 ? '・漏れ+1本分・雑音で方位誤差×1.3' : lv === 1 ? '・漏れ少なめ' : '')}` + (!sensorOrder.length ? ' (全帯域OFF — 何も聴こえないが漏らさない)' : leak ? ` (自艦が漏らす: ${leak})` : ' (漏れなし)'), 'system-msg');
-    playSound('ui');
+    sfxUI(lv ? 'ui_level_' + lv : 'ui_toggle_off');
 }
 // 基準の艦 (巡航の攻撃型) がその帯域で聞こえる距離の円を3秒だけ出す (感度・ソナーを変えた時に半径の見当をつける)。第43弾
 let _refRing = null;
@@ -7570,7 +7679,7 @@ function updateResupply() {
       logMessage('補給: コロニーで弾を満タン' + (gotA ? ' (+' + gotA + ')' : '') + (gotM ? '・資材+' + gotM + '個' : '') + ' — ' + cargoSummaryNow() + '。このコロニーでの補給はこれで終わり', 'system-msg'); }
     if (comDemo) comThinkEvent('p', '補給完了 (実弾' + cargo.ammoK + '・ミサイル' + cargo.ammoM + ')');
     _resupply = null;
-    playSound('ui');
+    sfxUI('supply_done');
 }
 function updateNodesAndColonies() {
     _capturing = null;
@@ -7612,7 +7721,7 @@ function captureNodeByPlayer(n) {
     updateTopUI();
     const got = addMaterials(NODE_MAT_GAIN);
     effects.push({ x: n.x, y: n.y, r: 0, maxR: 800, a: 1, c: '#50c8ff', type: 'circle' });
-    playSound('ui');
+    sfxUI('cap_done_node');
     logMessage(`NODE: ノードを制圧 — +${NODE_SCR} SCR・${got > 0 ? '資材+' + got + '個' : '資材は満載 (展開して空いた枠にだけ積める)'}。以後この結晶が聴音局になり、周囲${NODE_RELAY_RANGE}uの方位を送ってくる`, 'system-msg');
 }
 function hackColonyByPlayer(st) {
@@ -7621,7 +7730,7 @@ function hackColonyByPlayer(st) {
     matchRecEvent('colonyP', st.x, st.y, '自艦がコロニーを占有' + (was === 'enemy' ? ' (敵から奪還)' : ''));
     if (!st._partP) { st._partP = true; offerDraft('colony'); addLootTrace(st.x, st.y, 'p', 'colony'); } // 第32弾: 初めて占有したコロニーで部品 (機関・船体が出やすい)
     createClickEffect(st.x, st.y, '#00aaff');
-    playSound('ui');
+    sfxUI('cap_done_colony');
     const n = coloniesOwned('player');
     logMessage('COLONY: コロニーを占有 (' + n + 'つ' + (was === 'enemy' ? '・敵から奪還' : '') + ')' + (_colUsed(st, 'P') ? ' — ここの補給はもう使った' : ' — ここで1回だけ補給できる (弾を満タン・資材+' + COLONY_SUPPLY_MAT + ')') + '。演算力 ×' + (Math.round(analysisPower('player') * 100) / 100) + ' (解析と識別が速くなる)', 'system-msg');
     updateColonyIntel(true);
@@ -7686,7 +7795,7 @@ function updateEnemyColonyCapture() {
             if (!st._partE) { st._partE = true; enemyOfferDraft(near, 'colony', st.x, st.y); } // 第33弾: 敵も初めて占有したコロニーで部品
             // 第26弾: 占有しただけでは回復も補給もしない (補給は _supply の流れで1つのコロニーにつき1回)
             matchRecEvent('colonyE', st.x, st.y, '敵がコロニーを占有' + (was === 'player' ? ' (自艦のを奪った)' : ''));
-            if (was === 'player') { logMessage('COLONY: コロニーとの通信途絶 — 敵に奪われた (占有' + coloniesOwned('player') + 'つ)', 'warning-msg'); playSound('alert'); updateColonyIntel(true); }
+            if (was === 'player') { logMessage('COLONY: コロニーとの通信途絶 — 敵に奪われた (占有' + coloniesOwned('player') + 'つ)', 'warning-msg'); sfxOr('alm_colony_lost', 'alert'); updateColonyIntel(true); }
             if (comDemo) comThinkEvent('e', 'コロニーを占有 (' + coloniesOwned('enemy') + 'つ) — 自機の位置の手掛かりが増える', 'e' + near.uid);
         }
     }
@@ -7705,7 +7814,7 @@ function salvageDerelictByPlayer(st) {
     st.salvaged = true;
     matchRecEvent('salvP', st.x, st.y, '自艦が難破船から回収');
     logMessage('SALVAGE: 難破船から回収 — ' + [gK ? '実弾+' + gK : '', gM ? 'ミサイル+' + gM : '', got ? '資材+' + got + '個' : ''].filter(Boolean).join('・'), 'system-msg');
-    _hudCache.cargo = null; playSound('ui');
+    _hudCache.cargo = null; sfxUI('loot_salvage_done');
 }
 // ═══ 第32弾 (オーナー合意 2026-10-31): 部品のドラフト式カスタマイズ ═══
 // 試合の中で拾った部品で艦を組む (結果は持ち越さない)。どの部品にも長所と代償 = 何かを伸ばすとどこかが弱くなる。
@@ -7842,6 +7951,7 @@ function applyStatus(t, id) {
     else if (id === 'comm') t._commJam = Math.max(t._commJam || 0, dur);
     else if (id === 'burn') t._burn = Math.max(t._burn || 0, dur);
     effects.push({ x: t.x, y: t.y - 58, text: D.jp + '!', life: 1.3, type: 'floatText', c: '#ff9500' });
+    if (t === player) sfxOr('alm_status_' + id, 'ui', 0.9);
     if (t === player) logMessage('STATUS: ' + D.jp + ' — 約' + Math.round(dur / 60) + '秒で復旧 (AIの解析力が高いほど早い)', 'warning-msg');
     else if (comDemo) comThinkEvent('p', '命中 → 相手に' + D.jp + ' (約' + Math.round(dur / 60) + '秒)');
 }
@@ -7908,7 +8018,7 @@ function takePart(id) {
     }
     matchRecEvent('partP', player ? player.x : 0, player ? player.y : 0, '部品: ' + P.name);
     if (comDemo) comThinkEvent('p', '部品「' + P.name + '」を選んだ (' + P.up + ' / 代償: ' + P.down + ')');
-    playSound('ui');
+    sfxUI('draft_pick');
 }
 // 自機COMの選び方: 性格に合う種類を重く見る (攻撃性→兵装 / 隠密性→機関・電子戦・電波吸収 / 慎重さ→船体 / 貪欲さ→探知)
 function _comPartScore(id, pp) {
@@ -7952,7 +8062,7 @@ function updateParts() {
         mines.splice(i, 1);
         const dmg = Math.round(MISSILE_DMG * PM.dmgAll);
         hit.hp -= dmg;
-        createExplosion(mn.x, mn.y, '#ffcc66', 26); addShake(10); playSound('explosion');
+        createExplosion(mn.x, mn.y, '#ffcc66', 26, true); addShake(10); sfxOr('wpn_mine_blast', 'explosion');
         effects.push({ x: hit.x, y: hit.y - 30, text: '機雷 -' + dmg, life: 1.2, type: 'floatText', c: '#ffdd66' });
         logMessage('WEP: 機雷が炸裂 → ' + dmg + ' ダメージ (敵が触れた)', 'warning-msg');
         matchRecEvent('hitE', mn.x, mn.y, '敵に命中: 機雷 −' + dmg);
@@ -7995,7 +8105,7 @@ function placeMine() {
     player._launchFlash = 60; // 置く時に電磁波が漏れる
     matchRecEvent('fireP', player.x, player.y, '自艦: 機雷を置く');
     logMessage('機雷: 設置 — 3秒後から400u以内に来た艦に炸裂 (' + mines.length + '/' + MINE_MAX + '個)', 'system-msg');
-    playSound('ui');
+    sfxUI('wpn_mine_place');
 }
 function drawMines(ctx) {
     const inv = 1 / camera.zoom;
@@ -8031,7 +8141,7 @@ function mirvSplit(pr, cx, cy) {
     }
     logMessage(hits ? 'WEP: 多弾頭が分裂 — 子弾' + hits + '発が命中' : 'WEP: 多弾頭が分裂 — 子弾は何にも当たらなかった (推定が外れた)', hits ? 'warning-msg' : 'system-msg');
     if (!hits) { missRevealsShooter(pr.ox ?? player.x, pr.oy ?? player.y, cx, cy, false); if (pr.sid) recordMiss(pr.sid, { x: cx, y: cy, r: 1500 }); }
-    addShake(6); playSound('explosion');
+    addShake(6);
     pr.active = false;
 }
 // ═══ 第33弾 (段階C): 敵も部品を拾って付ける (自機と同じ所・同じ3択・同じ枠・付け替えは自分のコロニーで) ═══
@@ -8135,7 +8245,7 @@ function updateLull() {
         if (surgePhase !== 'none') { lullNext = 1200; return; } // サージと重ねない
         lullPhase = 'warn'; lullT = LULL_WARN;
         logMessage('SENSOR: 霧の流れが止まる — あと' + Math.round(LULL_WARN / 60) + '秒で凪 (霧が晴れ、遠くまで見える・見られる)。岩礁帯・難破船の陰・煙幕なら隠れられる', 'warning-msg');
-        playSound('alert');
+        sfxOr('alm_lull_warn', 'alert');
         matchRecEvent('lull', player ? player.x : 0, player ? player.y : 0, '凪の予兆');
         // 敵: 慎重・隠密なら隠れ場所へ / 攻撃的なら見張る
         for (const e of enemies) {
@@ -8247,7 +8357,7 @@ function _convoyDrop(cv, by) {
         fieldSignals.push(f);
     }
     createExplosion(cv.x, cv.y, '#ffbb66', by === 'kill' ? 40 : 14);
-    if (by === 'kill') { addShake(8); playSound('explosion'); }
+    if (by === 'kill') { addShake(8); sfx('convoy_destroyed'); }
 }
 // ═══ 第36弾 (オーナー): 輸送船を襲う理由 — 輸送船だけのレア部品 / リペアキットと完成品 / 航路の記録 (敵の方位) / 敵も本気で狙う ═══
 const CONVOY_LOG_EVERY = 300, CONVOY_LOG_R = 14000, CONVOY_RARE_PICKS = { board: 2, kill: 1 };
@@ -8645,7 +8755,7 @@ function collectCacheByPlayer(f) {
     matchRecEvent('salvP', f.x, f.y, '自艦が漂流コンテナを回収');
     logMessage('SALVAGE: 漂流コンテナを回収 — 部品が入っていた', 'system-msg');
     offerDraft('cache'); addLootTrace(f.x, f.y, 'p', 'cache');
-    _hudCache.cargo = null; playSound('ui');
+    _hudCache.cargo = null; sfxUI('loot_container');
     return true;
 }
 function _collectCacheAmmoOld(f) { // 第31弾の中身 (弾・資材)。部品に置き換えたので使わない
@@ -8658,7 +8768,7 @@ function _collectCacheAmmoOld(f) { // 第31弾の中身 (弾・資材)。部品�
     matchRecEvent('salvP', f.x, f.y, '自艦が漂流コンテナを回収');
     logMessage('SALVAGE: 漂流コンテナを回収 — ' + [gK ? '実弾+' + gK : '', gM ? 'ミサイル+' + gM : '', got ? '資材+' + got + '個' : ''].filter(Boolean).join('・'), 'system-msg');
     if (comDemo) comThinkEvent('p', '漂流コンテナを回収 (実弾' + cargo.ammoK + '・ミサイル' + cargo.ammoM + ')');
-    _hudCache.cargo = null; playSound('ui');
+    _hudCache.cargo = null; sfxUI('loot_container');
     return true;
 }
 function collectCacheByEnemy(e, f) { // 第33弾: 敵も中身は部品 (自機と同じ)
@@ -9211,6 +9321,7 @@ function checkPassiveDetection() {
 
     passiveAlertTimer = 180;
     if (_newSig) {
+        if (!sfx('det_rx_' + _newSig.band, 0.8)) playSound('ui', 0.5);
         logMessage(`RX: 方位${_newSig.deg}° ${_RX_WORD[_newSig.band] || '信号'}感知 — SIG-${String(_contactLabels[_newSig.sid]).padStart(2, '0')} (${identInfo(_newSig.sid).txt})`, 'warning-msg');
         const ind = document.getElementById('passive-indicator');
         if (ind) { ind.classList.add('alert'); setTimeout(() => ind.classList.remove('alert'), 3000); }
@@ -9503,7 +9614,7 @@ function droneOrder(type, kind, x, y, no) {
         const _nm = _droneName(dd);
         logMessage('DRONE: ' + _nm + 'に' + (kind === 'return' ? '帰還' : kind === 'patrol' ? '哨戒' : '攻撃') + '指示' + (kind === 'return' ? '' : ' — 方位' + compassDeg(Math.atan2(y - player.y, x - player.x)) + '° ' + Math.round(Math.hypot(x - player.x, y - player.y) / 100) * 100 + 'u'), 'system-msg');
         if (kind !== 'return') createClickEffect(x, y, kind === 'patrol' ? '#66ccff' : '#ff9966');
-        playSound('ui');
+        sfxUI('drone_order_' + (kind === 'return' ? 'return' : kind === 'patrol' ? 'patrol' : 'attack'));
         return;
     }
     for (const d of playerDrones) if (d.type === type) d._own = null; // 種類ぜんたいへの指示は個別の指示を上書きする
@@ -9516,7 +9627,7 @@ function droneOrder(type, kind, x, y, no) {
         createClickEffect(x, y, kind === 'patrol' ? '#66ccff' : '#ff9966');
     }
     for (const d of playerDrones) if (d.type === type && d.hp > 0) { d._order = droneOrders[type]; d._st = 'run'; d._lastSeen = null; }
-    playSound('ui');
+    sfxUI('drone_order_' + (kind === 'return' ? 'return' : kind === 'patrol' ? 'patrol' : 'attack'));
 }
 (() => {
     const lb = document.getElementById('lpm-lures');
@@ -9674,6 +9785,7 @@ function updateFreeBeam() {
         hitE.hp -= d; applyHitStatus(true, null, 'beam', hitE); // 第60弾
         if (huntStats) huntStats.dmgDealt += d;
         createHitEffect(hitE.x, hitE.y, '#00ffaa'); addShake(15);
+        sfxHitEnemy('beam', hitE);
         if (inPlayerVision(hitE.x, hitE.y)) logMessage('WEP: ビーム命中 → ' + d + ' ダメージ', 'system-msg'); else noteImpactObs(hitE.x, hitE.y, 'beam'); // 第59弾
     } else missRevealsShooter(player.x, player.y, ex, ey, true);
     leaveBeamChannel(player.x, player.y, ex, ey);
@@ -9795,7 +9907,7 @@ function fireOmniSonar(power) {
     const omniRange = baseRange * SONAR_FRAC * playerFx().sonar * genGain * (1 - stormAtPlayer * STORM_SONAR_DEGRADE) * PM.sonarRange * SP.r; // 第32弾: ソナー拡張 (第39弾: 探知重視×1.33)
     const sc = sensorConfig[currentSensor];
 
-    playSound('ui');
+    sfxUI('sonar_omni_' + ({ weak: 'weak', std: 'mid', strong: 'strong' })[power]);
     cancelSilentRunning('アクティブソナー使用');
     let detected = 0;
     enemies.forEach(e => {
@@ -9850,7 +9962,7 @@ function fireDirectionalSonar(targetAngle, power) {
     const stormAtPlayer2 = getStormIntensity(player.x, player.y);
     const maxRange  = DIR_SONAR_MAX_RANGE * SONAR_FRAC * playerFx().sonar * genGain * (1 - stormAtPlayer2 * STORM_SONAR_DEGRADE) * SP.r;
 
-    playSound('ui');
+    sfxUI('sonar_dir_' + ({ weak: 'weak', std: 'mid', strong: 'strong' })[power]);
     cancelSilentRunning('アクティブソナー使用');
     let detected = 0;
     enemies.forEach(e => {
@@ -11703,7 +11815,7 @@ function deployDrone(type, tx, ty) {
         if (!_freeLure && (cargo.stock[type] || 0) <= 0 && (cargo.asm || cargo.mat < spec.mat)) { logMessage(`搭載: ${spec.label}の完成品が無く${cargo.asm ? '組み立て中' : '資材も足りない'}`, 'warning-msg'); return; }
         pendingLure = type;
         logMessage('囮: ' + spec.label + 'を射出する地点をタップ (もう一度押すと取りやめ)', 'warning-msg');
-        playSound('ui');
+        sfxUI('ui_select');
         return;
     }
     if (type === 'repair') { // 第26弾: リペアキット — 完成品だけ (資材から作れない)
@@ -11725,7 +11837,7 @@ function deployDrone(type, tx, ty) {
     cargo.asm = { type, t: spec.build, total: spec.build, ready: false, tx, ty };
     _hudCache.cargo = null;
     logMessage(`搭載: ${spec.label}を資材から組み立て開始 (${Math.round(spec.build / 60)}秒)${spec.item ? ' — 完成した瞬間に使う' : ''} — 組み立て中はEMが漏れる`, 'warning-msg');
-    playSound('ui');
+    sfxUI('item_assemble_start');
 }
 function _spawnDrone(type, tx, ty) {
     const spec = DRONE_SPEC[type];
@@ -11751,7 +11863,7 @@ function _spawnDrone(type, tx, ty) {
             logMessage(`搭載: ${spec.label}を展開`, 'system-msg');
         }
     }
-    playSound('ui');
+    sfxUI(_sfxDeployId(type));
 }
 function updateCargo() {
     const a = cargo.asm;
@@ -11823,7 +11935,7 @@ function useFlash() {
     effects.push({ x: px, y: py, r: 0, maxR: FLASH_RADIUS, a: 0.9, c: '#ffffff', type: 'circle' });
     effects.push({ x: px, y: py, r: 0, maxR: FLASH_RADIUS * 0.55, a: 0.7, c: '#fff6cc', type: 'circle' });
     _flashScreen = 18;
-    playSound('alert');
+    /* 閃光は item_flash が鳴る */;
     matchRecEvent('flashP', px, py, '自艦: 閃光弾' + (blinded ? ' (敵' + blinded + '隻の目を焼いた)' : ''));
     logMessage('離脱: 閃光弾 — ' + (blinded ? '敵' + blinded + '隻の目を' + Math.round(FLASH_BLIND / 60) + '秒焼いた' : '半径' + FLASH_RADIUS + 'u内に敵なし')
         + (lost ? '・ミサイル' + lost + '発の誘導を切った' : '') + '。この位置は知られた — 進路を変えて離れろ', 'warning-msg');
@@ -11836,7 +11948,7 @@ function useNoise() {
     const a = player.angle;
     noiseMakers.push({ x: player.x + Math.cos(a) * 40, y: player.y + Math.sin(a) * 40, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
         life: NOISE_LIFE, _wid: 'noise-' + (++_wakeIdSeq) });
-    playSound('ui');
+    sfxUI('item_noise');
     logMessage('離脱: ノイズメーカー投下 — 方位' + compassDeg(a) + '°へ全速の音を' + Math.round(NOISE_LIFE / 60) + '秒出す。こちらは音を消して別方向へ', 'system-msg');
 }
 // 煙幕弾: 自艦の位置に濃いヒッグス雲。濃さ0.5以上なら敵の探信が埋もれ、光学と至近探知が鈍る。
@@ -11845,20 +11957,20 @@ function useNoise() {
 function useFogSpray(who, x, y) {
     smokeClouds.push({ x, y, r: SPRAY_R, dens: SPRAY_DENS, life: SPRAY_LIFE, max: SPRAY_LIFE, follow: null });
     matchRecEvent(who === 'p' ? 'escP' : 'escE', x, y, (who === 'p' ? '自艦' : '敵') + ': 散布弾');
-    playSound('ui');
+    sfxUI('item_fogspray');
     if (who === 'p') logMessage('離脱: 散布弾 — 半径' + SPRAY_R + 'uを濃い霧にする (' + Math.round(SPRAY_LIFE / 60) + '秒)。音も光も隠れるが、自分の有視界も縮む', 'system-msg');
 }
 function useFogBlow(who, x, y) {
     higgsClears.push({ x0: x, y0: y, x1: x, y1: y, hw: BLOW_R, hold: BLOW_HOLD, rec: BLOW_RECOVER, t: _frameCount });
     if (higgsClears.length > 16) higgsClears.shift();
     matchRecEvent(who === 'p' ? 'escP' : 'escE', x, y, (who === 'p' ? '自艦' : '敵') + ': 吹き飛ばし弾');
-    playSound('ui');
+    sfxUI('item_fogblow');
     if (who === 'p') logMessage('離脱: 吹き飛ばし弾 — 半径' + BLOW_R + 'uの霧を' + Math.round(BLOW_HOLD / 60) + '秒晴らす。遠くまで見通せるが、音も光も遮られず敵にも届く', 'system-msg');
 }
 function useSmoke() {
     smokeClouds.push({ x: player.x, y: player.y, r: SMOKE_R, dens: SMOKE_DENS, life: SMOKE_LIFE, max: SMOKE_LIFE, follow: null });
     matchRecEvent('escP', player.x, player.y, '自艦: 煙幕弾');
-    playSound('ui');
+    sfxUI('item_smoke');
     logMessage('離脱: 煙幕弾 — 半径' + SMOKE_R + 'uにヒッグス雲 (' + Math.round(SMOKE_LIFE / 60) + '秒)。中では探信が埋もれる。動けば航跡は深く残る', 'system-msg');
 }
 // 第22弾: 敵も離脱の消耗品を使う (積み込みで持たせた分だけ・自機と同じ効き目)
@@ -11994,7 +12106,7 @@ function toggleCoast(on) {
         playerCoasting = false;
         logMessage('離脱: 機関再点火 — 推力の熱が戻る', 'system-msg');
     }
-    playSound('ui');
+    sfxUI(playerCoasting ? 'eng_coast_on' : 'eng_restart');
     _updateEscapeBtns();
 }
 // 緊急噴射: 4秒だけ速度×2。終わると機関が8秒過熱 (既存の機関損傷と同じ: 最高速×0.45・熱漏れ)。再使用45秒
@@ -12008,7 +12120,7 @@ function useBoost() {
     if (silentRunning) setStance('cruise', true);
     boostT = BOOST_DUR; boostCD = BOOST_CD;
     matchRecEvent('escP', player.x, player.y, '自艦: 緊急噴射');
-    playSound('alert');
+    sfxOr('eng_boost_start', 'alert');
     logMessage('離脱: 緊急噴射 — ' + Math.round(BOOST_DUR / 60) + '秒間 速度×' + BOOST_MULT + '。熱が最大になり、終わると機関が' + Math.round(BOOST_OVERHEAT / 60) + '秒過熱する', 'warning-msg');
     _updateEscapeBtns();
 }
@@ -12113,7 +12225,7 @@ function launchLure(owner, kind, fx, fy, tx, ty, band) {
     matchRecEvent(owner === 'p' ? 'lureP' : 'lureE', tx, ty, (owner === 'p' ? '自艦: ' : '敵: ') + (kind === 'sos' ? '偽SOS' : band ? ({ heat: '熱', optic: '光', em: 'EM', higgs: '霧' })[band] + 'ビーコン' : '偽艦影ブイ') + 'を出す');
     // 航跡の持ち主: 敵の囮は 'e-lure-n' (自機は敵の航跡として読む・敵は自分の航跡として読まない) / 自機の囮は 'lure-n' (敵が自機の航跡として読む)
     lures.push({ owner, kind, x: fx, y: fy, tx, ty, vx: Math.cos(a) * LURE_FLY_SPEED, vy: Math.sin(a) * LURE_FLY_SPEED, a, phase: 'fly', life: 0, band: band || null, sid: 'L-' + seq, wid: (owner === 'e' ? 'e-lure-' : 'lure-') + seq });
-    if (owner === 'p') playSound('deploy');
+    if (owner === 'p') sfxOr(band ? 'item_beacon_' + band : kind === 'sos' ? 'item_lure_sos' : 'item_lure_ship', 'deploy');
 }
 function updateLures() {
     for (let i = lures.length - 1; i >= 0; i--) {
@@ -12127,7 +12239,7 @@ function updateLures() {
                 if (L.band) { L.vx = 0; L.vy = 0; }
                 if (L.owner === 'e' && L.kind === 'sos' && player && player.hp > 0) {
                     logMessage('SIGNAL: 遭難信号を受信 — 発信源に物資反応 (SOSマーカー)。敵も同じ信号を聞いている', 'warning-msg'); // 本物と同じ告知 (見分けはつかない)
-                    playSound('alert');
+                    sfxOr('alm_distress_signal', 'alert');
                 }
             } else { L.x += L.vx * gameSpeedFactor; L.y += L.vy * gameSpeedFactor; }
             continue;
@@ -12146,7 +12258,7 @@ function updateLures() {
         if (L.kind === 'sos') {
             if (L.owner === 'e' && player && player.hp > 0 && Math.hypot(player.x - L.x, player.y - L.y) < LURE_REVEAL_R) {
                 logMessage('SIGNAL: 発信源に物資なし — 囮の信号だった。近くで待ち伏せている恐れ', 'warning-msg');
-                playSound('alert'); lures.splice(i, 1); continue;
+                sfxOr('alm_distress_false', 'alert'); lures.splice(i, 1); continue;
             }
             if (L.owner === 'p') for (const e of enemies) {
                 if (e.hp <= 0 || e.type === 'fighter' || Math.hypot(e.x - L.x, e.y - L.y) >= LURE_REVEAL_R) continue;
@@ -13099,7 +13211,7 @@ function techSaberHit(d, t) {
     createHitEffect(t.x, t.y, '#ff9df0');
     if (t.type !== 'fighter') matchRecEvent('hitE', t.x, t.y, 'Techの斬撃 −' + dmg);
     if (t.hp > 0 && Math.random() < 0.35) { t._sysWeaponTimer = Math.max(t._sysWeaponTimer || 0, 180); }
-    playSound('hit');
+    sfxOr('hit_enemy_saber', 'hit');
 }
 let saberFx = [];
 function drawSaberFx(ctx) {
@@ -13282,7 +13394,7 @@ function setStance(st, quiet) {
         logMessage(st === 'silent' ? 'STANCE: 潜航 — 機関を絞り全シグネチャ抑制。止まるほど耳が澄む (発砲/ソナーで解除)'
                  : st === 'flank' ? 'STANCE: 全速 — 速いが熱と航跡を撒き散らす'
                  : 'STANCE: 巡航 — 通常出力', st === 'flank' ? 'warning-msg' : 'system-msg');
-        playSound('ui');
+        sfxUI('eng_stance_' + st);
     }
 }
 function cycleStance() { if (playerCoasting) toggleCoast(false); setStance(powerStance === 'silent' ? 'cruise' : powerStance === 'cruise' ? 'flank' : 'silent'); }
@@ -13355,7 +13467,7 @@ function updateDistressBeacon() {
             }
             distressBeacon = { x: bx, y: by, life: DISTRESS_LIFE, claimed: false };
             logMessage('SIGNAL: 遭難信号を受信 — 発信源に物資反応 (SOSマーカー)。敵も同じ信号を聞いている', 'warning-msg');
-            playSound('alert');
+            sfxOr('alm_distress_signal', 'alert');
         }
         return;
     }
@@ -13370,7 +13482,7 @@ function updateDistressBeacon() {
     if (Math.hypot(player.x - distressBeacon.x, player.y - distressBeacon.y) < 400) {
         gameState.credits += 300; // 第26弾: 船体の回復は撤去 (修理はリペアキットだけ)
         updateTopUI();
-        playSound('ui');
+        sfxUI('loot_container');
         effects.push({ x: distressBeacon.x, y: distressBeacon.y, r: 0, maxR: 700, a: 1, c: '#00e5ff', type: 'circle' });
         { const got = addMaterials(2); logMessage('SIGNAL: 遭難物資を回収 (+300 SCR' + (got ? '・資材+' + got + '個' : '') + ')。ここは敵も知っている — 長居は無用', 'system-msg'); }
         distressBeacon = null;
@@ -13618,7 +13730,7 @@ function updateHuntTension() {
     if (hit && _frameCount - hit.f < 480 && !hit.byFighter && lvl < 3) { lvl = 3; T.kind = 'hit'; T.ang = null; T.deg = hit.deg; }
     if (T.ang !== null && T.kind !== 'hit') T.deg = compassDeg(T.ang);
     if (lvl > playerExposureLevel || (lvl >= 2 && T.kind !== T.lastKind)) {
-        if (lvl > playerExposureLevel) playSound('alert');
+        if (lvl > playerExposureLevel) sfxOr('alm_exposure_' + Math.max(1, Math.min(3, lvl)), 'alert');
         const dg = T.deg !== undefined && T.deg !== null ? '方位' + T.deg + '° ' : '';
         if (T.kind === 'hit' && lvl > playerExposureLevel) { logMessage('CRITICAL: 攻撃を受けている — 交戦か離脱か', 'warning-msg'); if (huntStats) huntStats.timesEngaged++; }
     } else if (lvl === 0 && playerExposureLevel >= 2) {
@@ -13631,7 +13743,7 @@ function updateHuntTension() {
     if (_amb) {
         _amb.echoTimer -= gameSpeedFactor;
         if (_amb.echoTimer <= 0) {
-            playSound('ambientEcho', 0.7 + Math.random() * 0.5);
+            sfxOr('amb_echo', 'ambientEcho', 0.7 + Math.random() * 0.5);
             _amb.echoTimer = 1500 + Math.random() * 1500;
         }
     }
@@ -13663,7 +13775,7 @@ function updateHuntTension() {
         if (surgeNextTimer <= 0) {
             surgePhase = 'warn'; surgePhaseTimer = SURGE_WARN_DUR;
             logMessage('SENSOR: ヒッグス濃度急変を検知 — 広域センサーサージ接近 (全探知系に干渉)', 'warning-msg');
-            playSound('alert');
+            sfxOr('alm_surge_warn', 'alert');
         }
     } else {
         surgePhaseTimer -= gameSpeedFactor;
@@ -13757,7 +13869,7 @@ function _setLeg(ang, dist, label) {
     player.setTarget(p.x, p.y);
     createClickEffect(p.x, p.y, '#00ffaa');
     logMessage(`NAV: ${label} — 方位${compassDeg(ang)}°へ ${Math.round(dist)}u`, 'system-msg');
-    playSound('ui');
+    sfxUI('ui_select');
 }
 function compassDeg(ang) { return Math.round((Math.atan2(Math.cos(ang), -Math.sin(ang)) * 180 / Math.PI + 360) % 360); }
 // 方位線に直交する2方向のうち、今の艦首に近い方へ (回頭が少なく済む) 測量レグを引く
@@ -13845,7 +13957,7 @@ function switchWeapon(w) {
     const sel = document.getElementById('weapon-select');
     if (sel && sel.value !== w) { sel.value = w; sel.dispatchEvent(new Event('change')); }
     if (typeof window.syncWeaponUI === 'function') window.syncWeaponUI();
-    playSound('ui');
+    sfxUI('wpn_switch_' + w);
 }
 
 // ═══ 第19弾: COM対戦デモ — 自機もCOMが操作する (オーナー合意 2026-10-25) ═══
@@ -14270,7 +14382,7 @@ function setCombatMode(k, v) {
     if (comDemo || !(k in combatMode)) return;
     combatMode[k] = v;
     syncCombatBar();
-    if (typeof playSound === 'function') playSound('ui');
+    if (typeof playSound === 'function') sfxUI('ui_select');
     logMessage('操艦: 戦闘モード — ' + _CM_JP[combatMode.mode] + '・間合い' + _CM_JP[combatMode.range] + '・' + _CM_JP[combatMode.prio] + '優先' + (combatMode.mode === 'manual' ? ' (移動は自分で指示)' : ''), 'system-msg');
 }
 (() => { // 第49弾: 戦闘バーの目標の操作
@@ -15022,7 +15134,7 @@ function openComDemo() {
     comCfg = loadComCfg();
     _renderComCfg();
     document.getElementById('com-overlay').classList.remove('hidden');
-    playSound('ui');
+    sfxUI('ui_open');
 }
 function _renderComCfg() {
     const c = comCfg;
@@ -15091,7 +15203,7 @@ function exitComDemo() { location.reload(); }
         else if (act === 'higgs') comCfg.higgsView = !comCfg.higgsView;
         else if (act === 'think') comCfg.think = !comCfg.think;
         _renderComCfg();
-        playSound('ui');
+        sfxUI('ui_close');
     });
     ov.addEventListener('input', (ev) => {
         const r = ev.target.closest('input[data-act="axis"]');
@@ -15634,6 +15746,30 @@ window.__simSteps = function (n) {
     }
 };
 
+
+// 第68弾: ループ音の管理 (環境音・警報)。32フレームごとに呼ぶ
+function updateSfxLoops() {
+    if (!audioCtx || !_sfxMan) return;
+    const alive = player && player.hp > 0 && !player._dying;
+    for (const id of ['amb_drone_loop', 'amb_tension_loop', 'alm_missile_warn_loop', 'alm_fc_lock_loop']) { const e = _sfxMan[id]; if (e && !_sfxBufs[e.f[0]]) _sfxFetch(e.f[0]); }
+    const hasAmb = !!(_sfxMan.amb_drone_loop && _sfxBufs[_sfxMan.amb_drone_loop.f[0]]);
+    if (hasAmb && ambientOn && alive) {
+        if (_amb) stopAmbient();
+        sfxLoop('amb_drone_loop', true, 0.5);
+        sfxLoop('amb_tension_loop', playerExposureLevel >= 2, playerExposureLevel >= 3 ? 0.55 : 0.35);
+    } else { sfxLoop('amb_drone_loop', false); sfxLoop('amb_tension_loop', false); }
+    const msl = alive && THREATS.some(t => t.kind === 'msl');
+    const lock = alive && THREATS.some(t => t.kind === 'lock');
+    sfxLoop('alm_missile_warn_loop', !!msl, 0.8);
+    sfxLoop('alm_fc_lock_loop', !!lock && !msl, 0.7);
+    sfxLoopsGC();
+}
+function initSfxVolumeUI() {
+    const el = document.getElementById('sfx-vol'); if (!el) return;
+    const l = document.getElementById('sfx-vol-l');
+    el.value = String(Math.round(sfxVolume * 100)); if (l) l.textContent = el.value + '%';
+    el.addEventListener('input', () => { setSfxVolume(el.value / 100); if (l) l.textContent = el.value + '%'; });
+}
 function stepWorld() {
         _frameCount++;
         if (debugMode) { if (_dbgGod && player && player.hp > 0 && !player._dying) player.hp = player.maxHp; if (_dbgInfoOn && _frameCount % 20 === 0) { const el = document.getElementById('dbg-info'); if (el) el.textContent = _dbgInfoText(); } }
@@ -15643,6 +15779,7 @@ function stepWorld() {
         // 第21弾: マス目の濃さ全体に掛ける (旧: 円ごとの濃さを足していた。速さは旧と同じ ≈ 15分で+4%)
         if (player && player.hp > 0) higgsGrowth = Math.min(0.15, higgsGrowth + 0.0000008 * gameSpeedFactor);
         matchRecTick(); // 第22弾: 1秒ごとに位置を記録
+        if ((_frameCount & 31) === 0) updateSfxLoops();
         updateHiggsClears();
 
         // ソナークールダウン更新 — 表示は秒単位で変化する時のみ更新 (毎フレームinnerHTML禁止)
@@ -15706,7 +15843,7 @@ function stepWorld() {
                 de._dyingVy = (de.y - (de.prevY ?? de.y)) * 0.7;
                 if (de.type !== 'fighter') {
                     logMessage('TAC: 敵艦機関部誘爆 — 崩壊シーケンス進行中', 'system-msg');
-                    playSound('explosion');
+                    sfxOr('ship_destruct_start_enemy', 'explosion');
                 }
             }
             if (de._dying) {
@@ -15723,9 +15860,9 @@ function stepWorld() {
                 if (de._dying <= 0) {
                     // 母艦を失ったファイターは管制リンクが切れ、数秒で燃え尽きる
                     if (de.type === 'carrier') enemies.forEach(f => { if (f.type === 'fighter' && f.fuel !== undefined) f.fuel = Math.min(f.fuel, 240); });
-                    createExplosion(de.x, de.y, '#ff4d4d', de.type === 'carrier' ? 46 : (de.type === 'destroyer' ? 26 : 12));
+                    createExplosion(de.x, de.y, '#ff4d4d', de.type === 'carrier' ? 46 : (de.type === 'destroyer' ? 26 : 12), true);
                     effects.push({ x: de.x, y: de.y, r: 0, maxR: 900, a: 0.9, c: '#ffddaa', type: 'circle' }); // 衝撃波
-                    playSound('explosion');
+                    if (de.type === 'fighter') sfxExplosion(12); else sfxOr('ship_blast_final_enemy_' + (de.type === 'carrier' ? 'large' : de.type === 'destroyer' ? 'medium' : 'small'), 'explosion');
                     const reward = de.type === 'carrier' ? 300 : (de.type === 'destroyer' ? 100 : (de.type === 'fighter' ? 10 : 30));
                     // スクラップを散らす (大型ほど多い) — 撃沈跡が漁場になる
                     const _scraps = de.type === 'fighter' ? 1 : (de.type === 'carrier' ? 4 : 3);
@@ -15831,19 +15968,19 @@ function stepWorld() {
             const last = playerHitLog[playerHitLog.length - 1];
             player._deathCause = player._defeat || (last ? _hitText(last) : '原因不明');
             _hitStop = 18;
-            createExplosion(player.x, player.y, '#ffaa44', 22);
+            createExplosion(player.x, player.y, '#ffaa44', 22, true);
             logMessage('CRITICAL: 被弾 — ' + player._deathCause + '。機関部誘爆、船体崩壊が始まる', 'system-msg');
             showDeathBanner(player._deathCause);
             { const f = document.getElementById('hud-hp-fill'), t = document.getElementById('hud-hp-text'); if (f) f.style.width = '0%'; if (t) t.textContent = '0%'; }
             if (typeof matchRecEvent === 'function') matchRecEvent('deathP', player.x, player.y, '自艦撃沈 — ' + player._deathCause);
-            playSound('explosion');
+            sfxStopAllLoops(); sfxOr('ship_death_player_start', 'explosion');
         } else if (player && player._dying > 0) {
             player._dying--;
             player.x += player._dvx; player.y += player._dvy; player._dvx *= 0.985; player._dvy *= 0.985;
             player.angle += 0.004;
-            if (player._dying % 28 === 0) { createExplosion(player.x + (Math.random() - 0.5) * 50, player.y + (Math.random() - 0.5) * 50, '#ff8844', 14); playSound('explosion'); }
+            if (player._dying % 28 === 0) { createExplosion(player.x + (Math.random() - 0.5) * 50, player.y + (Math.random() - 0.5) * 50, '#ff8844', 14, true); sfxOr('ship_blast_chain', 'explosion'); }
             if (player._dying === 0) {
-                createExplosion(player.x, player.y, '#00ffaa', 50);
+                createExplosion(player.x, player.y, '#00ffaa', 50, true); sfxOr('ship_blast_final_player', 'explosion');
                 logMessage('CRITICAL: 船体崩壊。通信途絶...', 'system-msg');
                 setTimeout(() => showGameOver(), 1800);
             }
@@ -15867,7 +16004,7 @@ function stepWorld() {
             Math.hypot(player.x - playerWreckObj.x, player.y - playerWreckObj.y) < 350) {
             gameState.credits += playerWreckObj.value;
             gameState.wreckSalvage = 0;
-            updateTopUI(); saveGame(); playSound('ui');
+            updateTopUI(); saveGame(); sfxUI('loot_container');
             effects.push({ x: playerWreckObj.x, y: playerWreckObj.y, r: 0, maxR: 650, a: 1, c: '#9ab0bb', type: 'circle' });
             logMessage(`SALVAGE: 前任艦の残骸から物資を回収 (+${playerWreckObj.value} SCR) — 帰らなかった艦に敬礼`, 'system-msg');
             playerWreckObj = null;
@@ -15888,7 +16025,7 @@ function stepWorld() {
                 if (d < player.radius + 10) {
                     gameState.credits += s.value;
                     updateTopUI();
-                    playSound('ui');
+                    sfxUI('loot_container');
                     logMessage(`TAC: スクラップ回収 +${s.value} SCR`, 'system-msg');
                     createClickEffect(s.x, s.y, '#00ffaa');
                     scrapDrops.splice(i, 1);
@@ -16161,14 +16298,14 @@ btnDock.addEventListener('click', () => {
     dockPrompt.classList.remove('active');
     dockingMenu.classList.remove('hidden');
     player.setTarget(player.x, player.y);
-    playSound('ui');
+    sfxUI('ui_confirm');
     updateDockingUI();
 });
 
 btnLeave.addEventListener('click', () => {
     dockingOpen = false;
     dockingMenu.classList.add('hidden');
-    playSound('ui');
+    sfxUI('ui_close');
     if (sectorCleared && player && player.hp > 0) openDebrief(); // 作戦報告から来た場合は戻る
 });
 
@@ -16296,7 +16433,7 @@ function openDebrief() {
     if (lead) lead.textContent = (st.dmgTaken || 0) === 0 ? '無傷で敵艦を撃沈 — 完璧な狩りだ' : (st.ambushes ? '先に見つけ、先に撃った — セクター制圧' : '敵艦撃沈 — セクター制圧');
     document.getElementById('debrief-overlay')?.classList.remove('hidden');
     _debriefOpen = true;
-    playSound('ui');
+    sfxUI('sys_report_open');
 }
 function _closeDebrief() { document.getElementById('debrief-overlay')?.classList.add('hidden'); _debriefOpen = false; }
 document.getElementById('btn-db-next')?.addEventListener('click', () => {
@@ -16305,14 +16442,14 @@ document.getElementById('btn-db-next')?.addEventListener('click', () => {
     gameState.credits += 200; // 深宇宙への進出報酬 (旧ワープと同額)
     saveGame(); updateTopUI();
     generateSector();
-    playSound('ui');
+    sfxUI('ui_close');
 });
 document.getElementById('btn-db-dock')?.addEventListener('click', () => {
     document.getElementById('debrief-overlay')?.classList.add('hidden');
     dockingOpen = true;
     document.getElementById('docking-menu')?.classList.remove('hidden');
     updateDockingUI();
-    playSound('ui');
+    sfxUI('ui_close');
 });
 
 // ═══ 第13弾: 作戦要領 (初回出撃時・メニューから) — 表示中はゲームを止める ═══
@@ -16325,7 +16462,7 @@ function togglePause(on) {
     if (b) { b.classList.toggle('on', userPaused); b.textContent = userPaused ? '▶' : 'Ⅱ'; }
     const ind = document.getElementById('pause-ind');
     if (ind) ind.classList.toggle('hidden', !userPaused);
-    playSound('ui');
+    sfxUI(userPaused ? 'sys_pause_on' : 'sys_pause_off');
 }
 document.getElementById('btn-pause')?.addEventListener('click', () => togglePause());
 function showBriefing(fromMenu) {

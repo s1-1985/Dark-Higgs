@@ -524,6 +524,14 @@ tools/render3d/ # 第38弾: GLBを真上から描いて傾き別のPNGに書き�
 - 計測（敵と自艦を3200uまで近づけた6分・各性格）: 敵がノイズ・煙幕・散布・リペア・閃光・囮のいずれかを1〜5回使う（旧: ほぼ0回）。エラー0
 - **SE指示書**（`docs/SE_SPEC.md` 第2版）: 場面別に音の作り方を具体化（約190行）。ソナーは**尾込みの長い響き・音程一定**（ゲーム側の残響は0.1〜0.2秒しか足せない → 音源に響きを含める）。バリエーションは原則1音1ファイル。
 
+### 第68弾: ChatGPT製の効果音を組み込む（2026-11-09 ✅ オーナー提供の `Dark-Higgs_SE_Spec2_Part1/2.zip`）
+- **素材**: `prototype/assets/sfx/` に MP3 212ファイル（5.0MB。ChatGPTのWAV 48kHz/16bit を ffmpeg で 128k(ステレオ)/96k(モノ)に変換。**WAVの原本はリポジトリに無い**）＋ `manifest.json`（`{sounds:{id:{f:[ファイル],d,l,c}}}`・200 id）。id は `docs/SE_SPEC.md` 第2版どおり。末尾 `_loop` はループ
+- **再生**（`sfx(id,vol,opt)`・`sfxLoop(id,on,vol)`）: fetch＋`decodeAudioData`。起動時に manifest と `SFX_PRELOAD`（ソナー・被弾・命中）を読み、他は初回使用時に読む（**初回だけ従来の合成音にフォールバック**）。`_sfx.sbus` へ直結（圧縮器・残響を通さない＝音源の余韻をそのまま）。±3%の音程ゆらぎ（`SFX_NOJIT` の id は除く）・同じ音の連打は間引く（`SFX_GAP`）・同時28まで。音量は `sfxVolume`（ロビー右上のスライダー `#sfx-vol`・localStorage `darkEchoSfxVol`）
+- **配線**: 旧 `playSound` の16種は `SFX_LEGACY` でファイルへ写し、ファイルが無ければ合成。呼び出し側は文脈で選ぶ（被弾=`hit_player_*`・敵への命中=`sfxHitEnemy`・爆発=`sfxExplosion`(小/中/大)・囮/ビーコン=`item_*`・UI=`sfxUI`）。新規: 状態異常の警報（`alm_status_*`）・信号の初受信（`det_rx_<帯域>`）・視界外の命中観測（`det_impact_*`）
+- **ループ**（`updateSfxLoops`・32フレームごと）: `amb_drone_loop`（常時）・`amb_tension_loop`（兆候2以上）・`alm_missile_warn_loop`（ミサイルの脅威）・`alm_fc_lock_loop`（ロックの脅威）。環境音ファイルが読めたら合成のドローンは止める
+- **確認**: Playwright（Chromium）で manifest 200件・事前読み込み29件・MP3のデコードと再生・ループ・被弾/爆発/状態異常を通してエラー0。**聴感（音量バランス・音の質）は未確認 — 実機でオーナーが確認**（推論: 音量差は `SFX_GAIN` で個別に調整できる）
+- **未配線**（id はあるが呼び出し箇所が無い物がある可能性）: 船体警報・弾切れ・勝敗・ドラフト・ドローンの発進/喪失など。聞こえない音があれば指摘を
+
 ### マップ
 - 円形マップ `MAP_RADIUS=35000`（`FIELD_SIZE`=直径70000）@`game.js:35`
 - ヒッグスの霧 = 濃度グリッド（第21弾・細かくまばら）+ 時間経過で増加（ゾーン圧縮）。リソースノード5-10個（第18弾: 常に表示・未確認は薄く。HIGGS帯で見ると確認済みになる）
