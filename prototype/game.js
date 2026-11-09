@@ -427,7 +427,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261109p';
+const SPRITE_VER = '20261109q';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -6050,6 +6050,7 @@ function generateSector() {
         _com = comNewMemo(); _thinkLast = {};
         const _tl = document.getElementById('think-log'); if (_tl) _tl.textContent = '';
         const _th = document.getElementById('think-who');
+        _comMatchInfo = { ship: comCfg.ship, enemy: comCfg.enemy, pPre: comCfg.pPreset, ePre: comCfg.ePreset, pp: Object.assign({}, _com.pp), ep: Object.assign({}, boss.personality) }; // 第63弾: 試合の記録に双方の艦種と性格を出す
         if (_th) _th.textContent = '自機COM ' + SHIP_JP[comCfg.ship] + ' [' + persLabel(_com.pp) + ']  vs  敵COM ' + SHIP_JP[comCfg.enemy] + ' [' + persLabel(boss.personality) + ']';
     }
     // 第48弾: 敵の武器の種類も艦種の上限 (攻撃型3・潜航型2・空母1)。COM対戦は積み込みの設定どおり。通常の敵は性格で選ぶ (潜航型: 隠密/慎重ならビーム+ミサイル・他は実弾+ミサイル)
@@ -13979,6 +13980,7 @@ function comNewMemo() { return { pp: comPersonalityFor('p'), lastDeploy: -1e9, h
 let matchRec = null;
 const REC_EVENTS_MAX = 3000;
 const _AI_JP = { lurking: '潜伏', gathering: '収集', hunting: '追跡', combat: '交戦' };
+let _comMatchInfo = null;
 function matchRecStart() {
     const lm = [];
     for (const st of structures) if (st.type === 'colony' || st.type === 'derelict') lm.push({ k: st.type, x: st.x, y: st.y });
@@ -14025,6 +14027,16 @@ function openReplay() {
     for (const sm of matchRec.s) { const pts = [sm.P].concat(sm.E); for (const q of pts) { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); } }
     const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, half = Math.max(4000, (Math.max(x1 - x0, y1 - y0) / 2) * 1.15 + 600);
     _rp = { i: matchRec.s.length - 1, play: false, spd: 4, cx, cy, half, acc: 0, last: 0 };
+    { // 第63弾: COM対戦は 双方の艦種と性格 (プリセット名と4軸) を記録の上に出す
+        const mb = document.getElementById('rp-match'), I = _comMatchInfo;
+        if (mb) {
+            if (matchRec.com && I) {
+                const pn = k => (COM_PRESETS[k] && COM_PRESETS[k].label) || '';
+                const row = (cls, lab, ship, pre, p) => '<div class="rp-m ' + cls + '"><b>' + lab + '</b> ' + SHIP_JP[ship] + ' <span>' + (pn(pre) ? pn(pre) + ' ' : '') + persLabel(p) + '</span></div>';
+                mb.innerHTML = row('p', '自機COM', I.ship, I.pPre, I.pp) + row('e', '敵COM', I.enemy, I.ePre, I.ep); mb.style.display = '';
+            } else { mb.innerHTML = ''; mb.style.display = 'none'; }
+        }
+    }
     _rpRenderEvents();
     _rpDraw();
     _rpStartLoop();
