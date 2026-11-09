@@ -427,7 +427,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261109t';
+const SPRITE_VER = '20261109u';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -11923,16 +11923,17 @@ function enemyItemsStep(e) {
     const cd = (k, sec) => now - (e[k] || -1e9) > sec * 60;
     // ── 第52弾 (オーナー: 搭載品の使い分けをさらに細かく) — 状況 × 性格 ──
     // リペアキット: 損傷が大きく (55%未満)、気配が無い (確信が薄い・撃たれていない) 間に (潜伏していなくても)
-    if ((e.itemRepair || 0) > 0 && !(e._kitT > 0) && hpF < 0.55 && (e.contactFreshness || 0) < 0.2 && hitAgo > 1200 && e.hp < e.maxHp - REPAIR_KIT_HP * 0.8) {
+    // 第67弾 (オーナー「どちらのCOMもアイテムを使わず、出会い頭に殴り合うだけ」): 使う条件を緩め、戦闘の最中でも使う (旧: 耐久55%未満かつ気配が無い・20秒に1回の閃光はミサイル専用・ノイズは耐久75%未満…で、短い殴り合いでは一度も使わずに終わった)
+    if ((e.itemRepair || 0) > 0 && !(e._kitT > 0) && ((hpF < 0.55 && (e.contactFreshness || 0) < 0.2 && hitAgo > 1200) || (hpF < 0.4 && hitAgo > 420 && !e.inVision)) && e.hp < e.maxHp - REPAIR_KIT_HP * 0.8) {
         e.itemRepair--; e._kitT = REPAIR_KIT_TIME; matchRecEvent('repairE', e.x, e.y, '敵: リペアキットを使う');
         if (comDemo) comThinkEvent('e', '耐久' + _pct(hpF) + ' で気配が無い → リペアキットで修理 (残り' + e.itemRepair + '個)', 'e' + e.uid);
     }
     // 閃光: 自分に向かうミサイルが来ている時 (退き際でなくても)
-    if ((e.itemFlash || 0) > 0 && cd('_flashF', 20) && incomingMissile(e, true)) { e._flashF = now; enemyUseFlash(e); }
+    if ((e.itemFlash || 0) > 0 && cd('_flashF', 20) && (incomingMissile(e, true) || (hpF < 0.5 && hitAgo < 600 && dBel < 2200))) { /* 第67弾: 傷が深く至近で撃たれている時も (相手のセンサーを焼いて離れる) */ e._flashF = now; enemyUseFlash(e); }
     // ノイズメーカー: 撃たれて (6秒以内)・耐久75%未満・追われている (確信が高い) 時、横へ走らせて耳を逸らす
-    if ((e.itemNoise || 0) > 0 && hitAgo < 360 && hpF < 0.75 && (e.contactFreshness || 0) > 0.4 && !e._hiding && cd('_noiseF', 40)) { e._noiseF = now; enemyUseNoise(e, e.angle + (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2); }
+    if ((e.itemNoise || 0) > 0 && hitAgo < 600 && hpF < 0.95 && (e.contactFreshness || 0) > 0.3 && !e._hiding && cd('_noiseF', 40)) { e._noiseF = now; enemyUseNoise(e, e.angle + (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2); }
     // 煙幕: 撃たれて・慎重/隠密で・推定が3500u以内 (近い) か耐久60%未満
-    if ((e.itemSmoke || 0) > 0 && hitAgo < 360 && (ca >= 0.5 || st >= 0.5) && (dBel < 3500 || hpF < 0.6) && cd('_smokeF', 45)) { e._smokeF = now; enemyUseSmoke(e); }
+    if ((e.itemSmoke || 0) > 0 && hitAgo < 600 && (ca >= 0.25 || st >= 0.25 || hpF < 0.8) && (dBel < 4000 || hpF < 0.7) && cd('_smokeF', 45)) { e._smokeF = now; enemyUseSmoke(e); }
     // ビーコン: 潜伏を始める時、隠れ場所と反対へ1つ置く (敵の耳をそちらへ向ける)
     if (e._hideT > 0 && !e._beaconDone && e.itemBcn) {
         const k = Object.keys(e.itemBcn).find(b => e.itemBcn[b] > 0);
@@ -11951,7 +11952,7 @@ function enemyItemsStep(e) {
     if ((e.contactFreshness || 0) >= 0.05) e._quietStart = now;
     if (!(e.itemBlow > 0 || e.itemSpray > 0)) return;
     // 散布: 撃たれて (10秒以内) 隠密/慎重・霧が薄い時
-    if (e.itemSpray > 0 && st >= 0.5 && hitAgo < 600 && hHere < 0.5 && !e._hiding && cd('_sprayF', 120)) { e._sprayF = now; enemyUseSpray(e); return; }
+    if (e.itemSpray > 0 && (st >= 0.3 || ca >= 0.5) && hitAgo < 900 && hHere < 0.5 && !e._hiding && cd('_sprayF', 120)) { e._sprayF = now; enemyUseSpray(e); return; }
     // 吹き飛ばし: 攻撃的で、濃い霧の中・推定が4000u以内なのに見えない時
     if (e.itemBlow > 0 && ag >= 0.55 && hHere > 0.55 && lk && e.contactFreshness > 0.25 && !e.inVision && dBel < 4000 && cd('_blowF', 90)) {
         e._blowF = now; e.itemBlow--; useFogBlow('e', e.x, e.y);
@@ -14605,9 +14606,11 @@ function comReactItems(c, P, hpF, retreating) {
     const hitAgo = playerHitLog.length ? now - playerHitLog[playerHitLog.length - 1].f : 1e9;
     const msl = THREATS.find(t => t.kind === 'msl');
     if ((cargo.stock.repair || 0) > 0 && hpF < 0.6 && playerExposureLevel <= 1 && !(player._kitT > 0) && !incomingMissile(player, false) && now - (c.repF || -1e9) > 1800) { c.repF = now; deployDrone('repair'); comThinkEvent('p', '耐久' + _pct(hpF) + '・今は撃たれていない → リペアキットで修理'); return true; } // 第66弾: 修理も使う
+    const _enNear = enemies.some(q => q.hp > 0 && !q._dying && q.type !== 'fighter' && q.inVision && Math.hypot(q.x - player.x, q.y - player.y) < 2200);
+    if (x.flash && !msl && hpF < 0.5 && hitAgo < 600 && _enNear && now - (c.flashF || -1e9) > 1800) { c.flashF = now; deployDrone('flash'); comThinkEvent('p', '耐久' + _pct(hpF) + '・至近で撃たれている → 閃光弾で相手のセンサーを焼いて離れる'); return true; } // 第67弾
     if (msl && x.flash && now - (c.flashF || -1e9) > 1200) { c.flashF = now; deployDrone('flash'); comThinkEvent('p', 'ミサイルが接近 (' + compassDeg(msl.ang) + '°) → 閃光弾で誘導を断つ'); return true; }
-    if (hitAgo < 360 && x.noise && P.caution >= 0.35 && hpF < 0.8 && now - (c.noiseF || -1e9) > 2400) { c.noiseF = now; deployDrone('noise'); comThinkEvent('p', '撃たれた → ノイズメーカーで本物から目を逸らす'); return true; }
-    if (hitAgo < 360 && x.smoke && (P.caution >= 0.5 || P.stealth >= 0.5 || hpF < 0.5) && now - (c.smokeF || -1e9) > 2700) { c.smokeF = now; deployDrone('smoke'); comThinkEvent('p', '撃たれている → 煙幕で探信と光学を鈍らせる'); return true; }
+    if (hitAgo < 600 && x.noise && P.caution >= 0.2 && hpF < 0.95 && now - (c.noiseF || -1e9) > 2400) { c.noiseF = now; deployDrone('noise'); comThinkEvent('p', '撃たれた → ノイズメーカーで本物から目を逸らす'); return true; }
+    if (hitAgo < 600 && x.smoke && (P.caution >= 0.3 || P.stealth >= 0.3 || hpF < 0.6) && now - (c.smokeF || -1e9) > 2700) { c.smokeF = now; deployDrone('smoke'); comThinkEvent('p', '撃たれている → 煙幕で探信と光学を鈍らせる'); return true; }
     if (retreating && x.lures.length && now - (c.escLureF || -1e9) > 5400) {
         const k = x.lures[Math.floor(Math.random() * x.lures.length)], a = Math.atan2(player.y - MAP_CY, player.x - MAP_CX) + (Math.random() - 0.5) * 2.4, d = 3000 + Math.random() * 2500;
         const tp = clampToMapCircle(player.x + Math.cos(a) * d, player.y + Math.sin(a) * d, 1500);
