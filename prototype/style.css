@@ -2654,3 +2654,14 @@ body.in-game #zoom-ctl #btn-pause.on { background: rgba(80,60,0,0.85); color: #f
 .slot-gauge i.on { background: #00ffaa; box-shadow: 0 0 6px #00ffaa88; }
 #parts-title small { margin-left: 8px; font-size: 11px; color: #9fc9bb; }
 @media (max-height: 520px) { .pc-art { height: 86px; } .pc-img { width: 76px; height: 76px; } .part-card { flex-basis: 170px; max-width: 200px; } .pc-up, .pc-down { font-size: 10.5px; padding: 3px 6px; } }
+
+/* ═══ 第59弾: AIの解析力トグル (帯域バーの右隣) ═══ */
+#hud-left .ai-btn { flex: 0 0 22px; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px 2px 5px; background: rgba(0,10,8,0.85); border: 1px solid rgba(160,255,200,0.3); border-radius: 5px; cursor: pointer; font-family: 'Orbitron', monospace; color: #b6ffcf; }
+#hud-left .ai-btn .ai-lab { font-size: 7px; font-weight: 700; letter-spacing: 0; opacity: 0.85; }
+#hud-left .ai-btn .ai-seg { flex: 1; min-height: 0; display: flex; flex-direction: column-reverse; gap: 2px; width: 100%; padding: 0 3px; }
+#hud-left .ai-btn .ai-seg i { flex: 1; border: 1px solid rgba(160,255,200,0.35); border-radius: 2px; background: transparent; }
+#hud-left .ai-btn .ai-seg i.on { background: linear-gradient(#b6ffcf, #5fe0a0); border-color: #b6ffcf; }
+#hud-left .ai-btn.hot { border-color: #ffb36b; } #hud-left .ai-btn.hot .ai-seg i.on { background: linear-gradient(#ffd9a8, #ff9a5a); border-color: #ffb36b; }
+#hud-left .ai-btn.low { border-color: #7a8a9a; } #hud-left .ai-btn.low .ai-seg i.on { background: #7a8a9a; border-color: #7a8a9a; }
+#hud-left .ai-btn .ai-val { font-size: 6px; letter-spacing: 0; white-space: nowrap; opacity: 0.9; }
+#hud-left .ai-btn:active { transform: scale(0.96); }

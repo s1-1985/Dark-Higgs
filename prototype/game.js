@@ -392,7 +392,7 @@ function focusFx(al) {
         rxRange: 1 + 0.17 * s,               // 受信の最大距離
         sonar: 1 + 0.33 * s,                 // ソナーの距離と半径
         bearErr: 1 - 0.15 * s,               // 方位の誤差
-        anaSpeed: 1 + 0.4 * a,               // 解析の速さ
+        anaSpeed: (1 + 0.4 * a) * (1 - 0.4 * c(1 - al.ai / 50)), // 解析の速さ (第59弾: AIを下げると遅くなる)
         ai: a,                               // AIの助言の頻度と細かさ (0..1)
     };
 }
@@ -418,7 +418,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261109k';
+const SPRITE_VER = '20261109l';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -527,7 +527,8 @@ let currentSensor = 'heat'; // 'heat' | 'optic' | 'em' | 'higgs' (第21弾: ON�
 // 旧: 方位が取れるのは同調した1帯域だけ (他の3帯域はミキサーにレベルが出るだけ)
 let sensorsOn = { heat: true, optic: false, em: false, higgs: false };
 let sensorOrder = ['heat']; // ONにした順 (先頭が無料)
-const SENSOR_LEAK = { heat: 0.06, optic: 0.06, em: 0.08, higgs: 0.06 };
+// 第59弾 (オーナー「センサーの出力を上げたり複数化しても発信シグネチャにあまり出ない」): 基準を約2倍 (heat/optic/higgs 0.12・em 0.16) にし、最初の1本も漏らす (×0.35) — 下の leakMult
+const SENSOR_LEAK = { heat: 0.12, optic: 0.12, em: 0.16, higgs: 0.12 };
 // 第43弾 (オーナー合意): 帯域ごとの感度 — OFF / 標準 / 高感度 (左列の帯域バーをタップするたびに循環)。自艦も敵も同じ式
 //   高感度 = その帯域の受信距離 ×1.35 / 自艦が漏らすシグネチャ (SENSOR_LEAK) が +1本分 (標準の2本目以降なら×2) / 自然の雑音も拾い 方位の誤差 ×1.3
 // 第44弾 (オーナー): 感度は 弱 / 中 / 強 の3段階 — 帯域バーをタップ: OFF → 弱 → 中 → 強 → OFF (全帯域をOFFにもできる)
@@ -538,7 +539,8 @@ const HI_RANGE = 1.35, HI_NOISE = 1.3;
 const bandGainP = (b) => sensorsOn[b] ? LV_RANGE[sensorLv[b] || 2] : 1;                    // 自艦の帯域ごとの受信距離の倍率
 const bandGainE = (e) => (b) => e && e._lv && e._lv[b] ? LV_RANGE[e._lv[b]] : 1;            // 敵 (e._lv = 帯域ごとの感度。無ければ中)
 // その帯域が自艦/敵から漏らす信号 (SENSOR_LEAK に掛ける倍率): 2本目以降の漏れ (弱は半分) + 強の追加1本分。idx = ONにした順の位置
-const leakMult = (idx, lv) => (idx > 0 ? (lv === 1 ? 0.5 : 1) : 0) + (lv === 3 ? 1 : 0);
+// 第59弾: 漏れ = (1本目 0.35 / 2本目以降 1) × (弱 0.45 / 中 1 / 強 2.2)。旧: 1本目は無料・弱は半分・強は+1本分だけで、4本全部を強にしても約0.5しか出なかった
+const leakMult = (idx, lv) => (idx > 0 ? 1 : 0.35) * (lv === 1 ? 0.45 : lv === 3 ? 2.2 : 1);
 
 let dialogOpen = false;
 let dockingOpen = false;
@@ -849,6 +851,7 @@ let enemies = [];
 let projectiles = [];
 let structures = [];
 let effects = [];
+const BEAM_DRAW_LEN = 140000; // 第59弾: ビームの描く長さ (マップの外まで)
 const BEAM_FX_SEC = 6; // 第22弾: ビームの表示時間 (秒・オーナー指定5〜8秒)
 let damagePuffs = []; // 第21弾: 損傷した艦の煙と火花 (艦影の上に描く・上限70)
 let particles = [];
@@ -2747,7 +2750,7 @@ class Projectile {
                 }
                 createHitEffect(target.x, target.y, isPlayer ? '#00ffaa' : '#ff4d4d');
                 effects.push({ x: target.x, y: target.y - 30, text: _bStrike.preempt ? `奇襲! -${_beamDmg}` : `-${_beamDmg}`, life: 1.0, type: 'floatText', c: _bStrike.preempt ? '#ffff00' : (isPlayer ? '#00ffdd' : '#ff5555') });
-                if (isPlayer) logMessage(`HIT [BEAM] → ${_beamDmg} ダメージ`, 'warning-msg');
+                if (isPlayer) { if (inPlayerVision(target.x, target.y)) logMessage(`HIT [BEAM] → ${_beamDmg} ダメージ`, 'warning-msg'); else noteImpactObs(target.x, target.y, 'beam'); } // 第59弾: 視界の外は閃光の観測だけ
                 // ビーム着弾スプライトエフェクト
                 const _bfxImg = SPRITES['fx_beam_impact'];
                 if (spriteReady(_bfxImg)) {
@@ -2975,7 +2978,7 @@ class Projectile {
             if (!preemptive) {
                 effects.push({ x: hitTarget.x, y: hitTarget.y - 30, text: `-${_hitDmg}`, life: 1.0, type: 'floatText', c: this.isPlayer ? '#ffdd00' : '#ff5555' });
             }
-            if (this.isPlayer) logMessage(`HIT [${this.type.toUpperCase()}] → ${_hitDmg} ダメージ`, 'warning-msg');
+            if (this.isPlayer) { if (inPlayerVision(hitTarget.x, hitTarget.y)) logMessage(`HIT [${this.type.toUpperCase()}] → ${_hitDmg} ダメージ`, 'warning-msg'); else noteImpactObs(hitTarget.x, hitTarget.y, this.type); } // 第59弾
             addShake((this.dmg * dmgMult) / 10);
             if (this.type === 'missile') spawnShrapnel(this.x, this.y, 6, 3); // 第21弾: ミサイルの破片
             // kinetic着弾フラッシュスプライト
@@ -3352,7 +3355,7 @@ function playerFireWeapon(s, target, wType, lk) {
         if (hit) {
             projectiles.push(new Projectile(s.x, s.y, target, true, 'beam', dmgScale));
         } else {
-            effects.push({ x: s.x, y: s.y, tx: _bex, ty: _bey, type: 'beam', a: 1, c: '#00ffaa' });
+            effects.push({ x: s.x, y: s.y, tx: _bex, ty: _bey, type: 'beam', a: 1, c: '#00ffaa', miss: true });
             leaveBeamChannel(s.x, s.y, _bex, _bey);
             logMessage('WEP: BEAM 推定射撃 — 手応えなし (その線上には居ない)', 'warning-msg');
             missRevealsShooter(s.x, s.y, _bex, _bey, true);
@@ -4514,7 +4517,7 @@ class Ship {
                             void missDist;
                             if (!(_bAl > 0 && _bAl < _bL && _bPp < BEAM_HIT_WIDTH + (player.radius || 0))) {
                                 const _bex = this.x + Math.cos(_bA) * _bL, _bey = this.y + Math.sin(_bA) * _bL;
-                                effects.push({ x: this.x, y: this.y, tx: _bex, ty: _bey, type: 'beam', a: 1, c: '#ff4d4d' });
+                                effects.push({ x: this.x, y: this.y, tx: _bex, ty: _bey, type: 'beam', a: 1, c: '#ff4d4d', miss: true });
                                 leaveBeamChannel(this.x, this.y, _bex, _bey);
                                 beamNearMiss(this.x, this.y, _bex, _bey, false, null); // 外れても至近を通れば自艦のセンサーが乱れる
                                 if (this._sa) recordMissSa(this._sa, { x: this.x, y: this.y, x2: _bex, y2: _bey, r: BEAM_HIT_WIDTH + 120 }); // 外れ = その線上には居ない
@@ -5660,6 +5663,32 @@ function updateDrawEffects(ctx) {
     }
 }
 
+// ═══ 第59弾 (オーナー): 視界の外で何かに命中したら、光・熱の閃光を受信して AI が「何かに当たった」とコメントする。精度は AI の配分 (解析力) で変わる ═══
+// 旧: 視界の外でもビーム/弾の命中は「HIT → nダメージ」と正確に分かった (情報漏れ)。→ 視界の外は閃光の観測だけ
+const IMPACT_INT = { beam: 0.95, missile: 0.75, kinetic: 0.4 }; // 閃光の強さ (光・熱)
+function noteImpactObs(x, y, kind) {
+    if (!player || player.hp <= 0 || inPlayerVision(x, y)) return false;
+    const d = Math.hypot(x - player.x, y - player.y);
+    const range = passiveRange() * 0.9;
+    const seesOptic = sensorsOn.optic ? 1 : 0, seesHeat = sensorsOn.heat ? 1 : 0;
+    if (!(seesOptic || seesHeat)) return false; // 光学も熱も聴いていなければ閃光は拾えない
+    const p = Math.max(0, 1 - d / range) * (IMPACT_INT[kind] || 0.5) * (0.55 + 0.25 * seesOptic + 0.25 * seesHeat) * (1 - getHiggsIntensity(player.x, player.y) * 0.3);
+    if (Math.random() > p * 1.6) return false;
+    const q = Math.max(0, Math.min(1, genAlloc.ai / 100)) ; // AIの配分 (0.5=標準 / 0.8=解析重視 / 1.0=最大)
+    const sd = 0.03 + 0.5 * (1 - q) * (1 - q) + 0.12 * (d / range), ang = Math.atan2(y - player.y, x - player.x) + _gauss() * sd;
+    const dEst = d * (1 + _gauss() * (0.08 + 0.5 * (1 - q) * (1 - q)));
+    const conf = Math.max(0.2, Math.min(0.95, 0.3 + q * 0.7 - 0.25 * (d / range)));
+    const what = kind === 'beam' ? 'ビームの命中らしい強い光と熱' : kind === 'missile' ? 'ミサイルの爆発らしい光と熱' : '小さな閃光と熱';
+    const deg = compassDeg(ang);
+    logMessage(aiRoundText('AI: 遠方で何かに命中 — ' + what + 'を受信 (方位' + deg + '°・約' + Math.round(dEst / 100) * 100 + 'u・確度' + Math.round(conf * 100) + '%)。' + (q >= 0.6 ? '撃った先で当たった可能性が高い' : '何に当たったかは分からない'), q), 'warning-msg');
+    ringMarkBearing(deg, '#ffcc66');
+    // 閃光そのものも方位の手掛かり (短命の信号として記録 — 位置を測る材料になる)
+    const sid = 'X-imp-' + (_impN++);
+    passiveBearings.push({ ox: player.x, oy: player.y, angle: ang, halfWidth: Math.max(0.05, sd * 2), range: range, quality: conf, color: '255,200,80', sensor: seesOptic ? 'optic' : 'heat', strength: Math.min(1, 0.4 + p), sensorLabel: '閃光', bearingDeg: deg, halfWidthDeg: Math.round(sd * 2 * 57.3), sourceId: sid, contactNo: _contactLabelNext++, life: 240, maxLife: 240 });
+    while (passiveBearings.length > PASSIVE_BEARING_MAX) passiveBearings.shift();
+    return true;
+}
+let _impN = 0;
 // ソナー系エフェクト専用パス — フォグ/ヒッグス層の「手前」に描画する (updateDrawEffectsから分離)。
 // 探信音の波紋・充満・境界リングはプレイヤーの索敵成果なので、ヒッグス雲に隠されると視認できず意味を失う。
 // 第22弾: ビームは霧の上に描く — 強い光の筋は霧越しでも見える (旧: 霧の下に描いていて、視界の外から撃たれたビームが見えなかった)
@@ -5675,7 +5704,7 @@ function updateDrawBeams(ctx) {
         ef.a = _age < 1.2 ? 1 : 1 - (_age - 1.2) / (BEAM_FX_SEC - 1.2);
         const _bdx = ef.tx - ef.x, _bdy = ef.ty - ef.y;
         const _bAng = Math.atan2(_bdy, _bdx);
-        const _bLen = Math.hypot(_bdx, _bdy);
+        const _bLen = BEAM_DRAW_LEN; // 第59弾 (オーナー): ビームは当たった点・推定点で切れず、画面の外まで一直線に突き抜けて描く
         ctx.save();
         ctx.translate(ef.x, ef.y);
         ctx.rotate(_bAng);
@@ -5699,8 +5728,8 @@ function updateDrawBeams(ctx) {
         ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(_bLen, 0);
         ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(6 * ef.a, 2 / camera.zoom); ctx.globalAlpha = ef.a * 0.95; ctx.stroke();
         ctx.restore();
-        // 着弾点フラッシュ
-        if (ef.a > 0.65) {
+        // 着弾点フラッシュ (当たった時だけ。外れた推定射撃は出さない)
+        if (ef.a > 0.65 && !ef.miss) {
             const _flashR = 40 * ef.a;
             ctx.beginPath(); ctx.arc(ef.tx, ef.ty, _flashR, 0, Math.PI * 2);
             ctx.fillStyle = ef.c; ctx.globalAlpha = ef.a * 0.5; ctx.fill();
@@ -6456,7 +6485,7 @@ const GEN_MT_BASE = { engine: GEN_FOCUS.balance.engine, weapons: GEN_FOCUS.balan
 let genMT = null; // null=AT / {engine,weapons,sensors,ai} = 0..2
 function mtOver(k) { if (!genMT) return 1; const g = genMT[k]; return g > 1 ? g * g : 1; }
 function setGenMT(k, g) {
-    if (!genMT) genMT = { engine: 1, weapons: 1, sensors: 1, ai: 1 };
+    if (!genMT) genMT = { engine: genAlloc.engine / GEN_MT_BASE.engine, weapons: genAlloc.weapons / GEN_MT_BASE.weapons, sensors: genAlloc.sensors / GEN_MT_BASE.sensors, ai: genAlloc.ai / GEN_MT_BASE.ai }; // 第59弾: 今の重点の配分から始める (旧: 全部1に戻っていた)
     genMT[k] = Math.max(0, Math.min(2, g));
     _applyGenMT();
 }
@@ -6470,6 +6499,27 @@ function _applyGenMT() {
     document.getElementById('btn-focus-mt')?.classList.add('active');
     _syncMTPanel();
 }
+// ═══ 第59弾 (オーナー): AIの解析力をその場で調整 — 帯域バーの右隣のトグル。低 → 標準 → 高 → 最大 (MT の AI ゲイン 0.5/1/1.5/2) ═══
+//   高いほど 解析・識別が速い (×1.4まで)・助言が速く細かい・視界外の命中の観測が正確。代わりに演算の電磁波・熱が漏れる (ゲイン²)。低いと漏れは減るが 解析が遅く 誤判断が増える
+const AI_LEVELS = [{ g: 0.5, jp: '低' }, { g: 1, jp: '標準' }, { g: 1.5, jp: '高' }, { g: 2, jp: '最大' }];
+function aiLevelIdx() { const r = genAlloc.ai / 50; let bi = 1, bd = 9; AI_LEVELS.forEach((l, i) => { const d = Math.abs(l.g - r); if (d < bd) { bd = d; bi = i; } }); return bi; }
+function cycleAiLevel() {
+    const n = (aiLevelIdx() + 1) % AI_LEVELS.length;
+    setGenMT('ai', AI_LEVELS[n].g);
+    if (typeof playSound === 'function') playSound('ui');
+    logMessage('AI: 解析力 ' + AI_LEVELS[n].jp + (n >= 2 ? ' — 演算の電磁波・熱が漏れる (×' + (AI_LEVELS[n].g * AI_LEVELS[n].g).toFixed(1) + ')' : n === 0 ? ' — 漏れは減るが 解析が遅く 誤判断が増える' : ' — 均等'), 'system-msg');
+    _syncAiBtn(true);
+}
+let _aiBtnLast = '';
+function _syncAiBtn(force) {
+    const b = document.getElementById('btn-ai-level'); if (!b) return;
+    const i = aiLevelIdx(), key = i + ':' + (comDemo ? 1 : 0);
+    if (!force && key === _aiBtnLast) return; _aiBtnLast = key;
+    b.querySelectorAll('.ai-seg i').forEach((e, k) => e.classList.toggle('on', k <= i));
+    b.querySelector('.ai-val').textContent = AI_LEVELS[i].jp;
+    b.classList.toggle('hot', i >= 2); b.classList.toggle('low', i === 0);
+}
+document.getElementById('btn-ai-level')?.addEventListener('click', (e) => { e.stopPropagation(); if (!comDemo) cycleAiLevel(); });
 function _syncMTPanel() {
     const pn = document.getElementById('mt-panel');
     if (!pn) return;
@@ -9405,7 +9455,7 @@ function updateFreeBeam() {
     const ang = Math.atan2(fb.y - player.y, fb.x - player.x);
     const len = Math.min(weaponRange('beam'), Math.max(100, Math.hypot(fb.x - player.x, fb.y - player.y)));
     const ex = player.x + Math.cos(ang) * len, ey = player.y + Math.sin(ang) * len;
-    effects.push({ x: player.x, y: player.y, tx: ex, ty: ey, type: 'beam', a: 1, c: '#00ffaa' });
+    effects.push({ x: player.x, y: player.y, tx: ex, ty: ey, type: 'beam', a: 1, c: '#00ffaa', miss: true }); // 当たった時は下で着弾の閃光
     let hitE = null;
     for (const en of enemies) {
         if (en.hp <= 0 || en._dying) continue;
@@ -9419,7 +9469,7 @@ function updateFreeBeam() {
         hitE.hp -= d;
         if (huntStats) huntStats.dmgDealt += d;
         createHitEffect(hitE.x, hitE.y, '#00ffaa'); addShake(15);
-        logMessage('WEP: ビーム命中 → ' + d + ' ダメージ', 'system-msg');
+        if (inPlayerVision(hitE.x, hitE.y)) logMessage('WEP: ビーム命中 → ' + d + ' ダメージ', 'system-msg'); else noteImpactObs(hitE.x, hitE.y, 'beam'); // 第59弾
     } else missRevealsShooter(player.x, player.y, ex, ey, true);
     leaveBeamChannel(player.x, player.y, ex, ey);
     beamNearMiss(player.x, player.y, ex, ey, true, hitE);
@@ -15070,6 +15120,7 @@ function aiRoundText(t, ai) {
 }
 function updateTacStrip() {
     if (!player) return;
+    _syncAiBtn(); // 第59弾
     // 4帯域ミキサー: 太=受信レベル (0.5の刻み=同調すれば方位が取れる) / 細=自艦の放射
     // 自艦側は「受信機の半分の距離にいる敵が、その帯域で方位を取れるか」を同じ0.5基準で表す (対称)
     const rx = rxLevels(true); // 第31弾: OFFの帯域もバーは動く
