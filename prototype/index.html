@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261109k">
+    <link rel="stylesheet" href="style.css?v=20261109n">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -74,10 +74,11 @@
                     </div>
                 </div>
                 <div id="band-tuner" title="受信機: 太いバー=受信レベル (刻み=方位が取れるライン) / 細いバー=自艦の放射">
-                    <button class="band-btn tuned" data-band="heat" title="熱帯域 — タップで OFF → 弱 → 中 → 強 → OFF (弱=受信距離×0.7・強=×1.35で漏れ+1本分) (1)"><span class="bt-label">HEAT</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
-                    <button class="band-btn" data-band="optic" title="光学帯域 — タップで OFF → 弱 → 中 → 強 → OFF (弱=受信距離×0.7・強=×1.35で漏れ+1本分) (2)"><span class="bt-label">OPT</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
-                    <button class="band-btn" data-band="em" title="電磁波帯域 — タップで OFF → 弱 → 中 → 強 → OFF (弱=受信距離×0.7・強=×1.35で漏れ+1本分) (3)"><span class="bt-label">EM</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
-                    <button class="band-btn" data-band="higgs" title="ヒッグス帯域 — タップで OFF → 弱 → 中 → 強 → OFF (弱=受信距離×0.7・強=×1.35で漏れ+1本分) (4)"><span class="bt-label">HGS</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
+                    <button class="band-btn tuned" data-band="heat" title="熱帯域 — タップで OFF → 弱 → 中 → 強 → OFF (弱=距離×0.7・漏れ小 / 強=距離×1.35・漏れ大) (1)"><span class="bt-label">HEAT</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
+                    <button class="band-btn" data-band="optic" title="光学帯域 — タップで OFF → 弱 → 中 → 強 → OFF (弱=距離×0.7・漏れ小 / 強=距離×1.35・漏れ大) (2)"><span class="bt-label">OPT</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
+                    <button class="band-btn" data-band="em" title="電磁波帯域 — タップで OFF → 弱 → 中 → 強 → OFF (弱=距離×0.7・漏れ小 / 強=距離×1.35・漏れ大) (3)"><span class="bt-label">EM</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
+                    <button class="band-btn" data-band="higgs" title="ヒッグス帯域 — タップで OFF → 弱 → 中 → 強 → OFF (弱=距離×0.7・漏れ小 / 強=距離×1.35・漏れ大) (4)"><span class="bt-label">HGS</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
+                    <button id="btn-ai-level" class="ai-btn" title="AIの解析力 — タップで 低 → 標準 → 高 → 最大 (高いほど解析・識別・助言・命中の観測が速く正確。代わりに演算の電磁波・熱が漏れる。低いと漏れは減るが誤判断が増える)"><span class="ai-lab">AI</span><span class="ai-seg"><i></i><i></i><i></i><i></i></span><span class="ai-val">標準</span></button>
                 </div>
                 <div id="band-legend"><span class="bl-rx">受信</span><span class="bl-tx">自艦</span></div>
             </div>
@@ -781,7 +782,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261109k"></script>
+    <script src="game.js?v=20261109n"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
