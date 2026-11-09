@@ -24,6 +24,7 @@ HTML5 Canvas 2D / Vanilla JS プロトタイプ。最終ターゲット: Android
 CLAUDE.md       # 本書: 概要・確定仕様・クイックリファレンス
 TODO.md         # 実装タスク台帳（壁打ち企画・実装状況・未実装仕様）★着手前に必読
 HANDOVER.md     # セッションログ・決定経緯・パフォーマンス教訓
+docs/SE_SPEC.md # 効果音(SE)制作仕様書（ChatGPTへ渡す用・現行の再生方式・SE一覧・受け渡し手順）
 prototype/
 ├── index.html  # UI レイアウト（Homeworld2スタイル、日本語）
 ├── game.js     # ゲームロジック全体（約13900行）
