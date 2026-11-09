@@ -418,7 +418,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261109h';
+const SPRITE_VER = '20261109i';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -1115,7 +1115,7 @@ const DRONE_SPEC = {
     // 第20弾: 組み立て時間を2倍に (オーナー合意。8〜40秒)
     // 第22弾 (オーナー合意): 耐久はミサイル(350)何発で沈むかで決める・自機と敵で同じ —
     // 哨戒機1発 / 戦闘機3発 / 人型6発 / その他は1発。バリアはビームを1発だけ止める盾 (止めたら壊れる)
-    attack:  { label: '戦闘機',       w: 2, mat: 2, build: 720,  life: 3600, hp: 1050 }, // 第50弾: 枠・資材 1→2
+    attack:  { label: '戦闘機',       w: 2, mat: 2, build: 720,  life: 3600, hp: 90 }, // 第50弾: 枠・資材 1→2
     scout:   { label: '哨戒機',       w: 1, mat: 1, build: 720,  life: 2400, hp: 350 },
     decoy:   { label: 'デコイ',       w: 1, mat: 1, build: 480,  life: 2400, hp: 350 },
     build:   { label: '砲台',         w: 2, mat: 2, build: 1200, life: 7200, hp: 350, placed: true },
@@ -1251,7 +1251,7 @@ const DRONE_VIS = { attack: 900, scout: 2000, mech: 1000, buoy: 800 }; // 第36�
 // 戦闘機: 一撃離脱。機首の前±12°に入った時だけ機銃。突き抜けて離脱し、旋回して次の航過。後退・停止はしない
 const FTR_TURN = 0.065, FTR_ACC = 0.12, FTR_ARC = 12 * Math.PI / 180, FTR_GUN_RANGE = 900, FTR_ENGAGE_R = 2200;
 const ENEMY_FTR_SPEED = 4.4; // 自機の戦闘機と同じ
-const FTR_FIRE_CD = 7, FTR_DMG_SCALE = 1 / 3, FTR_BREAK_D = 220, FTR_EXTEND_F = 40, FTR_REATTACK_D = 600; // 第49弾: 一撃離脱を短く (旧 260/80/1300 — 敵の周りを大きくぐるぐる回って攻撃が減っていた)
+const FTR_FIRE_CD = 7, FTR_DMG_SCALE = 0.3, FTR_BREAK_D = 220, FTR_EXTEND_F = 40, FTR_REATTACK_D = 600; // 第49弾: 一撃離脱を短く (旧 260/80/1300 — 敵の周りを大きくぐるぐる回って攻撃が減っていた)
 // 哨戒機: 機首の向きにだけ進む・自艦の前方を半径1800uで周回。聴音 (方位を送る)・航跡の検出・ミサイルの早期警戒・探信 (指示で1回)
 const SCOUT_TURN = 0.03, SCOUT_ESCORT_R = 1800, SCOUT_LISTEN_R = 6000, SCOUT_WAKE_R = 2500, SCOUT_MSL_WARN_R = 3000, SCOUT_PING_R = 3500, SCOUT_PING_CD = 1800;
 // Tech (人型兵器): 推進器で全方向に動く・慣性あり。中=小銃3連射 / 遠=肩のミサイル (4発・自艦の近くで30秒に1発補充) / 近=ビームサーベル
@@ -1262,7 +1262,24 @@ const DRONE_CLOSE_SENSE = 700, DRONE_CHASE_MEM = 480; // 至近の探知 / 見�
 const ENEMY_ANTI_TECH_R = 2000, ENEMY_ANTI_TECH_CD = 600; // 敵がTechをミサイルで迎撃する距離・間隔 (攻撃型は×0.6)
 // 第50弾 (オーナー): ドローンと母艦の距離のリスク — 近い間は自艦のAIで動く (性能100%・自艦のEM/熱がわずかに上がる)。離れすぎる/どちらかが濃い霧の中だと通信が途絶え、
 // ドローンは内部AIの自動制御に切り替わる (熱とEMを多く出す・命中と回避が落ちる)。弾の上限 (撃ち尽くしたら自艦の近くへ戻って補給)。値は実装で決めた値
-const DRONE_ICON_ZOOM = 0.12; // 第50弾: これより縮小するとドローンは簡略アイコン
+// 第57弾 (オーナー): 縮小アイコン — 艦もドローンも同じ縮尺 (ICON_ZOOM 未満) で絵からアイコンへ切り替わる。ドローンは種類ごとに形を変える
+// 形 (艦首=+x): 戦闘機=細い矢じり / Tech=六角形 / 哨戒機=ブーメラン(広いV) / 砲台=四角+砲身 / デコイ=輪 / ブイ=菱形 / バリア=横長の枠 / 散布=三つの点
+const ICON_ZOOM = 0.12;
+const DRONE_ICON_MOBILE = { attack: 1, mech: 1, scout: 1 };
+function drawDroneIcon(ctx, kind, r, col) {
+    ctx.fillStyle = col; ctx.strokeStyle = col; ctx.lineWidth = Math.max(1, r * 0.28);
+    ctx.beginPath();
+    if (kind === 'attack') { ctx.moveTo(r * 1.1, 0); ctx.lineTo(-r * 0.9, -r * 0.5); ctx.lineTo(-r * 0.35, 0); ctx.lineTo(-r * 0.9, r * 0.5); ctx.closePath(); ctx.fill(); }
+    else if (kind === 'mech') { for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; ctx.lineTo(Math.cos(a) * r * 0.85, Math.sin(a) * r * 0.85); } ctx.closePath(); ctx.fill(); }
+    else if (kind === 'scout') { ctx.moveTo(r, 0); ctx.lineTo(-r * 0.7, -r * 1.0); ctx.lineTo(-r * 0.25, 0); ctx.lineTo(-r * 0.7, r * 1.0); ctx.closePath(); ctx.fill(); }
+    else if (kind === 'build') { ctx.rect(-r * 0.6, -r * 0.6, r * 1.2, r * 1.2); ctx.fill(); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(r * 1.25, 0); ctx.stroke(); }
+    else if (kind === 'decoy') { ctx.arc(0, 0, r * 0.7, 0, Math.PI * 2); ctx.stroke(); }
+    else if (kind === 'buoy') { ctx.moveTo(0, -r * 0.85); ctx.lineTo(r * 0.65, 0); ctx.lineTo(0, r * 0.85); ctx.lineTo(-r * 0.65, 0); ctx.closePath(); ctx.fill(); }
+    else if (kind === 'barrier') { ctx.rect(-r * 0.3, -r, r * 0.6, r * 2); ctx.stroke(); }
+    else if (kind === 'higgs') { for (const [x, y] of [[0, -r * 0.55], [-r * 0.5, r * 0.4], [r * 0.5, r * 0.4]]) { ctx.moveTo(x + r * 0.3, y); ctx.arc(x, y, r * 0.3, 0, Math.PI * 2); } ctx.fill(); }
+    else { ctx.arc(0, 0, r * 0.55, 0, Math.PI * 2); ctx.fill(); }
+}
+const FTR_BIG_PASS = 150, FTR_BIG_SEP = 1100; // 第57弾: 戦艦への航過 — 近づく限界・離れる距離
 const DRONE_AUTO_DIST = 6000, DRONE_AUTO_FOG = 0.75;           // 通信が切れる距離 / 切れる霧の濃さ (ドローン側・母艦側のどちらか)
 const DRONE_AUTO_HIT = 0.6, DRONE_AUTO_EVADE = 0.6;            // 自動制御中: 与えるダメージ×0.6・敵弾を避ける確率×0.6
 const DRONE_AMMO = { attack: 50, mech: 50 };       // 第52弾: 戦闘機は実弾50発・Techは小銃50発 (+ミサイル3発・サーベル5回)
@@ -2511,7 +2528,7 @@ function shipSpeedNow(t) {
 }
 // 弾が当たった時に避けられる確率 (速いほど避ける)。ビームは光速なので避けられない
 function evadeChance(type, t, shooter) {
-    const f = Math.min(1, shipSpeedNow(t) / EVADE_SPEED_REF);
+    const f = t && t.type === 'attack' && !(t.gen !== undefined) ? 0 : t && t.type === 'fighter' ? 0 : Math.min(1, shipSpeedNow(t) / EVADE_SPEED_REF); // 第57弾: 戦闘機は速さで弾を避けない (旧: 約60%避け、小さな円を回って戦艦の実弾がほとんど当たらなかった)
     const base = type === 'kinetic' ? EVADE_K_BASE + EVADE_K_SPD * f : type === 'missile' ? EVADE_M_BASE + EVADE_M_SPD * f : 0;
     if (!base) return 0;
     // 第39弾: 航行モード — 機関重視は回避+5pt・解析重視は+3pt / 撃った側の兵装重視は相手の回避×0.85・解析重視は×0.9 (自機も敵も同じ)
@@ -4846,10 +4863,12 @@ class Ship {
         // ── LOD: 画面上のサイズが小さい時は超簡略描画 ──────────
         // zoom*radius*5.6 = 画面上の直径(CSSピクセル)。12px未満は詳細不要
         const _screenDiam = camera.zoom * this.radius * 5.6;
-        if (_screenDiam < 12) {
+        if (camera.zoom < ICON_ZOOM) { // 第57弾: 艦もドローンも同じ縮尺で切り替える (旧: 艦は大きさ次第・ドローンは0.12)
             // 第50弾 (オーナー): 縮小しても必ず見える大きさ (画面上で半径5px以上) の三角形 — 自艦は緑・敵は赤 (ヒッグス表示OFFの時)
             const r = Math.max(this.radius * (_screenDiam < 6 ? 1.5 : 1.0), 5 / camera.zoom);
-            if (this.isPlayer) {
+            if (this.type === 'fighter' && !this.isPlayer) { // 敵の艦載機・Tech・哨戒機: 種類ごとの形 (敵は赤)
+                drawDroneIcon(ctx, this._kind === 'mech' ? 'mech' : this._kind === 'scout' ? 'scout' : 'attack', 4.2 / camera.zoom, isFlashing ? '#ff8888' : '#ff4d4d');
+            } else if (this.isPlayer) {
                 ctx.fillStyle = '#00ffaa';
                 ctx.beginPath();
                 ctx.moveTo(r, 0); ctx.lineTo(-r * 0.7, -r * 0.6); ctx.lineTo(-r * 0.7, r * 0.6);
@@ -11975,14 +11994,22 @@ function dogfightStep(f, tgt, vkey, vMax) {
     const lt = Math.min(90, d / DF_BULLET), ax = tgt.x + Math.cos(K.h) * K.s * lt, ay = tgt.y + Math.sin(K.h) * K.s * lt;
     const aimA = Math.atan2(ay - f.y, ax - f.x), ataAim = Math.abs(_angDiff(aimA, f.angle));
     const gunOK = ataAim < FTR_ARC && d < FTR_GUN_RANGE;
-    const shooter = _dfShooter(tgt);
+    const big = tgt === player || (tgt instanceof Ship && tgt.type !== 'fighter'); // 第57弾: 相手が戦艦なら 一撃離脱の航過 (速さを落とさず直進で撃ち抜け、1100u離れてから大きく戻る)
+    const shooter = !big && _dfShooter(tgt);
     // ぐるぐる検出: 近いのに撃てない時間が続いたら離脱して間合いを作り直す
     if ((S.st === 'attack' || S.st === 'intercept') && d < 780 && !gunOK) S.circ++; else S.circ = Math.max(0, S.circ - 2);
     const enter = (st) => { S.st = st; S.t = 0; };
     if (S.circ > DF_CIRC_T) { S.side = -S.side; S.circ = 0; enter('extend'); }
     // 状態の切替
     if (S.st !== 'defend' && shooter && d < 820 && tAta < 0.42 && aspect > 1.1) enter('defend'); // 後ろ寄りでない (=向き合っている/後ろを取られた) で狙われている → ブレイク
-    switch (S.st) {
+    if (big) {
+        const closing = (Math.cos(f.angle) * (tgt.x - f.x) + Math.sin(f.angle) * (tgt.y - f.y)) / d; // 1=真っすぐ向かっている / 負=通り過ぎた
+        switch (S.st) {
+            case 'intercept': case 'turnback': case 'defend': if (d < 1100 && closing > 0.3) enter('attack'); break;
+            case 'attack': if (d < FTR_BIG_PASS || (closing < -0.2 && d < 700)) enter('extend'); else if (d > 1800) enter('intercept'); break;
+            case 'extend': if ((S.t >= 50 && d > FTR_BIG_SEP) || S.t > 420) enter('turnback'); break;
+        }
+    } else switch (S.st) {
         case 'intercept': if (d < 1150 && aspect < 1.35) enter('attack'); else if (d < 230) enter('extend'); break;
         case 'attack': if (d < 100 || (aspect > 2.1 && ataAim > 1.9)) enter('extend'); else if (d > 1500) enter('intercept'); break;
         case 'extend': if ((S.t >= DF_EXT_MIN && d > DF_SEP && v > vTop * 0.82) || S.t > 380) enter('turnback'); break;
@@ -11990,7 +12017,9 @@ function dogfightStep(f, tgt, vkey, vMax) {
         case 'defend': if (S.t > 75 || tAta > 1.25 || d > 1200) enter('extend'); break;
     }
     let wantA = aimA, vT = vTop, tf = 1;
-    if (S.st === 'intercept') {           // 先回り (リード): 遠くから距離を詰める
+    if (big && (S.st === 'attack' || S.st === 'intercept')) { // 戦艦への航過: 先回りで向け、最後まで全速 (遅くなって小さな円を描かない)
+        wantA = aimA; vT = vTop;
+    } else if (S.st === 'intercept') {           // 先回り (リード): 遠くから距離を詰める
         wantA = aimA; vT = vTop;
     } else if (S.st === 'attack') {       // 近づいたら後ろ寄り (ラグ) → 撃つ時だけ機首を向ける。追い越さないよう相手の速さに合わせる
         const lagA = Math.atan2(tgt.y - Math.sin(K.h) * 160 - f.y, tgt.x - Math.cos(K.h) * 160 - f.x);
@@ -11998,6 +12027,9 @@ function dogfightStep(f, tgt, vkey, vMax) {
         vT = d > 600 ? vTop : Math.max(vMax * DF_VMIN, Math.min(vTop, K.s * 1.1 + 0.4));
     } else if (S.st === 'extend') {       // 離脱 (ブーム&ズーム): ほぼまっすぐ・全速・少し横へ
         wantA = f.angle + S.side * 0.12; vT = vTop; tf = 0.45;
+    } else if (big && S.st === 'turnback') { // 戦艦へ戻る: 大きく回って別の角度 (側面〜後ろ) から入る
+        const ba = a + Math.PI + S.side * 1.1, bx = tgt.x + Math.cos(ba) * 1300, by = tgt.y + Math.sin(ba) * 1300;
+        wantA = Math.atan2(by - f.y, bx - f.x); vT = vTop;
     } else if (S.st === 'turnback') {     // 回り込み: 相手の真後ろ (少し横) を目指して大きく曲がる = 次は後ろから入る
         const bx = tgt.x - Math.cos(K.h) * 650 + Math.cos(K.h + Math.PI / 2) * S.side * 260, by = tgt.y - Math.sin(K.h) * 650 + Math.sin(K.h + Math.PI / 2) * S.side * 260;
         wantA = Math.atan2(by - f.y, bx - f.x); vT = vTop * 0.95;
@@ -12383,14 +12415,12 @@ class Drone {
               ctx.setLineDash([5 / camera.zoom, 6 / camera.zoom]); ctx.beginPath(); ctx.moveTo(this.x, this.y); ctx.lineTo(tg.x, tg.y); ctx.stroke(); ctx.restore();
           } }
         // 第50弾 (オーナー): 縮小した時は簡略化したアイコン (自艦の緑の三角と同じ流儀) — 動くドローンは小さな三角・据え置きは点。通信途絶(自動制御)は黄
-        if (camera.zoom < DRONE_ICON_ZOOM) {
-            const r = 3.6 / camera.zoom, mob = this.type === 'attack' || this.type === 'mech' || this.type === 'scout';
-            ctx.save(); ctx.translate(this.x, this.y); ctx.globalAlpha = 0.9;
-            ctx.fillStyle = this._auto ? '#ffd24a' : '#66e6b0';
-            ctx.beginPath();
-            if (mob) { ctx.rotate(this.angle); ctx.moveTo(r, 0); ctx.lineTo(-r * 0.7, -r * 0.6); ctx.lineTo(-r * 0.7, r * 0.6); ctx.closePath(); }
-            else ctx.arc(0, 0, r * 0.55, 0, Math.PI * 2);
-            ctx.fill(); ctx.restore();
+        if (camera.zoom < ICON_ZOOM) {
+            const r = 4.2 / camera.zoom;
+            ctx.save(); ctx.translate(this.x, this.y); ctx.globalAlpha = 0.92;
+            if (DRONE_ICON_MOBILE[this.type]) ctx.rotate(this.angle);
+            drawDroneIcon(ctx, this.type, r, this._auto ? '#ffd24a' : '#66e6b0');
+            ctx.restore();
             return;
         }
         ctx.save();
@@ -14173,7 +14203,9 @@ function comPilotStep() {
         if (cvT && D.convoy) { // 第41弾: 方針 (貪欲+攻撃的 − 隠密×0.6 ≥ 0.45)
             // 第37弾: 追いつく点へ (旧: 少し先を追うだけ — 攻撃型の巡航は輸送船より遅く追いつけなかった)
             const ip = cvD < CONVOY_BOARD_R * 0.8 ? { x: cvT.x + cvT.vx * 30, y: cvT.y + cvT.vy * 30 } : interceptPoint(player.x, player.y, shipCruiseSpeed(gameState.shipType, genAlloc.engine, STANCE_GAIN.flank), cvT.x, cvT.y, cvT.vx, cvT.vy);
-            player.setTarget(ip.x, ip.y); _comSteered(c, 'convoy');
+            // 第57弾 (オーナー): 人間は一度向けた針路をむやみに変えない — 追う目標が大きくずれる(2500u超)か30秒たつか止まった時だけ向け直す (旧: 2秒ごとに目的地が動き続けた)
+            const _ca = c.cvAim;
+            if (!_ca || player.state !== 'moving' || Math.hypot(ip.x - _ca.x, ip.y - _ca.y) > 2500 || now - _ca.f > 1800) { player.setTarget(ip.x, ip.y); c.cvAim = { x: ip.x, y: ip.y, f: now }; _comSteered(c, 'convoy'); }
             comThink('p', 'convoy', '輸送船を追って拿捕する (' + _dirTxt(player.x, player.y, cvT.x, cvT.y) + '・' + Math.round(cvD / 100) * 100 + 'u)');
             if (powerStance !== 'flank' && cvD > CONVOY_BOARD_R) setStance('flank'); else if (cvD <= CONVOY_BOARD_R && powerStance === 'flank') setStance('cruise');
             return;
@@ -14262,6 +14294,14 @@ function comPilotStep() {
         if (c.srchArrF === undefined || c.srchArrF < 0) { c.srchArrF = now; }
         if (now - c.srchArrF < pause) { comThink('p', 'listen', (D.search === 'ambush' ? '待ち伏せ: 止まって聴く' : '捜索: 止まって聴く') + ' (残り' + Math.ceil((pause - (now - c.srchArrF)) / 60) + '秒・静けさ' + _pct(D.still) + ')' + (farGo ? ' — AIの勧め (' + Math.round(r.src.d / 100) * 100 + 'u先) は遠いので走らない' : '')); _comStance(c, P); return; }
         c.srchArrF = -1;
+        // 第57弾 (オーナー): 寄り道 (難破船・コンテナなど) が済んだら、決めていた行き先へ戻る (旧: 寄り道のたびに行き先を選び直し、同じ所をぐるぐるした)
+        const _gl = c.goalLeg;
+        if (_gl && now - _gl.f < 36000 && Math.hypot(_gl.x - player.x, _gl.y - player.y) > 1500) {
+            player.setTarget(_gl.x, _gl.y); _comSteered(c, 'leg');
+            comThink('p', 'search', '寄り道が済んだ → 決めていた行き先へ戻る (' + _gl.why + '・' + _dirTxt(player.x, player.y, _gl.x, _gl.y) + ')');
+            _comStance(c, P); return;
+        }
+        c.goalLeg = null;
         const sa = lockedSignalId && _signalAnalysis[lockedSignalId], est = sa && trackEstimate(sa, 0);
         let tx, ty, why;
         const estD = est ? Math.hypot(est.x - player.x, est.y - player.y) : 0;
@@ -14277,7 +14317,7 @@ function comPilotStep() {
                 tx = cv ? cv.x : lm.x + 1200; ty = cv ? cv.y : lm.y; why = lm.lbl + 'の近くの' + (cv ? '隠れ場所' : '外れ') + 'で待ち伏せ';
             } else { const sn = searchNext(player, player.x, player.y); tx = sn.x; ty = sn.y; why = 'まだ聴いていない海域'; }
         } else { const sn = searchNext(player, player.x, player.y); tx = sn.x; ty = sn.y; why = 'まだ聴いていない海域'; }
-        player.setTarget(clampToMapCircle(tx, ty, 1500).x, clampToMapCircle(tx, ty, 1500).y); _comSteered(c, 'leg');
+        { const _g = clampToMapCircle(tx, ty, 1500); player.setTarget(_g.x, _g.y); c.goalLeg = { x: _g.x, y: _g.y, why, f: now }; } _comSteered(c, 'leg');
         comThink('p', 'search', (r ? 'AI「' + r.text + '」。' : '') + '手掛かりなし → ' + why + ' (' + _dirTxt(player.x, player.y, tx, ty) + ')');
     } else if (r && _frameCount - _thinkLastP > 180) { // 直前(3秒以内)に何か決めたばかりなら「続ける」は言わない
         comThink('p', 'xo-' + r.tone + r.text.replace(/[\d.±]+/g, '#'), 'AI「' + r.text + '」→ 今の航路を続ける');
