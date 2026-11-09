@@ -2680,3 +2680,18 @@ body.in-game #zoom-ctl #btn-pause.on { background: rgba(80,60,0,0.85); color: #f
 
 .lo-row.lo-var { flex-direction: row !important; flex-wrap: wrap !important; }
 .lo-row.lo-var .lo-name, .lo-row.lo-var .lo-chips { flex: 1 1 100% !important; min-width: 0; }
+
+/* 第61弾: レア度の装飾枠 */
+.pc-art { height: 156px; }
+.pc-img { position: relative; width: 94px; height: 94px; z-index: 1; }
+.pc-frame { position: absolute; left: 50%; top: 50%; width: 150px; height: 150px; transform: translate(-50%,-50%); z-index: 2; pointer-events: none; object-fit: contain; }
+.pc-cat, .pc-slot, .pc-rar { z-index: 3; }
+.pc-rar { position: absolute; right: 8px; bottom: 6px; font-size: 11px; font-weight: 800; letter-spacing: 1px; padding: 0 7px; border-radius: 4px; color: #fff; background: #556; }
+.part-card.rar-n { border-color: rgba(190,200,205,0.5); } .rar-n .pc-rar { background: #6b7479; }
+.part-card.rar-r { border-color: #4fa8ff; box-shadow: 0 0 8px rgba(79,168,255,0.3); } .rar-r .pc-rar { background: #2f7fd0; }
+.part-card.rar-sr { border-color: #c27bff; box-shadow: 0 0 12px rgba(194,123,255,0.45); } .rar-sr .pc-rar { background: linear-gradient(90deg,#8e3fe0,#d28aff); }
+.part-card.rar-ssr { border-color: #ffd36a; box-shadow: 0 0 18px rgba(255,200,90,0.6); } .rar-ssr .pc-rar { color: #3a2400; background: linear-gradient(90deg,#ffcf5a,#fff3b8,#ffcf5a); background-size: 200% 100%; animation: pcShimmer 2.4s linear infinite; }
+.rar-ssr .pc-frame { animation: pcGlow 2.4s ease-in-out infinite; }
+@keyframes pcShimmer { from { background-position: 0 0; } to { background-position: 200% 0; } }
+@keyframes pcGlow { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.35) drop-shadow(0 0 6px #ffd36a); } }
+@media (max-height: 520px) { .pc-art { height: 104px; } .pc-img { width: 62px; height: 62px; } .pc-frame { width: 98px; height: 98px; } }

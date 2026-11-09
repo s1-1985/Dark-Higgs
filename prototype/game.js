@@ -418,7 +418,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261109m';
+const SPRITE_VER = '20261109n';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -8355,11 +8355,15 @@ function drawConvoys(ctx) {
 }
 
 // ── 画面: ドラフト (3つから1つ) / 部品の一覧 (ドックでは付け替え) ──
+// 第61弾: レア度 (ガチャ風の装飾枠)。レア部品(輸送船限定)は SSR
+const PART_RARITY_SET = { SSR: ['qcore','compos','ion','phase','autoaim'], SR: ['fcs','multiband','damcon','ecm','emshield','predict','thruster','anacore'], N: ['prox','drum','armor','chaff'] };
+function partRarity(id) { if (PARTS[id] && PARTS[id].rare) return 'SSR'; for (const k in PART_RARITY_SET) if (PART_RARITY_SET[k].indexOf(id) >= 0) return k; return 'R'; }
 function _partCard(id, btnLabel, onClick, disabled) {
     // 第58弾 (オーナー「モノグラムでなくイラストに・使いづらい」): 艦と同じタッチのイラストを大きく・長所/代償を色つきの帯で・分類は色で
     const P = PARTS[id], d = document.createElement('div');
-    d.className = 'part-card cat-' + P.cat + (P.rare ? ' rare' : '');
-    d.innerHTML = '<div class="pc-art"><img class="pc-img" alt=""><span class="pc-cat"></span>' + (partW(id) > 1 ? '<span class="pc-slot">枠 ' + partW(id) + '</span>' : '') + (P.rare ? '<span class="pc-rare">RARE</span>' : '') + '</div>'
+    const rar = partRarity(id), rk = rar.toLowerCase();
+    d.className = 'part-card cat-' + P.cat + (P.rare ? ' rare' : '') + ' rar-' + rk;
+    d.innerHTML = '<div class="pc-art"><img class="pc-img" alt=""><img class="pc-frame" alt="" src="assets/parts/frame_' + (rk === 'ssr' ? 'ssr' : rk) + '.png?v=' + SPRITE_VER + '"><span class="pc-rar">' + rar + '</span><span class="pc-cat"></span>' + (partW(id) > 1 ? '<span class="pc-slot">枠 ' + partW(id) + '</span>' : '') + '' + '</div>'
         + '<div class="pc-name"></div><div class="pc-up"><b>＋</b><span></span></div><div class="pc-down"><b>−</b><span></span></div>';
     const img = d.querySelector('.pc-img'); img.src = 'assets/parts/part_' + id + '.png?v=' + SPRITE_VER; img.onerror = () => { img.style.display = 'none'; d.querySelector('.pc-art').classList.add('noimg'); };
     d.querySelector('.pc-cat').textContent = PART_CATS[P.cat];
