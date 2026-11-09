@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261109v">
+    <link rel="stylesheet" href="style.css?v=20261109w">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -504,6 +504,7 @@
                     <div class="lobby-hero-fade"></div>
                     <button id="btn-ambient" onclick="toggleAmbient()">♪ SOUND ON</button>
                     <label id="sfx-vol-wrap" style="position:absolute;right:12px;top:44px;font-size:11px;color:#8fe;z-index:3">SE <input id="sfx-vol" type="range" min="0" max="100" step="5" style="width:90px;vertical-align:middle"> <span id="sfx-vol-l"></span></label>
+                    <label id="bgm-vol-wrap" style="position:absolute;right:12px;top:66px;font-size:11px;color:#8fe;z-index:3">BGM <input id="bgm-vol" type="range" min="0" max="100" step="5" style="width:90px;vertical-align:middle"> <span id="bgm-vol-l"></span></label>
                     <div class="lobby-hero-inner">
                         <div class="lobby-sonar-ring"></div>
                         <div class="lobby-logo-sub">HIGGS FOG &nbsp;//&nbsp; SILENT HUNT &nbsp;//&nbsp; DEEP SPACE</div>
@@ -733,6 +734,8 @@
                     <button class="btn btn-small com-only" id="btn-think-log" onclick="toggleThinkLog()">思考ログ: ON</button>
                     <button class="btn btn-small com-only" id="btn-com-exit" onclick="exitComDemo()">COM対戦を終えてロビーへ</button>
                     <button class="btn btn-small" id="mm-fullscreen" onclick="toggleFullscreen()">全画面 切替</button>
+                    <label class="btn btn-small" style="display:inline-flex;gap:6px;align-items:center">SE <input id="sfx-vol-m" type="range" min="0" max="100" step="5" style="width:80px"><span id="sfx-vol-m-l"></span></label>
+                    <label class="btn btn-small" style="display:inline-flex;gap:6px;align-items:center">BGM <input id="bgm-vol-m" type="range" min="0" max="100" step="5" style="width:80px"><span id="bgm-vol-m-l"></span></label>
                     <button class="btn btn-small" id="mm-fps" onclick="toggleFpsDisplay()">FPS表示: OFF</button>
                     <button class="btn btn-small" id="mm-debug" onclick="toggleDebugMode()">デバッグモード: OFF</button>
                     <button class="btn btn-primary btn-small" id="mm-save">データ保存</button>
@@ -784,7 +787,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261109v"></script>
+    <script src="game.js?v=20261109w"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {

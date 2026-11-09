@@ -533,6 +533,15 @@ tools/render3d/ # 第38弾: GLBを真上から描いて傾き別のPNGに書き�
 - **確認**: Playwright（Chromium）で manifest 200件・事前読み込み29件・MP3のデコードと再生・ループ・被弾/爆発/状態異常を通してエラー0。**聴感（音量バランス・音の質）は未確認 — 実機でオーナーが確認**（推論: 音量差は `SFX_GAIN` で個別に調整できる）
 - **未配線**（id はあるが呼び出し箇所が無い物がある可能性）: 船体警報・弾切れ・勝敗・ドラフト・ドローンの発進/喪失など。聞こえない音があれば指摘を
 
+### 第70弾: ChatGPT製のBGMを組み込む（2026-11-09 ✅ オーナー提供の `Dark-Higgs_BGM_Part01〜05.zip`・仕様は `docs/BGM_SPEC.md`）
+- **素材**: `prototype/assets/bgm/` に MP3 17本（128kbps・計9.6MB。ChatGPTのWAV 48kHz/16bit/ステレオを ffmpeg で変換。**WAV原本はリポジトリに無い**）＋ `manifest.json`（`{tracks:{id:{f,d,l}}}`・`d`=WAVの秒数）。ループ10（calm/contact/alert/combat/title/lull/surge/hide/dock/result）＋スティンガー7（contact/alert/combat/clear/victory/defeat/convoy）。全曲 D・4/4・60BPM基準（交戦のみ120）。受け取ったWAVは欠け・形式不備なし（ピーク −6.9〜−16.7dBFS・RMS −21〜−28dBFS＝仕様どおり控えめ）
+- **再生**（`bgmPlay`/`bgmSting`/`bgmTick`・250msごと）: `fetch`＋`decodeAudioData`・専用バス `_bgmBus`（SEとは別・圧縮器なし）。**2つのデッキをクロスフェード**。ループ周期 = 長さ−4秒（`BGM_XF`=1小節）で**次の周を等パワーで重ねる**（MP3の先頭/末尾の余白による継ぎ目・小節の格子を保つ）。下がる遷移は小節頭（最大4秒待ち）・4秒で、上がる遷移（交戦・照射）は即・1.5秒。タイトルは起動時に先読み・試合開始時（`bgmMatchStart`）に残りを全て先読み。最初の操作で `audioCtx.resume()`
+- **曲の選び方**（プレイヤーが観測できる兆候だけ）: ロビー=title / 記録・作戦報告・終了画面=result / ドック=dock / 試合中は 兆候3(攻撃)=combat > サージの予兆〜終了=surge > 凪の予兆〜終了=lull > 兆候2(照射)=alert > 機関停止中=hide > 兆候1(受信)=contact > calm。段階は**上がるのは即・下がるのは一段ずつ**（攻撃の後12秒、以後30秒ごと）。スティンガー: 段階が上がった時（contact/alert/combat）・交戦が収まった時（clear）・勝敗（`bgmEnd`・現在の曲を1.5秒で消し、スティンガーが終わる頃まで次の曲を始めない）。同じスティンガーは20秒に1回まで。`bgm_st_convoy` は**未配線**
+- **ダッキング**: SEの `sonar_*`・`alm_*`・`hit_player*`・`expl_*`・`det_impact*` が鳴る間（1.8〜2.5秒）、BGMを×0.55に下げる。SE側の環境音ループ（`amb_drone_loop`）はBGM再生中は0.5→0.3に
+- **音量**: BGM専用（`darkEchoBgmVol`・既定80%・内部の補正 `BGM_TRIM`=1.25）。ロビー右上のスライダーとメニューの「SE / BGM」スライダー（試合中に調整可）。0でBGM停止。SEの `sys_battle_start`/`sys_victory`/`sys_defeat` もこの弾で配線
+- **確認**: Playwright（Chromium）で 17曲のデコード・状況ごとの曲の切り替え（title→calm→contact→alert→combat→(12秒後)alert→surge→lull→hide→calm→dock→勝利）・スティンガー5種・短いループで24秒間の継ぎ目に無音が出ない・エラー0。**聴感（音量バランス・曲の出来・切り替えの違和感）は未確認 — 実機でオーナーが確認**（推論: 音量は `BGM_TRIM`・曲ごとの差は未調整）
+- **未配線/案**: `bgm_st_convoy`（輸送船の識別）・COM対戦中の挙動確認・曲ごとの音量差の調整
+
 ### マップ
 - 円形マップ `MAP_RADIUS=35000`（`FIELD_SIZE`=直径70000）@`game.js:35`
 - ヒッグスの霧 = 濃度グリッド（第21弾・細かくまばら）+ 時間経過で増加（ゾーン圧縮）。リソースノード5-10個（第18弾: 常に表示・未確認は薄く。HIGGS帯で見ると確認済みになる）

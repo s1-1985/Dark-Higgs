@@ -1,0 +1,90 @@
+{
+ "version": 1,
+ "tracks": {
+  "bgm_calm_loop": {
+   "f": "bgm_calm_loop.mp3",
+   "d": 64.0,
+   "l": true
+  },
+  "bgm_contact_loop": {
+   "f": "bgm_contact_loop.mp3",
+   "d": 64.0,
+   "l": true
+  },
+  "bgm_alert_loop": {
+   "f": "bgm_alert_loop.mp3",
+   "d": 48.0,
+   "l": true
+  },
+  "bgm_combat_loop": {
+   "f": "bgm_combat_loop.mp3",
+   "d": 48.0,
+   "l": true
+  },
+  "bgm_title_loop": {
+   "f": "bgm_title_loop.mp3",
+   "d": 80.0,
+   "l": true
+  },
+  "bgm_lull_loop": {
+   "f": "bgm_lull_loop.mp3",
+   "d": 48.0,
+   "l": true
+  },
+  "bgm_result_loop": {
+   "f": "bgm_result_loop.mp3",
+   "d": 64.0,
+   "l": true
+  },
+  "bgm_st_contact": {
+   "f": "bgm_st_contact.mp3",
+   "d": 4.0,
+   "l": false
+  },
+  "bgm_surge_loop": {
+   "f": "bgm_surge_loop.mp3",
+   "d": 32.0,
+   "l": true
+  },
+  "bgm_st_alert": {
+   "f": "bgm_st_alert.mp3",
+   "d": 4.0,
+   "l": false
+  },
+  "bgm_st_clear": {
+   "f": "bgm_st_clear.mp3",
+   "d": 6.0,
+   "l": false
+  },
+  "bgm_st_combat": {
+   "f": "bgm_st_combat.mp3",
+   "d": 3.0,
+   "l": false
+  },
+  "bgm_st_defeat": {
+   "f": "bgm_st_defeat.mp3",
+   "d": 12.0,
+   "l": false
+  },
+  "bgm_st_victory": {
+   "f": "bgm_st_victory.mp3",
+   "d": 12.0,
+   "l": false
+  },
+  "bgm_dock_loop": {
+   "f": "bgm_dock_loop.mp3",
+   "d": 64.0,
+   "l": true
+  },
+  "bgm_hide_loop": {
+   "f": "bgm_hide_loop.mp3",
+   "d": 64.0,
+   "l": true
+  },
+  "bgm_st_convoy": {
+   "f": "bgm_st_convoy.mp3",
+   "d": 3.0,
+   "l": false
+  }
+ }
+}
