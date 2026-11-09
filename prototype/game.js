@@ -418,7 +418,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261109n';
+const SPRITE_VER = '20261109o';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -7731,7 +7731,7 @@ function resetParts() { partsOn = []; partsSpare = []; _draft = null; _draftQ = 
 // ═══ 第60弾 (オーナー合意): 武器の種類 — 出撃前に積み込み画面で選ぶ (ミサイル/実弾/ビームそれぞれ1つ)。トレードオフ。状態異常の後遺症を与える弾も ═══
 // 武器の「方向性」を決めていた部品 8種 (多弾頭・長射程ブースター・徹甲弾・散弾砲身・集束レンズ・拡散照射・速射コンデンサ・静音推進) は武器の種類へ移した (部品の抽選には出ない・`moved`)。
 // 種類は PM (部品と同じ集計) に重ねて効く — 自機は shipLoadout().v・敵は e.wvar。`from` は移した部品の効果をそのまま使う
-const WEAPON_VARIANTS = {
+var WEAPON_VARIANTS = {
     kinetic: {
         std:     { name: '標準弾',   up: '扱いやすい標準の実弾', down: '—', f: m => {} },
         ap:      { from: 'ap' },
@@ -7763,7 +7763,7 @@ function variantInfo(w, id) {
     const v = (WEAPON_VARIANTS[w] || {})[id] || WEAPON_VARIANTS[w].std;
     return v.from ? { name: PARTS[v.from].name, up: PARTS[v.from].up, down: PARTS[v.from].down, f: PARTS[v.from].f } : v;
 }
-function normalizeVariants(v) { const o = {}; for (const w of ALL_WEAPONS) o[w] = v && v[w] && WEAPON_VARIANTS[w][v[w]] ? v[w] : 'std'; return o; }
+function normalizeVariants(v) { const o = {}; const WV = WEAPON_VARIANTS; /* 初期化前 (ロビーの積み込み表示) は var の巻き上げで undefined */ for (const w of ALL_WEAPONS) o[w] = WV && v && v[w] && WV[w][v[w]] ? v[w] : 'std'; return o; }
 function applyVariants(m, v, wset) { const nv = normalizeVariants(v); for (const w of ALL_WEAPONS) if (!wset || wset.includes(w)) variantInfo(w, nv[w]).f(m); }
 // 敵: 性格で選ぶ (攻撃的=重・速射・焼夷 / 慎重=遠距離・追尾 / 隠密=静音・妨害 / 貪欲=焼夷・機関破壊・イオン)。積んでいる種類の分だけ
 function enemyPickVariants(e) {
