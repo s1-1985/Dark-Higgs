@@ -146,6 +146,10 @@
                     <i class="ico" style="--ico:url(assets/icons/icon_sonar.png)"></i>
                     <span id="sonar-power-label">出力 中</span>
                 </button>
+                <button class="act-icon-btn btn-info sonar-band-btn" id="btn-sonar-band-heat" data-band="heat" data-keepopen="1" title="熱源ソナー — 選ぶと、熱源を出している物だけを映すソナーを打てる (もう一度押すと選択を外す)"><b class="fx-mark sb-mark">熱</b><span>熱源</span></button>
+                <button class="act-icon-btn btn-info sonar-band-btn" id="btn-sonar-band-optic" data-band="optic" data-keepopen="1" title="光ソナー — 選ぶと、光を出している物だけを映すソナーを打てる (もう一度押すと選択を外す)"><b class="fx-mark sb-mark">光</b><span>光</span></button>
+                <button class="act-icon-btn btn-info sonar-band-btn" id="btn-sonar-band-em" data-band="em" data-keepopen="1" title="電磁波ソナー — 選ぶと、電磁波を出している物だけを映すソナーを打てる (もう一度押すと選択を外す)"><b class="fx-mark sb-mark">磁</b><span>電磁波</span></button>
+                <button class="act-icon-btn btn-info sonar-band-btn" id="btn-sonar-band-higgs" data-band="higgs" data-keepopen="1" title="ヒッグスソナー — 選ぶと、ヒッグスを出している物だけを映すソナーを打てる (もう一度押すと選択を外す)"><b class="fx-mark sb-mark">霧</b><span>ヒッグス</span></button>
                 <button class="act-icon-btn btn-info" id="btn-scan" title="全周囲ソナー — 今の出力で打つ">
                     <i class="ico" style="--ico:url(assets/icons/icon_sonar.png)"></i>
                     <span>SONAR</span>
@@ -839,7 +843,7 @@
     // 実ボタンは #action-store に置いたまま。開く時だけポップオーバーへ移し、閉じたら戻す (IDとイベントは不変)
     (function() {
         var ACTION_GROUPS = {
-            scan:  ['btn-sonar-power', 'btn-scan', 'btn-dir-sonar'],
+            scan:  ['btn-sonar-band-heat', 'btn-sonar-band-optic', 'btn-sonar-band-em', 'btn-sonar-band-higgs', 'btn-sonar-power', 'btn-scan', 'btn-dir-sonar'],
             ew:    ['btn-jam-burst', 'btn-jam-cont', 'btn-jam-pulse', 'btn-drone-decoy', 'btn-drone-scout', 'btn-hack'],
             nav:   ['btn-cancel', 'btn-camera-follow', 'btn-attack-toggle', 'btn-game-speed'],
             drone: ['btn-drone-recall','btn-drone-attack','btn-drone-mech','btn-drone-build','btn-drone-scout','btn-drone-decoy',

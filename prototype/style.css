@@ -2753,3 +2753,12 @@ body.in-game #zoom-ctl #zoom-fab { width: 44px; height: 44px; font-size: 18px; p
 body.in-game #zoom-ctl #zoom-fab small { position: absolute; bottom: 2px; left: 0; right: 0; font-size: 8px; line-height: 1; color: #ffe08a; font-family: Orbitron, sans-serif; }
 body.in-game #zoom-ctl.open #zoom-fab { background: rgba(0,70,54,0.9); border-color: #00ffaa; }
 body.in-game #zoom-ctl #zoom-fab.warn { border-color: #ffcc55; }
+
+/* ═══ 第72弾: ソナーの種類 (熱源・光・電磁波・ヒッグス) — 選んだ種類だけが映る。未選択では打てない ═══ */
+.sonar-band-btn .sb-mark { width: 24px; height: 24px; font-size: 13px; }
+.sonar-band-btn[data-band="heat"] { color: #ffa03c; } .sonar-band-btn[data-band="optic"] { color: #3cffb4; } .sonar-band-btn[data-band="em"] { color: #e664ff; } .sonar-band-btn[data-band="higgs"] { color: #3cf0ff; }
+.sonar-band-btn.on { background: rgba(255,255,255,0.12) !important; box-shadow: 0 0 10px currentColor, inset 0 0 8px rgba(255,255,255,0.15); border-color: currentColor !important; }
+.sonar-band-btn.on .sb-mark { background: currentColor; color: #02130e; }
+#btn-scan.no-band, #btn-dir-sonar.no-band { opacity: 0.45; }
+#action-popover.shake { animation: apShake 0.4s; }
+@keyframes apShake { 0%,100% { transform: translateX(0); } 20% { transform: translateX(-5px); } 40% { transform: translateX(5px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(3px); } }

@@ -7068,6 +7068,16 @@ function cycleSonarLevel() {
     sfxUI('ui_level_' + ({ weak: 1, std: 2, strong: 3 })[sonarLevel]);
 }
 document.getElementById('btn-sonar-power')?.addEventListener('click', (e) => { e.stopPropagation(); cycleSonarLevel(); });
+// 第72弾: ソナーの種類 (熱源・光・電磁波・ヒッグス)。選んでいる種類をもう一度押すと未選択に戻る。未選択では全周囲も指向性も打てない
+function selectSonarBand(b) {
+    sonarBand = sonarBand === b ? null : b;
+    document.querySelectorAll('.sonar-band-btn').forEach(x => x.classList.toggle('on', x.dataset.band === sonarBand));
+    const sc = document.getElementById('btn-scan'), dc = document.getElementById('btn-dir-sonar'); if (sc) sc.classList.toggle('no-band', !sonarBand); if (dc) dc.classList.toggle('no-band', !sonarBand);
+    const lb = document.getElementById('sonar-band-label'); if (lb) lb.textContent = sonarBand ? SONAR_BAND_JP[sonarBand] + 'ソナー' : 'ソナーの種類を選ぶ';
+    if (sonarBand) logMessage('SONAR: ' + SONAR_BAND_JP[sonarBand] + 'ソナーを選んだ — ' + SONAR_BAND_JP[sonarBand] + 'を出している物だけが映る (別の種類の信号の艦は映らない)', 'system-msg');
+    sfxUI('ui_select');
+}
+document.querySelectorAll('.sonar-band-btn').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); selectSonarBand(b.dataset.band); }));
 
 // ── 潜航型ジャミング3種 ──
 document.getElementById('btn-jam-burst')?.addEventListener('click', () => {
@@ -7203,6 +7213,7 @@ document.getElementById('btn-dir-sonar').addEventListener('click', () => {
         logMessage(`SENSOR: 指向性ソナー再充電中... (残り ${Math.ceil(dirSonarCooldown / 60)}秒)`, 'warning-msg');
         return;
     }
+    if (!sonarBand && !dirSonarPendingFire) { sonarNeedBand(); return; } // 第72弾: 種類を選んでいないと打てない
     if (dirSonarPendingFire) {
         // Cancel pending
         dirSonarPendingFire = false;
@@ -9929,6 +9940,7 @@ function lpmSelectFire() {
 function lpmSelectDirSonar() {
     hideLongPressMenu();
     if (!_lpmWorld || !player || player.hp <= 0 || comDemo) return;
+    if (!sonarBand) { sonarNeedBand(); return; }
     fireDirectionalSonar(Math.atan2(_lpmWorld.y - player.y, _lpmWorld.x - player.x));
 }
 function lpmSelectSigList() { hideLongPressMenu(); if (window.openSigPanel) window.openSigPanel(); }
@@ -10128,9 +10140,23 @@ function applyTrackContact(e, sa) {
 // ============================================================
 function sonarOmniRange(level) { return OMNI_SONAR_RANGE[gameState.upgrades.sensor] * SONAR_FRAC * playerFx().sonar * genGain * (1 - getStormIntensity(player.x, player.y) * STORM_SONAR_DEGRADE) * PM.sonarRange * SONAR_POWER[level].r; }
 function sonarDirRange(level) { return DIR_SONAR_MAX_RANGE * SONAR_FRAC * playerFx().sonar * genGain * (1 - getStormIntensity(player.x, player.y) * STORM_SONAR_DEGRADE) * SONAR_POWER[level].r; }
-function fireOmniSonar(power) {
+// ═══ 第72弾 (オーナー「宇宙空間では音が伝わらない — 各センサーと同じ種類のソナーを飛ばす」) ═══
+//   ソナーは 熱・光・EM・ヒッグス の4種。種類を選ばないと打てない。打つと、その種類の信号を出している対象だけが反応する
+//   (熱源ソナーは熱を出している物=熱核エンジンの艦・熱泉 / EMエンジンの艦は熱をほとんど出さないので映らない)。反応の強さ = 出している強さ (SONAR_MIN_EMIT 未満は映らない)
+const SONAR_MIN_EMIT = 0.07, SONAR_BANDS = ['heat', 'optic', 'em', 'higgs'];
+const SONAR_BAND_JP = { heat: '熱源', optic: '光', em: '電磁波', higgs: 'ヒッグス' }, SONAR_BAND_HEX = { heat: '#ffa03c', optic: '#3cffb4', em: '#e664ff', higgs: '#3cf0ff' }, SONAR_BAND_RGB = { heat: '255,160,60', optic: '60,255,180', em: '230,100,255', higgs: '60,240,255' };
+let sonarBand = null; // 選んだソナーの種類 (null=未選択 → 打てない)
+function sonarFieldBand(f) { return f.kind === 'cache' ? 'any' : f.kind === 'cloud' ? 'higgs' : f.kind === 'storm' ? 'em' : f.kind === 'vent' ? 'heat' : null; } // 自然の信号が出している帯域
+function comSonarBand(c) { // 自機COM: 相手を最近聞いた帯域 / 無ければ順に回す
+    if (c && c.heardBand && c.heardBandF !== undefined && _frameCount - c.heardBandF < 3600) return c.heardBand;
+    c = c || {}; c.sonarRot = ((c.sonarRot || 0) + 1) % 4; return SONAR_BANDS[c.sonarRot];
+}
+function sonarNeedBand() { logMessage('SONAR: ソナーの種類 (熱源・光・電磁波・ヒッグス) を選んでから打つ — 索敵のポップオーバーで選ぶ', 'warning-msg'); const g = document.getElementById('action-popover'); if (g) { g.classList.add('shake'); setTimeout(() => g.classList.remove('shake'), 500); } sfxUI('ui_error'); }
+function fireOmniSonar(power, band) {
     if (!player || player.hp <= 0) return;
     if (typeof power !== 'string' || !SONAR_POWER[power]) power = comDemo && _com ? comSonarPower(_com.pp) : sonarLevel; // 第45弾: ボタンは「ソナー出力」のトグル・COMは性格で
+    if (!band) band = comDemo && _com ? comSonarBand(_com) : sonarBand;
+    if (!band) { sonarNeedBand(); return; }
     const SP = SONAR_POWER[power];
     if (omniSonarCooldown > 0) {
         logMessage(`SENSOR: 全周囲ソナー再充電中... (残り ${Math.ceil(omniSonarCooldown / 60)}秒)`, 'warning-msg');
@@ -10140,24 +10166,26 @@ function fireOmniSonar(power) {
     const baseRange = OMNI_SONAR_RANGE[sensorLv];
     const stormAtPlayer = getStormIntensity(player.x, player.y);
     const omniRange = baseRange * SONAR_FRAC * playerFx().sonar * genGain * (1 - stormAtPlayer * STORM_SONAR_DEGRADE) * PM.sonarRange * SP.r; // 第32弾: ソナー拡張 (第39弾: 探知重視×1.33)
-    const sc = sensorConfig[currentSensor];
+    const sc = sensorConfig[band];
 
     sfxUI('sonar_omni_' + ({ weak: 'weak', std: 'mid', strong: 'strong' })[power]);
     cancelSilentRunning('アクティブソナー使用');
-    let detected = 0;
+    let detected = 0, quiet = 0;
     enemies.forEach(e => {
         if (e.hp <= 0) return;
         const dist = Math.hypot(e.x - player.x, e.y - player.y);
         if (dist > omniRange) return;
+        const emit = sigPeak(e, band); // この種類の信号を出していなければ映らない
+        if (emit < SONAR_MIN_EMIT) { quiet++; return; }
         const higgsBlock = getHiggsIntensity((e.x + player.x) / 2, (e.y + player.y) / 2);
-        const acc = calcAccuracy(dist, omniRange, 0.6, higgsBlock);
+        const acc = calcAccuracy(dist, omniRange, 0.6, higgsBlock) * Math.min(1, 0.55 + emit * 0.9);
         pingContact(e, acc, dist);
         detected++;
     });
-    for (const st of structures) if (st.type === 'derelict' && !st.discovered && Math.hypot(st.x - player.x, st.y - player.y) <= omniRange) { st.discovered = true; logMessage('SONAR: 反響の中に難破船 — 海図に載せた', 'system-msg'); matchRecEvent('derFound', st.x, st.y, '難破船をソナーで発見'); } // 第44弾
+    for (const st of structures) if (st.type === 'derelict' && !st.discovered && (band === 'optic' || band === 'em') && Math.hypot(st.x - player.x, st.y - player.y) <= omniRange) { st.discovered = true; logMessage('SONAR: 反響の中に難破船 — 海図に載せた', 'system-msg'); matchRecEvent('derFound', st.x, st.y, '難破船をソナーで発見'); } // 第44弾
     // 第31弾: 嵐の放電・熱泉・漂流コンテナも小さく反響する (霧のゆらぎは反響しない)
     for (const f of fieldSignals) {
-        if (f.kind === 'cloud') continue;
+        const fb = sonarFieldBand(f); if (!fb || (fb !== 'any' && fb !== band)) continue; // 第72弾: 熱泉=熱 / 嵐=EM / 霧のゆらぎ=ヒッグス / コンテナ=どれでも
         const dist = Math.hypot(f.x - player.x, f.y - player.y);
         if (dist > omniRange) continue;
         const acc = calcAccuracy(dist, omniRange, 0.6, getHiggsIntensity((f.x + player.x) / 2, (f.y + player.y) / 2));
@@ -10169,27 +10197,29 @@ function fireOmniSonar(power) {
         solveFix(sa); identStep(f.sid, f.sid === lockedSignalId, 1, sa);
     }
     omniSonarCooldown = Math.round(900 * SP.cd);
-    _refRing = { kind: 'sonar', f: _frameCount, level: power, R: omniRange, H: omniRange * SONAR_HEARD * PM.sonarHeard };
+    _refRing = { kind: 'sonar', f: _frameCount, level: power, R: omniRange, H: omniRange * SONAR_HEARD * PM.sonarHeard, band };
     // 第15弾: 探信音は遠くまで届く — 反響が返る距離の2.2倍以内の敵は、こちらの位置をほぼ正確に掴む
     pingHeardBy(omniRange * SONAR_HEARD * PM.sonarHeard, null, 0, 0);
     const rStr = Math.round(omniRange);
     const stormSuffix = stormAtPlayer > 0.3 ? ` ⚡EM嵐による減衰 (${Math.round(stormAtPlayer * STORM_SONAR_DEGRADE * 100)}%低下)` : '';
     logMessage(detected > 0
-        ? `SONAR[全周囲・${SP.jp}] Lv${sensorLv}: ${detected}件の反応捕捉 (範囲: ${rStr}u・聞かれる ${Math.round(omniRange * SONAR_HEARD * PM.sonarHeard)}u) ─ 位置暴露注意${stormSuffix}`
-        : `SONAR[全周囲・${SP.jp}] Lv${sensorLv}: 有効範囲 ${rStr}u 内に反応なし${stormSuffix}`,
+        ? `SONAR[${SONAR_BAND_JP[band]}・全周囲・${SP.jp}]: ${detected}件の反応捕捉 (範囲: ${rStr}u・聞かれる ${Math.round(omniRange * SONAR_HEARD * PM.sonarHeard)}u) ─ 位置暴露注意${stormSuffix}`
+        : `SONAR[${SONAR_BAND_JP[band]}・全周囲・${SP.jp}]: 有効範囲 ${rStr}u 内に${SONAR_BAND_JP[band]}を出している物は映らなかった${quiet ? ' (範囲内に他の種類の信号の艦が' + quiet + '隻 — 別の種類のソナーなら映るかも)' : ''}${stormSuffix}`,
         'system-msg');
     // ソナー伝播速度を遅く (1/3)、色はシアン系で鮮やかに
-    effects.push({ x: player.x, y: player.y, r: 0, maxR: omniRange, a: 0.9, c: `rgba(0,255,220,1)`, type: 'sonar', speed: omniRange/60 });
-    effects.push({ x: player.x, y: player.y, r: omniRange, maxR: omniRange, a: 0.5, c: `rgba(${sc.r},0.8)`, type: 'sonar-boundary', life: 60 });
+    effects.push({ x: player.x, y: player.y, r: 0, maxR: omniRange, a: 0.9, c: `rgba(${SONAR_BAND_RGB[band]},1)`, type: 'sonar', speed: omniRange/60 });
+    effects.push({ x: player.x, y: player.y, r: omniRange, maxR: omniRange, a: 0.5, c: `rgba(${SONAR_BAND_RGB[band]},0.8)`, type: 'sonar-boundary', life: 60 });
 }
 
 // ============================================================
 // 指向性ソナー
 // ============================================================
-function fireDirectionalSonar(targetAngle, power) {
+function fireDirectionalSonar(targetAngle, power, band) {
     if (!player || player.hp <= 0) return;
     if (dirSonarCooldown > 0) return;
     if (typeof power !== 'string' || !SONAR_POWER[power]) power = comDemo && _com ? comSonarPower(_com.pp) : sonarLevel;
+    if (!band) band = comDemo && _com ? comSonarBand(_com) : sonarBand;
+    if (!band) { sonarNeedBand(); dirSonarPendingFire = false; return; }
     const SP = SONAR_POWER[power];
     if (targetAngle === undefined) targetAngle = Math.atan2(mouseWorldY - player.y, mouseWorldX - player.x);
     const sensorLv  = gameState.upgrades.sensor;
@@ -10208,19 +10238,21 @@ function fireDirectionalSonar(targetAngle, power) {
         while (diff < -Math.PI) diff += Math.PI * 2;
         while (diff >  Math.PI) diff -= Math.PI * 2;
         if (Math.abs(diff) > halfAngle) return;
+        const emit = sigPeak(e, band); // 第72弾: その種類の信号を出していなければ映らない
+        if (emit < SONAR_MIN_EMIT) return;
         const higgsBlock = getHiggsIntensity((e.x + player.x) / 2, (e.y + player.y) / 2);
-        const acc = calcAccuracy(dist, maxRange, 0.5, higgsBlock);
+        const acc = calcAccuracy(dist, maxRange, 0.5, higgsBlock) * Math.min(1, 0.55 + emit * 0.9);
         pingContact(e, acc, dist);
         detected++;
     });
     dirSonarCooldown = Math.round(300 * SP.cd);
     // 指向性は照射方向にだけ強く響く (コーン内は2倍・それ以外は SONAR_SIDE_LEAK 倍の距離まで聞こえる。第43弾: 旧0.5倍=側面でも1万u先まで聞こえた)
     pingHeardBy(maxRange * SONAR_HEARD, targetAngle, halfAngle, maxRange * SONAR_SIDE_LEAK);
-    dirSonarVisual = { angle: targetAngle, halfAngle, range: maxRange, life: 1.0 };
+    dirSonarVisual = { angle: targetAngle, halfAngle, range: maxRange, life: 1.0, band };
     const deg = Math.round(targetAngle * 180 / Math.PI);
     logMessage(detected > 0
-        ? `SONAR[指向性・${SP.jp}] Lv${sensorLv}: 方位${deg}° → ${detected}件捕捉`
-        : `SONAR[指向性・${SP.jp}] Lv${sensorLv}: 方位${deg}° → 反応なし`,
+        ? `SONAR[${SONAR_BAND_JP[band]}・指向性・${SP.jp}]: 方位${deg}° → ${detected}件捕捉`
+        : `SONAR[${SONAR_BAND_JP[band]}・指向性・${SP.jp}]: 方位${deg}° → ${SONAR_BAND_JP[band]}を出している物は映らなかった`,
         'system-msg');
 }
 
@@ -10675,9 +10707,9 @@ function drawRefRing(ctx) {
         else {
             const al = Math.min(1, 3 - age), R = rr.R;
             ctx.setLineDash([10 * inv, 8 * inv]); ctx.lineWidth = 1.5 * inv;
-            ctx.globalAlpha = 0.85 * al; ctx.strokeStyle = '#00ffdc'; ctx.beginPath(); ctx.arc(player.x, player.y, R, 0, Math.PI * 2); ctx.stroke();
+            ctx.globalAlpha = 0.85 * al; ctx.strokeStyle = SONAR_BAND_HEX[rr.band] || '#00ffdc'; ctx.beginPath(); ctx.arc(player.x, player.y, R, 0, Math.PI * 2); ctx.stroke();
             ctx.globalAlpha = 0.5 * al; ctx.strokeStyle = '#ff9a66'; ctx.beginPath(); ctx.arc(player.x, player.y, rr.H, 0, Math.PI * 2); ctx.stroke();
-            queueTag(player.x, player.y - R, 'ソナー' + SONAR_POWER[rr.level].jp, '反応 ' + Math.round(R / 100) * 100 + 'u', '#00ffdc', 'top', al);
+            queueTag(player.x, player.y - R, (SONAR_BAND_JP[rr.band] || '') + 'ソナー' + SONAR_POWER[rr.level].jp, '反応 ' + Math.round(R / 100) * 100 + 'u', SONAR_BAND_HEX[rr.band] || '#00ffdc', 'top', al);
             queueTag(player.x, player.y - rr.H, '聞かれる範囲', Math.round(rr.H / 100) * 100 + 'u', '#ff9a66', 'top', al * 0.8);
         }
     }
@@ -10787,6 +10819,7 @@ function drawPassiveAntenna(ctx) {
     // 指向性ソナーコーン描画 (強化版)
     if (dirSonarVisual && dirSonarVisual.life > 0) {
         const sv = dirSonarVisual;
+        const _cr = SONAR_BAND_RGB[sv.band] || '0,255,220'; // 第72弾: ソナーの種類の色
         const sonarNow = Date.now() * 0.001;
         ctx.save();
         ctx.translate(player.x, player.y);
@@ -10794,9 +10827,9 @@ function drawPassiveAntenna(ctx) {
 
         // ── レイヤー1: グラデーション塗り ───────────────────
         const coneGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, sv.range);
-        coneGrad.addColorStop(0,   `rgba(0,255,220,${(sv.life * 0.35).toFixed(3)})`);
-        coneGrad.addColorStop(0.5, `rgba(0,255,220,${(sv.life * 0.12).toFixed(3)})`);
-        coneGrad.addColorStop(1,   'rgba(0,255,220,0)');
+        coneGrad.addColorStop(0,   `rgba(${_cr},${(sv.life * 0.35).toFixed(3)})`);
+        coneGrad.addColorStop(0.5, `rgba(${_cr},${(sv.life * 0.12).toFixed(3)})`);
+        coneGrad.addColorStop(1,   `rgba(${_cr},0)`);
         ctx.beginPath();
         ctx.moveTo(0, 0);
         ctx.arc(0, 0, sv.range, -sv.halfAngle, sv.halfAngle);
@@ -10805,9 +10838,9 @@ function drawPassiveAntenna(ctx) {
         ctx.fill();
 
         // ── レイヤー2: 輝くコーンエッジライン ───────────────
-        ctx.shadowColor = 'rgba(0,255,220,1)';
+        ctx.shadowColor = `rgba(${_cr},1)`;
         ctx.shadowBlur  = 4 * sv.life;
-        ctx.strokeStyle = `rgba(0,255,220,${(sv.life * 0.95).toFixed(3)})`;
+        ctx.strokeStyle = `rgba(${_cr},${(sv.life * 0.95).toFixed(3)})`;
         ctx.lineWidth   = 1.8;
         ctx.beginPath();
         ctx.moveTo(0, 0);
@@ -10817,7 +10850,7 @@ function drawPassiveAntenna(ctx) {
         ctx.stroke();
 
         // ── レイヤー3: 外縁アーク ────────────────────────────
-        ctx.strokeStyle = `rgba(0,255,220,${(sv.life * 0.6).toFixed(3)})`;
+        ctx.strokeStyle = `rgba(${_cr},${(sv.life * 0.6).toFixed(3)})`;
         ctx.lineWidth   = 1.2;
         ctx.shadowBlur  = 2 * sv.life;
         ctx.beginPath();
@@ -10832,7 +10865,7 @@ function drawPassiveAntenna(ctx) {
             const ringR   = phase * sv.range;
             const ringAlpha = sv.life * (1 - phase) * 0.55;
             if (ringAlpha <= 0.01) continue;
-            ctx.strokeStyle = `rgba(0,255,220,${ringAlpha.toFixed(3)})`;
+            ctx.strokeStyle = `rgba(${_cr},${ringAlpha.toFixed(3)})`;
             ctx.lineWidth   = 1;
             ctx.beginPath();
             ctx.arc(0, 0, ringR, -sv.halfAngle, sv.halfAngle);
@@ -10855,7 +10888,7 @@ function drawPassiveAntenna(ctx) {
             ctx.shadowBlur = 0;
             // スキャン先端の輝点
             ctx.fillStyle = `rgba(255,255,255,${(sv.life * 0.8).toFixed(3)})`;
-            ctx.shadowColor = 'rgba(0,255,220,1)';
+            ctx.shadowColor = `rgba(${_cr},1)`;
             ctx.shadowBlur  = 6;
             ctx.beginPath();
             ctx.arc(Math.cos(sweepAng) * sv.range, Math.sin(sweepAng) * sv.range, 3, 0, Math.PI * 2);
@@ -10864,9 +10897,9 @@ function drawPassiveAntenna(ctx) {
         }
 
         // ── 発射元の輝き ────────────────────────────────────
-        ctx.shadowColor = 'rgba(0,255,220,1)';
+        ctx.shadowColor = `rgba(${_cr},1)`;
         ctx.shadowBlur  = 7 * sv.life;
-        ctx.fillStyle   = `rgba(0,255,220,${(sv.life * 0.7).toFixed(3)})`;
+        ctx.fillStyle   = `rgba(${_cr},${(sv.life * 0.7).toFixed(3)})`;
         ctx.beginPath();
         ctx.arc(0, 0, 5 * sv.life, 0, Math.PI * 2);
         ctx.fill();
@@ -10877,7 +10910,7 @@ function drawPassiveAntenna(ctx) {
 
         dirSonarVisual.life -= 0.004;
         if (dirSonarVisual.life <= 0) {
-            effects.push({ type: 'sonar-fill', x: player.x, y: player.y, r: sv.range, a: 0.12, c: `rgba(0,255,220,1)`, life: 240 });
+            effects.push({ type: 'sonar-fill', x: player.x, y: player.y, r: sv.range, a: 0.12, c: `rgba(${_cr},1)`, life: 240 });
             dirSonarVisual = null;
         }
     }
@@ -13798,6 +13831,8 @@ function enemyPingRange(e, pw) { return OMNI_SONAR_RANGE[1] * SONAR_FRAC * shipF
 function firePingFromEnemy(e) {
     if (!player || player.hp <= 0) return;
     const _pw = comSonarPower(e.personality || {});
+    // 第72弾: 敵も種類を選んで打つ — 自艦を最近聞いた帯域 / 無ければ順に回す (真の発信は読まない)
+    const _eBand = (e._heardBand && e._heardBandF !== undefined && _frameCount - e._heardBandF < 3600) ? e._heardBand : SONAR_BANDS[(e._pingRot = ((e._pingRot || 0) + 1) % 4)];
     // 第50弾: 接触を失った直後 (最後の推定がある) は、その方向へ指向性ソナーを打つ。無ければ全周囲
     let _dir = null;
     if (e.playerLastKnownPos && (e.contactFreshness || 0) > 0.15 && (e.uid + Math.floor(_frameCount / 900)) % 2 === 0) {
@@ -13806,6 +13841,7 @@ function firePingFromEnemy(e) {
     const ENEMY_PING_RANGE = _dir ? DIR_SONAR_MAX_RANGE * SONAR_FRAC * shipFx(e).sonar * (1 - getStormIntensity(e.x, e.y) * STORM_SONAR_DEGRADE) * SONAR_POWER[_pw].r : enemyPingRange(e, _pw);
     // 演出: 音波リング (フォグ無視 — 音はヒッグスの霧を越えて聞こえる)
     effects.push({ x: e.x, y: e.y, r: 0, maxR: ENEMY_PING_RANGE, a: 0.7, c: '#ff8866', type: 'circle' });
+    e._pingBandUsed = _eBand;
     effects.push({ x: e.x, y: e.y, r: 0, maxR: ENEMY_PING_RANGE * 0.55, a: 0.5, c: '#ffbb99', type: 'circle' });
     const distP = Math.hypot(player.x - e.x, player.y - e.y);
     playSound('enemyPing', Math.max(0.15, Math.min(1, 1 - distP / 16000)));
@@ -13858,6 +13894,9 @@ function firePingFromEnemy(e) {
         e._noiseLk = _isNoise ? e.playerLastKnownPos : null;
         e.contactFreshness = Math.max(e.contactFreshness, 0.85);
         logMessage(_isNoise ? '離脱: ノイズメーカーが敵の探信に反射 — 敵はそちらを掴んだ' : 'DECOY: デコイが偽エコー反射 — 敵ソナーを誤誘導', 'system-msg');
+    } else if (distP < ENEMY_PING_RANGE && _inCone && sigPeak(player, _eBand) < SONAR_MIN_EMIT) {
+        // 第72弾: その種類の信号を出していない自艦は映らない (敵の探信を空振りさせられる)
+        logMessage('TAC: 敵の' + SONAR_BAND_JP[_eBand] + 'ソナーに自艦は映らなかった — ' + SONAR_BAND_JP[_eBand] + 'を出していない', 'system-msg');
     } else if (distP < ENEMY_PING_RANGE && _inCone) {
         // 濃いヒッグスに潜んでいれば反射が背景に埋もれる
         const hHere = getHiggsIntensity(player.x, player.y);
