@@ -2278,6 +2278,76 @@ function dragDeltaWorld(dClientX, dClientY) {
 // 手でパンすると一時OFF → 「◎」チップで復帰
 let cameraFollowPlayer = true;
 
+// ═══ 第72弾: 画面下の状態ストリップ・AI助言の履歴・右下の丸ボタン ═══
+let _ssKey = '';
+function updateStatusStrip() {
+    if (!player || player.hp <= 0) return;
+    const hpP = Math.max(0, Math.round(player.hp / player.maxHp * 100)), col = hpP < 25 ? '#ff4d4d' : hpP < 55 ? '#ffaa44' : '#00ffaa';
+    const hf = document.getElementById('ss-hp-fill'), ht = document.getElementById('ss-hp-text');
+    if (hf) { hf.style.width = hpP + '%'; hf.style.backgroundColor = col; } if (ht) { ht.textContent = hpP + '%'; ht.style.color = col; }
+    const cp = cpTotal(), nc = Math.min(3, coloniesOwned('player'));
+    const cv = document.getElementById('ss-cp-val'), cb = document.getElementById('ss-cp-bar'), cs = document.getElementById('ss-cp-sub');
+    if (cv) cv.textContent = cp.toFixed(1); if (cb) cb.style.width = Math.min(100, (cp - 0.5) / 3 * 100) + '%'; if (cs) cs.textContent = 'コロニー' + nc + '/3';
+    const sv = document.getElementById('ss-spd-val'); if (sv) sv.textContent = String(Math.round((player.currentSpeed || 0) * 60));
+    // 状態異常 (名前と残り秒数)。時間で解消する
+    const chips = [], sec = (v) => Math.ceil(v / 60);
+    if (player._weaponJamTimer > 0) chips.push(['火器管制ダウン', sec(player._weaponJamTimer), 'bad']);
+    if (player._sysEngineTimer > 0) chips.push(['機関損傷', sec(player._sysEngineTimer), 'bad']);
+    if (player._sysSensorTimer > 0) chips.push(['センサー損傷', sec(player._sysSensorTimer), 'sen']); else if (player._daze > 0) chips.push(['センサー撹乱', sec(player._daze), 'sen']);
+    if (player._commJam > 0) chips.push(['通信障害', sec(player._commJam), 'sen']);
+    if (player._burn > 0) chips.push(['延焼', sec(player._burn), 'bad']);
+    const key = chips.map(c => c[0] + c[1]).join('|');
+    if (key !== _ssKey) { _ssKey = key; const st = document.getElementById('ss-stat'); if (st) st.innerHTML = chips.map(c => '<span class="ss-chip ' + c[2] + '">' + c[0] + '<i>' + c[1] + 's</i></span>').join(''); }
+    const xh = document.getElementById('xo-history'); if (xh && !xh.classList.contains('hidden')) renderXoHistory();
+    const pop = document.getElementById('cp-pop'); if (pop && !pop.classList.contains('hidden')) renderCpPop();
+}
+function renderCpPop() {
+    const pop = document.getElementById('cp-pop'); if (!pop) return;
+    const nc = Math.min(3, coloniesOwned('player')), fx = playerFx(), base = 1, col = ANA_COLONY * nc, parts = PM.ana || 0, mult = fx.anaSpeed || 1, cp = cpTotal();
+    const cmin = ANA_CMIN / Math.pow(Math.max(0.3, cp), 0.6);
+    pop.innerHTML = '<div class="cp-row"><span>自艦の基本</span><span>+' + base.toFixed(1) + '</span></div>'
+        + '<div class="cp-row"><span>占有コロニー ' + nc + '/3 (1つ +' + ANA_COLONY + ')</span><span>+' + col.toFixed(1) + '</span></div>'
+        + (parts ? '<div class="cp-row"><span>部品</span><span>+' + parts.toFixed(1) + '</span></div>' : '')
+        + (mult !== 1 ? '<div class="cp-row"><span>AIの配分 ×</span><span>' + mult.toFixed(2) + '</span></div>' : '')
+        + '<div class="cp-row"><b>演算力</b><b>' + cp.toFixed(2) + '</b></div>'
+        + '<small>解析の速さ = 演算力 × 受信の強さ。受信の強さが ' + Math.round(cmin * 100) + '% 未満 (遠い・弱い・感度が低い) の信号は解析が進まない。コロニーを占有するほど、遠く弱い信号も解析でき、速く、精度も上がる。近づく・感度を上げると受信が強くなる。</small>';
+}
+function renderXoHistory() {
+    const list = document.getElementById('xh-list'); if (!list) return;
+    const logTab = document.getElementById('xh-tab-log').classList.contains('on');
+    const fmt = (f) => { const s = Math.max(0, Math.round(f / 60)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+    const rows = logTab ? _logHist.slice(-90).map(m => '<div class="xh-row ' + m.cls + '"><span class="xh-t">' + m.ts.slice(3) + '</span><span>' + _esc(m.text) + '</span></div>')
+                        : _xoHist.slice(-90).map(m => '<div class="xh-row ' + m.tone + '"><span class="xh-t">' + fmt(m.f - (huntStats ? huntStats.startFrame : 0)) + '</span><span>' + _esc(m.txt) + '</span></div>');
+    const html = rows.join('') || '<div class="xh-row"><span>まだ無い</span></div>';
+    if (list._html !== html) { const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40; list._html = html; list.innerHTML = html; if (atBottom || !list._init) list.scrollTop = list.scrollHeight; list._init = true; }
+}
+function _esc(t) { return String(t).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+function updateZoomFab() {
+    const sub = document.getElementById('zoom-fab-sub'), ico = document.getElementById('zoom-fab-ico'), fab = document.getElementById('zoom-fab'); if (!fab) return;
+    const lb = gameSpeed === 0.5 ? '0.5x' : gameSpeed + 'x';
+    if (ico) ico.textContent = userPaused ? 'Ⅱ' : '◐';
+    if (sub) sub.textContent = userPaused ? '停止' : (gameSpeed !== 1 ? lb : '');
+    fab.classList.toggle('warn', userPaused || gameSpeed !== 1);
+}
+(() => {
+    const zc = document.getElementById('zoom-ctl'), fab = document.getElementById('zoom-fab');
+    if (zc && fab) {
+        fab.addEventListener('click', (e) => { e.stopPropagation(); zc.classList.toggle('open'); sfxUI('ui_select'); });
+        document.addEventListener('pointerdown', (e) => { if (zc.classList.contains('open') && !zc.contains(e.target)) zc.classList.remove('open'); }, true); // 別の所をタップするまで開いたまま
+    }
+    const xb = document.getElementById('xo-bar'), xh = document.getElementById('xo-history');
+    if (xb && xh) {
+        xb.addEventListener('click', (e) => { if (e.target.closest('#xo-act')) return; xh.classList.toggle('hidden'); if (!xh.classList.contains('hidden')) { document.getElementById('xh-list')._init = false; renderXoHistory(); } });
+        document.getElementById('xh-close')?.addEventListener('click', () => xh.classList.add('hidden'));
+        for (const [id, other] of [['xh-tab-ai', 'xh-tab-log'], ['xh-tab-log', 'xh-tab-ai']]) document.getElementById(id)?.addEventListener('click', () => { document.getElementById(id).classList.add('on'); document.getElementById(other).classList.remove('on'); document.getElementById('xh-list')._init = false; renderXoHistory(); });
+        document.addEventListener('pointerdown', (e) => { if (!xh.classList.contains('hidden') && !xh.contains(e.target) && !xb.contains(e.target)) xh.classList.add('hidden'); }, true);
+    }
+    const cb = document.getElementById('ss-cp'), pop = document.getElementById('cp-pop');
+    if (cb && pop) {
+        cb.addEventListener('click', (e) => { e.stopPropagation(); pop.classList.toggle('hidden'); if (!pop.classList.contains('hidden')) renderCpPop(); });
+        document.addEventListener('pointerdown', (e) => { if (!pop.classList.contains('hidden') && !pop.contains(e.target) && !cb.contains(e.target)) pop.classList.add('hidden'); }, true);
+    }
+})();
 // 第72弾 (オーナー「右上の自艦ボタンがたまに表示されない」): 旧は updateTacStrip (ロジックの8フレームごと) だけが更新していた →
 //   一時停止中・倍速の取りこぼし・縦持ちの停止中にパンしても出なかった。追従の切替・地図モードの出入りで直接更新する
 function updateRecenterChip() {
@@ -2663,7 +2733,7 @@ class Structure {
         // 第18弾: 引いた時は短い名前だけ・アイコンのすぐ上に (旧: 長い説明文を画面上60px上に大きく出していた)
         const _far = camera.zoom < LABEL_FAR_ZOOM;
         // 第28弾: 説明書きは消して名前だけ (オーナー)
-        const _lText  = this.type === 'colony' ? (this.owner === 'player' ? (_colUsed(this, 'P') ? '自コロニー (補給済)' : '自コロニー') : this.owner === 'enemy' ? '敵コロニー' : 'コロニー') : (this.salvaged ? '難破船 (回収済)' : '難破船');
+        const _lText  = this.type === 'colony' ? (this.owner === 'player' ? (_colUsed(this, 'P') ? '自コロニー (補給済)' : '自コロニー') : this._pObs === 'enemy' ? '敵コロニー' : 'コロニー') : (this.salvaged ? '難破船 (回収済)' : '難破船');
         const _iconPx = Math.max(this.radius * 2.6 * camera.zoom, STRUCT_MIN_PX);
         ctx.fillStyle = _lColor;
         ctx.font = 'bold ' + Math.round(_far ? 9 : 11) / camera.zoom + 'px Orbitron, monospace';
@@ -6072,6 +6142,7 @@ function updateDrawSonarEffects(ctx) {
 }
 
 let _logDedup = {};
+var _logHist = [], _xoHist = []; // var: 初期化中に logMessage が呼ばれても落ちない
 function logMessage(text, className) {
     const log = document.getElementById('message-log');
     if (!log) return;
@@ -6090,6 +6161,7 @@ function logMessage(text, className) {
     const ts = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
     msg.textContent = `[${ts}] ${text}`;
     log.appendChild(msg);
+    _logHist.push({ ts, text, cls: className || '' }); if (_logHist.length > 160) _logHist.shift(); // 第72弾: 履歴 (AIバーをタップ → ログのタブ)
     // 最大20件
     while (log.children.length > 20) log.removeChild(log.firstChild);
     // 自動スクロール (下端付近の時のみ)
@@ -7864,7 +7936,7 @@ function captureNodeByPlayer(n) {
     logMessage(`NODE: ノードを制圧 — +${NODE_SCR} SCR・${got > 0 ? '資材+' + got + '個' : '資材は満載 (展開して空いた枠にだけ積める)'}。以後この結晶が聴音局になり、周囲${NODE_RELAY_RANGE}uの方位を送ってくる`, 'system-msg');
 }
 function hackColonyByPlayer(st) {
-    const was = st.owner;
+    const was = st.owner; st._pObs = 'player'; const cp0 = cpTotal();
     if (was === 'enemy') enemyClueAt(st.x, st.y, 'コロニー');
     st.hacked = true; st.owner = 'player'; st.hackP = 0; st.eHackP = 0;
     matchRecEvent('colonyP', st.x, st.y, '自艦がコロニーを占有' + (was === 'enemy' ? ' (敵から奪還)' : ''));
@@ -7872,6 +7944,7 @@ function hackColonyByPlayer(st) {
     createClickEffect(st.x, st.y, '#00aaff');
     sfxUI('cap_done_colony');
     const n = coloniesOwned('player');
+    { const cp1 = cpTotal(); effects.push({ x: st.x, y: st.y - 120, text: '演算力 ' + cp0.toFixed(1) + ' → ' + cp1.toFixed(1), life: 3, type: 'floatText', c: '#39ff88' }); logMessage('COLONY: 演算力 ' + cp0.toFixed(1) + ' → ' + cp1.toFixed(1) + ' (解析が速く・遠く弱い信号も解析でき・精度も上がる)', 'system-msg'); } // 第72弾: 占有の効果を見える形に
     logMessage('COLONY: コロニーを占有 (' + n + 'つ' + (was === 'enemy' ? '・敵から奪還' : '') + ')' + (_colUsed(st, 'P') ? ' — ここの補給はもう使った' : ' — ここで1回だけ補給できる (弾を満タン・資材+' + COLONY_SUPPLY_MAT + ')') + '。演算力 ×' + (Math.round(analysisPower('player') * 100) / 100) + ' (解析と識別が速くなる)', 'system-msg');
     updateColonyIntel(true);
 }
@@ -7935,6 +8008,7 @@ function updateEnemyColonyCapture() {
             if (!st._partE) { st._partE = true; enemyOfferDraft(near, 'colony', st.x, st.y); } // 第33弾: 敵も初めて占有したコロニーで部品
             // 第26弾: 占有しただけでは回復も補給もしない (補給は _supply の流れで1つのコロニーにつき1回)
             matchRecEvent('colonyE', st.x, st.y, '敵がコロニーを占有' + (was === 'player' ? ' (自艦のを奪った)' : ''));
+            st._pObs = 'enemy'; // 第72弾: 奪われたことは通信途絶で分かる
             if (was === 'player') { logMessage('COLONY: コロニーとの通信途絶 — 敵に奪われた (占有' + coloniesOwned('player') + 'つ)', 'warning-msg'); sfxOr('alm_colony_lost', 'alert'); updateColonyIntel(true); comClueLost(st.x, st.y, COLONY_HACK_R, 'コロニー'); }
             if (comDemo) comThinkEvent('e', 'コロニーを占有 (' + coloniesOwned('enemy') + 'つ) — 自機の位置の手掛かりが増える', 'e' + near.uid);
         }
@@ -8788,6 +8862,8 @@ function updateVisualNegatives() {
 function updateSrcKnown() {
     if (_frameCount % 30) return;
     updateVisualNegatives();
+    // 第72弾: コロニーの持ち主は、自艦の有視界かドローンの視界に入った時に分かる (旧: 地図の名札が真の持ち主を最初から出していた=情報漏れ)
+    for (const st of structures) if (st.type === 'colony') { if (st.owner === 'player') st._pObs = 'player'; else if (inPlayerVision(st.x, st.y) || droneVisionSees(st.x, st.y)) st._pObs = st.owner; }
     for (const sid in _sigIdent) {
         const id = _sigIdent[sid], k = _srcKnown[sid];
         if (k && k.by === 'eye') { // 第44弾: 見えている間だけ位置を更新 — 有視界の外へ出たら最後に見た位置が海図に残る (漂う霧のゆらぎの今の位置は分からない)
@@ -11585,7 +11661,7 @@ function drawHUDOverlay(ctx) {
             else if (player._daze > 0) dmgTxt += 'センサー撹乱 ' + _sec(player._daze);
             if (player._commJam > 0) dmgTxt += '通信障害 ' + _sec(player._commJam);
             if (player._burn > 0) dmgTxt += '延焼 ' + _sec(player._burn);
-            ctx.fillText(dmgTxt, _fCX, _infoY);
+            // 第72弾: 状態異常は画面下の状態ストリップに出す (旧: ここに文字で描いていた)
         }
         // ── 奇襲可能インジケータ: 完全ロック中 & 敵が自分に気付いていない ──
         const te = player.targetEntity;
@@ -15316,7 +15392,7 @@ function comStallTour(c, P, D, hpF, contact) {
     if (!t) return false;
     const isNode = resourceNodes.includes(t);
     _comGoTo(t, (isNode ? NODE_CAP_R : COLONY_HACK_R) * 0.6, c);
-    comThink('p', 'tour', Math.round(quiet / 3600) + '分 気配が無い → 相手も寄る拠点を取りに行く: ' + (isNode ? 'ノード' : t.owner === 'enemy' ? '敵のコロニー (奪えば相手に通信途絶で伝わる)' : 'コロニー') + ' (' + _dirTxt(player.x, player.y, t.x, t.y) + '・' + Math.round(Math.hypot(t.x - player.x, t.y - player.y) / 100) * 100 + 'u)');
+    comThink('p', 'tour', Math.round(quiet / 3600) + '分 気配が無い → 相手も寄る拠点を取りに行く: ' + (isNode ? 'ノード' : t._pObs === 'enemy' ? '敵のコロニー (奪えば相手に通信途絶で伝わる)' : 'コロニー') + ' (' + _dirTxt(player.x, player.y, t.x, t.y) + '・' + Math.round(Math.hypot(t.x - player.x, t.y - player.y) / 100) * 100 + 'u)');
     return true;
 }
 // ═══ 第71弾: 決着をつける (自機COM) ═══
@@ -15848,7 +15924,7 @@ function xoInfoSource() {
         const p = clampToMapCircle(player.x + Math.cos(it.ang) * 8000, player.y + Math.sin(it.ang) * 8000, 1500);
         return { x: p.x, y: p.y, d: 8000, why: 'コロニー情報 — 敵は方位' + compassDeg(it.ang) + '°±' + Math.round(it.aHW * 180 / Math.PI) + '°。2つ目のコロニーは遠い (' + Math.round(bd / 1000) + 'k u) — 方角へ寄って聴け' };
     }
-    if (best) return { x: best.x, y: best.y, d: bd, why: (best.owner === 'enemy' ? '敵のコロニーを奪え' : '手掛かりなし — コロニーを占有せよ') + ' (占有' + coloniesOwned('player') + 'つ: 1つごとに演算力+35%・解析と識別が速くなる)' };
+    if (best) return { x: best.x, y: best.y, d: bd, why: (best._pObs === 'enemy' ? '敵のコロニーを奪え' : '手掛かりなし — コロニーを占有せよ') + ' (占有' + coloniesOwned('player') + 'つ: 1つごとに演算力+' + ANA_COLONY + '・解析が速く・遠く弱い信号も解析できる)' };
     for (const n of resourceNodes) { if (n.owner === 'player') continue; const d = Math.hypot(n.x - player.x, n.y - player.y); if (d < bd) { bd = d; best = n; } }
     if (best) return { x: best.x, y: best.y, d: bd, why: '手掛かりなし — ノードを取れば聴音局になる (周囲' + NODE_RELAY_RANGE + 'uを聴く)' };
     return null;
@@ -15915,6 +15991,8 @@ function updateTacStrip() {
         const ab = document.getElementById('xo-act');
         if (bar) bar.className = 'xo-' + (r ? r.tone : 'idle');
         if (tx) { tx.textContent = r ? r.text : '—'; tx.title = r ? r.text : ''; }
+        if (r && r.text) { const lk = _xoHist.length ? _xoHist[_xoHist.length - 1] : null, norm = r.text.replace(/[\d.±]+/g, '#'); // 第72弾: 数字だけ違う助言は履歴に積まない (最新を更新)
+            if (lk && lk.norm === norm) { lk.txt = r.text; lk.f = _frameCount; } else { _xoHist.push({ f: _frameCount, txt: r.text, tone: r.tone, norm }); if (_xoHist.length > 120) _xoHist.shift(); } }
         if (ab) ab.style.display = 'none'; // 第15弾: 副長は助言だけ。決断と操作はプレイヤーが行う
     }
     _xoAct = r && r.act ? r.act.fn : null;
@@ -15943,6 +16021,7 @@ function updateTacStrip() {
         if (tb._lbl !== tl) { tb._lbl = tl; const l = document.getElementById('abar-track-label'); if (l) l.textContent = tl; tb.classList.toggle('on', !!sa); }
     }
     updateRecenterChip();
+    updateStatusStrip();
     _updateCargoBadges();
 }
 // 第16弾: 搭載物ボタンの残数バッジ (×n=完成品 / 資材=組み立て可 / 秒=組み立て中 / 待機=完成・展開枠待ち / —=無し)
@@ -16035,7 +16114,7 @@ let _fpsLastTime = 0, _fpsFrameCount = 0, _fpsDisplay = 0;
 // ═══ ゲームループ: ロジック(stepWorld) と描画(renderWorld) を分離 ═══
 // 描画を伴わない高速シミュレーション(__simSteps)で数値バランスを検証できるようにするため。
 let _rcTick = 0;
-function _gameSpeedChanged() { /* 第72弾: 倍速ボタンのUI更新の受け口 (下の setGameSpeed から) */ }
+function _gameSpeedChanged() { updateZoomFab(); }
 let _hitStop = 0; // 奇襲命中時のヒットストップ (ロジックだけ数フレーム止めて描画は続ける)
 function gameLoop() {
     try {
@@ -16787,6 +16866,7 @@ function togglePause(on) {
     const ind = document.getElementById('pause-ind');
     if (ind) ind.classList.toggle('hidden', !userPaused);
     sfxUI(userPaused ? 'sys_pause_on' : 'sys_pause_off');
+    updateZoomFab();
 }
 document.getElementById('btn-pause')?.addEventListener('click', () => togglePause());
 function showBriefing(fromMenu) {

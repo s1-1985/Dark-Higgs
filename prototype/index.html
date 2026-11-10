@@ -322,10 +322,14 @@
             <div id="pause-ind" class="hidden">一時停止中 — ▶ か P で再開</div>
             <!-- 第16弾: ズームボタン (ピンチ・ホイールに加えて。追従中は自艦中心で拡大縮小) -->
             <div id="zoom-ctl">
-                <button id="btn-speed-fixed" title="倍速 — 1x→2x→4x→8x→0.5x (1フレームにn回進める・シグネチャは変わらない)">1x</button>
-                <button id="btn-pause" title="一時停止 (P) — 止めている間も地図を見て指示を出せる">Ⅱ</button>
-                <button id="zoom-in" onclick="zoomStep(1.6)" title="拡大 (+)">＋</button>
-                <button id="zoom-out" onclick="zoomStep(1 / 1.6)" title="縮小 (−)">－</button>
+                <!-- 第72弾 (オーナー): 普段は丸いボタン1個だけ。タップすると4つが縦に展開し、別の所をタップするまで開いたまま -->
+                <div id="zoom-stack">
+                    <button id="btn-speed-fixed" title="倍速 — 1x→2x→4x→8x→15x→20x→0.5x (1フレームにn回進める・シグネチャは変わらない。重い端末では自動で抑える)">1x</button>
+                    <button id="btn-pause" title="一時停止 (P) — 止めている間も地図を見て指示を出せる">Ⅱ</button>
+                    <button id="zoom-in" onclick="zoomStep(1.6)" title="拡大 (+)">＋</button>
+                    <button id="zoom-out" onclick="zoomStep(1 / 1.6)" title="縮小 (−)">－</button>
+                </div>
+                <button id="zoom-fab" title="倍速・一時停止・拡大縮小 (タップで開く)"><span id="zoom-fab-ico">◐</span><small id="zoom-fab-sub"></small></button>
             </div>
 
             <!-- GEN配分ドロワー (上帯のGENで開閉) — ゼロサム配分は「時々変える」設定なので常設しない -->
@@ -389,6 +393,18 @@
                 <div id="think-log"></div>
             </div>
 
+            <!-- 第72弾 (オーナー): 下のログ欄はAIの助言と重複するので廃止 → 空いた場所に 艦体・演算力・速度・状態異常。AIバーをタップすると助言の履歴 -->
+            <div id="status-strip">
+                <div class="ss-cell ss-hp" id="ss-hp" title="艦体耐久"><span class="ss-lab">HULL</span><span class="ss-track"><i id="ss-hp-fill"></i></span><b id="ss-hp-text">100%</b></div>
+                <button class="ss-cell ss-cp" id="ss-cp" title="演算力 — 信号の解析の速さ・精度・解析できる距離を決める。コロニーを占有すると上がる (タップで内訳)"><span class="ss-lab">演算力</span><b id="ss-cp-val">1.0</b><i id="ss-cp-bar"></i><small id="ss-cp-sub">コロニー0/3</small></button>
+                <div class="ss-cell ss-spd" id="ss-spd" title="航行速度"><span class="ss-lab">速度</span><b id="ss-spd-val">0</b><small>u/s</small></div>
+                <div class="ss-cell ss-stat" id="ss-stat" title="状態異常 (時間で解消・AIの解析力が高いほど早い)"></div>
+            </div>
+            <div id="cp-pop" class="hidden"></div>
+            <div id="xo-history" class="hidden">
+                <div class="xh-head"><span class="xh-tabs"><button id="xh-tab-ai" class="on">AIの助言</button><button id="xh-tab-log">ログ</button></span><button id="xh-close" title="閉じる">✕</button></div>
+                <div id="xh-list"></div>
+            </div>
             <div id="log-panel" class="compact">
                 <div id="log-header">
                     <span>SYSTEM LOG</span>
