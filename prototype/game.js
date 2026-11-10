@@ -1103,7 +1103,7 @@ let resourceNodes = []; // リソースノード {x, y, active, emFlashTimer}
 // 第22弾: 倍速は「1フレームにロジックを何回進めるか」(0.5=2フレームに1回 / 2・4・8=n回)。物理の1ステップは常に同じ。
 // 旧: gameSpeedFactor で艦の移動量とタイマーだけを倍にしていた → 1ステップの移動量が速さとして読まれ、
 // 自艦のシグネチャ (速さで熱・EMが増える) が倍速で上がっていた / 弾・ミサイルは倍にならず釣り合いが崩れていた
-const GAME_SPEEDS = [1, 2, 4, 8, 0.5];
+const GAME_SPEEDS = [1, 2, 4, 8, 15, 20, 0.5]; // 第72弾: 15倍・20倍を追加 (重い時は1フレームの上限24msで自動で抑える)
 let gameSpeed = 1, _speedAcc = 0;
 const gameSpeedFactor = 1.0; // 1ステップの時間 (常に1。式に残っている掛け算は互換のため)
 // 第22弾: 自艦の戦闘モード (ロックすると画面下に出るバー)。mode: 'manual'(手動) | 'face'(正対) | 'flank'(回り込み) /
@@ -2203,6 +2203,7 @@ function enterMapMode() {
     const fb = document.getElementById('btn-camera-follow');
     if (fb) fb.textContent = '追従 OFF';
     logMessage('NAV: マップモード ON — タップで航路設定、ミニマップ再タップで戻る', 'system-msg');
+    updateRecenterChip();
 }
 function exitMapMode() {
     if (!mapMode) return;
@@ -2214,6 +2215,7 @@ function exitMapMode() {
         cameraFollowPlayer = _preMapCamera.follow;
         if (cameraFollowPlayer) centerCameraOnPlayer();
     }
+    updateRecenterChip();
     const banner = document.getElementById('map-mode-banner');
     if (banner) banner.style.display = 'none';
     const fb = document.getElementById('btn-camera-follow');
@@ -2276,7 +2278,15 @@ function dragDeltaWorld(dClientX, dClientY) {
 // 手でパンすると一時OFF → 「◎」チップで復帰
 let cameraFollowPlayer = true;
 
+// 第72弾 (オーナー「右上の自艦ボタンがたまに表示されない」): 旧は updateTacStrip (ロジックの8フレームごと) だけが更新していた →
+//   一時停止中・倍速の取りこぼし・縦持ちの停止中にパンしても出なかった。追従の切替・地図モードの出入りで直接更新する
+function updateRecenterChip() {
+    const rc = document.getElementById('recenter-chip'); if (!rc) return;
+    const show = !!player && !cameraFollowPlayer && !mapMode;
+    rc._show = show; rc.style.display = show ? 'block' : 'none';
+}
 function updateCameraFollowBtn() {
+    updateRecenterChip();
     const btn = document.getElementById('btn-camera-follow');
     if (!btn) return;
     if (cameraFollowPlayer) {
@@ -6118,6 +6128,7 @@ function generateSector() {
     dirSonarVisual = null;
     dirSonarPendingFire = false;
     passiveBearings = [];
+    for (const k in _ringSm) delete _ringSm[k];
     lockedSignalId = null; _contactLabels = {}; _contactLabelNext = 1; _signalAnalysis = {}; for (const k in _srcKnown) delete _srcKnown[k]; // 第40弾
     for (const k in _passiveLastSeen) delete _passiveLastSeen[k];
     player = new Ship(MAP_CX, MAP_CY, true);
@@ -9567,7 +9578,12 @@ function drawTriangulationCircle(ctx) {
     _circScreen.length = 0;
     for (const sid in _signalAnalysis) {
         const sa = _signalAnalysis[sid];
-        if (!sa.fix || _srcKnown[sid]) { sa.displayCenterX = null; sa._fa = 0; continue; } // 第40弾: 特定した発信元は推定円を描かない
+        if (_srcKnown[sid]) { sa.displayCenterX = null; sa._fa = 0; sa._lastEst = null; continue; } // 第40弾: 特定した発信元は推定円を描かない
+        // 第72弾 (オーナー「受信強度が変わると一瞬消えてロックが外れたように見える」): 推定が一瞬出なくなっても、直前の円をしばらく残す (追跡中は20秒・それ以外は4秒・消える前にゆっくり薄れる)
+        if (!sa.fix) {
+            const hold = sid === lockedSignalId ? 1200 : 240, age = sa._lastEst ? _frameCount - sa._lastEst.f : 1e9;
+            if (!sa._lastEst || age > hold) { sa.displayCenterX = null; sa._fa = Math.max(0, (sa._fa || 0) - 0.05); sa._lastEst = age > hold ? null : sa._lastEst; if (!(sa._fa > 0)) continue; }
+        }
         const lo = sa.obs && sa.obs[sa.obs.length - 1];
         if (sid !== lockedSignalId && (!lo || _frameCount - lo.f > TMA_KEEP)) { sa._fa = 0; continue; } // 古い記録の円は出さない
         _drawEstCircle(ctx, sid, sa, sid === lockedSignalId);
@@ -9576,7 +9592,10 @@ function drawTriangulationCircle(ctx) {
 function _drawEstCircle(ctx, sid, sa, locked) {
     // 第15弾: 記録した方位線の交点 (solveFix) をそのまま描く。真の位置とは無関係 — 外れていることもある
     // 第18弾: 運動解があれば推定位置は針路に沿って進む (円もそれに付いていく)
-    const est = sa.fix ? trackEstimate(sa, 0) : null;
+    let est = sa.fix ? trackEstimate(sa, 0) : null;
+    let heldAlpha = 1;
+    if (est) sa._lastEst = { x: est.x, y: est.y, r: est.r, moving: false, vx: 0, vy: 0, f: _frameCount };
+    else if (sa._lastEst) { est = sa._lastEst; const hold = locked ? 1200 : 240; heldAlpha = Math.max(0.35, 1 - Math.max(0, (_frameCount - est.f) - hold * 0.6) / (hold * 0.4)); } // 持ち越し中は少し薄く
     if (!est) { sa.displayCenterX = null; return; }
     if (sa.displayCenterX == null) { sa.displayCenterX = est.x; sa.displayCenterY = est.y; sa.displayR = est.r; }
     const kc = est.moving ? 0.25 : 0.08;
@@ -9588,7 +9607,7 @@ function _drawEstCircle(ctx, sid, sa, locked) {
     const col = R > 2400 ? '#ff9a3c' : R > 900 ? '#ffd25a' : R > 350 ? '#5dff9a' : '#64dcff';
     const inv = 1 / camera.zoom;
     sa._fa = Math.min(1, (sa._fa || 0) + 0.035); // 第38弾: 円は突然出さずに0.5秒で浮かび上がる
-    const fade = (locked ? 1 : 0.6) * sa._fa;
+    const fade = (locked ? 1 : 0.6) * sa._fa * heldAlpha;
     { const sp = worldToScreen(cx, cy); _circScreen.push({ sid, cx: sp.sx, cy: sp.sy, r: R * camera.zoom }); }
     ctx.save();
     // 第40弾: 塗りはごく薄く・縁は 未追跡=細い破線 / 追跡中=実線＋外側をゆっくり回る4つのかぎ (照準のように) ・四方の目盛り
@@ -10129,6 +10148,7 @@ function updateEffectiveRadarRange() {
 // パッシブアンテナ描画 + ソナーコーン描画
 // ============================================================
 const _blipScreen = []; // { sid, sx, sy } 受信ブリップのスクリーン座標 (タップで追跡)
+const _ringSm = {}; // 第72弾: 信号ごとのリング上のサイン {ang,hw,a,...} (なめらかに追従・往復)
 // 第27弾 (オーナー指示): 推定円をタップしても追跡 — 円の縁(±22px)・上の名札・小さい円は内側。円の中ほどのタップは移動のまま
 function tryTapCircle(sx, sy) {
     let best = null, bd = Infinity;
@@ -10350,24 +10370,57 @@ function drawShipRing(ctx) {
     }
     // (5) 受信中の信号 (色=帯域)。タップでその信号を追跡。追跡中は SIG番号つき
     const S_HEX = { heat: '#ffa03c', optic: '#3cffb4', em: '#e664ff', higgs: '#3cf0ff' };
+    // 第72弾 (オーナー「向きがあいまいな時、シグネチャのサインが消えては別の方角に出る。来ていそうな範囲をなめらかに行ったり来たりすれば明滅に見えない」):
+    //   受信の記録 (直近の方位) を1つの「方角の範囲」にまとめ、サインは範囲の中を滑らかに往復する。範囲が狭ければ止まる。
+    //   途切れても (追跡中は長く・それ以外は短く) 薄れながら残る。サインは突然現れも消えもしない。
     const _sigBlips = {};
     _blipScreen.length = 0;
+    const _grp = {};
     for (const b of passiveBearings) {
-        if (b.life <= 0 || b.relay) continue; // 聴音局・コロニー起点の方位は自艦リングに出さない (自艦から見た方角ではない)
-        const prev = _sigBlips[b.sourceId];
-        if (!prev || b.life > prev.life) _sigBlips[b.sourceId] = b;
+        if (b.life <= 0 || b.relay || !b.sourceId || b.intel) continue; // 聴音局・コロニー起点の方位は自艦リングに出さない (自艦から見た方角ではない)
+        (_grp[b.sourceId] || (_grp[b.sourceId] = [])).push(b);
+    }
+    for (const sid in _grp) {
+        const arr = _grp[sid];
+        let sx = 0, sy = 0, wsum = 0, best = arr[0];
+        for (const b of arr) { const w = Math.max(0.05, b.life / (b.maxLife || 480)); sx += Math.cos(b.angle) * w; sy += Math.sin(b.angle) * w; wsum += w; if (b.life > best.life) best = b; }
+        const mean = Math.atan2(sy, sx);
+        let lo = 0, hi = 0;
+        for (const b of arr) { const d = _angDiff(b.angle, mean); if (d < lo) lo = d; if (d > hi) hi = d; }
+        const hw = Math.max(((best.halfWidthDeg || 0) * Math.PI) / 180, (hi - lo) / 2, 0.02);
+        const mid = mean + (hi + lo) / 2; // 範囲の中央
+        let st = _ringSm[sid];
+        if (!st) st = _ringSm[sid] = { ang: mid, a: 0, hw, phase: Math.random() * 6.28, sensor: best.sensor, seen: _frameCount, best };
+        st.mid = mid; st.hwT = hw; st.sensor = best.sensor; st.seen = _frameCount; st.best = best; st.life = best.life; st.maxLife = best.maxLife || 480;
+    }
+    for (const sid in _ringSm) {
+        const st = _ringSm[sid], isLocked = sid === lockedSignalId;
+        const live = st.seen === _frameCount;
+        const hold = isLocked ? 900 : 90; // 途切れてからの持ち越し (追跡中は15秒・それ以外は1.5秒)
+        const gone = _frameCount - st.seen;
+        if (!live && gone > hold) { delete _ringSm[sid]; continue; }
+        if (st.mid !== undefined) { st.ang += _angDiff(st.mid, st.ang) * 0.07; st.hw += (st.hwT - st.hw) * 0.05; }
+        const target = live ? 1 : Math.max(0, 1 - gone / hold) * (isLocked ? 0.7 : 0.5);
+        st.a += (target - st.a) * (live ? 0.06 : 0.05); // 現れる/消えるのを滑らかに
+        const sweepAmp = Math.min(st.hw, 0.6) * 0.85, sweepV = 0.0105; // 範囲が広いほど大きく往復 (約10秒周期)
+        const ang = st.ang + (sweepAmp > 0.035 ? Math.sin(_frameCount * sweepV + st.phase) * sweepAmp : 0);
+        _sigBlips[sid] = { angle: ang, sensor: st.sensor, life: st.life || 1, maxLife: st.maxLife || 480, _st: st };
     }
     ctx.font = 'bold 9px Orbitron, monospace';
     for (const sid in _sigBlips) {
-        const bl = _sigBlips[sid];
+        const bl = _sigBlips[sid], st = bl._st;
         const isLocked = sid === lockedSignalId;
         const hex = S_HEX[bl.sensor] || '#cfe8e0';
-        const appear = Math.min(1, ((bl.maxLife || 480) - bl.life) / 45);
-        const fade = Math.max(0.3, bl.life / (bl.maxLife || 480)) * appear;
+        const fade = Math.max(0.05, st.a);
         const c = Math.cos(bl.angle), s2 = Math.sin(bl.angle);
         const rr = gazeAt(bl.angle);
         const tip = rr + (isLocked ? 14 : 9);
-        _blipScreen.push({ sid, sx: cx + c * (tip + 4), sy: cy + s2 * (tip + 4) });
+        { const ca = Math.cos(st.ang), sa2 = Math.sin(st.ang); _blipScreen.push({ sid, sx: cx + ca * (tip + 4), sy: cy + sa2 * (tip + 4) }); } // タップの的は範囲の中央 (往復するサインを追わなくてよい)
+        // 来ていそうな方角の範囲 (薄い弧)
+        if (st.hw > 0.035) {
+            ctx.globalAlpha = fade * (isLocked ? 0.35 : 0.2); ctx.strokeStyle = hex; ctx.lineWidth = isLocked ? 4 : 3;
+            ctx.beginPath(); ctx.arc(cx, cy, rr + 5, st.ang - st.hw, st.ang + st.hw); ctx.stroke();
+        }
         ctx.globalAlpha = fade * (isLocked ? 1 : 0.75);
         ctx.strokeStyle = hex; ctx.fillStyle = hex;
         ctx.lineWidth = isLocked ? 2.4 : 1.5;
@@ -15873,8 +15926,7 @@ function updateTacStrip() {
         const tl = sa ? 'SIG-' + sigNo(lockedSignalId) + '\n' + identInfo(lockedSignalId).short + ' ' + (sa.fix ? _fmtR(trackEstimate(sa, 0).r) + (sa.motion ? '・動' : '') : '線' + (sa.obs ? sa.obs.length : 0)) : '追跡';
         if (tb._lbl !== tl) { tb._lbl = tl; const l = document.getElementById('abar-track-label'); if (l) l.textContent = tl; tb.classList.toggle('on', !!sa); }
     }
-    const rc = document.getElementById('recenter-chip');
-    if (rc) { const show = !cameraFollowPlayer && !mapMode; if (rc._show !== show) { rc._show = show; rc.style.display = show ? '' : 'none'; } }
+    updateRecenterChip();
     _updateCargoBadges();
 }
 // 第16弾: 搭載物ボタンの残数バッジ (×n=完成品 / 資材=組み立て可 / 秒=組み立て中 / 待機=完成・展開枠待ち / —=無し)
@@ -15966,6 +16018,8 @@ let _fpsLastTime = 0, _fpsFrameCount = 0, _fpsDisplay = 0;
 
 // ═══ ゲームループ: ロジック(stepWorld) と描画(renderWorld) を分離 ═══
 // 描画を伴わない高速シミュレーション(__simSteps)で数値バランスを検証できるようにするため。
+let _rcTick = 0;
+function _gameSpeedChanged() { /* 第72弾: 倍速ボタンのUI更新の受け口 (下の setGameSpeed から) */ }
 let _hitStop = 0; // 奇襲命中時のヒットストップ (ロジックだけ数フレーム止めて描画は続ける)
 function gameLoop() {
     try {
@@ -15982,6 +16036,7 @@ function gameLoop() {
             }
         }
         renderWorld();
+        if ((_rcTick = (_rcTick + 1) & 15) === 0) updateRecenterChip(); // 第72弾: 一時停止中でも更新する
     } catch (err) {
         console.error("Game loop error:", err);
         // エラー発生後もゲームループを継続する (一時的なエラーでフリーズしない)
@@ -16632,7 +16687,7 @@ function buyUpgrade(type) {
 
 // ── ゲームスピードトグル ──────────────────────────────────────
 function setGameSpeed(v) {
-    gameSpeed = GAME_SPEEDS.indexOf(v) >= 0 ? v : 1; _speedAcc = 0;
+    gameSpeed = GAME_SPEEDS.indexOf(v) >= 0 ? v : 1; _speedAcc = 0; _gameSpeedChanged();
     const lb = gameSpeed === 0.5 ? '0.5x' : gameSpeed + 'x';
     const sp = document.querySelector('#btn-game-speed span'); // ラベルだけ (旧: textContent で丸ごと置換しアイコンが消えていた)
     if (sp) sp.textContent = 'SPD:' + lb;
