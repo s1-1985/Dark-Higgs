@@ -1480,8 +1480,8 @@ const FTR_FIRE_CD = 7, FTR_DMG_SCALE = 0.3, FTR_BREAK_D = 220, FTR_EXTEND_F = 40
 const SCOUT_TURN = 0.03, SCOUT_ESCORT_R = 1800, SCOUT_LISTEN_R = 6000, SCOUT_WAKE_R = 2500, SCOUT_MSL_WARN_R = 3000, SCOUT_PING_R = 3500, SCOUT_PING_CD = 1800;
 // Tech (人型兵器): 推進器で全方向に動く・慣性あり。中=小銃3連射 / 遠=肩のミサイル (4発・自艦の近くで30秒に1発補充) / 近=ビームサーベル
 const TECH_TURN = 0.06, TECH_ACC = 0.07, TECH_DASH_V = 8, TECH_ENGAGE_R = 2000, TECH_KEEP_D = 650, TECH_DASH_START = 1100, TECH_SABER_R = 170;
-const TECH_RIFLE_RANGE = 1000, TECH_RIFLE_SCALE = 0.5, TECH_RIFLE_CD = 120, TECH_MSL_MIN = 900, TECH_MSL_RANGE = 1900, TECH_MSL_SCALE = 0.75, TECH_MSL_CD = 720, TECH_MSL_MAX = 3, TECH_MSL_REARM = 1800, TECH_SABER_N = 5; // 第52弾: ミサイル3発・サーベル5回・弾の補給は資材で (自動補充は撤去)
-const TECH_SABER_DMG = 260, TECH_SABER_CD = 600, TECH_SABER_RETRY = 240;
+const TECH_RIFLE_RANGE = 1000, TECH_RIFLE_SCALE = 0.2, TECH_RIFLE_CD = 120, TECH_MSL_MIN = 900, TECH_MSL_RANGE = 1900, TECH_MSL_SCALE = 0.3, TECH_MSL_CD = 720, TECH_MSL_MAX = 3, TECH_MSL_REARM = 1800, TECH_SABER_N = 5; // 第52弾: ミサイル3発・サーベル5回・弾の補給は資材で (自動補充は撤去)
+const TECH_SABER_DMG = 100, TECH_SABER_CD = 600, TECH_SABER_RETRY = 240;
 const DRONE_CLOSE_SENSE = 700, DRONE_CHASE_MEM = 480; // 至近の探知 / 見失ってから追う時間 (8秒)
 const ENEMY_ANTI_TECH_R = 2000, ENEMY_ANTI_TECH_CD = 600; // 敵がTechをミサイルで迎撃する距離・間隔 (攻撃型は×0.6)
 // 第50弾 (オーナー): ドローンと母艦の距離のリスク — 近い間は自艦のAIで動く (性能100%・自艦のEM/熱がわずかに上がる)。離れすぎる/どちらかが濃い霧の中だと通信が途絶え、
@@ -1509,6 +1509,7 @@ const DRONE_AUTO_HIT = 0.6, DRONE_AUTO_EVADE = 0.6;            // 自動制御�
 const DRONE_AMMO = { attack: 50, mech: 50 };       // 第52弾: 戦闘機は実弾50発・Techは小銃50発 (+ミサイル3発・サーベル5回)
 const DRONE_RESUP_COST = { attack: 0.25, mech: 1 };  // 全弾補給の資材 (戦闘機0.25個・Tech1個。使った分の残りは「使いかけ」＝補給にしか使えない)
 //                 // 機銃/小銃の弾数 (戦闘機は約25秒の連射・Techは3連射×50回)
+const DRONE_RESUP_SEC = { attack: 60, mech: 120 }, DRONE_REPAIR_SEC = { attack: 60, mech: 300 }; // 第75弾 (オーナー): 補給は時間がかかる (空になった状態から 戦闘機1分・Tech2分) / 空母の周りを周回している間だけ修理される (耐久1の状態から 戦闘機1分・Tech5分で全快)
 const DRONE_RESUP_R = 900, DRONE_RESUP_RATE = 3;               // 自艦のこの距離内で帰還/弾切れの間に補給 (1フレームに+3発 → 約1〜1.5秒)
 const DRONE_LINK_SHIP_EM = 0.02, DRONE_LINK_SHIP_HEAT = 0.01;  // 通信中のドローン1機あたり自艦のEM/熱に足す (最大4機)
 const DRONE_LINK_FULL = 3000, DRONE_LINK_LOST = 8000, DRONE_LINK_FOG = 0.7, DRONE_LINK_STRONG = 0.6, DRONE_LINK_WEAK = 0.15;
@@ -3319,7 +3320,7 @@ class Projectile {
         }
         // §3-6残: 敵弾がプレイヤードローンに被弾 (自機を外れた弾のみ判定)
         if (!this.isPlayer && this.active && playerDrones.length > 0) {
-            const hitDrone = playerDrones.find(d => d.hp > 0 && Math.hypot(d.x - this.x, d.y - this.y) < (d.type === 'mech' ? 40 : 24)); // 第74弾: Techは絵が大きいので当たり判定も大きく (旧: 全種18u)
+            const hitDrone = playerDrones.find(d => d.hp > 0 && Math.hypot(d.x - this.x, d.y - this.y) < (d.type === 'mech' ? 20 : 24)); // 第74弾: Techは絵が大きいので当たり判定も大きく (旧: 全種18u)
             if (hitDrone && !this._evaded && Math.random() < evadeChance(this.type, hitDrone) * (hitDrone._auto ? DRONE_AUTO_EVADE : 1)) this._evaded = true; // ドローンも速さで避ける
             if (hitDrone && !this._evaded) {
                 hitDrone.hp -= this.dmg; // 第22弾: 全威力 (旧0.8倍 — 「ミサイル何発で沈む」と合わなかった・敵の艦載機は全威力で非対称だった)
@@ -12844,14 +12845,23 @@ class Drone {
         const worth = this._rtb || this._ammo <= mx * 0.8 || (mech && ((this.msl || 0) < TECH_MSL_MAX || this._saberN < TECH_SABER_N));
         if (!worth) return;
         const cost = DRONE_RESUP_COST[this.type];
+        if (this._rsNeed > 0) { // 第75弾: 補給の作業中 (周回しながら進む)
+            this._rsT = (this._rsT || 0) + 1;
+            if (this._rsT < this._rsNeed) return;
+            this._rsNeed = 0; this._rsT = 0;
+            this._ammo = mx; if (mech) { this.msl = TECH_MSL_MAX; this._saberN = TECH_SABER_N; }
+            this._rtb = false; this._rtbSoft = false; _hudCache.cargo = null;
+            logMessage('DRONE: ' + _droneName(this) + ' 補給完了 — 戦線へ戻る', 'system-msg');
+            return;
+        }
         if (!spendResupplyMat(cost)) {
             if (this._rtbSoft) { this._rtb = false; this._rtbSoft = false; this._rtbBlock = _frameCount + 3600; } // 第74弾: 資材が無ければ補給を諦めて戦線へ (まだ撃てる)
             if (_frameCount - (this._noMatF || -1e9) > 1800) { this._noMatF = _frameCount; logMessage('DRONE: ' + _droneName(this) + ' 補給できない — 資材が足りない (必要' + cost + '個・使いかけ' + (Math.round(cargo.matScrap * 100) / 100) + '・資材' + cargo.mat + '個)', 'warning-msg'); }
             return;
         }
-        this._ammo = mx; if (mech) { this.msl = TECH_MSL_MAX; this._saberN = TECH_SABER_N; }
-        this._rtb = false; this._rtbSoft = false; _hudCache.cargo = null;
-        logMessage('DRONE: ' + _droneName(this) + ' 全弾補給 — 資材' + cost + '個を使った (使いかけ残り' + (Math.round(cargo.matScrap * 100) / 100) + '・資材' + cargo.mat + '個)', 'system-msg');
+        { const miss = mech ? Math.max(1 - this._ammo / mx, 1 - (this.msl || 0) / TECH_MSL_MAX, 1 - this._saberN / TECH_SABER_N) : 1 - this._ammo / mx;
+          this._rsNeed = Math.max(0.25, miss) * DRONE_RESUP_SEC[this.type] * 60; this._rsT = 0; } // 第75弾: 全弾補給ではなく、足りない分に応じた時間 (空なら戦闘機60秒・Tech120秒)
+        logMessage('DRONE: ' + _droneName(this) + ' 補給開始 (約' + Math.round(this._rsNeed / 60) + '秒) — 資材' + cost + '個を使った (使いかけ残り' + (Math.round(cargo.matScrap * 100) / 100) + '・資材' + cargo.mat + '個)', 'system-msg');
     }
     // 第50弾 (オーナー): ドローンが出すシグネチャ。小さいが、自動制御 (通信途絶) の間は熱とEMが増える。撃った直後は光
     sigOf(b) {
@@ -13076,7 +13086,10 @@ class Drone {
                 if (_why) { this._rtb = true; this._rtbSoft = true; tgt = null; logMessage('DRONE: ' + _droneName(this) + ' ' + _why + ' — 一旦補給に戻る', 'system-msg'); }
             }
             if (this._rtb) tgt = null;
-            if (_amMax && player && _ret && Math.hypot(player.x - this.x, player.y - this.y) < DRONE_RESUP_R) this._resupply(); // 第52弾: 補給は資材を使う
+            if (_amMax && player && _ret && Math.hypot(player.x - this.x, player.y - this.y) < DRONE_RESUP_R) {
+                this._resupply(); // 第52弾: 補給は資材を使う
+                if (gameState.shipType === 'carrier') droneRepairTick(this, this.type); // 第75弾: 空母の周りを周回している間だけ修理される
+            }
             if (_ret && !tgt) this._lastSeen = null;
             // 第36弾: 見失った敵は、最後に見た位置と動きから数秒追う (目の前で見失ってすぐ帰っていた)
             if (tgt) this._lastSeen = { e: tgt, x: tgt.x, y: tgt.y, vx: Math.cos(tgt.angle || 0) * (tgt.currentSpeed || tgt._spd || 0), vy: Math.sin(tgt.angle || 0) * (tgt.currentSpeed || tgt._spd || 0), f: _frameCount };
@@ -13366,7 +13379,7 @@ function enemyFighterStep(f) {
         f._seeT = tgt; f._seeF = _frameCount;
         if (tgt === player && carrier) { carrier.playerLastKnownPos = { x: player.x, y: player.y, vx: 0, vy: 0 }; carrier.contactFreshness = Math.max(carrier.contactFreshness || 0, 0.7); } // データリンクで母艦へ
     } else { tgt = f._seeT && f._seeT.hp > 0 ? f._seeT : null; if (tgt) td = Math.hypot(tgt.x - f.x, tgt.y - f.y); }
-    if (_rtbF) { tgt = null; if (carrier && Math.hypot(carrier.x - f.x, carrier.y - f.y) < DRONE_RESUP_R) { if (enemySpendMat(DRONE_RESUP_COST.attack)) f._ammo = DRONE_AMMO.attack; else if (f._ammo > 0) f._rtbBlock = _frameCount + 3600; } }
+    if (_rtbF) { tgt = null; if (carrier && Math.hypot(carrier.x - f.x, carrier.y - f.y) < DRONE_RESUP_R) { if (!enemyResupTick(f, 'attack') && f._ammo > 0) f._rtbBlock = _frameCount + 3600; if (carrier.type === 'carrier') { const mx = DRONE_SPEC.attack.hp; if (f.hp > 0 && f.hp < mx) f.hp = Math.min(mx, f.hp + mx / (DRONE_REPAIR_SEC.attack * 60)); } } }
     const fly = (tx, ty, vT, turn) => {
         const da = _angDiff(Math.atan2(ty - f.y, tx - f.x), f.angle);
         f.angle += Math.max(-turn, Math.min(turn, da));
@@ -13482,6 +13495,21 @@ function enemyScoutStep(f) {
     f.speed = f._v; f.currentSpeed = f._v; f._spd = f._v; f._movedF = _frameCount; f.state = 'moving';
     f.aiState = 'lurking';
 }
+// 第75弾: ドローンの修理 (空母の周りを周回して帰還/補給している間だけ) と、敵のドローンの補給 (時間がかかる・自機と同じ)
+function droneRepairTick(d, kind) {
+    const mx = DRONE_SPEC[kind].hp;
+    if (d.hp > 0 && d.hp < mx) d.hp = Math.min(mx, d.hp + mx / (DRONE_REPAIR_SEC[kind] * 60));
+}
+function enemyResupTick(f, kind) {
+    const mx = DRONE_AMMO[kind], mech = kind === 'mech';
+    if (!(f._rsNeed > 0)) {
+        if (!enemySpendMat(DRONE_RESUP_COST[kind])) return false;
+        const miss = mech ? Math.max(1 - f._ammo / mx, 1 - (f.msl || 0) / TECH_MSL_MAX, 1 - (f._saberN || 0) / TECH_SABER_N) : 1 - f._ammo / mx;
+        f._rsNeed = Math.max(0.25, miss) * DRONE_RESUP_SEC[kind] * 60; f._rsT = 0;
+    }
+    if (++f._rsT >= f._rsNeed) { f._ammo = mx; if (mech) { f.msl = TECH_MSL_MAX; f._saberN = TECH_SABER_N; } f._rsNeed = 0; f._rsT = 0; }
+    return true;
+}
 function enemyTechStep(f) {
     f.visible = false; if (f.fireFlashTimer > 0) { f.fireFlashTimer--; f.visible = true; }
     if (f.fireCD > 0) f.fireCD--;
@@ -13499,7 +13527,7 @@ function enemyTechStep(f) {
     // 第52弾: 小銃・ミサイル・サーベルが全部尽きたら母艦へ戻り、資材1個で全弾補給 (自機のTechと同じ)
     const _emptyT = f._ammo <= 0 && (f.msl || 0) <= 0; // 第54弾: 小銃とミサイルが尽きたら戻る
     if (_emptyT) tgt = null;
-    if ((_emptyT || (f._ammo <= DRONE_AMMO.mech * 0.2 && !tgt)) && Math.hypot(carrier.x - f.x, carrier.y - f.y) < DRONE_RESUP_R) { if (enemySpendMat(DRONE_RESUP_COST.mech)) { f._ammo = DRONE_AMMO.mech; f.msl = TECH_MSL_MAX; f._saberN = TECH_SABER_N; } }
+    if ((_emptyT || (f._ammo <= DRONE_AMMO.mech * 0.2 && !tgt)) && Math.hypot(carrier.x - f.x, carrier.y - f.y) < DRONE_RESUP_R) { enemyResupTick(f, 'mech'); if (carrier.type === 'carrier') { const mx = DRONE_SPEC.mech.hp; if (f.hp > 0 && f.hp < mx) f.hp = Math.min(mx, f.hp + mx / (DRONE_REPAIR_SEC.mech * 60)); } }
     let gx, gy;
     if (_emptyT) { gx = carrier.x; gy = carrier.y; f.aiState = 'lurking'; const ma0 = Math.atan2(gy - f.y, gx - f.x); f.angle += Math.max(-TECH_TURN, Math.min(TECH_TURN, _angDiff(ma0, f.angle))); }
     else if (tgt) {
