@@ -427,7 +427,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261110a';
+const SPRITE_VER = '20261110b';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -2325,7 +2325,7 @@ function _esc(t) { return String(t).replace(/[&<>]/g, c => ({ '&': '&amp;', '<':
 function updateZoomFab() {
     const sub = document.getElementById('zoom-fab-sub'), ico = document.getElementById('zoom-fab-ico'), fab = document.getElementById('zoom-fab'); if (!fab) return;
     const lb = gameSpeed === 0.5 ? '0.5x' : gameSpeed + 'x';
-    if (ico) ico.textContent = userPaused ? 'Ⅱ' : '◐';
+    if (ico) ico.style.opacity = userPaused ? '0.35' : '1'; // 停止中はアイコンを薄くして「停止」と出す
     if (sub) sub.textContent = userPaused ? '停止' : (gameSpeed !== 1 ? lb : '');
     fab.classList.toggle('warn', userPaused || gameSpeed !== 1);
 }
@@ -2636,7 +2636,7 @@ class Structure {
     }
     draw(ctx) {
         const t = Date.now();
-        const hColor = this.hacked ? '#00aaff' : (this.owner === 'enemy' ? '#ff8844' : null);
+        const hColor = this.hacked ? '#00aaff' : (this._pObs === 'enemy' ? '#ff8844' : null); // 第72弾: 持ち主は見た/奪われた時だけ分かる
 
         // アイコンスケール: 最低20px画面サイズを保証（Stationと同様の視認性）
         const _iconS = Math.max(20, Math.min(28, camera.zoom * 28)) / (camera.zoom * 28);
@@ -2729,7 +2729,7 @@ class Structure {
         // ランドマークラベル: Station スタイルで最低9px確保
         ctx.save();
         ctx.translate(this.x, this.y);
-        const _lColor = this.type === 'colony' ? (this.hacked ? '#00ffcc' : this.owner === 'enemy' ? '#ff9955' : '#6699ff') : (this.salvaged ? '#00ffcc' : '#bb9966');
+        const _lColor = this.type === 'colony' ? (this.hacked ? '#00ffcc' : this._pObs === 'enemy' ? '#ff9955' : '#6699ff') : (this.salvaged ? '#00ffcc' : '#bb9966');
         // 第18弾: 引いた時は短い名前だけ・アイコンのすぐ上に (旧: 長い説明文を画面上60px上に大きく出していた)
         const _far = camera.zoom < LABEL_FAR_ZOOM;
         // 第28弾: 説明書きは消して名前だけ (オーナー)
@@ -7879,7 +7879,7 @@ function cargoBelowPlan() {
 }
 function nearestResupply(x, y) {
     let best = null, bd = Infinity, kind = '';
-    for (const c of structures) { if (c.type !== 'colony' || c.owner === 'enemy' || _colUsed(c, 'P')) continue; const d = Math.hypot(c.x - x, c.y - y); if (d < bd) { bd = d; best = c; kind = 'colony'; } }
+    for (const c of structures) { if (c.type !== 'colony' || c._pObs === 'enemy' || _colUsed(c, 'P')) continue; const d = Math.hypot(c.x - x, c.y - y); if (d < bd) { bd = d; best = c; kind = 'colony'; } }
     return best ? { obj: best, kind, d: bd } : null;
 }
 function updateResupply() {
@@ -8019,8 +8019,7 @@ function updateEnemyColonyCapture() {
             if (!st._partE) { st._partE = true; enemyOfferDraft(near, 'colony', st.x, st.y); } // 第33弾: 敵も初めて占有したコロニーで部品
             // 第26弾: 占有しただけでは回復も補給もしない (補給は _supply の流れで1つのコロニーにつき1回)
             matchRecEvent('colonyE', st.x, st.y, '敵がコロニーを占有' + (was === 'player' ? ' (自艦のを奪った)' : ''));
-            st._pObs = 'enemy'; // 第72弾: 奪われたことは通信途絶で分かる
-            if (was === 'player') { logMessage('COLONY: コロニーとの通信途絶 — 敵に奪われた (占有' + coloniesOwned('player') + 'つ)', 'warning-msg'); sfxOr('alm_colony_lost', 'alert'); updateColonyIntel(true); comClueLost(st.x, st.y, COLONY_HACK_R, 'コロニー'); }
+            if (was === 'player') { st._pObs = 'enemy'; logMessage('COLONY: コロニーとの通信途絶 — 敵に奪われた (占有' + coloniesOwned('player') + 'つ)', 'warning-msg'); sfxOr('alm_colony_lost', 'alert'); updateColonyIntel(true); comClueLost(st.x, st.y, COLONY_HACK_R, 'コロニー'); }
             if (comDemo) comThinkEvent('e', 'コロニーを占有 (' + coloniesOwned('enemy') + 'つ) — 自機の位置の手掛かりが増える', 'e' + near.uid);
         }
     }
@@ -10142,8 +10141,11 @@ function sonarOmniRange(level) { return OMNI_SONAR_RANGE[gameState.upgrades.sens
 function sonarDirRange(level) { return DIR_SONAR_MAX_RANGE * SONAR_FRAC * playerFx().sonar * genGain * (1 - getStormIntensity(player.x, player.y) * STORM_SONAR_DEGRADE) * SONAR_POWER[level].r; }
 // ═══ 第72弾 (オーナー「宇宙空間では音が伝わらない — 各センサーと同じ種類のソナーを飛ばす」) ═══
 //   ソナーは 熱・光・EM・ヒッグス の4種。種類を選ばないと打てない。打つと、その種類の信号を出している対象だけが反応する
-//   (熱源ソナーは熱を出している物=熱核エンジンの艦・熱泉 / EMエンジンの艦は熱をほとんど出さないので映らない)。反応の強さ = 出している強さ (SONAR_MIN_EMIT 未満は映らない)
-const SONAR_MIN_EMIT = 0.07, SONAR_BANDS = ['heat', 'optic', 'em', 'higgs'];
+//   (熱源ソナーは熱を出している物=熱核エンジンの艦・熱泉 / EMエンジンの艦は熱をほとんど出さないので映らない)。反応の強さ = 出している強さ (SONAR_MIN 未満は映らない)
+// 実測 (巡航・霧10%): 熱 熱核0.34〜0.51 / 他のエンジン0.04〜0.16 ・光 フォトン0.21〜0.37 / 他0.01〜0.12 ・EM パルス0.59〜0.66 / 他0.25〜0.37 ・ヒッグス ヒッグス(霧60%)0.2 / 他≤0.13 → その種類を主に出すエンジンだけが超える線
+const SONAR_MIN = { heat: 0.22, optic: 0.17, em: 0.45, higgs: 0.15 };
+function sonarEmitAcc(emit, band) { return Math.min(1, 0.5 + 0.5 * emit / (SONAR_MIN[band] * 2)); }
+const SONAR_BANDS = ['heat', 'optic', 'em', 'higgs'];
 const SONAR_BAND_JP = { heat: '熱源', optic: '光', em: '電磁波', higgs: 'ヒッグス' }, SONAR_BAND_HEX = { heat: '#ffa03c', optic: '#3cffb4', em: '#e664ff', higgs: '#3cf0ff' }, SONAR_BAND_RGB = { heat: '255,160,60', optic: '60,255,180', em: '230,100,255', higgs: '60,240,255' };
 let sonarBand = null; // 選んだソナーの種類 (null=未選択 → 打てない)
 function sonarFieldBand(f) { return f.kind === 'cache' ? 'any' : f.kind === 'cloud' ? 'higgs' : f.kind === 'storm' ? 'em' : f.kind === 'vent' ? 'heat' : null; } // 自然の信号が出している帯域
@@ -10176,9 +10178,9 @@ function fireOmniSonar(power, band) {
         const dist = Math.hypot(e.x - player.x, e.y - player.y);
         if (dist > omniRange) return;
         const emit = sigPeak(e, band); // この種類の信号を出していなければ映らない
-        if (emit < SONAR_MIN_EMIT) { quiet++; return; }
+        if (emit < SONAR_MIN[band]) { quiet++; return; }
         const higgsBlock = getHiggsIntensity((e.x + player.x) / 2, (e.y + player.y) / 2);
-        const acc = calcAccuracy(dist, omniRange, 0.6, higgsBlock) * Math.min(1, 0.55 + emit * 0.9);
+        const acc = calcAccuracy(dist, omniRange, 0.6, higgsBlock) * sonarEmitAcc(emit, band);
         pingContact(e, acc, dist);
         detected++;
     });
@@ -10239,9 +10241,9 @@ function fireDirectionalSonar(targetAngle, power, band) {
         while (diff >  Math.PI) diff -= Math.PI * 2;
         if (Math.abs(diff) > halfAngle) return;
         const emit = sigPeak(e, band); // 第72弾: その種類の信号を出していなければ映らない
-        if (emit < SONAR_MIN_EMIT) return;
+        if (emit < SONAR_MIN[band]) return;
         const higgsBlock = getHiggsIntensity((e.x + player.x) / 2, (e.y + player.y) / 2);
-        const acc = calcAccuracy(dist, maxRange, 0.5, higgsBlock) * Math.min(1, 0.55 + emit * 0.9);
+        const acc = calcAccuracy(dist, maxRange, 0.5, higgsBlock) * sonarEmitAcc(emit, band);
         pingContact(e, acc, dist);
         detected++;
     });
@@ -13894,7 +13896,7 @@ function firePingFromEnemy(e) {
         e._noiseLk = _isNoise ? e.playerLastKnownPos : null;
         e.contactFreshness = Math.max(e.contactFreshness, 0.85);
         logMessage(_isNoise ? '離脱: ノイズメーカーが敵の探信に反射 — 敵はそちらを掴んだ' : 'DECOY: デコイが偽エコー反射 — 敵ソナーを誤誘導', 'system-msg');
-    } else if (distP < ENEMY_PING_RANGE && _inCone && sigPeak(player, _eBand) < SONAR_MIN_EMIT) {
+    } else if (distP < ENEMY_PING_RANGE && _inCone && sigPeak(player, _eBand) < SONAR_MIN[_eBand]) {
         // 第72弾: その種類の信号を出していない自艦は映らない (敵の探信を空振りさせられる)
         logMessage('TAC: 敵の' + SONAR_BAND_JP[_eBand] + 'ソナーに自艦は映らなかった — ' + SONAR_BAND_JP[_eBand] + 'を出していない', 'system-msg');
     } else if (distP < ENEMY_PING_RANGE && _inCone) {
@@ -14837,7 +14839,7 @@ function comPickStrat(c, P, x, hpF) {
 function _comSites(P) {
     const out = [];
     for (const s of structures) {
-        if (s.type === 'colony' && s.owner !== 'player') out.push({ x: s.x, y: s.y, lbl: s.owner === 'enemy' ? '敵のコロニー' : 'コロニー', w: 1.2 });
+        if (s.type === 'colony' && s.owner !== 'player') out.push({ x: s.x, y: s.y, lbl: s._pObs === 'enemy' ? '敵のコロニー' : 'コロニー', w: 1.2 });
         else if (s.type === 'derelict' && s.discovered && !s.salvaged) out.push({ x: s.x, y: s.y, lbl: '難破船', w: 1 });
     }
     for (const n of resourceNodes) if (n.owner !== 'player') out.push({ x: n.x, y: n.y, lbl: 'ノード', w: 0.8 });
@@ -15182,7 +15184,7 @@ function comPilotStep() {
             }
             else { // 第66弾: 補給できるコロニーが無い (全部使用済み/敵のもの) → 一番近いコロニーへ行って、復活を待つか奪い返す
                 let bc = null, bd2 = Infinity;
-                for (const st of structures) { if (st.type !== 'colony') continue; const d2 = Math.hypot(st.x - player.x, st.y - player.y) + (st.owner === 'enemy' ? 12000 : 0); if (d2 < bd2) { bd2 = d2; bc = st; } }
+                for (const st of structures) { if (st.type !== 'colony') continue; const d2 = Math.hypot(st.x - player.x, st.y - player.y) + (st._pObs === 'enemy' ? 12000 : 0); if (d2 < bd2) { bd2 = d2; bc = st; } }
                 if (bc) { c.mode = 'supply'; _comCMOff(); _comGoTo(bc, RESUPPLY_R * 0.5, c); comThink('p', 'supply', '弾が尽きた・補給できるコロニーが無い → 一番近いコロニーへ (使用済みは300秒で復活・敵のものは奪う)'); _comStance(c, P); return; }
             }
         }
@@ -15420,6 +15422,13 @@ function comStallTour(c, P, D, hpF, contact) {
     if (contact || c.datum) { c.tourT = null; return false; }
     const quiet = now - Math.max(c.lastContactF || 0, (huntStats && huntStats.startFrame) || 0), stallT = (240 + 360 * D.still) * 60;
     if (quiet < stallT) return false;
+    // 第72弾 (オーナー「隠れ合うだけで接触しない」→ A案+C案を漏れの無い形で): 長く気配が無ければ、ごく弱いソナーを時々打つ = 「あえて少しだけ音を出す」。
+    //   弱い出力は聞かれる距離が短い (約3000u) ので露出は小さいが、近くに居れば相手が寄ってくる。種類は順に回す (相手の位置・エンジンは使わない)。
+    //   拠点の取り合いと合わせて接触が生まれる。待ち伏せの置き場所を相手の動きに寄せることはしない (位置の漏れになるため)。
+    if (quiet > stallT * 1.15 && now - (c.nudgeF || -1e9) > 10800 && omniSonarCooldown <= 0 && playerExposureLevel < 2) {
+        c.nudgeF = now; const nb = comSonarBand(c); fireOmniSonar('weak', nb);
+        comThinkEvent('p', Math.round(quiet / 3600) + '分 気配が無い → あえて弱い' + SONAR_BAND_JP[nb] + 'ソナーを打つ (聞かれる距離は短い・近くに居れば相手が寄ってくる)');
+    }
     let t = c.tourT;
     if (t && t.owner === 'player') t = c.tourT = null;
     if (!t) {

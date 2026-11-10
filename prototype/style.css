@@ -2762,3 +2762,8 @@ body.in-game #zoom-ctl #zoom-fab.warn { border-color: #ffcc55; }
 #btn-scan.no-band, #btn-dir-sonar.no-band { opacity: 0.45; }
 #action-popover.shake { animation: apShake 0.4s; }
 @keyframes apShake { 0%,100% { transform: translateX(0); } 20% { transform: translateX(-5px); } 40% { transform: translateX(5px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(3px); } }
+
+body.in-game #zoom-ctl #zoom-fab .ico { width: 22px; height: 22px; display: block; margin: -4px auto 0; }
+.sonar-band-btn .sb-mark { background: transparent; border: 1px solid currentColor; color: currentColor; }
+.sonar-band-btn.on .sb-mark { background: currentColor !important; color: #02130e !important; }
+.sonar-band-btn.on .sb-mark, .sonar-band-btn.on span { text-shadow: none; }

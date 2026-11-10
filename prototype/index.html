@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261110a">
+    <link rel="stylesheet" href="style.css?v=20261110b">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -333,7 +333,7 @@
                     <button id="zoom-in" onclick="zoomStep(1.6)" title="拡大 (+)">＋</button>
                     <button id="zoom-out" onclick="zoomStep(1 / 1.6)" title="縮小 (−)">－</button>
                 </div>
-                <button id="zoom-fab" title="倍速・一時停止・拡大縮小 (タップで開く)"><span id="zoom-fab-ico">◐</span><small id="zoom-fab-sub"></small></button>
+                <button id="zoom-fab" title="倍速・一時停止・拡大縮小 (タップで開く)"><i class="ico" id="zoom-fab-ico" style="--ico:url(assets/icons/icon_speed.png)"></i><small id="zoom-fab-sub"></small></button>
             </div>
 
             <!-- GEN配分ドロワー (上帯のGENで開閉) — ゼロサム配分は「時々変える」設定なので常設しない -->
@@ -807,7 +807,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261110a"></script>
+    <script src="game.js?v=20261110b"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
