@@ -12882,7 +12882,7 @@ class Drone {
     // 艦首を目標の方位へ (旋回の速さに上限) 回し、艦首の向きにだけ進む。vT=目標の速さ
     _fly(tx, ty, vT, turn, acc) {
         const want = Math.atan2(ty - this.y, tx - this.x);
-        const da = ((want - this.angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+        const da = _angDiff(want, this.angle) /* 第77弾: 角度が±πを超えて貯まると % が負になり遠回りに旋回して小さな輪ができた */;
         this.angle += Math.max(-turn, Math.min(turn, da));
         this.v = (this.v || 0) + Math.max(-acc, Math.min(acc, vT - (this.v || 0)));
         this.x += Math.cos(this.angle) * this.v; this.y += Math.sin(this.angle) * this.v;
@@ -12932,7 +12932,7 @@ class Drone {
         let gx, gy, vmax = this.speed;
         if (tgt) {
             const d = Math.hypot(tgt.x - this.x, tgt.y - this.y), a = Math.atan2(tgt.y - this.y, tgt.x - this.x);
-            const da = ((a - this.angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+            const da = _angDiff(a, this.angle);
             this.angle += Math.max(-TECH_TURN, Math.min(TECH_TURN, da));
             const facing = Math.abs(da) < 0.35;
             if (this._dash > 0) {
@@ -12980,7 +12980,7 @@ class Drone {
                 gx = player.x + Math.cos(h) * rr; gy = player.y + Math.sin(h) * rr;
             } else { gx = this.x; gy = this.y; }
             const ma = Math.atan2(gy - this.y, gx - this.x);
-            if (Math.hypot(gx - this.x, gy - this.y) > 40) { const da = ((ma - this.angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI; this.angle += Math.max(-TECH_TURN, Math.min(TECH_TURN, da)); }
+            if (Math.hypot(gx - this.x, gy - this.y) > 40) { const da = _angDiff(ma, this.angle); this.angle += Math.max(-TECH_TURN, Math.min(TECH_TURN, da)); }
         }
         // ミサイルは自艦の近く (1500u) でゆっくり補充 (30秒に1発・最大4)
         // 推進: 目標点へ向かう速度に慣性で寄せる (止まる時も滑らかに減速)
