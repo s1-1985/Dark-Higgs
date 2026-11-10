@@ -1475,7 +1475,7 @@ const DRONE_VIS = { attack: 900, scout: 2000, mech: 1000, buoy: 800 }; // 第36�
 // 戦闘機: 一撃離脱。機首の前±12°に入った時だけ機銃。突き抜けて離脱し、旋回して次の航過。後退・停止はしない
 const FTR_TURN = 0.065, FTR_ACC = 0.12, FTR_ARC = 12 * Math.PI / 180, FTR_GUN_RANGE = 900, FTR_ENGAGE_R = 2200;
 const ENEMY_FTR_SPEED = 4.4; // 自機の戦闘機と同じ
-const FTR_FIRE_CD = 7, FTR_DMG_SCALE = 0.3, FTR_BREAK_D = 220, FTR_EXTEND_F = 40, FTR_REATTACK_D = 600; // 第49弾: 一撃離脱を短く (旧 260/80/1300 — 敵の周りを大きくぐるぐる回って攻撃が減っていた)
+const FTR_FIRE_CD = 7, FTR_DMG_SCALE = 0.42, FTR_BREAK_D = 220, FTR_EXTEND_F = 40, FTR_REATTACK_D = 600; // 第49弾: 一撃離脱を短く (旧 260/80/1300 — 敵の周りを大きくぐるぐる回って攻撃が減っていた)
 // 哨戒機: 機首の向きにだけ進む・自艦の前方を半径1800uで周回。聴音 (方位を送る)・航跡の検出・ミサイルの早期警戒・探信 (指示で1回)
 const SCOUT_TURN = 0.03, SCOUT_ESCORT_R = 1800, SCOUT_LISTEN_R = 6000, SCOUT_WAKE_R = 2500, SCOUT_MSL_WARN_R = 3000, SCOUT_PING_R = 3500, SCOUT_PING_CD = 1800;
 // Tech (人型兵器): 推進器で全方向に動く・慣性あり。中=小銃3連射 / 遠=肩のミサイル (4発・自艦の近くで30秒に1発補充) / 近=ビームサーベル
@@ -3320,7 +3320,7 @@ class Projectile {
         }
         // §3-6残: 敵弾がプレイヤードローンに被弾 (自機を外れた弾のみ判定)
         if (!this.isPlayer && this.active && playerDrones.length > 0) {
-            const hitDrone = playerDrones.find(d => d.hp > 0 && Math.hypot(d.x - this.x, d.y - this.y) < (d.type === 'mech' ? 20 : 24)); // 第74弾: Techは絵が大きいので当たり判定も大きく (旧: 全種18u)
+            const hitDrone = playerDrones.find(d => d.hp > 0 && Math.hypot(d.x - this.x, d.y - this.y) < (d.type === 'mech' ? 20 : 18)); // 第74弾: Techは絵が大きいので当たり判定も大きく (旧: 全種18u)
             if (hitDrone && !this._evaded && Math.random() < evadeChance(this.type, hitDrone) * (hitDrone._auto ? DRONE_AUTO_EVADE : 1)) this._evaded = true; // ドローンも速さで避ける
             if (hitDrone && !this._evaded) {
                 hitDrone.hp -= this.dmg; // 第22弾: 全威力 (旧0.8倍 — 「ミサイル何発で沈む」と合わなかった・敵の艦載機は全威力で非対称だった)
