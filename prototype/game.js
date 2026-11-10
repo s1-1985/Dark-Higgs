@@ -4383,7 +4383,7 @@ class Ship {
                     const ang = Math.atan2(_src.y - oy, _src.x - ox) + _gauss() * sig;
                     const _n0 = _sa.obs.length;
                     _addObs(_sa, ox, oy, ang, sig, detectedSigStrength, null, _relayPost && !_noiseSrc ? 'post' : undefined);
-                    _sa.ana = (_sa.ana || 0) + analysisPower('enemy', this) * (0.5 + 0.5 * _q) * (_sa.obs.length > _n0 ? ANA_NEWPOS : 1); // 第29弾: 解析量 (自艦と同じ式)
+                    { const _cpE = analysisPower('enemy', this); _sa.cp = _cpE; _sa.ana = (_sa.ana || 0) + anaRate(_cpE, conf, _sa.obs.length > _n0); } // 第29弾: 解析量 (自艦と同じ式・第72弾: 演算力×受け取りの質)
                     solveFix(_sa);
                     const est = trackEstimate(_sa, 0);
                     if (est) {
@@ -7736,7 +7736,7 @@ function trackEstimate(sa, ahead = 0) {
         const pxy = C[1] + dt * (C[3] + C[6]) + dt * dt * C[11];
         const tr = pxx + pyy, det = pxx * pyy - pxy * pxy;
         let r = 2 * Math.sqrt(Math.max(0, tr / 2 + Math.sqrt(Math.max(0, tr * tr / 4 - det)))) * Math.sqrt(Math.max(1, m.chi2));
-        r = Math.max(150, Math.hypot(x - ob.x, y - ob.y) * Math.max(CV_R_FLOOR, anaFloorFrac(sa.ana)), r); // 等速の仮定そのものの誤差ぶん・第29弾: 解析量の下限
+        r = Math.max(150, Math.hypot(x - ob.x, y - ob.y) * Math.max(CV_R_FLOOR, anaFloorFrac(sa.ana, sa.cp)), r); // 等速の仮定そのものの誤差ぶん・第29弾: 解析量の下限
         return { x, y, r, vx: m.vx, vy: m.vy, moving: true };
     }
     const f = sa.fix;
@@ -7746,7 +7746,7 @@ function trackEstimate(sa, ahead = 0) {
     // 動いている仮定でも記録が同じくらい説明できるなら、その仮定の位置まで円を広げる (どちらか分からない、が正直な答え)
     const a = sa.alt;
     if (a && !f.fromMotion) { const ta = now - a.f + ahead; r = Math.max(r, Math.hypot(a.x + a.vx * ta - f.x, a.y + a.vy * ta - f.y) + 150); }
-    r = Math.max(r, Math.hypot(f.x - ob.x, f.y - ob.y) * anaFloorFrac(sa.ana)); // 第29弾: 解析量の下限
+    r = Math.max(r, Math.hypot(f.x - ob.x, f.y - ob.y) * anaFloorFrac(sa.ana, sa.cp)); // 第29弾: 解析量の下限 (第72弾: 演算力)
     return { x: f.x, y: f.y, r, vx: 0, vy: 0, moving: false };
 }
 // 追跡ボタンの幅表示 (±850 / ±1.2k)
@@ -9272,11 +9272,21 @@ function enemyCaptureNode(e, n) {
 // 解析量は方位を受けるたびに貯まる。1秒あたりの演算力 (1 + コロニー1つごとに+35%・最大3つ) を受信中の信号で分け合う
 // (追跡中の信号に半分・残りを他で等分)。強い信号ほど・場所を変えて聴いた方位ほど多く貯まる (実装で決めた値)。
 // 下限 = 距離 × (12% + 88%×exp(−解析量/6))。近づくだけでは絞れない / 囮やノイズメーカーは演算力を食う。敵も同じ式
-const ANA_MIN = 0.12, ANA_TAU = 6, ANA_COLONY = 0.35, ANA_NEWPOS = 1.5;
+const ANA_MIN = 0.12, ANA_TAU = 6, ANA_COLONY = 0.6, ANA_NEWPOS = 1.5; // 第72弾: コロニー1つの演算力 +0.35 → +0.6 (3つで 1.0 → 2.8)
+// 第72弾 (オーナー「演算力が低いと解析がなかなか終わらない・近づく/感度を上げると速い・コロニーで遠く弱い信号も解析できる」):
+//   解析の速さ = 演算力 × 受け取りの質。受け取りの質 qf = (確かさ conf − 最低ライン) ÷ (1 − 最低ライン) (conf は受信の強さ=距離・感度・経路の減衰で決まる)。
+//   最低ライン cmin = ANA_CMIN ÷ 演算力^0.6 — 演算力が低いと弱い信号 (遠い・感度が低い) は解析がまったく進まず、コロニーを取ると遠く弱い信号も進む。
+//   精度 (推定円の下限) も演算力で締まる。進捗 (名札の蛍光グリーン) = 解析量 ÷ ANA_FULL。自艦も敵も同じ式 (anaRate)。
+const ANA_CMIN = 0.34, ANA_RATE = 0.26, ANA_FULL = 12;
+const ANA_CONF_REF = 0.30; // 実測: 受け取りの確かさ conf は 近く=0.2〜0.25・中距離=0.1・遠く=0.05 前後 (最大でも0.3台) → 0.30 を「十分強い」とする
+function anaQf(cp, conf) { const sn = Math.min(1, conf / ANA_CONF_REF), cmin = ANA_CMIN / Math.pow(Math.max(0.3, cp), 0.6); return Math.max(0, (sn - cmin) / (1 - cmin)); }
+function anaRate(cp, conf, newPos) { return cp * anaQf(cp, conf) * ANA_RATE * (newPos ? ANA_NEWPOS : 1); }
+function anaProgress(sa) { return sa ? Math.max(0, Math.min(1, (sa.ana || 0) / ANA_FULL)) : 0; }
+function cpTotal() { return player ? analysisPower('player') : 1; } // 画面に出す「演算力」
 function analysisPower(side, who) { let ea = 0; if (side !== 'player') for (const e of enemies) if (e.pm && e.hp > 0) ea = Math.max(ea, e.pm.ana); // 第32弾: 解析コア (第33弾: 敵も)
     const fx = side === 'player' ? playerFx() : shipFx(who || enemies.find(e => e.hp > 0 && e.type !== 'fighter')); // 第39弾: 解析重視は解析の速さ×1.4
     return (1 + ANA_COLONY * Math.min(3, coloniesOwned(side)) + (side === 'player' ? PM.ana : ea)) * fx.anaSpeed; }
-function anaFloorFrac(ana) { return ANA_MIN + (1 - ANA_MIN) * Math.exp(-(ana || 0) / ANA_TAU); }
+function anaFloorFrac(ana, cp) { return Math.max(ANA_MIN * 0.5, (ANA_MIN + (1 - ANA_MIN) * Math.exp(-(ana || 0) / ANA_TAU)) / (0.7 + 0.3 * (cp || 1))); } // 第72弾: 演算力でも締まる
 function anaPct(ana) { return Math.round((1 - (anaFloorFrac(ana) - ANA_MIN) / (1 - ANA_MIN)) * 100); }
 const _RX_WORD = { heat: '熱源', optic: '光', em: '電磁波', higgs: '霧の乱れ' };
 const IDENT_MIN_N = 3, IDENT_WARN_P = 0.4;
@@ -9444,9 +9454,10 @@ function checkPassiveDetection() {
         const _n0 = (_signalAnalysis[c.sourceId] && _signalAnalysis[c.sourceId].obs.length) || 0;
         const sa = addBearingObs(c.sourceId, player.x, player.y, angle, sigma, c.sig, colorRgb);
         const _share = _shareOf(c.sourceId);
-        sa.ana = (sa.ana || 0) + _anaB * _share * (0.5 + 0.5 * conf) * (sa.obs.length > _n0 ? ANA_NEWPOS : 1); // 第29弾: 解析量
+        sa.cp = _anaB; const _qf = anaQf(_anaB, conf); sa._gate = _qf <= 0.02; sa._rate = anaRate(_anaB, conf, false) * _share;
+        sa.ana = (sa.ana || 0) + anaRate(_anaB, conf, sa.obs.length > _n0) * _share; // 第29弾: 解析量 (第72弾: 演算力×受け取りの質・弱い信号は進まない)
         solveFix(sa); // 第26弾: 追跡していない信号も解く (地図に複数の推定円を出すため。追跡中は方位が鋭いので円も小さい)
-        identStep(c.sourceId, tracked, c.nb || 1, sa, Math.max(0.2, Math.min(2, _anaB * _share * 2))); // 第23弾: 識別の手掛かり (第29弾: 演算力の取り分で速さが変わる)
+        identStep(c.sourceId, tracked, c.nb || 1, sa, Math.max(0.05, Math.min(2, _anaB * _share * 2 * Math.min(1, 0.25 + _qf * 1.2)))); // 第23弾: 識別の手掛かり (第29弾: 演算力の取り分で速さが変わる)
         if (_sigIdent[c.sourceId]) _sigIdent[c.sourceId].band = c.band; // 第40弾: 一番よく聞こえた帯域 (自然の信号の種類の手掛かり)
         if (tracked) {
             const _te = enemyBySid(c.sourceId);
@@ -9632,7 +9643,7 @@ function _drawEstCircle(ctx, sid, sa, locked) {
     for (let k = 0; k < 4; k++) { const a0 = k * Math.PI / 2, c0 = Math.cos(a0), s0 = Math.sin(a0); ctx.moveTo(cx + c0 * (R - 5 * inv), cy + s0 * (R - 5 * inv)); ctx.lineTo(cx + c0 * (R + 4 * inv), cy + s0 * (R + 4 * inv)); }
     ctx.stroke();
     // 名札 (円の上): 「SIG-xx 艦n%」だけ (第28弾: 説明書きは消す — オーナー)。中心に居るとは限らない
-    { const idn = identInfo(sid); queueTag(cx, cy - R, (locked ? 'LOCK ' : '') + 'SIG-' + sigNo(sid), idn.known ? idn.short : '不明', locked ? '#ff7a6a' : col, 'top', (locked ? 1 : 0.75) * sa._fa);
+    { const idn = identInfo(sid); queueTag(cx, cy - R, (locked ? 'LOCK ' : '') + 'SIG-' + sigNo(sid), idn.known ? idn.short : '不明', locked ? '#ff7a6a' : col, 'top', (locked ? 1 : 0.75) * sa._fa * heldAlpha, 0, anaProgress(sa), !!sa._gate);
       // 第44弾 (オーナー): 解析で艦影と特定した (艦影75%以上・または確認) 信号は、推定の中心に艦のしるしを霧の上に描く (中心に居るとは限らない。囮を艦と誤認していればそのまま艦として出る)
       if (idn.known && idn.p >= 0.75 && !(inPlayerVision(cx, cy) || droneVisionSees(cx, cy))) { // 第65弾 (オーナー「有視界の中で近いのに居ない所にゴースト」): 中心が見えているのに艦のしるしは出さない
           const gs = Math.max(120, 11 * inv);
@@ -10188,7 +10199,7 @@ function sigNo(sid) { if (!sid) return '??'; if (!_contactLabels[sid]) _contactL
 const TAG_BG = 'rgba(2,10,14,0.78)', TAG_FG = '#e6fbf5', TAG_SUB = '#9fc9c0';
 const _tagQ = [];
 // x,y はワールド座標。anchor: 'top' (点の上に置く) / 'right' (点の右に置く) / 'center'
-function queueTag(x, y, main, sub, col, anchor, alpha, dy) { if (_tagQ.length > 120) return; _tagQ.push({ x, y, main, sub, col, anchor: anchor || 'top', a: alpha == null ? 1 : alpha, dy: dy || 0 }); }
+function queueTag(x, y, main, sub, col, anchor, alpha, dy, prog, gate) { if (_tagQ.length > 120) return; _tagQ.push({ x, y, main, sub, col, anchor: anchor || 'top', a: alpha == null ? 1 : alpha, dy: dy || 0, prog: prog, gate: gate }); }
 function flushTags(ctx) {
     if (!_tagQ.length) return;
     const placed = [];
@@ -10208,26 +10219,31 @@ function flushTags(ctx) {
         }
         if (x + w < 0 || y + h < 0 || x > (cssW || 9999) || y > (cssH || 9999)) continue;
         placed.push({ x, y, w, h });
-        _tagBox(ctx, x, y, w, h, wm, t.main, t.sub, t.col, t.a);
+        _tagBox(ctx, x, y, w, h, wm, t.main, t.sub, t.col, t.a, t.prog, t.gate);
     }
     ctx.restore();
     _tagQ.length = 0;
 }
-function _tagBox(ctx, x, y, w, h, wm, main, sub, col, a) {
+function _tagBox(ctx, x, y, w, h, wm, main, sub, col, a, prog, gate) {
     ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
     ctx.globalAlpha = 0.9 * a; ctx.fillStyle = TAG_BG; _roundRect(ctx, x, y, w, h, 3); ctx.fill();
+    if (prog != null) { // 第72弾 (オーナー): 名札の黒い背景を解析の進捗バーに — 進むほど蛍光グリーンに染まる (完了で全体が光る・信号が弱くて進まない間は縞が止まる)
+        const pw = Math.max(0, Math.min(1, prog)) * (w - 2);
+        if (pw > 0.5) { ctx.save(); _roundRect(ctx, x, y, w, h, 3); ctx.clip(); ctx.globalAlpha = (prog >= 0.995 ? 0.62 + Math.sin(Date.now() * 0.006) * 0.12 : 0.5) * a; ctx.fillStyle = '#2cff8a'; ctx.fillRect(x + 1, y + 1, pw, h - 2); ctx.globalAlpha = 0.5 * a; ctx.fillStyle = '#b8ffd8'; ctx.fillRect(x + 1 + Math.max(0, pw - 2), y + 1, 2, h - 2); ctx.restore(); }
+        if (gate) { ctx.save(); _roundRect(ctx, x, y, w, h, 3); ctx.clip(); ctx.globalAlpha = 0.22 * a; ctx.strokeStyle = '#ff8a5a'; ctx.lineWidth = 1; ctx.beginPath(); for (let k = -h; k < w; k += 6) { ctx.moveTo(x + k, y + h); ctx.lineTo(x + k + h, y); } ctx.stroke(); ctx.restore(); }
+    }
     ctx.globalAlpha = a; ctx.fillStyle = col || '#5fe0c4'; ctx.fillRect(x, y + 2, 2, h - 4);
     ctx.font = 'bold 10px Orbitron, sans-serif'; ctx.fillStyle = col || TAG_FG; ctx.fillText(main, x + 6, y + h / 2 + 0.5);
     if (sub) { ctx.font = '9px Orbitron, sans-serif'; ctx.fillStyle = TAG_SUB; ctx.fillText(sub, x + 12 + wm, y + h / 2 + 0.5); }
 }
 // 画面座標の名札 (自艦リングなど)。anchor: 'center' / 'left' (sx が左端) / 'right' (sx が右端)
-function screenTag(ctx, sx, sy, main, sub, col, a, anchor) {
+function screenTag(ctx, sx, sy, main, sub, col, a, anchor, prog, gate) {
     ctx.save();
     ctx.font = 'bold 10px Orbitron, sans-serif'; const wm = ctx.measureText(main).width;
     let ws = 0; if (sub) { ctx.font = '9px Orbitron, sans-serif'; ws = ctx.measureText(sub).width; }
     const w = 10 + wm + (sub ? 6 + ws : 0), h = 16;
     const x = anchor === 'left' ? sx : anchor === 'right' ? sx - w : sx - w / 2;
-    _tagBox(ctx, x, sy - h / 2, w, h, wm, main, sub, col, a == null ? 1 : a);
+    _tagBox(ctx, x, sy - h / 2, w, h, wm, main, sub, col, a == null ? 1 : a, prog, gate);
     ctx.restore();
 }
 function ringMarkBearing(deg, col) {
@@ -10436,7 +10452,7 @@ function drawShipRing(ctx) {
             ctx.beginPath(); ctx.arc(cx + c * tip, cy + s2 * tip, 7, 0, Math.PI * 2); ctx.stroke();
             const _idn = identInfo(sid); // 第23弾: 識別 / 第40弾: 名札
             const lx = cx + c * (tip + 14), ly = cy + s2 * (tip + 14);
-            screenTag(ctx, lx, ly, 'SIG-' + sigNo(sid), _idn.txt, _idn.low ? '#ffcc66' : hex, fade, c > 0.3 ? 'left' : c < -0.3 ? 'right' : 'center');
+            screenTag(ctx, lx, ly, 'SIG-' + sigNo(sid), _idn.txt, _idn.low ? '#ffcc66' : hex, fade, c > 0.3 ? 'left' : c < -0.3 ? 'right' : 'center', anaProgress(_signalAnalysis[sid]), !!(_signalAnalysis[sid] && _signalAnalysis[sid]._gate));
         }
     }
     // (6) 測量ガイド: 追跡中の方位線に直交する2方向 (そちらへ動くと交点が締まる)。推定が十分に絞れたら消える
