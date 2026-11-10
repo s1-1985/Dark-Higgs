@@ -427,7 +427,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261109w';
+const SPRITE_VER = '20261110a';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -2824,7 +2824,7 @@ function nearMissBlast(x, y, byPlayer, dmg) {
         const d = Math.floor(dmg * NEAR_MISS_DMG);
         t.hp -= d;
         if (t === player) notePlayerHit('nearmiss', d, x, y, null);
-        if (huntStats) { if (byPlayer && t !== player) huntStats.dmgDealt += d; else if (!byPlayer && t === player) huntStats.dmgTaken += d; }
+        if (huntStats) { if (byPlayer && t !== player) { huntStats.dmgDealt += d; if (t.type !== 'fighter' && enemies.includes(t)) huntStats.dmgShip = (huntStats.dmgShip || 0) + d; } else if (!byPlayer && t === player) huntStats.dmgTaken += d; }
         effects.push({ x: t.x, y: t.y - 30, text: '至近弾 -' + d, life: 1.0, type: 'floatText', c: byPlayer ? '#ffcc66' : '#ff8866' });
         applyDaze(t, NEAR_MISS_DAZE, 'ミサイルの至近弾');
     };
@@ -2972,7 +2972,7 @@ class Projectile {
                 target.hp -= _beamDmg;
                 applyHitStatus(isPlayer, _beamShooter, 'beam', target); // 第60弾
                 if (isPlayer && target !== player && target.type !== 'fighter') matchRecEvent('hitE', target.x, target.y, '敵に命中: ビーム −' + _beamDmg + (_bStrike.preempt ? '・奇襲' : ''));
-                if (huntStats) { if (isPlayer && target !== player) huntStats.dmgDealt += _beamDmg; else if (!isPlayer && target === player) huntStats.dmgTaken += _beamDmg; }
+                if (huntStats) { if (isPlayer && target !== player) { huntStats.dmgDealt += _beamDmg; if (target.type !== 'fighter' && enemies.includes(target)) huntStats.dmgShip = (huntStats.dmgShip || 0) + _beamDmg; } else if (!isPlayer && target === player) huntStats.dmgTaken += _beamDmg; }
                 // 被弾方向インジケータ (敵ビームが自機に命中)
                 if (!isPlayer && target === player) {
                     notePlayerHit('beam', _beamDmg, x, y, _bStrike);
@@ -3199,7 +3199,7 @@ class Projectile {
             if (this.emp) applyDaze(hitTarget, 480, 'EMP弾頭'); // 第32弾 (第33弾: 敵のEMPも)
             applyHitStatus(this.isPlayer, this.owner, this.type, hitTarget); // 第60弾: 状態異常の弾
             if (this.isPlayer && hitTarget !== player && hitTarget.type !== 'fighter' && hitTarget.maxHp) matchRecEvent('hitE', hitTarget.x, hitTarget.y, '敵に命中: ' + (_HIT_JP[this.type] || this.type) + ' −' + _hitDmg + (preemptive ? '・奇襲' : ''));
-            if (huntStats) { if (this.isPlayer) huntStats.dmgDealt += _hitDmg; else if (hitTarget === player) huntStats.dmgTaken += _hitDmg; }
+            if (huntStats) { if (this.isPlayer) { huntStats.dmgDealt += _hitDmg; if (hitTarget && hitTarget.type !== 'fighter' && enemies.includes(hitTarget)) huntStats.dmgShip = (huntStats.dmgShip || 0) + _hitDmg; } else if (hitTarget === player) huntStats.dmgTaken += _hitDmg; }
             // 被弾方向インジケータ: どの方位から撃たれたか (自機のみ)
             if (!this.isPlayer && hitTarget === player) {
                 notePlayerHit(this.type, _hitDmg, this.ox, this.oy, _strike, this.owner && this.owner.type === 'fighter');
@@ -4461,7 +4461,7 @@ class Ship {
                     const _hk = this.playerLastKnownPos; // 推定位置へ向かう (旧: 真の座標を参照していた)
                     this.huntTarget = { x: _hk.x, y: _hk.y };
                 }
-                this.huntTimer = 480 + Math.floor(detectedSigStrength * 300);
+                this.huntTimer = Math.max(this.huntTimer || 0, 480 + Math.floor(detectedSigStrength * 300)); // 第71弾: 長い追跡の残り時間を短く上書きしない
                 const _distBelief = Math.hypot(this.playerLastKnownPos.x - this.x, this.playerLastKnownPos.y - this.y);
                 if (_distBelief < 1800 || detectedSigStrength > 0.6) {
                     if (this.aiState !== 'combat') {
@@ -4530,7 +4530,9 @@ class Ship {
                 const near = lkH && this.contactFreshness > 0.8 && Math.hypot(lkH.x - this.x, lkH.y - this.y) < 1200;
                 if (near && this._hiding) {
                     // 至近まで来られたら潜伏を解いて応戦
-                    this._hideT = 0; this._hiding = false;
+                    // 第71弾: 応戦を始めたら20秒は潜り直さない (旧: 退き際の判定が毎フレーム潜伏を掛け直し、潜伏⇔応戦を往復して撃ちも隠れもしなかった)
+                    this._hideT = 0; this._hiding = false; this._hideCD = Math.max(this._hideCD || 0, 1200);
+                    if (comDemo) comThinkEvent('e', '隠れ場所まで踏み込まれた → 潜伏を解いて応戦する', 'e' + this.uid);
                 } else {
                     const dH = Math.hypot(hs.x - this.x, hs.y - this.y);
                     if (dH > 200) {
@@ -4655,7 +4657,7 @@ class Ship {
                         }
                     }
                     // 第17弾: 近くに濃い霧/岩礁帯があればそこへ潜む (ノードより優先。ノードは位置が知られている)
-                    if (!(this._hideCD > 0) && this.type !== 'fighter') {
+                    if (!(this._hideCD > 0) && !(this._hideT > 0) && this.type !== 'fighter') {
                         const lkC = this.playerLastKnownPos;
                         const cs = findCoverSpot(this.x, this.y, ENEMY_HIDE_SEARCH, lkC ? Math.atan2(lkC.y - this.y, lkC.x - this.x) : null);
                         if (cs) { this._hideSpot = cs; this._hideT = ENEMY_HIDE_TIME; this._hiding = false; if (comDemo) comThinkEvent('e', '耐久' + _pct(hpFrac) + ' < 退き際' + _pct(retreatThresh) + ' → 近くの' + (cs.kind === 'fog' ? '濃い霧' : '岩礁帯') + 'に潜んで修復する', 'e' + this.uid);
@@ -4854,7 +4856,19 @@ class Ship {
                 // シグネチャ喪失 → lurking
                 if (!playerSigDetected) {
                     this.huntTimer = Math.max(0, this.huntTimer - 1);
-                    if (this.huntTimer <= 0) { this.aiState = 'lurking'; this.lurking = true; this.alertLogged = false; if (_frameCount > (this._alertUntil || 0)) this.detectionState = 'unaware'; if (comDemo && this.type !== 'fighter') comThinkEvent('e', '自機の音が途絶えた → 交戦を解いて潜伏へ (残り香を追う)', 'e' + this.uid); }
+                    if (this.huntTimer <= 0) {
+                        // 第71弾: 見失ってもすぐ潜伏へ戻らず、最後の推定位置まで追って周りを捜す (性格と形勢で 20〜130秒)。
+                        //   旧: 8〜10秒で潜伏へ戻り、数秒後にまた交戦…を繰り返して決着が付かなかった
+                        const _lkP = this.playerLastKnownPos;
+                        if (this.type !== 'fighter' && !desperate && _lkP) {
+                            const _ps = outmatched ? 20 : Math.max(20, 25 + pers.aggression * 60 + (killInstinct ? 45 : 0) - (pers.stealth || 0) * 20);
+                            this.aiState = 'hunting'; this.lurking = false; this.huntTarget = { x: _lkP.x, y: _lkP.y }; this._huntSearched = true; this.huntTimer = Math.round(_ps * 60);
+                            this._pursue = killInstinct ? 'kill' : 'chase';
+                            if (comDemo) comThinkEvent('e', '自機の音が途絶えた → 最後の推定位置へ追って捜す (' + Math.round(_ps) + '秒' + (killInstinct ? '・相手は手負い — 仕留めに行く' : '') + ')', 'e' + this.uid);
+                        } else {
+                            this.aiState = 'lurking'; this.lurking = true; this.alertLogged = false; if (_frameCount > (this._alertUntil || 0)) this.detectionState = 'unaware'; if (comDemo && this.type !== 'fighter') comThinkEvent('e', '自機の音が途絶えた → 交戦を解いて潜伏へ (残り香を追う)', 'e' + this.uid);
+                        }
+                    }
                 } else {
                     this.huntTimer = Math.min(600, this.huntTimer + 2);
                 }
@@ -4886,12 +4900,12 @@ class Ship {
                     if (dist > this.speed * 2) {
                         const ta = Math.atan2(this.huntTarget.y - this.y, this.huntTarget.x - this.x);
                         const _msN = this._maxSpeeds();
-                        this._moveHeading(ta, _msN ? Math.min(this.speed, _msN.cruise) : this.speed); // 第22弾: 追う時は巡航まで
+                        this._moveHeading(ta, _msN ? (this._pursue === 'kill' ? _msN.flank : Math.min(this.speed, _msN.cruise)) : this.speed); // 第22弾: 追う時は巡航まで (第71弾: 手負いを仕留めに行く時は全速)
                     } else {
                         this.huntTarget = null;
                     }
                 }
-                if (this.huntTimer <= 0 && !playerSigDetected) { this.aiState = 'lurking'; this.lurking = true; if (_frameCount > (this._alertUntil || 0)) this.detectionState = 'unaware'; }
+                if (this.huntTimer <= 0 && !playerSigDetected) { this.aiState = 'lurking'; this.lurking = true; if (this._pursue && comDemo && this.type !== 'fighter') comThinkEvent('e', '捜したが見つからない → 追跡をやめて潜伏へ', 'e' + this.uid); this._pursue = null; if (_frameCount > (this._alertUntil || 0)) this.detectionState = 'unaware'; }
 
             } else if (this.aiState === 'gathering') {
                 this.lurking = false;
@@ -7827,6 +7841,7 @@ function updateNodesAndColonies() {
     }
 }
 function captureNodeByPlayer(n) {
+    if (n.owner === 'enemy') enemyClueAt(n.x, n.y, 'ノード');
     n.owner = 'player'; n.capP = 0; n.emFlashTimer = 180; n.knownLost = false;
     matchRecEvent('nodeP', n.x, n.y, '自艦がノードを制圧');
     if (!n._partP) { n._partP = true; offerDraft('node'); addLootTrace(n.x, n.y, 'p', 'node'); } // 第32弾: 初めて制圧したノードで部品 (探知・電子戦が出やすい)
@@ -7839,6 +7854,7 @@ function captureNodeByPlayer(n) {
 }
 function hackColonyByPlayer(st) {
     const was = st.owner;
+    if (was === 'enemy') enemyClueAt(st.x, st.y, 'コロニー');
     st.hacked = true; st.owner = 'player'; st.hackP = 0; st.eHackP = 0;
     matchRecEvent('colonyP', st.x, st.y, '自艦がコロニーを占有' + (was === 'enemy' ? ' (敵から奪還)' : ''));
     if (!st._partP) { st._partP = true; offerDraft('colony'); addLootTrace(st.x, st.y, 'p', 'colony'); } // 第32弾: 初めて占有したコロニーで部品 (機関・船体が出やすい)
@@ -7908,7 +7924,7 @@ function updateEnemyColonyCapture() {
             if (!st._partE) { st._partE = true; enemyOfferDraft(near, 'colony', st.x, st.y); } // 第33弾: 敵も初めて占有したコロニーで部品
             // 第26弾: 占有しただけでは回復も補給もしない (補給は _supply の流れで1つのコロニーにつき1回)
             matchRecEvent('colonyE', st.x, st.y, '敵がコロニーを占有' + (was === 'player' ? ' (自艦のを奪った)' : ''));
-            if (was === 'player') { logMessage('COLONY: コロニーとの通信途絶 — 敵に奪われた (占有' + coloniesOwned('player') + 'つ)', 'warning-msg'); sfxOr('alm_colony_lost', 'alert'); updateColonyIntel(true); }
+            if (was === 'player') { logMessage('COLONY: コロニーとの通信途絶 — 敵に奪われた (占有' + coloniesOwned('player') + 'つ)', 'warning-msg'); sfxOr('alm_colony_lost', 'alert'); updateColonyIntel(true); comClueLost(st.x, st.y, COLONY_HACK_R, 'コロニー'); }
             if (comDemo) comThinkEvent('e', 'コロニーを占有 (' + coloniesOwned('enemy') + 'つ) — 自機の位置の手掛かりが増える', 'e' + near.uid);
         }
     }
@@ -8369,7 +8385,7 @@ function updateLull() {
                 if (sp) { e.setTarget(sp.x, sp.y); if (comDemo) comThinkEvent('e', '凪の予兆 → ' + sp.lbl + 'へ隠れる (' + _dirTxt(e.x, e.y, sp.x, sp.y) + ')', 'e' + e.uid); }
             } else if (comDemo) comThinkEvent('e', '凪の予兆 → 止まって見張る (晴れたら遠くまで見える)', 'e' + e.uid);
         }
-        if (comDemo && _com && _com.pp && _com.pp.stealth + _com.pp.caution >= 0.8 && player) {
+        if (comDemo && _com && _com.pp && _com.pp.stealth + _com.pp.caution >= 0.8 && player && !(_frameCount - (_com.pressF || -1e9) < 600)) { // 第71弾: 相手へ詰めている最中は隠れない
             const sp = lullShelterSpot(player.x, player.y, 6000);
             if (sp) { player.setTarget(sp.x, sp.y); comThinkEvent('p', '凪の予兆 → ' + sp.lbl + 'へ隠れる (' + _dirTxt(player.x, player.y, sp.x, sp.y) + ')'); }
         }
@@ -9230,7 +9246,7 @@ function enemyCaptureNode(e, n) {
     if (!n._matE) { n._matE = true; enemyAddMat(4); } // 第50弾B
     if (!n._partE) { n._partE = true; enemyOfferDraft(e, 'node', n.x, n.y); } // 第33弾: 敵も初めて制圧したノードで部品
     matchRecEvent('nodeE', n.x, n.y, '敵がノードを制圧');
-    if (wasMine) { n.knownLost = true; logMessage('聴音局: ノードとの通信途絶 — 敵に制圧された。敵の耳になる', 'warning-msg'); }
+    if (wasMine) { n.knownLost = true; logMessage('聴音局: ノードとの通信途絶 — 敵に制圧された。敵の耳になる', 'warning-msg'); comClueLost(n.x, n.y, NODE_CAP_R, 'ノード'); }
 }
 
 // 方位の記録を1本足す。同じ場所(180u・4秒以内)の再観測は1本にまとめて誤差を√nで縮める。
@@ -13086,7 +13102,7 @@ function updatePlayerDrones() {
     for (let i = playerDrones.length - 1; i >= 0; i--) {
         const d = playerDrones[i];
         d.update();
-        if (d.hp <= 0) { if (d.type === 'scout') scoutLost(d); playerDrones.splice(i, 1); } // 第21弾: 撃墜されるまで消えない (旧: 寿命40〜120秒で消えていた)
+        if (d.hp <= 0) { if (d.type === 'scout') scoutLost(d); comClueLost(d.x, d.y, 1200, (DRONE_SPEC[d.type] || {}).label || 'ドローン'); playerDrones.splice(i, 1); } // 第71弾: 落とされた所に相手が居る // 第21弾: 撃墜されるまで消えない (旧: 寿命40〜120秒で消えていた)
     }
 }
 // 第36弾 (オーナー): 哨戒機が落ちたら、哨戒機の観測だけで描いていた推定円と監視網の円は消える。
@@ -14989,6 +15005,7 @@ function comPilotStep() {
     }
     // 3) 撃つ
     const te = bestFireTarget(), lk = te ? playerLockInfo(te) : null;
+    comDatumNote(c, te, lk); // 第71弾: 相手を掴んだ位置を覚える
     if (comPlanStep(c, P, D, hpF, te, lk)) { _comStance(c, P); return; } // 第46弾: 作戦「囮で誘い背後を取る」
     let held = null;
     if (te && lk.full) {
@@ -15036,8 +15053,12 @@ function comPilotStep() {
             comThinkEvent('p', 'SIG-' + no + ' 命中予測' + _pct(hc) + ' ≥ 撃つ基準' + _pct(fireThr) + ' (攻撃性' + _pct(P.aggression) + ') → ' + _WPN_JP[w] + 'で撃つ (推定' + Math.round(lk.dist / 100) * 100 + 'u)');
             _comStance(c, P);
             return;
-        } else if (hc > 0) held = 'SIG-' + no + ' 命中予測' + _pct(hc) + ' < 撃つ基準' + _pct(fireThr) + ' → まだ撃たない';
+        } else if (hc >= fireThr) held = 'SIG-' + no + ' 命中予測' + _pct(hc) + ' — ' + _WPN_JP[w] + 'が装填中/弾切れ → まだ撃てない'; // 第71弾: 旧は「63% < 基準34%」と矛盾した文だった
+        else if (hc > 0) held = 'SIG-' + no + ' 命中予測' + _pct(hc) + ' < 撃つ基準' + _pct(fireThr) + ' → まだ撃たない';
     }
+    // 3b) 第71弾: 決着をつける — 掴んだ相手へ詰める / 見失ったら最後の推定位置を捜す (戦略より先)
+    if (comPressStep(c, P, D, hpF, te, lk, retreat, held, contact)) { _comStance(c, P); return; }
+    if (comStallTour(c, P, D, hpF, contact)) { _comStance(c, P); return; }
     // 4) 出す
     if (contact && (P.aggression >= 0.5 || P.caution >= 0.5 || playerExposureLevel >= 2) && now - c.lastDeploy > COM_DEPLOY_GAP && !(c.st && (c.st.id === 'ambush' || c.st.id === 'bait' || c.st.id === 'fogHide'))) _comDeploy(c, P); // 第58弾: 潜む戦略の間はドローンを出して信号を増やさない
     // 4b) 第58弾: 戦略テンプレート (待ち伏せ・餌・ドローン・霧に潜む・狩り・拠点防衛)。収集は従来どおり下の流れ
@@ -15191,6 +15212,121 @@ function comPilotStep() {
         comThink('p', 'xo-' + r.tone + r.text.replace(/[\d.±]+/g, '#'), 'AI「' + r.text + '」→ 今の航路を続ける');
     }
     _comStance(c, P);
+}
+// 第71弾: 拠点を奪われた = その瞬間、相手はそこに居た (通信途絶で分かる・観測できる手掛かり)。自機COMも敵も同じ
+function comClueLost(x, y, r, lbl) {
+    if (!comDemo || !_com || !player || player.hp <= 0) return;
+    _com.datum = { x, y, r, f: _frameCount, vx: 0, vy: 0, pinged: false, n: 0, sid: null, clue: lbl };
+    comThinkEvent('p', lbl + 'との通信途絶 — 相手は今そこに居る (' + _dirTxt(player.x, player.y, x, y) + '・' + Math.round(Math.hypot(x - player.x, y - player.y) / 100) * 100 + 'u)');
+}
+function enemyClueAt(x, y, lbl) {
+    for (const e of enemies) {
+        if (e.hp <= 0 || e._dying || e.type === 'fighter' || e.aiState === 'combat' || e._hideT > 0) continue;
+        const pp = _enemyPersonality(e);
+        e.playerLastKnownPos = { x, y }; e.contactFreshness = Math.max(e.contactFreshness || 0, 0.6);
+        e.aiState = 'hunting'; e.lurking = false; e.gatherTarget = null; e.huntTarget = { x, y }; e._huntSearched = true; e._pursue = 'chase';
+        e.huntTimer = Math.max(e.huntTimer || 0, Math.round((40 + 60 * pp.aggression) * 60) + Math.round(Math.hypot(x - e.x, y - e.y) / 0.6));
+        if (comDemo) comThinkEvent('e', lbl + 'との通信途絶 — 自機は今そこに居る → 向かう (' + _dirTxt(e.x, e.y, x, y) + '・' + Math.round(Math.hypot(x - e.x, y - e.y) / 100) * 100 + 'u)', 'e' + e.uid);
+    }
+}
+// 第71弾: 長く気配が無ければ、相手も寄る所 (自分のものでないコロニー・ノード) を順に取りに行く。
+//   旧: 待ち伏せと捜索を繰り返すだけで、30分間どちらも相手を聞かない試合があった。拠点を取り合えば「通信途絶」の手掛かりが出る
+function comStallTour(c, P, D, hpF, contact) {
+    const now = _frameCount;
+    if (contact || c.datum) { c.tourT = null; return false; }
+    const quiet = now - Math.max(c.lastContactF || 0, (huntStats && huntStats.startFrame) || 0), stallT = (240 + 360 * D.still) * 60;
+    if (quiet < stallT) return false;
+    let t = c.tourT;
+    if (t && t.owner === 'player') t = c.tourT = null;
+    if (!t) {
+        let bd = 1e9;
+        for (const st of structures) { if (st.type !== 'colony' || st.owner === 'player') continue; const d = Math.hypot(st.x - player.x, st.y - player.y); if (d < bd) { bd = d; t = st; } }
+        for (const n of resourceNodes) { if (n.owner === 'player') continue; const d = Math.hypot(n.x - player.x, n.y - player.y) * 1.4; if (d < bd) { bd = d; t = n; } }
+        c.tourT = t;
+    }
+    if (!t) return false;
+    const isNode = resourceNodes.includes(t);
+    _comGoTo(t, (isNode ? NODE_CAP_R : COLONY_HACK_R) * 0.6, c);
+    comThink('p', 'tour', Math.round(quiet / 3600) + '分 気配が無い → 相手も寄る拠点を取りに行く: ' + (isNode ? 'ノード' : t.owner === 'enemy' ? '敵のコロニー (奪えば相手に通信途絶で伝わる)' : 'コロニー') + ' (' + _dirTxt(player.x, player.y, t.x, t.y) + '・' + Math.round(Math.hypot(t.x - player.x, t.y - player.y) / 100) * 100 + 'u)');
+    return true;
+}
+// ═══ 第71弾: 決着をつける (自機COM) ═══
+// 旧: 2〜3kmまで寄っても「直交して測り直す」を続け、見失うと戦略を選び直して離れて行った → 30分で決着が付かない試合が6割。
+//   詰める理由: 止め (自分は健在・相手は手負い) / 優位 (耐久の差25ポイント以上) / 攻撃性0.45以上。相手の耐久は「当てた損害」からの見積もり (敵と同じ考え方)
+const PRESS_R_AGGR = 6000, PRESS_R_ADV = 12000, PRESS_SONAR_R = 450, PRESS_OBLIQUE = 0.44; // 詰め始める距離 / ソナーを打つ推定幅 / 推定が広い時に斜めに寄る角度 (約25°)
+function comDatumNote(c, te, lk) {
+    if (!te || !lk) return;
+    if (te.inVision) c.seenType = te.type;
+    let est = null;
+    if (lk.full) est = { x: te.x, y: te.y, r: 0 };
+    else if (lk.assumed) { const sa = _signalAnalysis[enemySid(te)]; if (sa && sa.fix) est = trackEstimate(sa, 0); }
+    if (est) c.datum = { x: est.x, y: est.y, r: est.r || 0, f: _frameCount, vx: est.moving ? est.vx : 0, vy: est.moving ? est.vy : 0, pinged: false, n: 0, sid: enemySid(te) };
+}
+function comOppHpEst(c) { const cls = c.seenType && ENEMY_CLASS[c.seenType]; const mx = (cls && PLAYER_HP_BASE[cls]) || 2500; return Math.max(0, 1 - ((huntStats && huntStats.dmgShip) || 0) / mx); } // 艦に当てた損害だけ (艦載機への損害は数えない)
+function comWantsPress(c, P, hpF, retreat) {
+    const opp = c.oppHp = comOppHpEst(c);
+    if (hpF < retreat + 0.08) return null;
+    if (hpF > 0.5 && opp < 0.35) return 'kill';
+    if (hpF - opp >= 0.25) return 'adv';
+    if (P.aggression >= 0.45) return 'aggr';
+    return null;
+}
+function _comPressGo(c, x, y, fast) {
+    const now = _frameCount, a = c.pressAim;
+    if (!a || player.state !== 'moving' || Math.hypot(a.x - x, a.y - y) > 600 || now - a.f > 900) { const g = clampToMapCircle(x, y, 800); player.setTarget(g.x, g.y); c.pressAim = { x, y, f: now }; _comSteered(c, 'press'); }
+    if (fast) { c.flankUntil = now + 300; c.silentUntil = 0; }
+    c.pressF = now;
+}
+function comPressStep(c, P, D, hpF, te, lk, retreat, held, contact) {
+    const now = _frameCount, dm = c.datum;
+    if (!dm) return false;
+    let why = comWantsPress(c, P, hpF, retreat);
+    if (!why && dm.clue && hpF >= retreat + 0.08) why = 'clue'; // 通信途絶の手掛かりは性格によらず確かめに行く
+    if (!why) return false;
+    const whyJp = why === 'clue' ? dm.clue + 'を奪われた — 相手はそこに居た' : why === 'kill' ? '相手は手負い (見積もり' + _pct(c.oppHp) + ') — 仕留める' : why === 'adv' ? '耐久で優位 (自艦' + _pct(hpF) + '・相手の見積もり' + _pct(c.oppHp) + ')' : '攻撃性' + _pct(P.aggression);
+    const fast = why === 'clue' ? P.stealth < 0.5 : (why !== 'aggr' || P.aggression >= 0.6);
+    const pw = comSonarPower(P), sonR = sonarOmniRange(pw) * 0.85;
+    if (te && lk && lk.assumed && dm.f === now) {
+        // 推定がある: 撃てないなら詰める (推定が広ければ斜めに寄って角度を稼ぐ・ソナーの届く所で打って点にする)
+        if (why === 'aggr' && c.st && (c.st.id === 'ambush' || c.st.id === 'bait' || c.st.id === 'trap')) return false; // 待ち伏せ中は来るのを待つ (優位・止めなら出る)
+        const dE = Math.hypot(dm.x - player.x, dm.y - player.y);
+        if (dE > (why === 'aggr' ? PRESS_R_AGGR : PRESS_R_ADV)) return false;
+        if (omniSonarCooldown <= 0 && dm.r > PRESS_SONAR_R && dE < sonR && (playerExposureLevel >= 2 || why !== 'aggr' || P.stealth < 0.6)) {
+            fireOmniSonar(pw);
+            comThinkEvent('p', 'SIG-' + sigNo(dm.sid) + ' 推定±' + Math.round(dm.r / 100) * 100 + 'u・' + Math.round(dE / 100) * 100 + 'u先 → ソナーを打って位置を確かめる (' + whyJp + ')');
+        }
+        let ang = Math.atan2(dm.y - player.y, dm.x - player.x);
+        if (dm.r > dE * 0.35 && dE > 1500) { if (!c.pressSide) c.pressSide = Math.random() < 0.5 ? 1 : -1; ang += c.pressSide * PRESS_OBLIQUE; }
+        const go = Math.max(0, dE - 250);
+        _comPressGo(c, player.x + Math.cos(ang) * go, player.y + Math.sin(ang) * go, fast);
+        comThink('p', 'press' + why, (held ? held + '。' : '') + 'SIG-' + sigNo(dm.sid) + ' (' + Math.round(dE / 100) * 100 + 'u先・±' + Math.round(dm.r / 100) * 100 + 'u) → 詰める — ' + whyJp + (dm.r > dE * 0.35 && dE > 1500 ? '・斜めに寄って角度を稼ぐ' : ''));
+        return true;
+    }
+    if (contact && (!te || !lk || !(lk.assumed || lk.full))) {
+        // 方位だけ聞こえている: 測量は従来の流れに任せる (推定が出れば上へ)
+        return false;
+    }
+    if (te && lk && (lk.assumed || lk.full)) return false;
+    // 見失った: 最後の推定位置へ行き、着いたらソナー → 周りを3か所まで捜す
+    const mem = (why === 'aggr' ? 60 + 120 * P.aggression : 240) * 60 + (dm.clue ? Math.hypot(dm.x - player.x, dm.y - player.y) / 0.5 : 0), age = now - dm.f; // 手掛かりは着くまでの時間ぶん長く
+    if (age > mem) { c.datum = null; c.pressAim = null; comThinkEvent('p', '最後の推定位置の周りを捜したが見つからない → 追跡をやめる'); return false; }
+    if (!dm.sx) { const lead = Math.min(age, 900); dm.sx = dm.x + dm.vx * lead; dm.sy = dm.y + dm.vy * lead; }
+    const dD = Math.hypot(dm.sx - player.x, dm.sy - player.y);
+    if (dD > 500) {
+        _comPressGo(c, dm.sx, dm.sy, fast);
+        comThink('p', 'datum' + dm.n, '相手を見失った (' + Math.round(age / 60) + '秒前) → ' + (dm.n ? '周りを捜す (' + dm.n + '/3)' : '最後の推定位置へ') + ' (' + _dirTxt(player.x, player.y, dm.sx, dm.sy) + ') — ' + whyJp);
+        return true;
+    }
+    if (!dm.pinged && omniSonarCooldown <= 0) { dm.pinged = true; fireOmniSonar(pw); comThinkEvent('p', '最後の推定位置に着いた・何も居ない → ソナーを打つ (' + whyJp + ')'); c.pressF = now; return true; }
+    if (dm.n >= 3) { c.datum = null; c.pressAim = null; comThinkEvent('p', '最後の推定位置の周りを捜したが見つからない → 追跡をやめる'); return false; }
+    // 次に捜す所: 相手が動いていた向き (分かれば) を中心に、2500u先を扇状に
+    const base = (dm.vx || dm.vy) ? Math.atan2(dm.vy, dm.vx) : Math.atan2(dm.y - player.y, dm.x - player.x) + Math.PI * (dm.n ? 0.6 : 0);
+    const a2 = base + [0, 1.9, -1.9][dm.n] ;
+    dm.n++; dm.pinged = omniSonarCooldown > 600; // 次の所でも (再充電が済んでいれば) 打つ
+    const cv = findCoverSpot(dm.x + Math.cos(a2) * 2500, dm.y + Math.sin(a2) * 2500, 1500); // 隠れていそうな所 (濃い霧・岩礁帯) を優先
+    dm.sx = cv ? cv.x : dm.x + Math.cos(a2) * 2500; dm.sy = cv ? cv.y : dm.y + Math.sin(a2) * 2500;
+    _comPressGo(c, dm.sx, dm.sy, fast);
+    return true;
 }
 function _comDeploy(c, P) {
     for (const k of ['mech', 'attack', 'build', 'scout']) {
@@ -15985,6 +16121,7 @@ function stepWorld() {
                         const _sa = Math.random() * Math.PI * 2, _sr = Math.random() * de.radius * 3;
                         scrapDrops.push({ x: de.x + Math.cos(_sa) * _sr, y: de.y + Math.sin(_sa) * _sr, value: Math.ceil(reward / _scraps), life: 1.0 });
                     }
+                    if (de.type === 'fighter') enemyClueAt(de.x, de.y, de._kind === 'mech' ? 'Tech' : de._kind === 'scout' ? '哨戒機' : de._kind === 'turret' ? '砲台' : '艦載機'); // 第71弾: 敵も同じ手掛かり
                     enemiesKilled++;
                     matchRecEvent('killE', de.x, de.y, '敵艦撃沈');
                     if (gameState.career) gameState.career.kills++;
