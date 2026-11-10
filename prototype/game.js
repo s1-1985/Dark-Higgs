@@ -4252,7 +4252,7 @@ class Ship {
                 const _fk = comFocusPlan(_pf, _sit, !!(this._quietRun || this._hiding || (_pf.stealth ?? 0) >= 0.5));
                 if (_fk !== this._focus && (_sit === 'engage' || _sit === 'retreat' || _frameCount - (this._focusF || -1e9) >= 1200)) { this._focusF = _frameCount; setEnemyFocus(this, _fk); }
                 // 第42弾: エンジンも場面と居る所の環境で (自機COMと同じ comEngineDecide)。替えるのは捜索・接近の間で、潜伏中でなく15秒撃たれていない時だけ
-                if (!(this._engSwT > 0)) {
+                if (!(this._engSwT > 0) && !(this._engLockUntil > _frameCount)) { // 第80弾: 狩人の頭脳が移動用に換えた直後は自動で戻さない
                     const _esit = _sit === 'track' ? (comDoctrine(_pf).approach ? 'approach' : 'search') : _sit;
                     if ((_esit === 'search' || _esit === 'approach') && !this._hiding && _frameCount - (this._lastHitF ?? -1e9) > 900) {
                         const _env = comEnvAt(this.x, this.y), _ev = comEngineDecide(this._engM || (this._engM = {}), _pf, _esit, _env, this.engine || 'thermonuclear', _frameCount);
@@ -14558,6 +14558,14 @@ function huntTryFire(e, H, est, minHc) {
 }
 // 第80弾 (オーナー「目の前にアイテムがあるのに取らずに急に方向転換して変な方に行く」): 目の前の拾い物は先に拾う (敵COM)。
 // 見える所 (自分の有視界) か 2500u以内の 漂流コンテナ / 難破船 があり、撃ち合いの最中でなければ、取り終えるまでそこへ向かう
+// 第80弾: 遠くへ移る時、今のエンジンが遅ければ (ヒッグスエンジンは霧の薄い所で0.25倍) 熱核へ換える — 人間なら移動用に機関を換える。
+// 熱核の熱は後ろへ出るので、相手へ向かう間は正面からほとんど聞こえない。換えた後90秒は自動のエンジン選びを止める
+function huntTransitEngine(e, why) {
+    const now = _frameCount;
+    if (e._engSwT > 0 || now - (e._huntEngF ?? -1e9) < 60 * 120 || e.engine === 'thermonuclear') return;
+    if (engineSpeedFactor(e.engine || 'thermonuclear', getHiggsIntensity(e.x, e.y)) >= 0.6) return;
+    if (enemyRequestEngine(e, 'thermonuclear', why + ' — 今のエンジンでは遅すぎる (熱核の熱は後ろへ出るので、向かう先からは聞こえにくい)')) { e._huntEngF = now; e._engLockUntil = now + 60 * 90; }
+}
 function enemyGrabStep(e) {
     const hph = e._hunt && e._hunt.ph;
     if (e.type === 'fighter' || (e.aiState === 'combat' && !(e._hunt && e._hunt.k === 'prowl')) || (e._hunt && !['lurk', 'prowl', 'watch'].includes(hph))) { if (e._grab && e.aiState === 'combat') e._grab = null; return false; }
@@ -14593,6 +14601,8 @@ function enemyHunterStep(e, heard, hard) {
     const say = (t) => { if (comDemo || window.__thinkAll) comThinkEvent('e', t, 'e' + e.uid); };
     let H = e._hunt;
     let est = _huntEst(e);
+    // 相手の最後の動き (先読みに使う): 推定の中心の移り変わりから
+    if (est && est.age < 600) { const mv = e._mvMem || (e._mvMem = { vh: [] }); const v = _huntVel(mv, est); if (v && Math.hypot(v.vx, v.vy) > 0.25) e._lastMove = { x: est.x, y: est.y, vx: v.vx, vy: v.vy, f: now }; }
     const toCombat = () => { e.aiState = 'combat'; e.lurking = false; e.detectionState = 'alerted'; e.huntTimer = Math.max(e.huntTimer || 0, 600); };
     if (e._hpLast !== undefined && e.hp < e._hpLast) e._hpLossF = now; e._hpLast = e.hp;
     const end = (why, combat, cd) => { say('【' + H.jp + '】終了 — ' + why); e._hunt = null; e._huntEndF = now;
@@ -14613,12 +14623,15 @@ function enemyHunterStep(e, heard, hard) {
                 const vis = e._prowlSeen || (e._prowlSeen = {}), sites = [];
                 for (const q of structures) if ((q.type === 'colony' && q.owner !== 'enemy') || (q.type === 'derelict' && !q.salvaged)) sites.push({ o: q, lbl: q.type === 'colony' ? 'コロニー' : '難破船', w: q.type === 'colony' ? 1.4 : 1 });
                 for (const n of resourceNodes) if (n.owner !== 'enemy') sites.push({ o: n, lbl: 'ノード', w: 0.7 });
-                const sc = sites.filter(t => now - (vis[t.o.x + ',' + t.o.y] || -1e9) > 60 * 360).map(t => ({ t, v: t.w * (0.5 + Math.random()) / (1 + Math.hypot(t.o.x - e.x, t.o.y - e.y) / 9000) })).sort((a, b) => b.v - a.v);
+                // 先読み: 最後に聞いた相手の針路の先にある拠点を重く見る (相手は次にそこへ行くはず)
+                const lm = e._lastMove && now - e._lastMove.f < 60 * 240 ? e._lastMove : null;
+                const ahead = (q) => { if (!lm) return 1; const hd = Math.atan2(lm.vy, lm.vx), a = Math.atan2(q.y - lm.y, q.x - lm.x), dq = Math.hypot(q.x - lm.x, q.y - lm.y); return Math.cos(_angDiff(a, hd)) > 0.6 && dq < 20000 ? 3.5 : 0.6; };
+                const sc = sites.filter(t => now - (vis[t.o.x + ',' + t.o.y] || -1e9) > 60 * 360).map(t => ({ t, v: t.w * ahead(t.o) * (0.5 + Math.random()) / (1 + Math.hypot(t.o.x - e.x, t.o.y - e.y) / 9000) })).sort((a, b) => b.v - a.v);
                 if (sc.length && Math.random() < 0.75) {
                     const t = sc[0].t, q = t.o, a0 = Math.atan2(e.y - q.y, e.x - q.x) + (Math.random() - 0.5) * 2, off = 1300 + Math.random() * 600;
                     vis[q.x + ',' + q.y] = now;
                     const cv = findCoverSpot(q.x + Math.cos(a0) * off, q.y + Math.sin(a0) * off, 1200);
-                    goal = { x: cv ? cv.x : q.x + Math.cos(a0) * off, y: cv ? cv.y : q.y + Math.sin(a0) * off, lbl: t.lbl + 'の脇の' + (cv ? (cv.kind === 'fog' ? '霧' : '岩礁帯') : '暗がり'), site: { x: q.x, y: q.y }, lblS: t.lbl };
+                    goal = { x: cv ? cv.x : q.x + Math.cos(a0) * off, y: cv ? cv.y : q.y + Math.sin(a0) * off, lbl: (lm && ahead(q) > 1 ? '自機の向かう先らしい' : '') + t.lbl + 'の脇の' + (cv ? (cv.kind === 'fog' ? '霧' : '岩礁帯') : '暗がり'), site: { x: q.x, y: q.y }, lblS: t.lbl };
                 }
                 if (!goal) { const g = searchNext(e, e.x, e.y); if (g) goal = { x: g.x, y: g.y, lbl: 'まだ聴いていない海域' }; }
                 if (goal && Math.hypot(goal.x - e.x, goal.y - e.y) > 2500) {
@@ -14708,6 +14721,7 @@ function enemyHunterStep(e, heard, hard) {
         }
         if (dG < 600 && H.goal.site) { H.ph = 'watch'; H.watchF = now; H.watchT = 60 * (50 + 80 * st + 40 * ca - 30 * ag); e._stratEndF = -1e9; say('【索敵行】' + H.goal.lblS + 'の脇に着いた → 機関を止めて' + Math.round(H.watchT / 60) + '秒 見張る (来た相手を待ち伏せる)'); return true; }
         if (dG < 800 || now - H.t0 > 60 * 240) { e._hunt = null; e._huntEndF = now - 60 * 40; e._huntCD = now + 600; say('【索敵行】' + (dG < 800 ? '着いた — 何も聞こえない → 次の場所を考える' : '時間切れ')); return false; }
+        if (dG > 5000) huntTransitEngine(e, '索敵行で遠くへ移る');
         const ga = Math.atan2(H.goal.y - e.y, H.goal.x - e.x), cyc = (now - H.f0) % (60 * 30);
         if (cyc < 60 * (20 + 6 * ag - 6 * st) || (e._v || 0) < 0.15 || Math.abs(_angDiff(ga, e._driftA ?? e.angle)) > 0.6) e._moveHeading(ga, ms.cruise * 0.9); else e._drift(ga);
         return true;
@@ -14740,6 +14754,7 @@ function enemyHunterStep(e, heard, hard) {
                     if (!H.ipLog || now - H.ipLog > 1800) { H.ipLog = now; say('【' + H.jp + '】自機は針路' + Math.round(((hd * 180 / Math.PI) + 450) % 360) + '°で動いている → 先回りして進む先の脇 (' + _dirTxt(e.x, e.y, H.ip.x, H.ip.y) + ') で待ち伏せる'); }
                 }
                 const dI = Math.hypot(H.ip.x - e.x, H.ip.y - e.y);
+                if (dI > 4000) huntTransitEngine(e, '先回りの移動');
                 if (dI < 500) { H.ph = 'wait'; H.waitF = now; H.k = 'hold'; H.jp = '先回りの待ち伏せ'; say('【' + H.jp + '】進む先の脇に着いた → 機関を止めて待つ'); return true; }
                 e._moveHeading(Math.atan2(H.ip.y - e.y, H.ip.x - e.x), dI > 3000 ? ms.cruise : ms.silent);
                 return true;
@@ -14780,6 +14795,7 @@ function enemyHunterStep(e, heard, hard) {
             }
             if (H.lastD !== undefined && now - (H.lastDF || 0) >= 300) { H.receding = D > H.lastD + 150; H.lastD = D; H.lastDF = now; } else if (H.lastD === undefined) { H.lastD = D; H.lastDF = now; }
             const near = D < H.R + 3200 && !H.receding; // 離れていく相手は惰性では追いつけない — 巡航で追う
+            if (!near && D > H.R + 5000) huntTransitEngine(e, '忍び寄りの移動');
             const ga = Math.atan2(gy - e.y, gx - e.x);
             if (near) { // 近くでは「噴かして惰性」: 機関を噴かしては止めて漂う (推進の信号を断続にして方位を取らせない)
                 const cyc = (now - H.f0) % (60 * (20 + 8 * st)), burn = 60 * (11 + 4 * ag - 3 * st);
