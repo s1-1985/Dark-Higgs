@@ -427,7 +427,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261110b';
+const SPRITE_VER = '20261110h';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -472,6 +472,8 @@ const SPRITE_FILES = {
     drone_mech_e: 'assets/drone_mech_e.png', drone_scout_e: 'assets/drone_scout_e.png', drone_missile_e: 'assets/drone_missile_e.png', // 第49弾: 敵側のデザイン (黒×赤)
     bcn_heat: 'assets/bcn_heat.png', bcn_optic: 'assets/bcn_optic.png', bcn_em: 'assets/bcn_em.png', bcn_higgs: 'assets/bcn_higgs.png', // 第49弾: 帯域ビーコン
     drone_mech:         'assets/drone_mech.png', // 第20弾: 人型 (Higgsfield生成・透過256px)
+    drone_mech_thrust: 'assets/drone_mech_thrust.png', drone_mech_fire: 'assets/drone_mech_fire.png', drone_mech_ready: 'assets/drone_mech_ready.png', drone_mech_slash: 'assets/drone_mech_slash.png', // 第78弾: Techの姿勢 (突進・射撃・サーベル構え・斬撃)
+    drone_mech_e_thrust: 'assets/drone_mech_e_thrust.png', drone_mech_e_fire: 'assets/drone_mech_e_fire.png', drone_mech_e_ready: 'assets/drone_mech_e_ready.png', drone_mech_e_slash: 'assets/drone_mech_e_slash.png',
     drone_barrier:      'assets/drone_barrier.png',      // 第22弾: ビームの盾 (Higgsfield生成・透過256px)
     fx_barrier_shield:  'assets/fx_barrier_shield.png',  // 第22弾: 盾の泡 (黒背景・加算)
     fx_decoy:           'assets/fx_decoy.png',
@@ -5621,7 +5623,8 @@ class Ship {
             }
         } else {
             // ── 敵スプライト描画 (読み込めていればベクターより優先) ──
-            const _eskey = this._kind === 'mech' ? 'drone_mech_e' : this._kind === 'scout' ? 'drone_scout_e' : this._kind === 'turret' ? 'drone_turret' : (ENEMY_SPRITE_KEY[this.type] || 'e_corvette');
+            const _ep = this._kind === 'mech' ? techPose(this) : '', _eskey0 = _ep && spriteReady(SPRITES['drone_mech_e_' + _ep]) ? 'drone_mech_e_' + _ep : 'drone_mech_e';
+            const _eskey = this._kind === 'mech' ? _eskey0 : this._kind === 'scout' ? 'drone_scout_e' : this._kind === 'turret' ? 'drone_turret' : (ENEMY_SPRITE_KEY[this.type] || 'e_corvette');
             if (this._kind === 'mech') ctx.rotate(Math.PI / 2); // Techの絵は上が前
             const _esprite = SPRITES[_eskey];
             if (spriteReady(_esprite)) {
@@ -5633,7 +5636,7 @@ class Ship {
                     ctx.beginPath(); ctx.arc(0, 0, this.radius * 3.5, 0, Math.PI * 2); ctx.fill();
                 }
                 // 透過スプライト(第16弾)を不透明で描き、暗い艦体が霧に沈まないよう同じ絵を薄く加算して明るくする
-                const _eLen = this.radius * (isFlashing ? 6.2 : 5.6);
+                const _eLen = this.radius * (isFlashing ? 6.2 : 5.6) * (_ep === 'thrust' || _ep === 'slash' ? 1.2 : _ep ? 1.1 : 1);
                 ctx.globalAlpha = 1;
                 drawSpriteCentered(ctx, _esprite, _eLen);
                 ctx.globalCompositeOperation = 'lighter';
@@ -12882,7 +12885,7 @@ class Drone {
     // 艦首を目標の方位へ (旋回の速さに上限) 回し、艦首の向きにだけ進む。vT=目標の速さ
     _fly(tx, ty, vT, turn, acc) {
         const want = Math.atan2(ty - this.y, tx - this.x);
-        const da = ((want - this.angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+        const da = _angDiff(want, this.angle) /* 第77弾: 角度が±πを超えて貯まると % が負になり遠回りに旋回して小さな輪ができた */;
         this.angle += Math.max(-turn, Math.min(turn, da));
         this.v = (this.v || 0) + Math.max(-acc, Math.min(acc, vT - (this.v || 0)));
         this.x += Math.cos(this.angle) * this.v; this.y += Math.sin(this.angle) * this.v;
@@ -12932,7 +12935,7 @@ class Drone {
         let gx, gy, vmax = this.speed;
         if (tgt) {
             const d = Math.hypot(tgt.x - this.x, tgt.y - this.y), a = Math.atan2(tgt.y - this.y, tgt.x - this.x);
-            const da = ((a - this.angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+            const da = _angDiff(a, this.angle);
             this.angle += Math.max(-TECH_TURN, Math.min(TECH_TURN, da));
             const facing = Math.abs(da) < 0.35;
             if (this._dash > 0) {
@@ -12980,7 +12983,7 @@ class Drone {
                 gx = player.x + Math.cos(h) * rr; gy = player.y + Math.sin(h) * rr;
             } else { gx = this.x; gy = this.y; }
             const ma = Math.atan2(gy - this.y, gx - this.x);
-            if (Math.hypot(gx - this.x, gy - this.y) > 40) { const da = ((ma - this.angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI; this.angle += Math.max(-TECH_TURN, Math.min(TECH_TURN, da)); }
+            if (Math.hypot(gx - this.x, gy - this.y) > 40) { const da = _angDiff(ma, this.angle); this.angle += Math.max(-TECH_TURN, Math.min(TECH_TURN, da)); }
         }
         // ミサイルは自艦の近く (1500u) でゆっくり補充 (30秒に1発・最大4)
         // 推進: 目標点へ向かう速度に慣性で寄せる (止まる時も滑らかに減速)
@@ -13175,19 +13178,20 @@ class Drone {
             const _lean = Math.max(-0.16, Math.min(0.16, ((this.vx || 0) * -Math.sin(this.angle) + (this.vy || 0) * Math.cos(this.angle)) * 0.12)); // 横へ動く向きへ傾く
             const _bob = Math.sin(_mt * 0.07) * 0.9 + (_mv < 0.3 ? Math.sin(_mt * 0.035) * 0.8 : 0);
             ctx.rotate(_rot + _lean);
+            const _pose = techPose(this), _psp = _pose ? SPRITES['drone_mech_' + _pose] : null, _posed = !!(_psp && spriteReady(_psp)); // 第78弾: 姿勢の絵 (絵の中に炎・刀身・閃光がある)
             // 推進炎 (機体の後ろ=画像の下側・左右2つ)
-            { const fl = 5 + _mv * 4 + Math.sin(_mt * 0.7) * 1.6 + (this._dash > 0 ? 9 : 0);
+            if (!_posed || _pose === 'fire') { const fl = 5 + _mv * 4 + Math.sin(_mt * 0.7) * 1.6 + (this._dash > 0 ? 9 : 0);
               ctx.globalCompositeOperation = 'lighter';
               for (const fx of [-6, 6]) { const g = ctx.createLinearGradient(fx, 12, fx, 12 + fl);
                   g.addColorStop(0, 'rgba(160,240,255,0.85)'); g.addColorStop(0.5, 'rgba(60,170,255,0.45)'); g.addColorStop(1, 'rgba(0,80,255,0)');
                   ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(fx - 2.2, 12); ctx.lineTo(fx + 2.2, 12); ctx.lineTo(fx, 12 + fl); ctx.closePath(); ctx.fill(); }
               ctx.globalCompositeOperation = 'source-over'; }
             ctx.translate(0, _bob);
-            ctx.drawImage(SPRITES['drone_mech'], -20, -20, 40, 40);
-            if (this._flashF && _frameCount - this._flashF < 4) { // 小銃の発砲の閃光
+            if (_posed) { const _ps = _pose === 'thrust' || _pose === 'slash' ? 52 : 44; ctx.drawImage(_psp, -_ps / 2, -_ps / 2, _ps, _ps); } else ctx.drawImage(SPRITES['drone_mech'], -20, -20, 40, 40);
+            if (!_posed && this._flashF && _frameCount - this._flashF < 4) { // 小銃の発砲の閃光
                 ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = 'rgba(255,230,140,0.9)'; ctx.beginPath(); ctx.arc(-13, -19, 3 + Math.random() * 2, 0, Math.PI * 2); ctx.fill(); ctx.globalCompositeOperation = 'source-over';
             }
-            if ((this._dash > 0 || this._slash > 0) && spriteReady(SPRITES.fx_saber_blade)) { // 第36弾: ビームサーベルを抜いている
+            if (!_posed && (this._dash > 0 || this._slash > 0) && spriteReady(SPRITES.fx_saber_blade)) { // 第36弾: ビームサーベルを抜いている
                 ctx.globalCompositeOperation = 'lighter';
                 const sw = this._slash > 0 ? (1 - this._slash / 24) * 2.4 - 1.2 : -0.5;
                 ctx.save(); ctx.translate(12, -6); ctx.rotate(sw); ctx.drawImage(SPRITES.fx_saber_blade, -4, -46, 8, 46); ctx.restore();
@@ -13495,6 +13499,17 @@ function enemyScoutStep(f) {
     f.speed = f._v; f.currentSpeed = f._v; f._spd = f._v; f._movedF = _frameCount; f.state = 'moving';
     f.aiState = 'lurking';
 }
+// 第78弾 (オーナー「Techが仁王立ちのまま。挙動に合わせて動いてほしい」): Techの姿勢 — 斬撃=slash / サーベルを構えて突進=ready / 撃った直後=fire / 速く動いている=thrust / それ以外=立ち (空文字)。ちらつかないよう10フレームは保つ
+function techPose(d) {
+    const now = _frameCount, vx = d.vx !== undefined ? d.vx : (d._vx2 || 0), vy = d.vy !== undefined ? d.vy : (d._vy2 || 0);
+    let want = '';
+    if (d._slash > 0) want = 'slash';
+    else if (d._dash > 0) want = 'ready';
+    else if (d._fireF && now - d._fireF < 22) want = 'fire';
+    else if (Math.hypot(vx, vy) > 1.8) want = 'thrust';
+    if (want !== (d._pose || '')) { if ((d._poseHold || 0) > now && want !== 'slash') return d._pose || ''; d._pose = want; d._poseHold = now + 10; }
+    return d._pose || '';
+}
 // 第75弾: ドローンの修理 (空母の周りを周回して帰還/補給している間だけ) と、敵のドローンの補給 (時間がかかる・自機と同じ)
 function droneRepairTick(d, kind) {
     const mx = DRONE_SPEC[kind].hp;
@@ -13537,7 +13552,7 @@ function enemyTechStep(f) {
         const k = d > TECH_KEEP_D ? 1 : -0.5;
         gx = f.x + Math.cos(a) * k * 300; gy = f.y + Math.sin(a) * k * 300;
         // 第51弾: サーベル (近接の踏み込み斬り・回避できない・後ろから×1.5) とミサイル (遠距離・4発・12秒ごと) — 自機のTechと同じ値
-        if (f._saberCD > 0) f._saberCD--; if (f._mslCD > 0) f._mslCD--;
+        if (f._saberCD > 0) f._saberCD--; if (f._mslCD > 0) f._mslCD--; if (f._slash > 0) f._slash--;
         if (f.msl === undefined) f.msl = TECH_MSL_MAX;
         if (f._dash > 0) { f._dash--; const dv = TECH_DASH_V; f._vx2 = Math.cos(a) * dv; f._vy2 = Math.sin(a) * dv; }
         else if (d < TECH_DASH_START && d > TECH_SABER_R && (f._saberCD || 0) <= 0 && f._saberN > 0 && Math.abs(_angDiff(a, f.angle)) < 0.3) f._dash = 40;
@@ -13546,12 +13561,12 @@ function enemyTechStep(f) {
             const back = tgt === player ? Math.abs(_angDiff(Math.atan2(f.y - tgt.y, f.x - tgt.x), tgt.angle || 0)) > Math.PI * 0.55 : false;
             const pr = new Projectile(f.x, f.y, { x: tgt.x, y: tgt.y, hp: 1 }, false, 'kinetic', TECH_SABER_DMG * (back ? 1.5 : 1) / KINETIC_DMG * (f._auto ? DRONE_AUTO_HIT : 1));
             pr.fromDrone = true; pr.owner = f; pr._noEvade = true; pr.x = tgt.x - Math.cos(a) * 8; pr.y = tgt.y - Math.sin(a) * 8; projectiles.push(pr);
-            saberFx.push({ x: f.x, y: f.y, tx: tgt.x, ty: tgt.y, a, t: 0 }); f.fireFlashTimer = Math.max(f.fireFlashTimer || 0, 20);
+            saberFx.push({ x: f.x, y: f.y, tx: tgt.x, ty: tgt.y, a, t: 0 }); f.fireFlashTimer = Math.max(f.fireFlashTimer || 0, 20); f._slash = 24; // 第78弾: 斬撃の姿勢
         } else if (d > TECH_MSL_MIN && d < TECH_MSL_RANGE && (f._mslCD || 0) <= 0 && f.msl > 0 && Math.abs(_angDiff(a, f.angle)) < 0.5) {
             const pr = new Projectile(f.x, f.y, tgt, false, 'missile', TECH_MSL_SCALE * (f._auto ? DRONE_AUTO_HIT : 1)); pr.fromDrone = true; pr.owner = f; projectiles.push(pr);
             f.msl--; f._mslCD = TECH_MSL_CD; f.fireFlashTimer = Math.max(f.fireFlashTimer || 0, 20);
         } else if (d < TECH_RIFLE_RANGE && f.fireCD <= 0 && f._dash <= 0 && f._ammo > 0 && Math.abs(_angDiff(a, f.angle)) < 0.35) {
-            f._ammo--;
+            f._ammo--; f._fireF = _frameCount;
             const pr = new Projectile(f.x, f.y, { x: tgt.x, y: tgt.y, hp: 1 }, false, 'kinetic', TECH_RIFLE_SCALE * (f._auto ? DRONE_AUTO_HIT : 1)); pr.fromDrone = true; pr.owner = f; projectiles.push(pr);
             f.fireFlashTimer = Math.max(f.fireFlashTimer || 0, 20);
             f._burst = (f._burst || 0) + 1;
