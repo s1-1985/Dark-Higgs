@@ -195,7 +195,7 @@ const SIG_ACT = {
     kinFire:    { optic: 0.6, heat: 0.10 },              // 実弾の発砲: 閃光
     mslFire:    { heat: 0.35, optic: 0.15, em: 0.45 },   // ミサイルの発射: 推進炎と誘導の電波
     beamFire:   { optic: 0.9, em: 0.6 },                 // ビームの発射: 強い光と電磁波 (霧に軌跡も残る)
-    beamCharge: { heat: 0.30, em: 0.40, higgs: 0.30 },   // ビームのチャージ: 熱・電磁波・霧の乱れ
+    beamCharge: { heat: 0.90, optic: 0.90, em: 0.90, higgs: 0.30 },   // ビームのチャージ: 熱・電磁波・霧の乱れ
     beamCool:   { heat: 0.15, em: 0.10 },                // ビームの再充電 (35秒): 放熱
     mslReload:  { em: 0.20 },                            // ミサイルの装填: 管制の電波
     launch:     { optic: 0.35, em: 0.40 },               // ドローンの発進
@@ -209,6 +209,8 @@ const SIG_COMPUTE = { emSensors: 0.09, emAi: 0.20, heatAi: 0.05 }; // 演算 (�
 // o: { engine, engineOn, thrust 0..1, alloc{sensors,ai 0..1}, mt{e,w,s,a}, quiet, ff(0..1), ft, launch(0..1), charge(倍率 0=なし),
 //      beamCool, mslReload, assemble, comms, repair, engSwitch, sysEngine, leak{heat,optic,em,higgs}, hHere, storm, thermal,
 //      bottomed, pm{heat,heatAdd,optic,em,emAdd,opticFire,mslLaunchHeat,chargeLeak}, wounded, pulsePh }
+// 第79弾 (オーナー: 潜航型は奇襲しやすい環境を作れる特性が要る): 潜航型は 推進・演算の信号が×0.6 (行動で出る信号は減らない)・受信の最大距離が×1.25 (先に聴いて先に見つける)。自機も敵も艦種で同じ
+const STEALTH_PROP_MULT = 0.6, STEALTH_RX_MULT = 1.25;
 function emitSigs(o) {
     const out = { heat: 0, optic: 0, em: 0, higgs: 0 };
     let dirB = null, dirV = 0;
@@ -229,6 +231,7 @@ function emitSigs(o) {
     const al = o.alloc || { sensors: 0.3, ai: 0.5 };
     out.em += (al.sensors * SIG_COMPUTE.emSensors * mt.s + al.ai * SIG_COMPUTE.emAi * mt.a);
     out.heat += al.ai * SIG_COMPUTE.heatAi * mt.a;
+    if (o.cls === 'stealth') { for (const b of BANDS) out[b] *= STEALTH_PROP_MULT; dirV *= STEALTH_PROP_MULT; }
     if (o.quiet) { for (const b of BANDS) out[b] *= SILENT_SIG_MULT; dirV *= SILENT_SIG_MULT; } // 潜航・機関停止・潜伏: 推進と演算を絞る (行動で出る信号は減らない)
     const add = (t, k) => { if (!t || !(k > 0)) return; for (const b in t) out[b] += t[b] * k; };
     if (o.ff > 0) {
@@ -1186,6 +1189,8 @@ function incomingMissile(me, byPlayer) {
         if (d >= bd || (pr.quiet && d >= CM_MISSILE_EVADE_R * 0.5)) continue; // 第32弾: 静音推進は気付かれるのが半分の距離
         const toMe = Math.atan2(me.y - pr.y, me.x - pr.x);
         if (Math.abs(_angDiff(toMe, pr.angle)) > 0.9) continue;
+        if (!byPlayer) { if (!pr._torpAlerted) continue; } // 第79弾: 自艦はEMか警報で気づいたミサイルにだけ反応
+        else if (!(pr._locked || ((me._bp || []).indexOf('em') >= 0 && d < MSL_EM_RANGE * (pr.quiet ? 0.5 : 1)))) continue; // 敵も同じ: ロックされたか、EM帯を聴いていて捉えた時だけ
         bd = d; best = pr;
     }
     return best;
@@ -1619,6 +1624,7 @@ let silentRunning = false;           // 静粛航行モード
 let powerStance = 'cruise';           // 第15弾: 出力スタンス 'silent'(潜航) | 'cruise'(巡航) | 'flank'(全速)
 const SILENT_SPEED_MULT = 0.5;       // 静粛航行中の速度倍率
 const SILENT_SIG_MULT = 0.55;        // 静粛航行中の全シグネチャ倍率
+const MSL_EM_RANGE = 2600;           // 第79弾: ロックされていないミサイルをEMで捉える距離 (静音推進は半分・EM帯をONにしている時だけ)
 const TORPEDO_ALERT_RANGE = 2600;    // ミサイル接近警報の探知距離 (推進波)
 let distressBeacon = null;           // {x, y, life, claimed} 遭難信号イベント
 let distressNextTimer = 4200;        // 初回発生 ~70s
@@ -1644,7 +1650,9 @@ const BOTTOM_SIG_MULT = 0.30;        // 擬態中の追加シグネチャ倍率 
 let nearMissActive = false;          // ニアミス状態 (息を殺せ)
 const NEAR_MISS_DIST = 1600;         // ニアミス発動距離
 const NEAR_MISS_CLEAR = 2100;        // ニアミス解除距離 (ヒステリシス)
-const BEAM_CHARGE_DUR = 120;         // チャージ時間 2s (第20弾: ビームはチャージ専用)
+const BEAM_CHARGE_DUR = 600;         // チャージ時間 10s (第79弾: 2→10秒。チャージ中は半径5000uに強い熱・光・EM)
+const BEAM_CHARGE_WARN_R = 5000;     // 第79弾: チャージの高エネルギー反応が警告になる距離
+const BEAM_HOLD_F = BEAM_FX_SEC * 60; // 第79弾: 発射した艦はビームの表示が消えるまで動けない
 let _commsInterceptCD = 0;           // 通信傍受クールダウン
 const COMMS_INTERCEPT_RANGE = 2600;  // 傍受可能距離
 let huntStats = null;                // 戦闘詳報 (セクター毎リセット)
@@ -3187,7 +3195,8 @@ class Projectile {
             // ミサイル接近警報: 敵ミサイルの推進波を探知。
             // 警告が出ることでデコイ射出/ジャミング/回避機動が「反応する道具」になる。
             if (!this.isPlayer && !this._torpAlerted && player && player.hp > 0 &&
-                Math.hypot(player.x - this.x, player.y - this.y) < TORPEDO_ALERT_RANGE * (this.quiet ? 0.5 : 1)) { // 第33弾: 静音推進
+                Math.hypot(player.x - this.x, player.y - this.y) < TORPEDO_ALERT_RANGE * (this.quiet ? 0.5 : 1) &&
+                (this._locked || (sensorsOn.em && Math.hypot(player.x - this.x, player.y - this.y) < MSL_EM_RANGE * bandGainP('em') * (this.quiet ? 0.5 : 1)))) { // 第33弾: 静音推進 / 第79弾: ロックされていないミサイルはEMを捉えた時だけ
                 this._torpAlerted = true;
                 sfxOr('alm_missile_launch_detect', 'alert');
                 logMessage('WARNING: 高速推進波を探知 — ミサイル接近中！ (デコイ/ジャミング/回避)', 'warning-msg');
@@ -3653,7 +3662,7 @@ function playerFireWeapon(s, target, wType, lk) {
         // 推定座標へ飛翔 → 到達付近で終末シーカーが実体を探す。居なければ空振り (=「そこには居ない」という情報)
         if (!lk.full) tgt = { x: aimX, y: aimY, hp: 1, radius: 1, seek: true };
         const _mp = new Projectile(s.x, s.y, tgt, true, 'missile', dmgScale);
-        _mp.ox = s.x; _mp.oy = s.y; _mp.sid = enemySid(target);
+        _mp.ox = s.x; _mp.oy = s.y; _mp.sid = enemySid(target); _mp._locked = !!lk.full; // 第79弾: 見えている相手へのロックだけ「ロックされた」ミサイル
         if (s === player) _armMirv(_mp);
         projectiles.push(_mp);
         s.missileReloading = true;
@@ -3666,7 +3675,7 @@ function playerFireWeapon(s, target, wType, lk) {
             s.weaponType = 'beam';
             s._beamCharge = (s._beamCharge || 0) + gameSpeedFactor;
             s._chargeFrame = _frameCount;
-            if (!s._chargeLogged) { s._chargeLogged = true; if (s === player) playSound('beamCharge'); logMessage('WEP: ビームチャージ開始 — 熱/EM放射激増中', 'warning-msg'); }
+            if (!s._chargeLogged) { s._chargeLogged = true; if (s === player) playSound('beamCharge'); logMessage('WEP: ビームチャージ開始 (約' + Math.round(BEAM_CHARGE_DUR * PM.beamCharge / 60) + '秒) — 半径5000uに強い熱・光・EMが出る。溜めている間は敵に読まれる', 'warning-msg'); }
             return false;
         }
         // ビームは推定点の方向へ射程いっぱいまで一直線。線上(幅BEAM_HIT_WIDTH)に実体が居れば当たる
@@ -3690,7 +3699,7 @@ function playerFireWeapon(s, target, wType, lk) {
         }
         beamNearMiss(s.x, s.y, _bex, _bey, true, hit ? target : null); // 第20弾: 外れても線の近くの敵はセンサーが乱れる
         beamRevealsShooter(s.x, s.y, true);                                 // 第20弾: 霧の軌跡で射手の位置が知れる
-        s._beamCharge = 0; s._chargeLogged = false;
+        s._beamCharge = 0; s._chargeLogged = false; s._beamHold = _frameCount + BEAM_HOLD_F; // 第79弾: 照射が消えるまで動けない
         s.beamReloading = true;
         s.beamReloadTimer = Math.round(BEAM_RELOAD_TIME * reloadMult * (s === player ? PM.beamReload : 1));
         logMessage('WEP: ビーム発射 — 次まで' + Math.round(s.beamReloadTimer / 60) + '秒 (リロード中も熱/EM/ヒッグスが漏れる・霧に軌跡が残る)', 'system-msg');
@@ -3981,7 +3990,7 @@ class Ship {
                 this._beamCharge = Math.max(0, this._beamCharge - 2 * gameSpeedFactor);
                 if (this._beamCharge === 0) this._chargeLogged = false;
             }
-            const _sg = emitSigs({
+            const _sg = emitSigs({ cls: gameState.shipType,
                 engine: gameState.engineType, engineOn: !(playerCoasting || engineSwitchT > 0),
                 thrust: boostT > 0 ? 1 : thrustFrac(_spd, gameState.shipType),
                 alloc: { sensors: genAlloc.sensors / 100, ai: genAlloc.ai / 100 },
@@ -4049,6 +4058,7 @@ class Ship {
                 return; // 移動・発射をスキップ
             }
 
+            if (this._beamHold > _frameCount) { this.currentSpeed = 0; this._baseTargetSpeed = 0; playerTickReloads(this); return; } // 第79弾: ビーム照射中は動けない
             // §3-6残: 建設中停止フロー (carrier が建設系ドローン展開中は完全停止 + シグネチャ増大)
             if (buildingTimer > 0 || techBuilding()) {
                 const _tb = techBuilding(), _bm = _tb ? TECH_BUILD_SIG_MULT : BUILD_SIG_MULT;
@@ -4208,6 +4218,7 @@ class Ship {
             // ファイターの燃料切れ (消滅)
             if (this.fuel !== undefined && (this.fuel -= gameSpeedFactor) <= 0) { this.hp = 0; this._dying = 1; this._noReward = true; return; }
             // 第50弾B (オーナー: 敵もTech・哨戒機を使う・自機と同じ法則): 敵の空母もTech組み立て中は完全停止し大量のシグネチャを出す
+            if (this._beamHold > _frameCount) { this._v = 0; this.currentSpeed = 0; this.speed = 0; this._movedF = -1; return; } // 第79弾: ビーム照射中は動けない
             if (this._techT > 0) {
                 this._techT -= gameSpeedFactor; this._v = 0; this.currentSpeed = 0; this.speed = 0; this._movedF = -1;
                 if (this._techT <= 0) { this._techT = 0; spawnEnemyDrone(this, 'mech'); }
@@ -4356,7 +4367,7 @@ class Ship {
             // 第39弾: 敵だけの補正 (セクターごとの+5%・自艦のAI配分で伸び縮み・ノードでの強化) は撤去 — 自艦の有視界と同じ
             let myDetectRange = (BASE_VISION_RADIUS + (LULL_VIS - BASE_VISION_RADIUS) * lullK) * Math.max(MIN_VISION_FACTOR, 1 - higgsHereDetect * (1 - MIN_VISION_FACTOR)) * (1 - jamDegrade) / (1 + CLUTTER_HARD * _clN);
             // 第39弾: 受信の最大距離も自艦と同じ式 (15000u × 探知重視 × 居る場所の霧)。セクター補正は撤去
-            let sigRange = PASSIVE_BASE * _efx.rxRange * epm(this).rxRange * (1 - higgsHereDetect * 0.3) * (1 - jamDegrade);
+            let sigRange = PASSIVE_BASE * _efx.rxRange * epm(this).rxRange * (ENEMY_CLASS[this.type] === 'stealth' ? STEALTH_RX_MULT : 1) * (1 - higgsHereDetect * 0.3) * (1 - jamDegrade);
             // ヒッグスサージ: 敵の探知も対称に縮退/ブースト (プレイヤーと同じ物理法則)
             if (surgePhase === 'active') { myDetectRange *= SURGE_DETECT_MULT; sigRange *= SURGE_DETECT_MULT; }
             else if (surgePhase === 'after') { myDetectRange *= SURGE_CLARITY_MULT; sigRange *= SURGE_CLARITY_MULT; }
@@ -4876,7 +4887,7 @@ class Ship {
                         _eproj.owner = this; // kinetic/missile着弾時の奇襲被弾判定用
                         { const _m = epm(this); // 第33弾: 敵の部品
                           if (wType === 'kinetic') _eproj.dmg *= _m.kinDmg * _m.dmgAll;
-                          else if (wType === 'missile') { _eproj.dmg *= _m.mslDmg * _m.dmgAll; _eproj.maxDist *= _m.mslRange; _eproj.speed *= _m.mslSpeed; _eproj.quiet = !!_m.mslQuiet; _eproj.emp = !!_m.emp; _eproj._turnMul = _m.mslTurn; _eproj.seekR = _m.seeker ? 1300 : 900; } } // 第39弾: 終末シーカーは自機と同じ 900u (部品で1300u)
+                          else if (wType === 'missile') { _eproj.dmg *= _m.mslDmg * _m.dmgAll; _eproj.maxDist *= _m.mslRange; _eproj.speed *= _m.mslSpeed; _eproj._locked = !!this.inVision; _eproj.quiet = !!_m.mslQuiet; _eproj.emp = !!_m.emp; _eproj._turnMul = _m.mslTurn; _eproj.seekR = _m.seeker ? 1300 : 900; } } // 第39弾: 終末シーカーは自機と同じ 900u (部品で1300u)
                         _beamShooter = null;
                         projectiles.push(_eproj);
                     }
@@ -4885,7 +4896,7 @@ class Ship {
                     // 第20弾: 弾を消費してリロード (実弾=8斉射マガジン / ミサイル=1発ごとに10秒 / ビーム=35秒)
                     if (wType === 'kinetic' && this.ammoK !== undefined) { this.ammoK--; if (this._kMag === undefined) this._kMag = epm(this).kinMag; if (--this._kMag <= 0 || this.ammoK <= 0) this._kReload = KINETIC_RELOAD_TIME * epm(this).kinReload * shipFx(this).reload; }
                     else if (wType === 'missile' && this.ammoM !== undefined) { this.ammoM--; this._mReload = MISSILE_RELOAD_TIME * epm(this).mslReload * shipFx(this).reload; }
-                    else if (wType === 'beam') { this._bReload = BEAM_RELOAD_TIME * epm(this).beamReload * shipFx(this).reload; this._eCharge = 0; }
+                    else if (wType === 'beam') { this._bReload = BEAM_RELOAD_TIME * epm(this).beamReload * shipFx(this).reload; this._eCharge = 0; this._beamHold = _frameCount + BEAM_HOLD_F; }
                     this.fireFlashTimer = 120;
                     this._fireFlash = 90; this._fireFlashType = wType; // 第39弾: 発砲の信号は自艦と同じ (emitSigs)
                     this._lastFireType = wType; this._lastFireF = _frameCount; // 第22弾: 自機(COM)は撃たれた兵装で機動を選ぶ
@@ -5186,7 +5197,7 @@ class Ship {
             const _lf = this._launchFlash > 0 ? this._launchFlash / 60 : 0;
             if (this._launchFlash > 0) this._launchFlash -= gameSpeedFactor;
             const _eSw = !_isF && this._engSwT > 0; // 第42弾: 敵もエンジンの切替中は推力ゼロ・EMが漏れる (自艦と同じ)
-            const _sg = emitSigs({
+            const _sg = emitSigs({ cls: _isF ? '' : ENEMY_CLASS[this.type],
                 engine: _isF ? 'thermonuclear' : (this.engine || 'thermonuclear'), engineOn: !_eSw, engSwitch: _eSw,
                 thrust: _thrusting ? (_isF ? Math.min(1, 0.04 + spd / Math.max(0.1, gameSpeedFactor) / ENEMY_FTR_SPEED) : thrustFrac(spd, ENEMY_CLASS[this.type] || 'assault')) : 0,
                 alloc: _isF ? { sensors: 0, ai: 0 } : { sensors: _al.sensors / 100, ai: _al.ai / 100 },
@@ -8136,7 +8147,7 @@ var WEAPON_VARIANTS = {
     missile: {
         std:     { name: '標準ミサイル', up: '熱源誘導・バランス型', down: '—', f: m => {} },
         fast:    { name: '短中距離型', up: '速さ×1.5・リロード×0.7', down: '威力×0.7・射程×0.7', f: m => { m.mslSpeed *= 1.5; m.mslReload *= 0.7; m.mslDmg *= 0.7; m.mslRange *= 0.7; } },
-        heavy:   { name: '遠距離重ミサイル', up: '威力×1.4・射程×1.6', down: '速さ×0.7・リロード×1.3', f: m => { m.mslDmg *= 1.4; m.mslRange *= 1.6; m.mslSpeed *= 0.7; m.mslReload *= 1.3; } },
+        heavy:   { name: '遠距離重ミサイル', up: '威力×1.4・射程5000u', down: '速さ×0.7・リロード×1.3', f: m => { m.mslDmg *= 1.4; m.mslRange *= 5000 / 2200; m.mslSpeed *= 0.7; m.mslReload *= 1.3; } },
         seek:    { name: '高追尾型', up: '旋回×1.6 (動く相手に当てやすい)', down: '威力×0.8・射程×0.9・発射の熱×1.3', f: m => { m.mslTurn *= 1.6; m.mslDmg *= 0.8; m.mslRange *= 0.9; m.mslLaunchHeat *= 1.3; } },
         mirv:    { from: 'mirv' },
         quiet:   { from: 'quietmsl' },
@@ -10995,6 +11006,16 @@ function drawMinimap() {
         minimapCtx.closePath(); minimapCtx.fill();
         minimapCtx.globalAlpha = 1;
     }
+    // 第79弾 (オーナー): ビームの軌跡をミニマップに (自艦の撃ったもの=水色・敵のもの=赤。表示が消えるまで)
+    for (const ef of effects) {
+        if (ef.type !== 'beam' || ef.born === undefined) continue;
+        const _bax = ef.tx - ef.x, _bay = ef.ty - ef.y, _bl = Math.hypot(_bax, _bay) || 1;
+        const _bx2 = ef.x + _bax / _bl * BEAM_DRAW_LEN, _by2 = ef.y + _bay / _bl * BEAM_DRAW_LEN;
+        minimapCtx.globalAlpha = Math.max(0.25, ef.a === undefined ? 1 : ef.a) * 0.9;
+        minimapCtx.strokeStyle = ef.c === '#ff4d4d' ? '#ff5050' : '#7fe8ff'; minimapCtx.lineWidth = 1.5;
+        minimapCtx.beginPath(); minimapCtx.moveTo(ef.x * mmScale + offX, ef.y * mmScale + offY); minimapCtx.lineTo(_bx2 * mmScale + offX, _by2 * mmScale + offY); minimapCtx.stroke();
+    }
+    minimapCtx.globalAlpha = 1;
     // Viewport
     minimapCtx.strokeStyle = 'rgba(255,255,0,0.5)'; minimapCtx.lineWidth = 1;
     minimapCtx.strokeRect(camera.x * mmScale + offX, camera.y * mmScale + offY, (cssW / camera.zoom) * mmScale, (cssH / camera.zoom) * mmScale);
@@ -14054,12 +14075,17 @@ function updateThreats() {
             _thrPut(key, 'drn', Math.atan2(e.y - py, e.x - px), 0.03, 0.9, '艦載機', '艦載機が自艦を狙っている (有視界・' + Math.round(d / 100) * 100 + 'u)');
             continue;
         }
-        const fcsOn = e.aiState === 'combat' && (e.contactFreshness || 0) > 0.4 && d < FC_ILLUM_RANGE * (epm(e).fcsLeak ? 1.5 : 1) && !(e._noiseLk && e._noiseLk === e.playerLastKnownPos);
+        const fcsOn = e.aiState === 'combat' && e.inVision && (e.contactFreshness || 0) > 0.4 && // 第79弾: 見えている相手へのロックだけが照準波になる (推定へのロックは通知しない)
+             d < FC_ILLUM_RANGE * (epm(e).fcsLeak ? 1.5 : 1) && !(e._noiseLk && e._noiseLk === e.playerLastKnownPos);
         if (fcsOn) {
             const sd = 0.05 * (epm(e).ecm ? 1.5 : 1) * (player._daze > 0 ? 2 : 1);
             _thrPut(key, 'lock', Math.atan2(e.y - py, e.x - px), sd, 0.9, 'ロック', '火器管制の照準波を感知 — ロックオンされている。射線から外れろ');
         }
-        if ((e._beamCharge || 0) > 0 && d < passiveRange()) _thrPut('B' + e.uid, 'beam', Math.atan2(e.y - py, e.x - px), 0.1, 0.7, 'ビーム', 'ビームのチャージ反応 — 射線から外れろ');
+        if ((e._eCharge || 0) > 0 && d < BEAM_CHARGE_WARN_R && (sensorsOn.heat || sensorsOn.optic || sensorsOn.em)) { // 第79弾: 高エネルギー反応 (方向は分からず、距離だけ500u刻み)
+            const _bd = Math.max(500, Math.ceil(d / 500) * 500);
+            _thrPut('B' + e.uid, 'beam', Math.atan2(e.y - py, e.x - px), 1.0, 0.5, '高エネルギー', '距離' + _bd + 'uの範囲において高エネルギー反応有り');
+            if (_frameCount - (e._chgWarnF || -9999) > 480) { e._chgWarnF = _frameCount; logMessage('WARNING: 距離' + _bd + 'uの範囲において高エネルギー反応有り — ビームのチャージの疑い', 'warning-msg'); sfxOr('alm_status_warn', 'alert'); }
+        }
     }
     // ②③ 飛んでくる弾: 自艦へ向かっているものだけ (逸れる弾・囮を追うミサイルは脅威にしない)
     for (const p of projectiles) {
@@ -14072,7 +14098,7 @@ function updateThreats() {
             _thrPut('K' + (p._uid || (p._uid = ++_thrUid)), 'kin', Math.atan2(dy, dx), 0.04, 0.9, '実弾', '実弾が飛来 (有視界)');
         } else {
             const vis = inPlayerVision(p.x, p.y);
-            if (closing < 0.35 || !(p._torpAlerted || vis)) continue; // ミサイルは推進波か有視界
+            if (closing < 0.35 || !(p._torpAlerted || (vis && p._locked))) continue; // 第79弾: ロックされたミサイルは推進波か有視界・されていないミサイルはEMを捉えた時だけ
             _thrPut('M' + (p._uid || (p._uid = ++_thrUid)), 'msl', Math.atan2(dy, dx), vis ? 0.04 : 0.14, 0.9, 'ミサイル', 'ミサイルが接近 — ' + (vis ? '有視界' : '推進波'));
         }
     }
@@ -14201,7 +14227,7 @@ const BAND_JP = { heat: '熱', optic: '光学', em: '電磁波', higgs: 'ヒッ�
 // パッシブ受信の到達距離 (方位ウェッジ生成・受信レベル表示で共通)
 function passiveRange() {
     // 第39弾: 受信の最大距離 15000u × 探知重視 × 部品 × 居る場所の霧 (敵と同じ式)
-    let range = PASSIVE_BASE * PM.rxRange * playerFx().rxRange * (player ? 1 - getHiggsIntensity(player.x, player.y) * 0.3 : 1);
+    let range = PASSIVE_BASE * PM.rxRange * playerFx().rxRange * (gameState.shipType === 'stealth' ? STEALTH_RX_MULT : 1) * (player ? 1 - getHiggsIntensity(player.x, player.y) * 0.3 : 1);
     if (surgePhase === 'active') range *= SURGE_DETECT_MULT;        // ヒッグスサージ: 敵味方対称に縮退
     else if (surgePhase === 'after') range *= SURGE_CLARITY_MULT;   // 通過後は高感度
     if (player && player._sysSensorTimer > 0) range *= SYS_SENSOR_RX; // センサー損傷 (敵も同じ)
@@ -16947,9 +16973,8 @@ document.getElementById('btn-restart').addEventListener('click', () => {
     document.getElementById('game-over-overlay').classList.add('hidden');
     gameState.credits = Math.floor(gameState.credits * 0.5); // Keep half credits on death
     gameState.sector = Math.max(1, gameState.sector); // Keep sector progress
-    generateSector();
-    updateTopUI();
-    logMessage('SYSTEM: 艦体緊急再起動完了。クレジット50%喪失。', 'warning-msg');
+    saveGame();
+    location.reload(); // 第79弾 (オーナー): 撃沈後も次の狩りは始めずタイトルへ戻る
 });
 
 // ═══ 第13弾: 作戦報告 (セクター制圧後の帰投・補給) ═══
@@ -16983,12 +17008,12 @@ function openDebrief() {
 }
 function _closeDebrief() { document.getElementById('debrief-overlay')?.classList.add('hidden'); _debriefOpen = false; }
 document.getElementById('btn-db-next')?.addEventListener('click', () => {
+    // 第79弾 (オーナー): 試合が終わったら次の狩りへは進まずタイトルへ戻る (強化の持ち越しは無いため)
     _closeDebrief();
-    gameState.sector++;
-    gameState.credits += 200; // 深宇宙への進出報酬 (旧ワープと同額)
-    saveGame(); updateTopUI();
-    generateSector();
+    gameState.credits += 200; // 進出報酬 (従来どおり)
+    saveGame();
     sfxUI('ui_close');
+    location.reload();
 });
 document.getElementById('btn-db-dock')?.addEventListener('click', () => {
     document.getElementById('debrief-overlay')?.classList.add('hidden');

@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261110h">
+    <link rel="stylesheet" href="style.css?v=20261110i">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -436,8 +436,8 @@
             <div id="dock-prompt">
                 <div class="prompt-content">
                     <div class="pulse-icon"></div>
-                    <span>占有したコロニーの通信圏内です (改修・積み込み計画)</span>
-                    <button class="btn btn-primary" id="btn-dock">ドッキング開始</button>
+                    <span>コロニー通信圏内</span>
+                    <button class="btn btn-primary btn-small" id="btn-dock">ドック</button>
                 </div>
             </div>
 
@@ -647,8 +647,8 @@
                     <div id="db-report" class="db-report"></div>
                     <div class="db-btns">
                         <button class="btn btn-small" id="btn-replay-db">試合の記録</button>
-                        <button class="btn btn-info" id="btn-db-dock">補給・改修</button>
-                        <button class="btn btn-primary" id="btn-db-next">次の狩りへ ▶</button>
+                        <button class="btn btn-info hidden" id="btn-db-dock">補給・改修</button>
+                        <button class="btn btn-primary" id="btn-db-next">タイトルへ ▶</button>
                     </div>
                 </div>
             </div>
@@ -807,7 +807,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261110h"></script>
+    <script src="game.js?v=20261110i"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {

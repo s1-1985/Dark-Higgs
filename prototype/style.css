@@ -2767,3 +2767,9 @@ body.in-game #zoom-ctl #zoom-fab .ico { width: 22px; height: 22px; display: bloc
 .sonar-band-btn .sb-mark { background: transparent; border: 1px solid currentColor; color: currentColor; }
 .sonar-band-btn.on .sb-mark { background: currentColor !important; color: #02130e !important; }
 .sonar-band-btn.on .sb-mark, .sonar-band-btn.on span { text-shadow: none; }
+
+/* 第79弾: ドッキングの案内は小さく (オーナー: 大きすぎる) */
+#dock-prompt .prompt-content { padding: 5px 12px; gap: 8px; border-radius: 20px; box-shadow: none; }
+#dock-prompt .prompt-content span { font-size: 11px; text-shadow: none; }
+#dock-prompt .pulse-icon { width: 8px; height: 8px; }
+#dock-prompt .btn { padding: 3px 10px; font-size: 11px; min-height: 0; }
