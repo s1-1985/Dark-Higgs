@@ -2296,8 +2296,9 @@ function updateStatusStrip() {
     if (player._sysSensorTimer > 0) chips.push(['センサー損傷', sec(player._sysSensorTimer), 'sen']); else if (player._daze > 0) chips.push(['センサー撹乱', sec(player._daze), 'sen']);
     if (player._commJam > 0) chips.push(['通信障害', sec(player._commJam), 'sen']);
     if (player._burn > 0) chips.push(['延焼', sec(player._burn), 'bad']);
+    if (debugMode) chips.push([_dbgGod ? 'DEBUG 無敵' : 'DEBUG', '', 'sen']); // 第73弾: 無敵が残っていても気づけるように常に表示
     const key = chips.map(c => c[0] + c[1]).join('|');
-    if (key !== _ssKey) { _ssKey = key; const st = document.getElementById('ss-stat'); if (st) st.innerHTML = chips.map(c => '<span class="ss-chip ' + c[2] + '">' + c[0] + '<i>' + c[1] + 's</i></span>').join(''); }
+    if (key !== _ssKey) { _ssKey = key; const st = document.getElementById('ss-stat'); if (st) st.innerHTML = chips.map(c => '<span class="ss-chip ' + c[2] + '">' + c[0] + (c[1] === '' ? '' : '<i>' + c[1] + 's</i>') + '</span>').join(''); }
     const xh = document.getElementById('xo-history'); if (xh && !xh.classList.contains('hidden')) renderXoHistory();
     const pop = document.getElementById('cp-pop'); if (pop && !pop.classList.contains('hidden')) renderCpPop();
 }
@@ -6537,6 +6538,7 @@ function toggleHiggsView(off) {
 function updateLandmarkBanner() { /* ランドマーク距離表示廃止 */ }
 
 function startGame(shipType) {
+    if (debugMode) toggleDebugMode(false); // 第73弾: 出撃のたびにデバッグ(無敵・凍結)を切る — 前の試合の無敵が次の試合に残っていた
     try { bgmMatchStart(); sfx('sys_battle_start', 0.9); } catch (e) {}
     gameState.shipType = shipType;
     // 敵艦種: ロビーで選択された値をセット
@@ -14859,9 +14861,9 @@ function _comUseItem(k, tx, ty) { if (!((SHIP_DRONES[gameState.shipType] || []).
 function comStratStep(c, P, D, hpF, contact, te, lk, r) {
     const now = _frameCount;
     let S = c.st;
-    const end = (why) => { comThinkEvent('p', '戦略「' + (S ? COM_STRATS[S.id].split(' ')[0] : '') + '」終了: ' + why); c.lastStrat = S && S.id; c.st = null; c.stratCD = now + 600 + Math.random() * 1800; S = null; return false; };
+    const end = (why) => { if (S && (S.id === 'screen' || S.id === 'guard' || S.id === 'push' || S.id === 'tech')) comDroneRecall(c, '戦略の終了'); comThinkEvent('p', '戦略「' + (S ? COM_STRATS[S.id].split(' ')[0] : '') + '」終了: ' + why); c.lastStrat = S && S.id; c.st = null; c.stratCD = now + 600 + Math.random() * 1800; S = null; return false; };
     if (!S) {
-        if (now < (c.stratCD || 0)) return false;
+        if (now < (c.stratCD || 0) || comEngaged()) return false; // 第73弾: 会敵中は新しい戦略 (ドローンを遠くへ出す物) を始めない
         const x = comStratCtx(c, P), pk = comPickStrat(c, P, x, hpF);
         S = c.st = { id: pk.pick, t0: now, until: now + COM_STRAT_MIN + Math.random() * COM_STRAT_VAR, ph: 'go', hp0: player.hp, x0: player.x, y0: player.y };
         const ws = Object.keys(pk.w).map(k => k + ' ' + pk.w[k].toFixed(1)).join(' / ');
@@ -14890,6 +14892,7 @@ function comStratStep(c, P, D, hpF, contact, te, lk, r) {
     // ── 共通の中止条件 ──
     if (S.id !== 'gather' && S.id !== 'fogHide' && player.hp < S.hp0 - player.maxHp * 0.05 && !(S.id === 'push' || S.id === 'screen')) return end('被弾');
     if (now > S.until) return end('時間');
+    if ((S.id === 'screen' || S.id === 'guard' || S.id === 'push') && comEngaged()) return end('会敵 (' + comEngaged() + ') — ドローンを母艦の護衛へ');
     const sa = lockedSignalId && _signalAnalysis[lockedSignalId], est = sa && sa.fix ? trackEstimate(sa, 0) : null;
     const dEst = est ? Math.hypot(est.x - player.x, est.y - player.y) : Infinity;
     switch (S.id) {
@@ -15029,6 +15032,20 @@ function comStratStep(c, P, D, hpF, contact, te, lk, r) {
     return false;
 }
 // 撃たれた・ミサイルが来た・退く時のかく乱 (敵の enemyItemsStep と同じ考え方): 閃光=ミサイルが近い/敵が近い・ノイズ=撃たれて横へ逃がす・煙幕=撃たれて慎重/隠密・偽装=退く時に逆方向へ
+// 第73弾 (オーナー「空母がドローンを哨戒に出したまま遠くで会敵しても呼び戻さない」): 会敵したら 戦闘機・Tech を全機帰還させる (母艦の護衛として戦わせる)。
+//   旧: 戦略「ドローンで探る」「拠点を守る」で出した 哨戒/攻撃 の指示は 戦略が終わるまで・終わっても 取り消されず、ドローンは遠い哨戒点に残った
+function comDroneRecall(c, why) {
+    const ts = ['attack', 'mech'].filter(t => playerDrones.some(d => d.type === t && d.hp > 0 && ((d._own || droneOrders[t] || {}).kind || 'return') !== 'return'));
+    if (!ts.length) return false;
+    for (const t of ts) droneOrder(t, 'return', player.x, player.y);
+    comThinkEvent('p', 'ドローンを呼び戻す — ' + why);
+    return true;
+}
+function comEngaged() {
+    const hitRecent = playerHitLog.length && _frameCount - playerHitLog[playerHitLog.length - 1].f < 600;
+    const seen = enemies.some(e => e.hp > 0 && !e._dying && e.type !== 'fighter' && e.inVision && Math.hypot(e.x - player.x, e.y - player.y) < 5000);
+    return hitRecent ? '被弾' : playerExposureLevel >= 3 ? '攻撃を受けている' : seen ? '敵が見えた' : playerExposureLevel >= 2 ? '照準波を受けた' : '';
+}
 function comReactItems(c, P, hpF, retreating) {
     const now = _frameCount, x = comStratCtx(c, P);
     const hitAgo = playerHitLog.length ? now - playerHitLog[playerHitLog.length - 1].f : 1e9;
@@ -15071,6 +15088,7 @@ function comPilotStep() {
     if (contact) c.lastContactF = now;
     comExtrasStep(c, P, D, hpF, contact);
     comReactItems(c, P, hpF, hpF < retreat); // 第58弾: かく乱 (閃光・ノイズ・煙幕・偽装)
+    { const why = comEngaged(); if (why && now - (c.recallF || -1e9) > 600) { if (comDroneRecall(c, why)) c.recallF = now; } } // 第73弾: 会敵したら呼び戻す
     // 第41弾: エンジンは試合の始めに選ぶ (始めの10秒なら切替の惰性なし)。第42弾: 性格と居る所の環境で (敵と同じ comEngineEval)・試合中も場面で替える (下)
     if (!c.engSet) {
         c.engSet = true; c.engM = { engRevF: now, engSit: 'search' };
