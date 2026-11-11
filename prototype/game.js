@@ -430,7 +430,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261111a';
+const SPRITE_VER = '20261111b';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -494,7 +494,8 @@ const SPRITE_FILES = {
     // 第35弾 (Higgsfield gpt_image_2_5): 漂流コンテナ・輸送船・機雷・開けた跡 (透過) / 嵐の放電・霧のゆらぎ・熱泉 (黒地・加算で描く)
     field_cache:  'assets/field_cache.png',
     field_trap:   'assets/field_trap.png',   // 偽コンテナ (自分で置いた・見抜いた) の印。ゲーム中の本物そっくりの絵は field_cache のまま (見た目で分からないように)
-    fx_trap_blast: 'assets/fx_trap_blast.png', // 偽コンテナの爆発
+    fx_trap_blast: 'assets/fx_trap_blast.png', // 偽コンテナの爆発 (火球)
+    fx_trap_smoke: 'assets/fx_trap_smoke.png', // 偽コンテナの爆発 (煙)
     field_convoy: 'assets/field_convoy.png',
     field_mine:   'assets/field_mine.png',
     field_looted: 'assets/field_looted.png',
@@ -1473,7 +1474,16 @@ const DECOY_LURE_RADIUS = 1600; // この半径内の敵ミサイルを誘引
 let playerDrones = [];
 const DRONE_ATK_RANGE = 1400;   // 攻撃ドローンの索敵/射程
 const DRONE_SCOUT_RANGE = 2200; // 哨戒ドローンのセンサー拡張半径
-const DRONE_TURRET_RANGE = 1100;// 建設タレットの射程
+const DRONE_TURRET_RANGE = 2200;// 建設タレットの射程 (2026-11-11 オーナー「砲台の射程が短い・戦闘機3機編隊を迎撃できるように」: 1100→2200・威力×0.6→×1.5・連射 55→22フレーム・弾は減衰なしで射程まで届く・見越し射撃)
+const TURRET_DMG_SCALE = 1.5, TURRET_CD = 22, TURRET_ENEMY_CD = 30;
+// 砲台の見越し射撃: 弾 (12u/f) が届く時の相手の位置 (自分の速度ベクトルは使わない・相手の動きだけ)
+function turretLead(x, y, t) {
+    let vx = 0, vy = 0;
+    if (t.vx !== undefined && t.vy !== undefined && !(t.currentSpeed > 0)) { vx = t.vx; vy = t.vy; } else { const sp = t.currentSpeed || t._spd || t.v || 0; vx = Math.cos(t.angle || 0) * sp; vy = Math.sin(t.angle || 0) * sp; }
+    let lx = t.x, ly = t.y;
+    for (let i = 0; i < 3; i++) { const T = Math.hypot(lx - x, ly - y) / 12; lx = t.x + vx * T; ly = t.y + vy * T; }
+    return { x: lx, y: ly };
+}
 // 第20弾: ドローンへの指示 (種類ごと: 哨戒/攻撃/帰還)。哨戒=その点の半径800uを周回 / 攻撃=その点へ向かい着いたら半径600uを周回 / 帰還=自艦の護衛 (既定)。
 // ドローン自身の目 (1200u) で見えた敵も撃ち、データリンクで自艦に共有する。追いかけるのは指示点から1500uまで (実装で決めた値)
 const DRONE_PATROL_R = 800, DRONE_ATTACK_ORBIT = 600, DRONE_SIGHT = 1200, DRONE_LEASH = 1500;
@@ -1490,7 +1500,7 @@ const FTR_FIRE_CD = 7, FTR_DMG_SCALE = 0.42, FTR_BREAK_D = 220, FTR_EXTEND_F = 4
 const SCOUT_TURN = 0.03, SCOUT_ESCORT_R = 1800, SCOUT_LISTEN_R = 6000, SCOUT_WAKE_R = 2500, SCOUT_MSL_WARN_R = 3000, SCOUT_PING_R = 3500, SCOUT_PING_CD = 1800;
 // Tech (人型兵器): 推進器で全方向に動く・慣性あり。中=小銃3連射 / 遠=肩のミサイル (4発・自艦の近くで30秒に1発補充) / 近=ビームサーベル
 const TECH_TURN = 0.06, TECH_ACC = 0.07, TECH_DASH_V = 8, TECH_ENGAGE_R = 2000, TECH_KEEP_D = 650, TECH_DASH_START = 1100, TECH_SABER_R = 170;
-const TECH_RIFLE_RANGE = 1000, TECH_RIFLE_SCALE = 0.2, TECH_RIFLE_CD = 120, TECH_MSL_MIN = 900, TECH_MSL_RANGE = 1900, TECH_MSL_SCALE = 0.3, TECH_MSL_CD = 720, TECH_MSL_MAX = 3, TECH_MSL_REARM = 1800, TECH_SABER_N = 5; // 第52弾: ミサイル3発・サーベル5回・弾の補給は資材で (自動補充は撤去)
+const TECH_RIFLE_RANGE = 1000, TECH_RIFLE_SCALE = 0.2, TECH_RIFLE_CD = 120, TECH_MSL_MIN = 500, TECH_MSL_RANGE = 2400, TECH_MSL_SCALE = 0.3, TECH_MSL_CD = 480, TECH_MSL_MAX = 3, TECH_MSL_REARM = 1800, TECH_SABER_N = 5; // 第52弾: ミサイル3発・サーベル5回・弾の補給は資材で (自動補充は撤去)
 const TECH_SABER_DMG = 100, TECH_SABER_CD = 600, TECH_SABER_RETRY = 240;
 const DRONE_CLOSE_SENSE = 700, DRONE_CHASE_MEM = 480; // 至近の探知 / 見失ってから追う時間 (8秒)
 const ENEMY_ANTI_TECH_R = 2000, ENEMY_ANTI_TECH_CD = 600; // 敵がTechをミサイルで迎撃する距離・間隔 (攻撃型は×0.6)
@@ -3245,7 +3255,7 @@ class Projectile {
         if (this.isPlayer && this.type === 'kinetic' && PM.kinProx && !hitTarget && !this._evaded) {
             const pe = enemies.find(e => e.hp > 0 && !e._dying && Math.hypot(e.x - this.x, e.y - this.y) < 150 + (e.radius || 0));
             if (pe) {
-                const _fallP = PM.kinNoFall ? 1 : 1 - KINETIC_FALLOFF * Math.min(1, this.distTraveled / WEAPON_RANGE.kinetic);
+                const _fallP = PM.kinNoFall || this._noFall ? 1 : 1 - KINETIC_FALLOFF * Math.min(1, this.distTraveled / WEAPON_RANGE.kinetic);
                 const d = Math.floor(this.dmg * 0.5 * _fallP);
                 pe.hp -= d; this.active = false;
                 createHitEffect(this.x, this.y, '#ffcc55');
@@ -3292,7 +3302,7 @@ class Projectile {
             if (!this.isPlayer && hitTarget === player && PM.front > 0 && Math.abs(_angDiff(_hitAng, player.angle)) < Math.PI / 6) dmgMult *= 1 - PM.front;
             if (this.isPlayer && hitTarget.pm && hitTarget.pm.front > 0 && Math.abs(_angDiff(_hitAng, hitTarget.angle)) < Math.PI / 6) dmgMult *= 1 - hitTarget.pm.front; // 第33弾: 敵の傾斜装甲
             // 第20弾: 実弾は遠いほど威力が落ちる (射程いっぱいで半分)
-            const _fall = this.type === 'kinetic' && !(this.isPlayer && PM.kinNoFall) && !(!this.isPlayer && this.owner && epm(this.owner).kinNoFall) ? 1 - KINETIC_FALLOFF * Math.min(1, this.distTraveled / WEAPON_RANGE.kinetic) : 1;
+            const _fall = this.type === 'kinetic' && !this._noFall && !(this.isPlayer && PM.kinNoFall) && !(!this.isPlayer && this.owner && epm(this.owner).kinNoFall) ? 1 - KINETIC_FALLOFF * Math.min(1, this.distTraveled / WEAPON_RANGE.kinetic) : 1;
             const _hitDmg = Math.floor(this.dmg * dmgMult * _fall);
             hitTarget.hp -= _hitDmg;
             if (this.emp) applyDaze(hitTarget, 480, 'EMP弾頭'); // 第32弾 (第33弾: 敵のEMPも)
@@ -4011,7 +4021,7 @@ class Ship {
                 mt: { e: mtOver('engine'), w: mtOver('weapons'), s: mtOver('sensors'), a: mtOver('ai') },
                 quiet: silentRunning || playerCoasting, ff: _ff, ft: this._fireFlashType, launch: _lf,
                 charge: _chg ? PM.chargeLeak : 0, beamCool: !!this.beamReloading, mslReload: !!this.missileReloading,
-                assemble: cargoAssembling(), comms: !!(_capturing || _resupply), repair: (this._kitT || 0) > 0 || repairActive,
+                assemble: cargoAssembling(), comms: !!(_capturing || _resupply || _frameCount < _hackUntil), repair: (this._kitT || 0) > 0 || repairActive,
                 engSwitch: engineSwitchT > 0, sysEngine: this._sysEngineTimer > 0,
                 leak: { heat: sensorLeak('heat'), optic: sensorLeak('optic'), em: sensorLeak('em'), higgs: sensorLeak('higgs') },
                 hHere: _hHere, storm: getStormIntensity(this.x, this.y), thermal: getThermalIntensity(this.x, this.y),
@@ -6031,6 +6041,40 @@ function updateDrawEffects(ctx) {
         } else if (ef.type === 'sonar' || ef.type === 'sonar-fill' || ef.type === 'sonar-boundary') {
             // ソナー系エフェクトはヒッグスフォグより手前に描く: updateDrawSonarEffects() で更新+描画
             continue;
+        } else if (ef.type === 'trapblast') {
+            // 2026-11-11 (オーナー「爆発はアニメーションに」): 偽コンテナの爆発 — 閃光 → 火球 (絵が膨らんで回る) → 衝撃波の輪 → 煙 + 飛び散る破片。約1.5秒 (描画フレームで進む)
+            ef.t = (ef.t || 0) + 1;
+            const t = ef.t, T = 96;
+            if (t >= T) { effects.splice(i, 1); continue; }
+            const R = Math.max(ef.R || 240, 48 / camera.zoom), easeOut = (u) => 1 - (1 - u) * (1 - u);
+            ctx.save();
+            if (t < 22) { // 閃光 (白い核がふくらみ消える)
+                const u = t / 22; ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = (1 - u) * 0.95;
+                const g = ctx.createRadialGradient(ef.x, ef.y, 0, ef.x, ef.y, R * (0.3 + 0.9 * easeOut(u)));
+                g.addColorStop(0, '#ffffff'); g.addColorStop(0.35, '#ffe9a0'); g.addColorStop(1, 'rgba(255,140,40,0)');
+                ctx.fillStyle = g; ctx.beginPath(); ctx.arc(ef.x, ef.y, R * (0.3 + 0.9 * easeOut(u)), 0, Math.PI * 2); ctx.fill();
+            }
+            if (t > 14) { // 煙 (暗い塊が広がりながら薄れる)
+                const u = (t - 14) / (T - 14); ctx.globalCompositeOperation = 'source-over';
+                if (spriteReady(SPRITES.fx_trap_smoke)) { const L = R * (0.9 + 1.5 * easeOut(u)); ctx.globalAlpha = (1 - u) * 0.75; ctx.save(); ctx.translate(ef.x, ef.y - u * R * 0.35); ctx.rotate(ef.rot + u * 0.5); ctx.drawImage(SPRITES.fx_trap_smoke, -L / 2, -L / 2, L, L); ctx.restore(); }
+                else { ctx.fillStyle = '#2a2622'; for (let k = 0; k < 5; k++) { const a = ef.rot + k * 1.26; ctx.globalAlpha = (1 - u) * 0.35; ctx.beginPath(); ctx.arc(ef.x + Math.cos(a) * R * 0.5 * u, ef.y + Math.sin(a) * R * 0.5 * u - u * R * 0.3, R * (0.25 + 0.5 * u), 0, Math.PI * 2); ctx.fill(); } }
+            }
+            if (t < 64 && spriteReady(SPRITES.fx_trap_blast)) { // 火球 (絵が膨らみながら回って消える)
+                const u = t / 64, L = R * 2 * (0.25 + 0.95 * easeOut(Math.min(1, u * 1.6)));
+                ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = u < 0.35 ? 1 : 1 - (u - 0.35) / 0.65;
+                ctx.save(); ctx.translate(ef.x, ef.y); ctx.rotate(ef.rot + u * 0.6); ctx.drawImage(SPRITES.fx_trap_blast, -L / 2, -L / 2, L, L); ctx.restore();
+            }
+            if (t < 50) { // 衝撃波の輪
+                const u = t / 50; ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = (1 - u) * 0.8; ctx.strokeStyle = '#ffd890'; ctx.lineWidth = Math.max(2, 14 * (1 - u));
+                ctx.beginPath(); ctx.arc(ef.x, ef.y, R * 2.2 * easeOut(u), 0, Math.PI * 2); ctx.stroke();
+            }
+            ctx.globalCompositeOperation = 'source-over'; // 破片 (外へ飛び、減速しながら薄れる)
+            for (const d of ef.deb) {
+                const u = Math.min(1, t / 80), dist = d.v * R * 2.4 * easeOut(u), x = ef.x + Math.cos(d.a) * dist, y = ef.y + Math.sin(d.a) * dist;
+                ctx.globalAlpha = (1 - u) * 0.95; ctx.strokeStyle = d.hot ? '#ffb050' : '#d8d0c0'; ctx.lineWidth = d.w;
+                ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - Math.cos(d.a + d.sp * t) * d.len, y - Math.sin(d.a + d.sp * t) * d.len); ctx.stroke();
+            }
+            ctx.restore();
         } else if (ef.type === 'fx-sprite') {
             // Higgsfieldスプライトエフェクト: 黒背景画像を'lighter'加算合成で描画 (黒=透明)
             if (!spriteReady(ef.img)) { effects.splice(i, 1); continue; }
@@ -8917,6 +8961,7 @@ function updateSrcKnown() {
     if (_frameCount % 30) return;
     updateVisualNegatives();
     updateFakeReveal();
+    updateHack();
     // 第72弾: コロニーの持ち主は、自艦の有視界かドローンの視界に入った時に分かる (旧: 地図の名札が真の持ち主を最初から出していた=情報漏れ)
     for (const st of structures) if (st.type === 'colony') { if (st.owner === 'player') st._pObs = 'player'; else if (inPlayerVision(st.x, st.y) || droneVisionSees(st.x, st.y)) st._pObs = st.owner; }
     for (const sid in _sigIdent) {
@@ -9077,7 +9122,8 @@ function fakeCacheBlast(f, victim) {
     let dmg = Math.round(victim.maxHp * FAKE_DMG_FRAC); dmg = Math.max(0, Math.min(dmg, Math.floor(victim.hp) - 1));
     victim.hp -= dmg;
     createExplosion(f.x, f.y, '#ffcc66', 34, true); addShake(isP ? 14 : 6);
-    if (spriteReady(SPRITES.fx_trap_blast)) effects.push({ type: 'fx-sprite', x: f.x, y: f.y, img: SPRITES.fx_trap_blast, r: 110, life: 1.0, decay: 0.02 }); sfxOr('wpn_mine_blast', 'explosion');
+    { const deb = []; for (let k = 0; k < 22; k++) deb.push({ a: Math.random() * Math.PI * 2, v: 0.35 + Math.random() * 0.65, len: 18 + Math.random() * 40, w: 2 + Math.random() * 3, hot: Math.random() < 0.55, sp: (Math.random() - 0.5) * 0.06 });
+      effects.push({ type: 'trapblast', x: f.x, y: f.y, R: 240, t: 0, rot: Math.random() * 6.28, deb }); } sfxOr('wpn_mine_blast', 'explosion');
     effects.push({ x: victim.x, y: victim.y - 30, text: '偽コンテナ -' + dmg, life: 1.4, type: 'floatText', c: '#ffdd66' });
     applyDaze(victim, FAKE_DAZE, '偽コンテナの爆発');
     if (isP) {
@@ -9096,6 +9142,86 @@ function fakeCacheBlast(f, victim) {
     }
 }
 // 自機側の見抜き (30フレームごと): 解析量・近くで調べた時間
+
+// ═══ 敵ドローンのハック (2026-11-11 オーナー案・値は実装で決めた値) ═══
+// 演算力 (占有コロニー・解析重視) が高いと、敵の戦闘機/Tech の通信に入り込める。第1段階 = 発進元 (母艦) の方角が分かる / 第2段階 = 制御を奪って自分のドローンにする。
+//   戦闘機: 第1段階 = コロニー2つ+解析重視 (またはコロニー3つ) / 第2段階 = コロニー3つ
+//   Tech:   1段階ぶん重い — 第1段階 = コロニー3つ+解析重視 (またはコロニー4つ) / 第2段階 = コロニー4つ以上
+//   第1段階: 5000u以内の見えている敵ドローンが 15秒ごとに母艦の方角 (誤差 ±20°/±10°/±5° — コロニーが多いほど小さい) を教える (方位の記録にも入る)
+//   第2段階: 3000u以内の見えている敵ドローンへ 戦闘機10秒・Tech20秒 かけて侵入 (進行中は通信のEMが漏れる・途中で見えなくなる/離れると最初から)。成功すると耐久そのまま自分の護衛ドローンになる
+//   ⚠️ 敵側が自機のドローンをハックする処理は未実装 (自機側だけ)
+const HACK_RANGE1 = 5000, HACK_RANGE2 = 3000, HACK_NEED = { fighter: 600, mech: 1200 }, HACK_LINE_LIFE = 900;
+let _hack = null, _hackUntil = 0, _hackLvKey = '';
+function hackLevel(kind) {
+    const col = coloniesOwned('player'), an = genFocusKey === 'analysis', c = col - (kind === 'mech' ? 1 : 0);
+    return { s1: c >= 3 || (c >= 2 && an), s2: c >= 3, col };
+}
+function _hackable(e) { return e.hp > 0 && !e._dying && e.type === 'fighter' && (!e._kind || e._kind === 'mech'); }
+function updateHack() {
+    if (!player || player.hp <= 0) { _hack = null; return; }
+    const lf = hackLevel('fighter'), lm = hackLevel('mech'), key = (lf.s1 ? 1 : 0) + (lf.s2 ? 2 : 0) + (lm.s1 ? 4 : 0) + (lm.s2 ? 8 : 0);
+    if (String(key) !== _hackLvKey) {
+        if (_hackLvKey !== '' && key > +_hackLvKey) logMessage('AI: 演算力が上がった — 敵の戦闘機: ' + (lf.s2 ? '通信に侵入して奪える' : lf.s1 ? '発進元の方角が分かる' : 'ハック不可') + ' / Tech: ' + (lm.s2 ? '奪える' : lm.s1 ? '発進元の方角が分かる' : 'ハック不可') + ' (コロニー' + lf.col + '・' + (genFocusKey === 'analysis' ? '解析重視' : '解析重視でない') + ')', 'system-msg');
+        _hackLvKey = String(key);
+    }
+    if (!lf.s1 && !lm.s1) { _hack = null; return; }
+    const now = _frameCount; let best = null, bd = Infinity;
+    for (const e of enemies) {
+        if (!_hackable(e)) continue;
+        const d = Math.hypot(e.x - player.x, e.y - player.y); if (d > HACK_RANGE1) continue;
+        if (!(e.visible || inPlayerVision(e.x, e.y) || droneVisionSees(e.x, e.y))) continue;
+        const kind = e._kind === 'mech' ? 'mech' : 'fighter', L = kind === 'mech' ? lm : lf;
+        if (L.s1 && e._home && e._home.hp > 0 && now - (e._hk1F || -1e9) > 900) { // 第1段階: 発進元の方角
+            e._hk1F = now; const sig = L.col - (kind === 'mech' ? 1 : 0) >= 4 ? 0.09 : L.col - (kind === 'mech' ? 1 : 0) >= 3 ? 0.17 : 0.35;
+            if (e._hkErr === undefined) e._hkErr = _gauss() * sig * 0.5;
+            const ang = Math.atan2(e._home.y - e.y, e._home.x - e.x) + e._hkErr, deg = compassDeg(ang);
+            e._hkLine = { ang, until: now + HACK_LINE_LIFE, sig };
+            addBearingObs('e-' + e._home.uid, e.x, e.y, ang, sig, 0.8, '255,130,130', 'hack');
+            ringMarkBearing(deg, '255,130,130');
+            logMessage('AI: 敵の' + (kind === 'mech' ? 'Tech' : '戦闘機') + 'の通信をハック — 発進元は方位' + deg + '° (誤差±' + Math.round(sig * 57.3) + '°)。その先に母艦が居る', 'system-msg');
+            matchRecEvent('hack1', e.x, e.y, '敵ドローンをハック (第1段階): 発進元の方位' + deg + '°');
+        }
+        if (L.s2 && d < HACK_RANGE2 && d < bd) { bd = d; best = e; }
+    }
+    if (best) {
+        const kind = best._kind === 'mech' ? 'mech' : 'fighter';
+        if (_hack && _hack.e === best) _hack.p += 30; else { _hack = { e: best, p: 0, need: HACK_NEED[kind], kind }; logMessage('AI: 敵の' + (kind === 'mech' ? 'Tech' : '戦闘機') + 'へ侵入開始 — ' + Math.round(_hack.need / 60) + '秒 (その間は通信のEMが漏れる)', 'system-msg'); }
+        _hackUntil = now + 45;
+        if (_hack.p >= _hack.need) hackTakeControl(best, kind);
+    } else _hack = null;
+}
+function hackTakeControl(e, kind) {
+    const type = kind === 'mech' ? 'mech' : 'attack', spec = DRONE_SPEC[type];
+    const d = new Drone(type, e.x, e.y); d.angle = e.angle || 0;
+    d.hp = Math.max(1, spec.hp * Math.max(0.3, e.hp / (e.maxHp || spec.hp))); d._hacked = true; if (type === 'mech') { d.vx = e._vx2 || 0; d.vy = e._vy2 || 0; }
+    playerDrones.push(d);
+    const i = enemies.indexOf(e); if (i >= 0) enemies.splice(i, 1);
+    createExplosion(e.x, e.y, '#66ddff', 10, false); sfxUI('pickup');
+    effects.push({ x: e.x, y: e.y, r: 0, maxR: 420, a: 0.7, c: '#66ddff', type: 'circle' });
+    logMessage('AI: 敵の' + (kind === 'mech' ? 'Tech' : '戦闘機') + 'の制御を奪った — こちらの護衛ドローンになった', 'system-msg');
+    matchRecEvent('hack2', e.x, e.y, '敵ドローンの制御を奪った (' + (kind === 'mech' ? 'Tech' : '戦闘機') + ')');
+    _hack = null; _hackUntil = 0;
+    if (huntStats) huntStats.hacked = (huntStats.hacked || 0) + 1;
+}
+function drawHackFx(ctx) {
+    const inv = 1 / camera.zoom;
+    for (const e of enemies) { // 第1段階の方角の線 (発進元の方へ)
+        const L = e._hkLine; if (!L || _frameCount > L.until || e.hp <= 0) continue;
+        const k = (L.until - _frameCount) / HACK_LINE_LIFE;
+        ctx.save(); ctx.globalAlpha = 0.65 * Math.min(1, k * 3); ctx.strokeStyle = '#ff8a8a'; ctx.lineWidth = 1.5 * inv; ctx.setLineDash([10 * inv, 8 * inv]);
+        ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(e.x + Math.cos(L.ang) * 2600, e.y + Math.sin(L.ang) * 2600); ctx.stroke(); ctx.setLineDash([]);
+        ctx.globalAlpha = 0.35 * Math.min(1, k * 3); ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(e.x + Math.cos(L.ang - L.sig) * 2600, e.y + Math.sin(L.ang - L.sig) * 2600); ctx.moveTo(e.x, e.y); ctx.lineTo(e.x + Math.cos(L.ang + L.sig) * 2600, e.y + Math.sin(L.ang + L.sig) * 2600); ctx.stroke();
+        ctx.restore();
+    }
+    if (_hack && _hack.e && _hack.e.hp > 0) { // 第2段階の進み
+        const e = _hack.e, R = Math.max(60, 20 * inv), u = Math.min(1, _hack.p / _hack.need);
+        ctx.save(); ctx.strokeStyle = '#66ddff'; ctx.lineWidth = 2 * inv; ctx.globalAlpha = 0.9;
+        ctx.beginPath(); ctx.arc(e.x, e.y, R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * u); ctx.stroke();
+        ctx.globalAlpha = 0.35; ctx.setLineDash([4 * inv, 6 * inv]); ctx.beginPath(); ctx.arc(e.x, e.y, R, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+        ctx.restore();
+        queueTag(e.x, e.y - R, 'HACK ' + Math.round(u * 100) + '%', _hack.kind === 'mech' ? 'Tech' : '戦闘機', '102,221,255', 'top', 1);
+    }
+}
 function updateFakeReveal() {
     if (!player || player.hp <= 0) return;
     for (const f of fieldSignals) {
@@ -12847,16 +12973,20 @@ function dogfightStep(f, tgt, vkey, vMax) {
     const shooter = !big && _dfShooter(tgt);
     // ぐるぐる検出: 近いのに撃てない時間が続いたら離脱して間合いを作り直す
     if ((S.st === 'attack' || S.st === 'intercept') && d < 780 && !gunOK) S.circ++; else S.circ = Math.max(0, S.circ - 2);
-    const enter = (st) => { S.st = st; S.t = 0; };
+    const enter = (st) => { S.st = st; S.t = 0; if (st === 'extend') S.extA = f.angle + S.side * 0.15; }; // 離脱の針路は入る時に1回だけ決める (毎フレーム「今の向き+定数」を狙うと旋回の上限に張り付き、半径200uの円を描き続けていた)
     if (S.circ > DF_CIRC_T) { S.side = -S.side; S.circ = 0; enter('extend'); }
     // 状態の切替
     if (S.st !== 'defend' && shooter && d < 820 && tAta < 0.42 && aspect > 1.1) enter('defend'); // 後ろ寄りでない (=向き合っている/後ろを取られた) で狙われている → ブレイク
     if (big) {
         const closing = (Math.cos(f.angle) * (tgt.x - f.x) + Math.sin(f.angle) * (tgt.y - f.y)) / d; // 1=真っすぐ向かっている / 負=通り過ぎた
         switch (S.st) {
-            case 'intercept': case 'turnback': case 'defend': if (d < 1100 && closing > 0.3) enter('attack'); break;
+            case 'intercept': case 'defend': if (d < 1100 && closing > 0.3) enter('attack'); else if (S.t > 420) enter('turnback'); break;
+            // 2026-11-11 (オーナー「戦闘機は艦に近づくと周りをくるくる回るだけ」): 旧の『戻る』は 目標点を機体の位置から (視線の方位+定数) で毎フレーム計算していた
+            //   → 目標点も一緒に動き、戦艦のまわりを半径1300uで回り続けた (抜ける条件が『正面1100u以内』だけで、時間切れも無かった)。
+            //   → 再突入の点を離脱の終わりに1回だけ決め (別の角度・1500u)、そこへ向かい (近づくか4.5秒たてば) 戦艦へ向き直って次の航過に入る
+            case 'turnback': if (d < 1100 && closing > 0.3) enter('attack'); else if (Math.hypot((S.bx ?? f.x) - f.x, (S.by ?? f.y) - f.y) < 450 || S.t > 270) enter('intercept'); break;
             case 'attack': if (d < FTR_BIG_PASS || (closing < -0.2 && d < 700)) enter('extend'); else if (d > 1800) enter('intercept'); break;
-            case 'extend': if ((S.t >= 50 && d > FTR_BIG_SEP) || S.t > 420) enter('turnback'); break;
+            case 'extend': if ((S.t >= 50 && d > FTR_BIG_SEP) || S.t > 420) { enter('turnback'); const _ba = a + Math.PI + S.side * (1.1 + Math.random() * 0.8); S.bx = tgt.x + Math.cos(_ba) * 1500; S.by = tgt.y + Math.sin(_ba) * 1500; } break;
         }
     } else switch (S.st) {
         case 'intercept': if (d < 1150 && aspect < 1.35) enter('attack'); else if (d < 230) enter('extend'); break;
@@ -12875,10 +13005,9 @@ function dogfightStep(f, tgt, vkey, vMax) {
         wantA = gunOK || d > 600 ? aimA : lagA;
         vT = d > 600 ? vTop : Math.max(vMax * DF_VMIN, Math.min(vTop, K.s * 1.1 + 0.4));
     } else if (S.st === 'extend') {       // 離脱 (ブーム&ズーム): ほぼまっすぐ・全速・少し横へ
-        wantA = f.angle + S.side * 0.12; vT = vTop; tf = 0.45;
+        wantA = S.extA ?? f.angle; vT = vTop; tf = 0.45;
     } else if (big && S.st === 'turnback') { // 戦艦へ戻る: 大きく回って別の角度 (側面〜後ろ) から入る
-        const ba = a + Math.PI + S.side * 1.1, bx = tgt.x + Math.cos(ba) * 1300, by = tgt.y + Math.sin(ba) * 1300;
-        wantA = Math.atan2(by - f.y, bx - f.x); vT = vTop;
+        wantA = Math.atan2((S.by ?? tgt.y) - f.y, (S.bx ?? tgt.x) - f.x); vT = vTop;
     } else if (S.st === 'turnback') {     // 回り込み: 相手の真後ろ (少し横) を目指して大きく曲がる = 次は後ろから入る
         const bx = tgt.x - Math.cos(K.h) * 650 + Math.cos(K.h + Math.PI / 2) * S.side * 260, by = tgt.y - Math.sin(K.h) * 650 + Math.sin(K.h + Math.PI / 2) * S.side * 260;
         wantA = Math.atan2(by - f.y, bx - f.x); vT = vTop * 0.95;
@@ -13092,9 +13221,10 @@ class Drone {
                 // 中距離を保って横へ回る (推進器で滑らかに)。サーベルの準備ができて近ければ踏み込む
                 if (!this._side) this._side = Math.random() < 0.5 ? -1 : 1;
                 if ((_frameCount + this._id) % 600 === 0) this._side = -this._side;
-                const want = TECH_KEEP_D, ra = a + Math.PI + this._side * 0.5;
+                // 2026-11-11 (オーナー「Techがミサイルを撃っている様子がない」): 旧は接近の途中で1発撃つだけで、すぐ小銃の距離 (650u) まで寄っていた → ミサイルが残っている間は 1500u の間合いを保って撃ち切ってから詰める
+                const want = (this.msl || 0) > 0 && !this._rtb ? 1500 : TECH_KEEP_D, ra = a + Math.PI + this._side * 0.5;
                 gx = tgt.x + Math.cos(ra) * want; gy = tgt.y + Math.sin(ra) * want;
-                if (this._saberCD <= 0 && this._saberN > 0 && d < TECH_DASH_START && tgt.hp > 0 && !tgt._ghost) { this._dash = 90; }
+                if (this._saberCD <= 0 && this._saberN > 0 && d < TECH_DASH_START && ((this.msl || 0) <= 0 || d < 700) && tgt.hp > 0 && !tgt._ghost) { this._dash = 90; }
             }
             // 射撃 (艦首が向いている時だけ)
             if (facing && tgt.hp > 0 && this._dash <= 0 && !tgt._ghost) {
@@ -13249,7 +13379,7 @@ class Drone {
             const _cl = clampToMapCircle(this.x, this.y, 300); this.x = _cl.x; this.y = _cl.y;
         } else if (this.type === 'build') {
             const tgt = this._nearestEnemy(DRONE_TURRET_RANGE);
-            if (tgt) { this.angle = Math.atan2(tgt.y - this.y, tgt.x - this.x); if (this.fireCD <= 0 && tgt.hp > 0) { { const _dp = new Projectile(this.x, this.y, tgt, true, 'kinetic', 0.6); _dp.fromDrone = true; projectiles.push(_dp); } this.fireCD = 55; } }
+            if (tgt) { const _ld = turretLead(this.x, this.y, tgt); this.angle = Math.atan2(_ld.y - this.y, _ld.x - this.x); if (this.fireCD <= 0 && tgt.hp > 0) { { const _dp = new Projectile(this.x, this.y, { x: _ld.x, y: _ld.y, hp: 1 }, true, 'kinetic', TURRET_DMG_SCALE); _dp.fromDrone = true; _dp._noFall = true; _dp.maxDist = DRONE_TURRET_RANGE * 1.1; projectiles.push(_dp); this.fireFlashTimer = Math.max(this.fireFlashTimer || 0, 6); } this.fireCD = TURRET_CD; } }
         } else if (this.type === 'barrier') {
             // 第22弾: ビームの盾 — 動作は barrierBlocksBeam (相手のビームが撃たれた時に判定)。周期ダメージは撤去
         } else if (this.type === 'buoy') {
@@ -13583,10 +13713,11 @@ function enemyTurretStep(f) {
     if ((_frameCount + f.uid) % 6 === 0) f._tgt = _enemyDroneSees(f, DRONE_TURRET_RANGE).tgt;
     const tgt = f._tgt;
     if (tgt && tgt.hp > 0 && Math.hypot(tgt.x - f.x, tgt.y - f.y) < DRONE_TURRET_RANGE) {
-        f.angle = Math.atan2(tgt.y - f.y, tgt.x - f.x);
+        const _ld = turretLead(f.x, f.y, tgt);
+        f.angle = Math.atan2(_ld.y - f.y, _ld.x - f.x);
         if (!(f.fireCD > 0)) {
-            const pr = new Projectile(f.x, f.y, { x: tgt.x, y: tgt.y, hp: 1 }, false, 'kinetic', 0.6); pr.fromDrone = true; pr.owner = f; projectiles.push(pr);
-            f.fireCD = 40; f.fireFlashTimer = 6;
+            const pr = new Projectile(f.x, f.y, { x: _ld.x, y: _ld.y, hp: 1 }, false, 'kinetic', TURRET_DMG_SCALE); pr.fromDrone = true; pr.owner = f; pr._noFall = true; pr.maxDist = DRONE_TURRET_RANGE * 1.1; projectiles.push(pr);
+            f.fireCD = TURRET_ENEMY_CD; f.fireFlashTimer = 6;
         }
     }
 }
@@ -15545,6 +15676,14 @@ function matchRecEvent(kind, x, y, text) {
 function matchRecTick() {
     if (!matchRec || !player || (_frameCount - matchRec.f0) % 60) return;
     if (sectorCleared) return; // 第82弾: 決着後は記録しない
+    // 空転の見張り (2026-11-11 オーナー報告「COMで見ていると自艦がその場で何周もぐるぐる回る」。ヘッドレス66分では再現せず → 起きた時に原因を後から辿れるよう記録に残す):
+    //   20秒の間に 艦首が720°以上回り、位置は600u未満しか動いていない → 出来事に 速さ・機関停止・照射の硬直・自動攻撃の目標・戦闘モード を書く (60秒に1回まで)
+    { const w = matchRec._spinW || (matchRec._spinW = []); w.push({ a: (w.length ? w[w.length - 1].a : player.angle) + (w.length ? _angDiff(player.angle, w[w.length - 1].r) : 0), r: player.angle, x: player.x, y: player.y });
+      if (w.length > 21) w.shift();
+      if (w.length === 21 && _frameCount - (matchRec._spinF || -1e9) > 3600) {
+          const rot = Math.abs(w[20].a - w[0].a) * 57.3, disp = Math.hypot(w[20].x - w[0].x, w[20].y - w[0].y);
+          if (rot > 720 && disp < 600) { matchRec._spinF = _frameCount; const te = player.targetEntity;
+              matchRecEvent('spin', player.x, player.y, '自艦が空転: 20秒で' + Math.round(rot) + '° 回り移動 ' + Math.round(disp) + 'u (速さ' + (player.currentSpeed || 0).toFixed(2) + (playerCoasting ? '・機関停止' : '') + (player._beamHold > _frameCount ? '・照射の硬直' : '') + '・自動攻撃の目標=' + (te ? (te.type + ' ' + Math.round(Math.hypot(te.x - player.x, te.y - player.y)) + 'u') : 'なし') + '・戦闘モード=' + (combatMode ? combatMode.mode : '-') + ')'); } } }
     const P = { x: Math.round(player.x), y: Math.round(player.y), a: +player.angle.toFixed(2), hp: Math.max(0, player.hp / player.maxHp), ex: playerExposureLevel, st: powerStance };
     // 自艦の推定 (追跡中の信号)
     if (lockedSignalId && _signalAnalysis[lockedSignalId] && _signalAnalysis[lockedSignalId].fix) {
@@ -17712,6 +17851,7 @@ function renderWorld() {
         drawNoiseMakers(ctx);
         drawLures(ctx); // 第21弾
         drawFieldSignals(ctx); // 第31弾
+        drawHackFx(ctx);
         drawDroneVision(ctx); // 第44弾: ドローンの有視界
         drawMines(ctx); // 第32弾
         drawLootTraces(ctx); drawConvoys(ctx); // 第34弾
