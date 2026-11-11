@@ -3490,7 +3490,7 @@ function beamRevealsShooter(ox, oy, byPlayer, shooter) {
             e.detectionState = 'alerted';
             e._alertUntil = _frameCount + ENEMY_ALERT_MEMORY;
             if (e.aiState === 'lurking' || e.aiState === 'gathering') { e.aiState = 'hunting'; e.huntTimer = 600 + d / 1.2; }
-            if (comDemo) comThinkEvent('e', '霧にビームの軌跡 → 射手は' + _dirTxt(e.x, e.y, ox, oy) + 'にいる', 'e' + e.uid);
+            comThinkEvent('e', '霧にビームの軌跡 → 射手は' + _dirTxt(e.x, e.y, ox, oy) + 'にいる', 'e' + e.uid);
         }
         return;
     }
@@ -4329,7 +4329,7 @@ class Ship {
                     if (this.ammoM !== undefined) this.ammoM--;
                     this._atCD = ENEMY_ANTI_TECH_CD * (this.type === 'destroyer' ? 0.6 : 1);
                     this.fireFlashTimer = Math.max(this.fireFlashTimer || 0, 40);
-                    if (comDemo) comThinkEvent('e', 'ロック切替 → ' + ((DRONE_SPEC[tk.type] || {}).label || '') + 'を迎撃 — ミサイル', 'e' + this.uid);
+                    comThinkEvent('e', 'ロック切替 → ' + ((DRONE_SPEC[tk.type] || {}).label || '') + 'を迎撃 — ミサイル', 'e' + this.uid);
                 } else this._atCD = 30;
             }
 
@@ -4433,13 +4433,13 @@ class Ship {
                 const _seeIt = (o) => { const dd = Math.hypot(o.x - this.x, o.y - this.y); return dd < Math.max(VIS_CLOSE, myDetectRange) && losReach(this.x, this.y, Math.atan2(o.y - this.y, o.x - this.x), Math.max(VIS_CLOSE, myDetectRange)) >= dd; };
                 for (const L of lures) {
                     if (L.owner !== 'p' || L.kind !== 'ship' || L.phase !== 'on' || _fk.has(L)) continue;
-                    if (_seeIt(L)) { _fk.add(L); if (comDemo) comThinkEvent('e', '偽艦影ブイを視認 — 囮だった', 'e' + this.uid); continue; }
+                    if (_seeIt(L)) { _fk.add(L); comThinkEvent('e', '偽艦影ブイを視認 — 囮だった', 'e' + this.uid); continue; }
                     const h = hearSource(L, 'e' + this.uid, this.x, this.y, L.x, L.y, lureSigOf(L), sigRange, enemyBands(this), bandGainE(this));
                     if (h && h.sig > detectedSigStrength) { detectedSigStrength = h.sig; _noiseSrc = L; _hNoise = h.noise; _hBand = h.band; }
                 }
                 for (const nm of noiseMakers) {
                     if (_fk.has(nm)) continue;
-                    if (_seeIt(nm)) { _fk.add(nm); if (comDemo) comThinkEvent('e', 'ノイズメーカーを視認 — 囮だった', 'e' + this.uid); continue; }
+                    if (_seeIt(nm)) { _fk.add(nm); comThinkEvent('e', 'ノイズメーカーを視認 — 囮だった', 'e' + this.uid); continue; }
                     const h = hearSource(nm, 'e' + this.uid, this.x, this.y, nm.x, nm.y, b => b === 'heat' ? NOISE_HEAT * Math.min(1, nm.life / 60) : 0, sigRange, enemyBands(this), bandGainE(this));
                     if (h && h.sig > detectedSigStrength) { detectedSigStrength = h.sig; _noiseSrc = nm; _hNoise = h.noise; _hBand = h.band; }
                 }
@@ -4545,7 +4545,7 @@ class Ship {
                 if (clue) {
                     this.playerLastKnownPos = { x: clue.x, y: clue.y, vx: 0, vy: 0 };
                     this.contactFreshness = 0.4;
-                    if (comDemo) comThinkEvent('e', '霧に残った航跡を見つけた → 辿る (' + _dirTxt(this.x, this.y, clue.x, clue.y) + ')', 'e' + this.uid);
+                    comThinkEvent('e', '霧に残った航跡を見つけた → 辿る (' + _dirTxt(this.x, this.y, clue.x, clue.y) + ')', 'e' + this.uid);
                     if (this.aiState === 'lurking' || this.aiState === 'gathering') { this.aiState = 'hunting'; this.huntTimer = 900; }
                 }
             }
@@ -4625,7 +4625,7 @@ class Ship {
                 } else if (!this._techBuilt && enemyMat >= DRONE_SPEC.mech.mat && _quiet && _frameCount - this._quietF > 5400 && !_liveK('mech') && (this.personality ? (this.personality.greed ?? 0.4) : 0.4) >= 0.3 && !(this._techT > 0)) {
                     enemyMat -= DRONE_SPEC.mech.mat; this._techT = DRONE_SPEC.mech.build; this._techBuilt = true;
                     logMessage('TACTICAL: 敵空母が停止して何かを組み立てている — 大きな電磁波・熱が出ている', 'warning-msg');
-                    if (comDemo) comThinkEvent('e', 'Techを組み立て開始 (資材' + DRONE_SPEC.mech.mat + '個・' + Math.round(DRONE_SPEC.mech.build / 60) + '秒・停止して大量のシグネチャ)', 'e' + this.uid);
+                    comThinkEvent('e', 'Techを組み立て開始 (資材' + DRONE_SPEC.mech.mat + '個・' + Math.round(DRONE_SPEC.mech.build / 60) + '秒・停止して大量のシグネチャ)', 'e' + this.uid);
                 }
                 if (this.droneSpawnTimer <= 0 && _hasContact && !this._hunt && this.droneStock > 0 && enemies.filter(e => e.hp > 0 && e.type === 'fighter').length < CARGO_CAP.carrier) { // 第21弾: 同時に出せる数は自機の空母と同じ上限
                     this.droneStock--;
@@ -4643,7 +4643,7 @@ class Ship {
                     this._launchFlash = 60; // 第20弾: 発進は光とEMが漏れる (自機と同じ)
                     this.droneSpawnTimer = _engaged ? (380 + Math.floor(Math.random() * 320)) : (700 + Math.floor(Math.random() * 500));
                     logMessage('TACTICAL: 敵空母がファイタードローンを射出！', 'warning-msg');
-                    if (comDemo) comThinkEvent('e', '戦闘機を射出 → 推定位置 (' + _dirTxt(this.x, this.y, _bel.x, _bel.y) + ') へ向かわせる (残り' + this.droneStock + '機)', 'e' + this.uid);
+                    comThinkEvent('e', '戦闘機を射出 → 推定位置 (' + _dirTxt(this.x, this.y, _bel.x, _bel.y) + ') へ向かわせる (残り' + this.droneStock + '機)', 'e' + this.uid);
                 }
             }
 
@@ -4658,7 +4658,7 @@ class Ship {
                     // 至近まで来られたら潜伏を解いて応戦
                     // 第71弾: 応戦を始めたら20秒は潜り直さない (旧: 退き際の判定が毎フレーム潜伏を掛け直し、潜伏⇔応戦を往復して撃ちも隠れもしなかった)
                     this._hideT = 0; this._hiding = false; this._hideCD = Math.max(this._hideCD || 0, 1200);
-                    if (comDemo) comThinkEvent('e', '隠れ場所まで踏み込まれた → 潜伏を解いて応戦する', 'e' + this.uid);
+                    comThinkEvent('e', '隠れ場所まで踏み込まれた → 潜伏を解いて応戦する', 'e' + this.uid);
                 } else {
                     const dH = Math.hypot(hs.x - this.x, hs.y - this.y);
                     if (dH > 200) {
@@ -4673,13 +4673,13 @@ class Ship {
                         if ((this.itemRepair || 0) > 0 && !(this._kitT > 0) && this.hp < this.maxHp - REPAIR_KIT_HP * 0.8) {
                             this.itemRepair--; this._kitT = REPAIR_KIT_TIME;
                             matchRecEvent('repairE', this.x, this.y, '敵: リペアキットを使う');
-                            if (comDemo) comThinkEvent('e', '潜伏中 → リペアキットで修理 (残り' + this.itemRepair + '個)', 'e' + this.uid);
+                            comThinkEvent('e', '潜伏中 → リペアキットで修理 (残り' + this.itemRepair + '個)', 'e' + this.uid);
                         }
                         this._hideT -= gameSpeedFactor;
                     }
                     if (this._hideT <= 0) {
                         this._hideT = 0; this._hiding = false; this._hideCD = 3600;
-                        if (comDemo) comThinkEvent('e', '潜伏を終える (耐久' + _pct(this.hp / this.maxHp) + ') → 狩りへ戻る', 'e' + this.uid);
+                        comThinkEvent('e', '潜伏を終える (耐久' + _pct(this.hp / this.maxHp) + ') → 狩りへ戻る', 'e' + this.uid);
                         this.aiState = 'hunting'; this.huntTimer = 900; this.lurking = false;
                     }
                     _hideActive = true; // 他のAIは止める (シグネチャの計算はこの後も毎フレーム行う)
@@ -4690,7 +4690,7 @@ class Ship {
             if (this.type !== 'fighter' && this.personality && (_frameCount + this.uid) % 600 === 0) {
                 const _pb = this._persBase || (this._persBase = this.personality);
                 const _sp = this.aiState === 'lurking' ? Math.max(0, Math.min(1, (_frameCount - (this._lastScentF || 0) - 36000) / 36000)) : 0;
-                if (_sp > 0) { this.personality = Object.assign({}, _pb, { aggression: Math.min(1, (_pb.aggression ?? 0.5) + 0.5 * _sp), stealth: Math.max(0, (_pb.stealth ?? 0.4) * (1 - 0.7 * _sp)), caution: Math.max(0, (_pb.caution ?? 0.4) * (1 - 0.4 * _sp)) }); if (!this._stallOn) { this._stallOn = true; if (comDemo) comThinkEvent('e', '長く気配が無い → 痺れを切らす (攻撃性が上がる)', 'e' + this.uid); } }
+                if (_sp > 0) { this.personality = Object.assign({}, _pb, { aggression: Math.min(1, (_pb.aggression ?? 0.5) + 0.5 * _sp), stealth: Math.max(0, (_pb.stealth ?? 0.4) * (1 - 0.7 * _sp)), caution: Math.max(0, (_pb.caution ?? 0.4) * (1 - 0.4 * _sp)) }); if (!this._stallOn) { this._stallOn = true; comThinkEvent('e', '長く気配が無い → 痺れを切らす (攻撃性が上がる)', 'e' + this.uid); } }
                 else if (this.personality !== _pb) { this.personality = _pb; this._stallOn = false; }
             }
             // ── 第20弾: 補給 — 弾が尽きたら交戦を離れ、補給所か (自機がハックしていない) コロニーへ。600u以内に8秒留まれば満タン ──
@@ -4707,7 +4707,7 @@ class Ship {
                     if (!best) { for (const c of structures) { if (c.type !== 'colony' || c.hacked) continue; const d = Math.hypot(c.x - this.x, c.y - this.y); if (d < bd) { bd = d; best = c; kind = 'コロニー(補給の復活待ち)'; } } } // 第66弾: 全部使い切っていたら、一番近い自分のものでないコロニーへ行って復活を待つ
                     if (best) {
                         this._supply = { x: best.x, y: best.y, t: 0, col: best };
-                        if (comDemo) comThinkEvent('e', '弾が尽きた (実弾' + this.ammoK + '・ミサイル' + this.ammoM + ') → 交戦を離れて' + kind + 'で補給 (' + _dirTxt(this.x, this.y, best.x, best.y) + ')', 'e' + this.uid);
+                        comThinkEvent('e', '弾が尽きた (実弾' + this.ammoK + '・ミサイル' + this.ammoM + ') → 交戦を離れて' + kind + 'で補給 (' + _dirTxt(this.x, this.y, best.x, best.y) + ')', 'e' + this.uid);
                     }
                 }
                 const sp = this._supply;
@@ -4723,7 +4723,7 @@ class Ship {
                         this.ammoK = this._fullK; this.ammoM = this._fullM; this._kMag = KINETIC_MAG; this._kReload = 0; this._mReload = 0;
                         this._supply = null;
                         this.aiState = 'hunting'; this.huntTimer = 900; this.lurking = false;
-                        if (comDemo) comThinkEvent('e', '補給完了 (実弾' + this.ammoK + '・ミサイル' + this.ammoM + ') → 狩りへ戻る', 'e' + this.uid);
+                        comThinkEvent('e', '補給完了 (実弾' + this.ammoK + '・ミサイル' + this.ammoM + ') → 狩りへ戻る', 'e' + this.uid);
                         if (this.inVision || this.contactLife > 0) logMessage('SENSOR: 敵艦が補給を終えた', 'warning-msg');
                     } else this._commsF = _frameCount; // 補給中は通信のEMが漏れる (第39弾: 自機と同じ値 — emitSigs の comms)
                     _supplyActive = !!this._supply && !_waitS;
@@ -4786,13 +4786,13 @@ class Ship {
                     if (!(this._hideCD > 0) && !(this._hideT > 0) && this.type !== 'fighter') {
                         const lkC = this.playerLastKnownPos;
                         const cs = findCoverSpot(this.x, this.y, ENEMY_HIDE_SEARCH, lkC ? Math.atan2(lkC.y - this.y, lkC.x - this.x) : null);
-                        if (cs) { this._hideSpot = cs; this._hideT = ENEMY_HIDE_TIME; this._hiding = false; if (comDemo) comThinkEvent('e', '耐久' + _pct(hpFrac) + ' < 退き際' + _pct(retreatThresh) + ' → 近くの' + (cs.kind === 'fog' ? '濃い霧' : '岩礁帯') + 'に潜んで修復する', 'e' + this.uid);
+                        if (cs) { this._hideSpot = cs; this._hideT = ENEMY_HIDE_TIME; this._hiding = false; comThinkEvent('e', '耐久' + _pct(hpFrac) + ' < 退き際' + _pct(retreatThresh) + ' → 近くの' + (cs.kind === 'fog' ? '濃い霧' : '岩礁帯') + 'に潜んで修復する', 'e' + this.uid);
                             // 第21弾: 潜りに行く前に、反対方向へ偽艦影ブイを撃って追手の耳を逸らす (自機の囮と同じもの)
                             if ((this.lureShip || 0) > 0) {
                                 this.lureShip--;
                                 const _la = Math.atan2(this.y - cs.y, this.x - cs.x) + (Math.random() - 0.5) * 0.6;
                                 launchLure('e', 'ship', this.x, this.y, this.x + Math.cos(_la) * 2500, this.y + Math.sin(_la) * 2500);
-                                if (comDemo) comThinkEvent('e', '潜る前に偽艦影ブイを反対方向 (' + _dirTxt(this.x, this.y, this.x + Math.cos(_la) * 2500, this.y + Math.sin(_la) * 2500) + ') へ — 追手の耳を逸らす', 'e' + this.uid);
+                                comThinkEvent('e', '潜る前に偽艦影ブイを反対方向 (' + _dirTxt(this.x, this.y, this.x + Math.cos(_la) * 2500, this.y + Math.sin(_la) * 2500) + ') へ — 追手の耳を逸らす', 'e' + this.uid);
                             }
                         }
                     }
@@ -4863,7 +4863,7 @@ class Ship {
                     // 第39弾: 見えていない相手には、推定円が十分に小さい時だけ撃つ (自機COMと同じ基準: 見込み ≥ 65% − 35%×攻撃性)。方位しか無ければ撃たない
                     if (wType && this.type !== 'fighter' && !(this.detectionTimer > 60)) {
                         const _te = this._sa && (this._sa.fix || this._sa.motion || this._sa.ping) ? trackEstimate(this._sa, 0) : null;
-                        const _hc = this._lkGuess || !_te ? 0 : hitChanceR(wType, _te.r, epm(this).seeker ? 1300 : 900);
+                        const _hc = this._lkGuess || !_te ? 0 : hitChanceR(wType, huntHonestR(_te.r, saAge(this._sa)), epm(this).seeker ? 1300 : 900);
                         if (_hc < 0.65 - 0.35 * (pers.aggression ?? 0.5)) { wType = null; this.fireCooldown = Math.max(this.fireCooldown, 60); }
                     }
                     // 第22弾: 自機と同じく射角に入っていなければ撃たない (旧: 艦首の向きに関係なく撃てた)。ビームのチャージは射角の外でもできる
@@ -4936,7 +4936,7 @@ class Ship {
                     const sigLabel = { kinetic: '銃口炎[光学]', missile: '推進炎[熱源+EM]', beam: 'EMパルス[EM+光学]' };
                     effects.push({ x: this.x, y: this.y, r: 0, maxR: 200, a: 0.9, c: '#ff4d4d', type: 'circle' });
                     logMessage(`WARNING: 敵艦発砲 — ${sigLabel[wType]||''}シグネチャ捕捉。`, 'warning-msg');
-                    if (comDemo) comThinkEvent('e', '推定点へ' + _WPN_JP[wType] + 'を撃つ (' + Math.round(distToBelief / 100) * 100 + 'u先・確信' + _pct(this.contactFreshness) + (desperate ? '・後退しながら' : '') + ')', 'e' + this.uid);
+                    comThinkEvent('e', '推定点へ' + _WPN_JP[wType] + 'を撃つ (' + Math.round(distToBelief / 100) * 100 + 'u先・確信' + _pct(this.contactFreshness) + (desperate ? '・後退しながら' : '') + ')', 'e' + this.uid);
                     // 第16弾: 撃ったら必ず位置を変える (全艦種・ファイター除く)。撃てば位置を教えるのは自機と同じ —
                     // 撃った場所に留まらない。ミサイル/ビーム=推定方位と直交する方向へ1800〜3000u (霧を選ぶ) /
                     // 実弾=近接戦は続けたまま横へ600〜900u跳ぶ。旧: 間合いを取る艦種だけで、攻撃型は撃った場所で殴り続けた
@@ -4991,7 +4991,7 @@ class Ship {
                             const _ps = outmatched ? 20 : Math.max(20, 25 + pers.aggression * 60 + (killInstinct ? 45 : 0) - (pers.stealth || 0) * 20);
                             this.aiState = 'hunting'; this.lurking = false; this.huntTarget = { x: _lkP.x, y: _lkP.y }; this._huntSearched = true; this.huntTimer = Math.round(_ps * 60);
                             this._pursue = killInstinct ? 'kill' : 'chase';
-                            if (comDemo) comThinkEvent('e', '自機の音が途絶えた → 最後の推定位置へ追って捜す (' + Math.round(_ps) + '秒' + (killInstinct ? '・相手は手負い — 仕留めに行く' : '') + ')', 'e' + this.uid);
+                            comThinkEvent('e', '自機の音が途絶えた → 最後の推定位置へ追って捜す (' + Math.round(_ps) + '秒' + (killInstinct ? '・相手は手負い — 仕留めに行く' : '') + ')', 'e' + this.uid);
                         } else {
                             this.aiState = 'lurking'; this.lurking = true; this.alertLogged = false; if (_frameCount > (this._alertUntil || 0)) this.detectionState = 'unaware'; if (comDemo && this.type !== 'fighter') comThinkEvent('e', '自機の音が途絶えた → 交戦を解いて潜伏へ (残り香を追う)', 'e' + this.uid);
                         }
@@ -5011,7 +5011,7 @@ class Ship {
                     this._pingCD = ENEMY_PING_CD_MIN + Math.random() * ENEMY_PING_CD_VAR
                                  + ((this.personality && this.personality.stealth) || 0.3) * 900;
                     firePingFromEnemy(this);
-                    if (comDemo) comThinkEvent('e', '接触が薄い (確信' + _pct(this.contactFreshness) + ') → 探信を打つ (位置を晒すが正確な位置が取れる)', 'e' + this.uid);
+                    comThinkEvent('e', '接触が薄い (確信' + _pct(this.contactFreshness) + ') → 探信を打つ (位置を晒すが正確な位置が取れる)', 'e' + this.uid);
                 }
                 this.speed = 0.86 * _huntProf.speedMult * (this.upgSpeed || 1) * this.terrainSpeedMult() * gameSpeedFactor * MOVE_SPEED_MULT;
                 if (this.huntTimer > 0) this.huntTimer--;
@@ -5111,11 +5111,11 @@ class Ship {
                     } else if (this.type !== 'fighter' && !_hasScent && (_cpick = enemyConvoyPick(this, _pers))) {
                         // 第34弾: 聞こえた輸送船へ (拿捕して部品) — 追いつくまで updateConvoys が先回りの点へ向け直す
                         this._cvT = _cpick.sid; this.setTarget(_cpick.x + _cpick.vx * 600, _cpick.y + _cpick.vy * 600); this._roam = 'convoy';
-                        if (comDemo) comThinkEvent('e', 'うるさい信号 → 輸送船と見て拿捕しに行く (' + _dirTxt(this.x, this.y, _cpick.x, _cpick.y) + ')', 'e' + this.uid);
+                        comThinkEvent('e', 'うるさい信号 → 輸送船と見て拿捕しに行く (' + _dirTxt(this.x, this.y, _cpick.x, _cpick.y) + ')', 'e' + this.uid);
                     } else if (this.type !== 'fighter' && !_hasScent && (_fpick = enemyFieldPick(this, _pers))) {
                         // 第31弾: 聞こえた漂流コンテナ (と、たまに自然の信号) を見に行く — 動けば痕跡が残る
                         this.setTarget(_fpick.x, _fpick.y);
-                        if (comDemo) comThinkEvent('e', (_fpick.kind === 'cache' ? '弱く平坦な信号 → 漂流コンテナと見て回収に向かう' : '信号を確かめに行く') + ' (' + _dirTxt(this.x, this.y, _fpick.x, _fpick.y) + ')', 'e' + this.uid);
+                        comThinkEvent('e', (_fpick.kind === 'cache' ? '弱く平坦な信号 → 漂流コンテナと見て回収に向かう' : '信号を確かめに行く') + ' (' + _dirTxt(this.x, this.y, _fpick.x, _fpick.y) + ')', 'e' + this.uid);
                         this._roam = 'cache';
                     } else if (this.type !== 'fighter' && !_hasScent && (this.lureSOS || 0) > 0 && (_pers.caution >= 0.5 || _pers.stealth >= 0.5) && _frameCount - (this._lastScentF || 0) > ENEMY_ROAM_QUIET * (1.4 - _pers.aggression) * (0.7 + 0.8 * (_pers.stealth ?? 0.4)) && Math.random() < 0.01) {
                         // 第21弾: 慎重・隠密な個体は偽SOSで誘い出し、その近くの霧に潜んで待ち伏せる (自機と同じ偽SOS)
@@ -5125,7 +5125,7 @@ class Ship {
                         launchLure('e', 'sos', this.x, this.y, _sp.x, _sp.y);
                         const _amb = findHidingSpot(_sp.x, _sp.y, 1500);
                         this.setTarget(_amb.x, _amb.y); this._roam = 'patrol';
-                        if (comDemo) comThinkEvent('e', '気配なし → 偽SOSを ' + _dirTxt(this.x, this.y, _sp.x, _sp.y) + ' に出し、その近くの霧で待ち伏せる', 'e' + this.uid);
+                        comThinkEvent('e', '気配なし → 偽SOSを ' + _dirTxt(this.x, this.y, _sp.x, _sp.y) + ' に出し、その近くの霧で待ち伏せる', 'e' + this.uid);
                     } else if (this.type !== 'fighter' && !_hasScent && ((_frameCount - (this._lastScentF || 0) > ENEMY_ROAM_QUIET * (1.4 - _pers.aggression) * (0.7 + 0.8 * (_pers.stealth ?? 0.4)) && Math.random() < 0.02)
                                || (this._partHunt = enemySlotsUsed(this) < enemySlotsMax(this) && _frameCount - (this._lastScentF || 0) > ENEMY_PART_QUIET && (comDoctrine(_pers).partHunt || _frameCount < COM_EARLY_GATHER) && Math.random() < 0.15 + (_frameCount < COM_EARLY_GATHER ? 0.4 : _pers.greed * 0.3)))) { // 第41弾: 寄り道は自機COMと同じ方針 (隠密は寄り道しない)
                         // 第33弾: 部品の枠が空いていれば、20秒気配が無いだけで部品を取りに出る (長い静けさを待たない)
@@ -5143,7 +5143,7 @@ class Ship {
                             if (ps) {
                                 const isDer = ps.type === 'derelict', isCol = ps.type === 'colony';
                                 g = this._roamGoal = { x: ps.x, y: ps.y, lbl: isDer ? '難破船 (部品)' : isCol ? 'コロニー (部品)' : 'ノード (部品)', der: isDer ? ps : null, col: isCol ? ps : null, node: !isDer && !isCol ? ps : null };
-                                if (comDemo) comThinkEvent('e', '気配なし・部品の枠が空いている → ' + g.lbl + ' (' + _dirTxt(this.x, this.y, g.x, g.y) + ')', 'e' + this.uid);
+                                comThinkEvent('e', '気配なし・部品の枠が空いている → ' + g.lbl + ' (' + _dirTxt(this.x, this.y, g.x, g.y) + ')', 'e' + this.uid);
                             }
                         }
                         if (!g || (g.col ? g.col.owner === 'enemy' : g.node ? g.node.owner === 'enemy' : g.der ? g.der.salvaged : Math.hypot(g.x - this.x, g.y - this.y) < 2500)) {
@@ -5152,14 +5152,14 @@ class Ship {
                             for (const st of structures) { if (st.type !== 'colony' || st.owner === 'enemy') continue; const d = Math.hypot(st.x - this.x, st.y - this.y); if (d < cd) { cd = d; col = st; } }
                             if (col && Math.random() < 0.4 + _pers.greed * 0.5) {
                                 g = this._roamGoal = { x: col.x, y: col.y, lbl: col.owner === 'player' ? '自機のコロニー (奪う)' : 'コロニー (占有する)', col };
-                                if (comDemo) comThinkEvent('e', '気配なし → ' + g.lbl + ' (' + _dirTxt(this.x, this.y, g.x, g.y) + ')。占有すれば補給・聴音局・演算力', 'e' + this.uid);
+                                comThinkEvent('e', '気配なし → ' + g.lbl + ' (' + _dirTxt(this.x, this.y, g.x, g.y) + ')。占有すれば補給・聴音局・演算力', 'e' + this.uid);
                             }
                         }
                         if (!g || (!g.col && Math.hypot(g.x - this.x, g.y - this.y) < 2500)) {
                             // 第39弾: まだ聴いていない所へ (自機COMと同じ searchNext)。旧: ノード/コロニー/中央から無作為
                             const sn = searchNext(this, this.x, this.y);
                             g = this._roamGoal = { x: sn.x, y: sn.y, lbl: 'まだ聴いていない海域' };
-                            if (comDemo) comThinkEvent('e', '長く気配なし (攻撃性' + _pct(_pers.aggression) + ') → ' + g.lbl + 'へ哨戒に出る (' + _dirTxt(this.x, this.y, g.x, g.y) + ')', 'e' + this.uid);
+                            comThinkEvent('e', '長く気配なし (攻撃性' + _pct(_pers.aggression) + ') → ' + g.lbl + 'へ哨戒に出る (' + _dirTxt(this.x, this.y, g.x, g.y) + ')', 'e' + this.uid);
                         }
                         const dG = Math.hypot(g.x - this.x, g.y - this.y), aG = Math.atan2(g.y - this.y, g.x - this.x), leg = Math.min(dG, 3500 + Math.random() * 1500);
                         if ((g.col || g.der || g.node) && dG < 3000) { this.setTarget(g.x + Math.cos(aG + Math.PI) * 150, g.y + Math.sin(aG + Math.PI) * 150); if (g.node && dG < 600) this.aiState = 'gathering'; } // 最後は直接 (コロニー600u/8秒・難破船500u/3秒・ノードは収集へ)
@@ -6508,14 +6508,14 @@ function generateSector() {
     // 第21弾: 敵のエンジン (性格で選ぶ。速さはエンジンの倍率) / 自機のエンジン切替をリセット
     { const _env0 = comEnvAt(boss.x, boss.y), _ev0 = comEngineEval(boss.personality || {}, 'search', _env0); // 第42弾: 出現した所の環境と性格で (自機COMと同じ)
       boss.engine = _ev0.engine; boss._engSwT = 0; boss._engM = { engRevF: _frameCount, engSit: 'search' };
-      if (comDemo) comThinkEvent('e', 'エンジン → ' + ENGINE_JP[_ev0.engine] + ' (' + engineWhy(_ev0, _env0) + ')', 'e' + boss.uid); }
+      comThinkEvent('e', 'エンジン → ' + ENGINE_JP[_ev0.engine] + ' (' + engineWhy(_ev0, _env0) + ')', 'e' + boss.uid); }
     boss._focus = null; setEnemyFocus(boss, comFocusPlan(boss.personality || {}, 'search', (boss.personality || {}).stealth >= 0.5)); boss._focusF = 0; // 第39弾: 敵も航行モードを持つ (自機と同じ効果)・第41弾: 場面ごとに選び直す
     boss.lureSOS = 1; boss.lureShip = 1; // 第21弾: 敵の囮 (各1個 — 実装で決めた数)
     { // 第60弾: 敵の武器の種類 (COM対戦は設定の積み込みどおり・通常は性格で選ぶ)
       const _cl = comDemo && comCfg && comCfg.lo && comCfg.lo.e && comCfg.lo.e[ENEMY_CLASS[boss.type]];
       boss.wvar = _cl && _cl.v ? normalizeVariants(_cl.v) : enemyPickVariants(boss);
       recomputeEnemyParts(boss);
-      if (comDemo) comThinkEvent('e', '武器の種類: ' + ALL_WEAPONS.filter(w => !boss.wset || boss.wset.includes(w)).map(w => _WPN_NAME[w] + '=' + variantInfo(w, boss.wvar[w]).name).join(' / '), 'e' + boss.uid); }
+      comThinkEvent('e', '武器の種類: ' + ALL_WEAPONS.filter(w => !boss.wset || boss.wset.includes(w)).map(w => _WPN_NAME[w] + '=' + variantInfo(w, boss.wvar[w]).name).join(' / '), 'e' + boss.uid); }
     if (boss._eLo) { boss.lureSOS = boss._eLo.fsos || 0; boss.lureShip = boss._eLo.lure || 0; if (boss.type === 'carrier') boss.droneStock = boss._eLo.attack || 0; } // 第22弾: COM対戦で敵の積み込みを編集した時だけ
     { // 第51弾 (オーナー): 敵COMの搭載品は試合開始時に性格に合わせて切り替える (COM対戦で積み込みを編集した時は編集どおり)
       const _es3 = { destroyer: 'assault', corvette: 'stealth', carrier: 'carrier' }[boss.type] || 'assault';
@@ -6525,7 +6525,7 @@ function generateSector() {
       boss.itemBcn = { heat: L.bcn_heat || 0, optic: L.bcn_optic || 0, em: L.bcn_em || 0, higgs: L.bcn_higgs || 0 };
       const _ln = []; for (const t of ['flash', 'noise', 'smoke', 'fsos', 'lure', 'bcn_heat', 'bcn_optic', 'bcn_em', 'bcn_higgs', 'fogspray', 'fogblow', 'fakecache', 'repair']) if (L[t]) _ln.push(DRONE_SPEC[t].label + L[t]);
       boss._itemText = _ln.join('・') || 'なし';
-      if (comDemo) comThinkEvent('e', '搭載品 (' + (boss._eLo ? '設定どおり' : '性格に合わせて選んだ') + '): ' + boss._itemText, 'e' + boss.uid); }
+      comThinkEvent('e', '搭載品 (' + (boss._eLo ? '設定どおり' : '性格に合わせて選んだ') + '): ' + boss._itemText, 'e' + boss.uid); }
     boss.upgSpeed = (ENGINE_TYPES[boss.engine] || ENGINE_TYPES.thermonuclear).speedMult;
     engineSwitchT = 0; engineSwitchTo = null; _engCoast = false; _syncEngineUI();
     // 第20弾: 開戦時の司令部情報は撤去 (オーナー指示「開始と同時に敵の方角が分かるのはいらない」・双方なくす)。
@@ -7586,7 +7586,7 @@ const ENGINE_SHORT = { thermonuclear: '熱核', pulse: 'EM', higgs: 'ヒッグ�
 function enemyRequestEngine(e, E, why) {
     if (!ENGINE_TYPES[E] || e.engine === E || e._engSwT > 0) return false;
     e._engSwT = ENGINE_SWITCH_TIME; e._engSwTo = E; e._swAng = e.angle;
-    if (comDemo) comThinkEvent('e', 'エンジン → ' + ENGINE_JP[E] + 'へ切替 (10秒は惰性)' + (why ? ' — ' + why : ''), 'e' + e.uid);
+    comThinkEvent('e', 'エンジン → ' + ENGINE_JP[E] + 'へ切替 (10秒は惰性)' + (why ? ' — ' + why : ''), 'e' + e.uid);
     return true;
 }
 function pickEnemyEngine(p, x, y) { return comEngineEval(p || {}, 'search', x !== undefined ? comEnvAt(x, y) : null).engine; } // 第42弾: 出現した所の環境で
@@ -7610,7 +7610,7 @@ function pickFocus(p) { return comFocusPlan(p || {}, 'search', (p && p.stealth >
 function setEnemyFocus(e, k) {
     if (!GEN_FOCUS[k] || e._focus === k) return;
     e._focus = k; e.gen = GEN_FOCUS[k]; e._fx = focusFx(e.gen);
-    if (comDemo && e.type !== 'fighter') comThinkEvent('e', '航行モード → ' + FOCUS_JP[k], 'e' + e.uid);
+    if (e.type !== 'fighter') comThinkEvent('e', '航行モード → ' + FOCUS_JP[k], 'e' + e.uid);
 }
 // 自艦が帯域で漏らす量 (2本目以降)
 function sensorLeak(kind) { return sensorsOn[kind] ? SENSOR_LEAK[kind] * PM.leakMul * leakMult(sensorOrder.indexOf(kind), sensorLv[kind]) : 0; } // 第32弾: 多帯域受信機
@@ -8123,7 +8123,7 @@ function updateEnemyColonyCapture() {
             // 第26弾: 占有しただけでは回復も補給もしない (補給は _supply の流れで1つのコロニーにつき1回)
             matchRecEvent('colonyE', st.x, st.y, '敵がコロニーを占有' + (was === 'player' ? ' (自艦のを奪った)' : ''));
             if (was === 'player') { st._pObs = 'enemy'; logMessage('COLONY: コロニーとの通信途絶 — 敵に奪われた (占有' + coloniesOwned('player') + 'つ)', 'warning-msg'); sfxOr('alm_colony_lost', 'alert'); updateColonyIntel(true); comClueLost(st.x, st.y, COLONY_HACK_R, 'コロニー'); }
-            if (comDemo) comThinkEvent('e', 'コロニーを占有 (' + coloniesOwned('enemy') + 'つ) — 自機の位置の手掛かりが増える', 'e' + near.uid);
+            comThinkEvent('e', 'コロニーを占有 (' + coloniesOwned('enemy') + 'つ) — 自機の位置の手掛かりが増える', 'e' + near.uid);
         }
     }
 }
@@ -8515,7 +8515,7 @@ function enemyOfferDraft(e, src, x, y) {
     else e.partsSpare.push(best);
     matchRecEvent('partE', x ?? e.x, y ?? e.y, '敵が部品: ' + PARTS[best].name);
     addLootTrace(x ?? e.x, y ?? e.y, 'e', src); // 第34弾: 空き巣の跡
-    if (comDemo) comThinkEvent('e', _SRC_JP[src] + 'で部品 → 「' + PARTS[best].name + '」を選んだ (' + c.map(id => PARTS[id].name).join('/') + 'から・' + PARTS[best].up + ')', 'e' + e.uid);
+    comThinkEvent('e', _SRC_JP[src] + 'で部品 → 「' + PARTS[best].name + '」を選んだ (' + c.map(id => PARTS[id].name).join('/') + 'から・' + PARTS[best].up + ')', 'e' + e.uid);
 }
 // 敵の付け替え: 自分のコロニーに居る時、予備の方が性格に合えば付け替える
 function enemySwapAtColony(e) {
@@ -8528,7 +8528,7 @@ function enemySwapAtColony(e) {
         for (const id of e.parts) { const sc = _comPartScore(id, pp); if (sc < ws) { ws = sc; worst = id; } }
         if (worst && _comPartScore(sp, pp) > ws + 0.15 && partW(sp) <= partW(worst) + enemySlotsMax(e) - enemySlotsUsed(e)) {
             e.parts.splice(e.parts.indexOf(worst), 1); e.partsSpare.splice(e.partsSpare.indexOf(sp), 1, worst); e.parts.push(sp); recomputeEnemyParts(e);
-            if (comDemo) comThinkEvent('e', '自分のコロニーで「' + PARTS[worst].name + '」→「' + PARTS[sp].name + '」に付け替え', 'e' + e.uid);
+            comThinkEvent('e', '自分のコロニーで「' + PARTS[worst].name + '」→「' + PARTS[sp].name + '」に付け替え', 'e' + e.uid);
         }
     }
 }
@@ -8586,8 +8586,8 @@ function updateLull() {
             const pp = _enemyPersonality(e);
             if (pp.caution + pp.stealth >= 0.8) {
                 const sp = lullShelterSpot(e.x, e.y, 6000);
-                if (sp) { e.setTarget(sp.x, sp.y); if (comDemo) comThinkEvent('e', '凪の予兆 → ' + sp.lbl + 'へ隠れる (' + _dirTxt(e.x, e.y, sp.x, sp.y) + ')', 'e' + e.uid); }
-            } else if (comDemo) comThinkEvent('e', '凪の予兆 → 止まって見張る (晴れたら遠くまで見える)', 'e' + e.uid);
+                if (sp) { e.setTarget(sp.x, sp.y); comThinkEvent('e', '凪の予兆 → ' + sp.lbl + 'へ隠れる (' + _dirTxt(e.x, e.y, sp.x, sp.y) + ')', 'e' + e.uid); }
+            } else comThinkEvent('e', '凪の予兆 → 止まって見張る (晴れたら遠くまで見える)', 'e' + e.uid);
         }
         if (comDemo && _com && _com.pp && _com.pp.stealth + _com.pp.caution >= 0.8 && player && !(_frameCount - (_com.pressF || -1e9) < 600)) { // 第71弾: 相手へ詰めている最中は隠れない
             const sp = lullShelterSpot(player.x, player.y, 6000);
@@ -8643,7 +8643,7 @@ function updateLootTraces() {
                 if (nx && !(e.contactFreshness > 0.3)) {
                     e._roamGoal = { x: nx.x, y: nx.y, lbl: '跡の先 (自機が次に寄りそうな所)' }; e._roam = 'patrol'; e.state = 'idle';
                     e.playerLastKnownPos = { x: nx.x, y: nx.y, vx: 0, vy: 0 }; e.contactFreshness = Math.max(e.contactFreshness || 0, 0.25);
-                    if (comDemo) comThinkEvent('e', '自機が開けた跡を見つけた (約' + Math.round((_frameCount - t.f) / 3600) + '分前) → 次に寄りそうな所へ (' + _dirTxt(e.x, e.y, nx.x, nx.y) + ')', 'e' + e.uid);
+                    comThinkEvent('e', '自機が開けた跡を見つけた (約' + Math.round((_frameCount - t.f) / 3600) + '分前) → 次に寄りそうな所へ (' + _dirTxt(e.x, e.y, nx.x, nx.y) + ')', 'e' + e.uid);
                 }
                 break;
             }
@@ -8700,7 +8700,7 @@ function convoyReward(cv, enemy, how) {
         for (let k = 0; k < picks; k++) enemyOfferDraft(enemy, 'convoy', cv.x, cv.y);
         enemy.itemRepair = (enemy.itemRepair || 0) + 1;
         const lp = cv.logP && cv.logP[cv.logP.length - 1];
-        if (lp && _frameCount - lp.f < 3600 && !(enemy.contactFreshness > 0.6)) { enemy.playerLastKnownPos = { x: lp.x, y: lp.y, vx: 0, vy: 0 }; enemy.contactFreshness = Math.max(enemy.contactFreshness || 0, 0.5); if (comDemo) comThinkEvent('e', '輸送船の航路の記録 → 自機は ' + _dirTxt(enemy.x, enemy.y, lp.x, lp.y) + ' に居た', 'e' + enemy.uid); }
+        if (lp && _frameCount - lp.f < 3600 && !(enemy.contactFreshness > 0.6)) { enemy.playerLastKnownPos = { x: lp.x, y: lp.y, vx: 0, vy: 0 }; enemy.contactFreshness = Math.max(enemy.contactFreshness || 0, 0.5); comThinkEvent('e', '輸送船の航路の記録 → 自機は ' + _dirTxt(enemy.x, enemy.y, lp.x, lp.y) + ' に居た', 'e' + enemy.uid); }
         return;
     }
     for (let k = 0; k < picks; k++) offerDraft('convoy');
@@ -8780,7 +8780,7 @@ function updateConvoys() {
                     const pers = e.personality || { aggression: 0.5, stealth: 0.3, greed: 0.4, caution: 0.4 };
                     if (comDoctrine(pers).convoy && Math.random() < 0.55 + pers.greed * 0.35 + pers.aggression * 0.1) { // 第41弾: 自機COMと同じ方針
                         e._cvT = cv.sid; e._roam = 'convoy'; e.aiState = 'lurking'; e.lurking = true; e.state = 'moving';
-                        if (comDemo) comThinkEvent('e', 'うるさい信号 → 輸送船と見て拿捕しに行く (' + _dirTxt(e.x, e.y, cv.x, cv.y) + ')', 'e' + e.uid);
+                        comThinkEvent('e', 'うるさい信号 → 輸送船と見て拿捕しに行く (' + _dirTxt(e.x, e.y, cv.x, cv.y) + ')', 'e' + e.uid);
                     }
                 }
             }
@@ -9250,13 +9250,13 @@ function enemyHackStep(e) {
             if (!(e._dlSolveF > now - 30)) { e._dlSolveF = now; solveFix(e._sa); }
             e.contactFreshness = Math.max(e.contactFreshness || 0, 0.3);
             logMessage('WARN: ' + _droneName(d) + 'の通信を探られた — 敵に自艦の方角を知られた (敵のハック 第1段階・誤差±' + Math.round(sig * 57.3) + '°)', 'warning-msg');
-            if (comDemo) comThinkEvent('e', '自機の' + (kind === 'mech' ? 'Tech' : '戦闘機') + 'の通信をハック — 発進元の方位を得た (誤差±' + Math.round(sig * 57.3) + '°)', 'e' + e.uid);
+            comThinkEvent('e', '自機の' + (kind === 'mech' ? 'Tech' : '戦闘機') + 'の通信をハック — 発進元の方位を得た (誤差±' + Math.round(sig * 57.3) + '°)', 'e' + e.uid);
             matchRecEvent('hackE1', d.x, d.y, '敵が自機ドローンをハック (第1段階)');
         }
         if (S.s2 && dist < HACK_RANGE2 && dist < bd) { bd = dist; best = d; bk = kind; }
     }
     if (best) {
-        if (e._hack && e._hack.d === best) e._hack.p += 30; else { e._hack = { d: best, p: 0, need: HACK_NEED[bk], kind: bk }; if (comDemo) comThinkEvent('e', '自機の' + (bk === 'mech' ? 'Tech' : '戦闘機') + 'へ侵入開始 (' + Math.round(HACK_NEED[bk] / 60) + '秒)', 'e' + e.uid); }
+        if (e._hack && e._hack.d === best) e._hack.p += 30; else { e._hack = { d: best, p: 0, need: HACK_NEED[bk], kind: bk }; comThinkEvent('e', '自機の' + (bk === 'mech' ? 'Tech' : '戦闘機') + 'へ侵入開始 (' + Math.round(HACK_NEED[bk] / 60) + '秒)', 'e' + e.uid); }
         e._hackUntil = now + 45;
         if (!best._warnHackF || now - best._warnHackF > 1800) { best._warnHackF = now; logMessage('WARN: ' + _droneName(best) + 'が侵入を受けている (約' + Math.round(HACK_NEED[bk] / 60) + '秒で奪われる) — 母艦の近くへ戻す(帰還)か、侵入元の敵艦から3000u以上離す・見えない所へ逃がす', 'warning-msg'); sfxOr('alm_status_comm', 'ui', 0.9); }
         best._underHack = { until: now + 60, u: Math.min(1, e._hack.p / e._hack.need) };
@@ -9272,7 +9272,7 @@ function enemyHackTake(e, d, kind) {
     const i = playerDrones.indexOf(d); if (i >= 0) playerDrones.splice(i, 1);
     createExplosion(d.x, d.y, '#ff6666', 10, false); effects.push({ x: d.x, y: d.y, r: 0, maxR: 420, a: 0.7, c: '#ff6666', type: 'circle' });
     logMessage('WARN: 自機の' + (kind === 'mech' ? 'Tech' : '戦闘機') + 'が敵に通信をハックされ、制御を奪われた — 敵の艦載機になった', 'warning-msg');
-    if (comDemo) comThinkEvent('e', '自機の' + (kind === 'mech' ? 'Tech' : '戦闘機') + 'の制御を奪った', 'e' + e.uid);
+    comThinkEvent('e', '自機の' + (kind === 'mech' ? 'Tech' : '戦闘機') + 'の制御を奪った', 'e' + e.uid);
     matchRecEvent('hackE2', d.x, d.y, '敵が自機ドローンの制御を奪った (' + (kind === 'mech' ? 'Tech' : '戦闘機') + ')');
     e._hack = null; e._hackUntil = 0;
 }
@@ -9308,7 +9308,7 @@ function fireHackPulse(att, angle, effect) {
     else matchRecEvent('hackPulseE', A.x, A.y, '敵がハック波を発射 (' + E.jp + ')');
     if (!hit) {
         if (isP) logMessage('HACK: ハック波 — 応答なし (外れ)。大量の電磁波を出した — 敵に方向を知られる', 'warning-msg');
-        else if (comDemo) comThinkEvent('e', 'ハック波を撃ったが相手は居なかった (EMを出した)', 'e' + att.uid);
+        else comThinkEvent('e', 'ハック波を撃ったが相手は居なかった (EMを出した)', 'e' + att.uid);
         return false;
     }
     const R = hackResist(hit), q = H / R;
@@ -9320,12 +9320,12 @@ function fireHackPulse(att, angle, effect) {
     } else if (att._sa) { att._sa.ping = { x: player.x + (Math.random() - 0.5) * err, y: player.y + (Math.random() - 0.5) * err, r: err, f: now, src: 'hack' }; solveFix(att._sa); att.contactFreshness = Math.max(att.contactFreshness || 0, 0.6); }
     if (q < 1) {
         if (isP) logMessage('HACK: 応答あり — 艦影を捉えた (方位' + compassDeg(Math.atan2(hit.y - A.y, hit.x - A.x)) + '°・約' + Math.round(bd / 100) * 100 + 'u)。だが相手のハック耐性が演算力を上回り侵入できない (演算力' + (Math.round(H * 10) / 10) + ')', 'warning-msg');
-        else if (comDemo) comThinkEvent('e', 'ハック波が当たったが耐性が高く侵入できない', 'e' + att.uid);
+        else comThinkEvent('e', 'ハック波が当たったが耐性が高く侵入できない', 'e' + att.uid);
         return false;
     }
     const S = { att, tgt: hit, effect, p: 0, need: hackSessTime(H, R), q, H };
     if (isP) { hackSessP = S; logMessage('HACK: 応答あり — 侵入開始 (' + E.jp + '・約' + Math.round(S.need / 60) + '秒)。リンクの間は電磁波が漏れる。相手が' + Math.round(range * HACK_BREAK) + 'u以上離れると中断', 'system-msg'); }
-    else { att._hackSess = S; logMessage('WARN: ハック波を受けた — 侵入されている (約' + Math.round(S.need / 60) + '秒で機能を奪われる)。侵入元から' + Math.round(hackPulseRange(H) * HACK_BREAK) + 'u以上離れれば中断できる', 'warning-msg'); sfxOr('alm_status_comm', 'ui', 0.9); if (comDemo) comThinkEvent('e', 'ハック侵入開始 (' + E.jp + ')', 'e' + att.uid); }
+    else { att._hackSess = S; logMessage('WARN: ハック波を受けた — 侵入されている (約' + Math.round(S.need / 60) + '秒で機能を奪われる)。侵入元から' + Math.round(hackPulseRange(H) * HACK_BREAK) + 'u以上離れれば中断できる', 'warning-msg'); sfxOr('alm_status_comm', 'ui', 0.9); comThinkEvent('e', 'ハック侵入開始 (' + E.jp + ')', 'e' + att.uid); }
     return true;
 }
 function _stepHackSess(S, att) {
@@ -9340,7 +9340,7 @@ function _stepHackSess(S, att) {
     const E = HACK_EFFECTS[S.effect] || HACK_EFFECTS.halt, mult = Math.max(0.8, Math.min(1.8, 0.8 + 0.4 * (S.q - 1)));
     applyStatus(T, E.st, Math.round(E.dur * mult));
     if (att === 'p') { logMessage('HACK: 成功 — 敵に' + E.jp + ' (約' + Math.round(E.dur * mult / 60) + '秒)。今が奇襲の好機', 'system-msg'); matchRecEvent('hackOkP', T.x, T.y, '敵をハック: ' + E.jp); hackSessP = null; }
-    else { att._hackSess = null; if (comDemo) comThinkEvent('e', 'ハック成功 — 自機に' + E.jp, 'e' + att.uid); matchRecEvent('hackOkE', T.x, T.y, '敵にハックされた: ' + E.jp); }
+    else { att._hackSess = null; comThinkEvent('e', 'ハック成功 — 自機に' + E.jp, 'e' + att.uid); matchRecEvent('hackOkE', T.x, T.y, '敵にハックされた: ' + E.jp); }
 }
 function updateHackSessions() {
     if (_hackPulseCD > 0) _hackPulseCD -= gameSpeedFactor;
@@ -9545,7 +9545,7 @@ function updateSigZones() {
             e.playerLastKnownPos = { x: c.x, y: c.y, vx: 0, vy: 0 };
             e.contactFreshness = Math.max(e.contactFreshness || 0, 0.6);
             if (e.aiState === 'lurking' || e.aiState === 'gathering') { e.aiState = 'hunting'; e.huntTimer = 900; }
-            if (comDemo) comThinkEvent('e', '監視網の円 — 自機は ' + _dirTxt(e.x, e.y, c.x, c.y) + ' の半径1500uのどこか', 'e' + e.uid);
+            comThinkEvent('e', '監視網の円 — 自機は ' + _dirTxt(e.x, e.y, c.x, c.y) + ' の半径1500uのどこか', 'e' + e.uid);
         }
     }
 }
@@ -10516,6 +10516,7 @@ function pingContact(e, acc, dist) {
 // 第36弾: 哨戒機の探信を聞いた敵 — 鳴った所へ向かう (敵には哨戒機か自艦か分からない)
 function _heardPingAt(e, x, y, d) {
     if (e.type === 'fighter' || e.inVision) return;
+    e._pingHeardF = _frameCount; // 探信を聞いた (相手に見つかっていると分かる — 偽装退却の合図)
     const err = 150 + d * 0.03, a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * err;
     e.playerLastKnownPos = { x: x + Math.cos(a) * r, y: y + Math.sin(a) * r, vx: 0, vy: 0 };
     e.contactFreshness = Math.max(e.contactFreshness || 0, 0.9);
@@ -10534,6 +10535,7 @@ function pingHeardBy(range, dirAng, halfAngle, sideRange) {
             if (Math.abs(df) > halfAngle) lim = sideRange;
         }
         if (d > lim) continue;
+        e._pingHeardF = _frameCount;
         // 第50弾 (オーナー): 全周囲ソナーは聞こえても正確な方角は分からない (大きな誤差・敵には「探信された」ことだけ確か)。指向性を照射方向の内で受けた時だけ発信元の方角が分かる
         const directional = dirAng !== null && dirAng !== undefined && lim === range;
         const err = directional ? 150 + d * 0.03 : 500 + d * 0.3;
@@ -12709,7 +12711,7 @@ function useFlash() {
         e.playerLastKnownPos = { x: px, y: py, vx, vy };
         e.contactFreshness = Math.max(e.contactFreshness || 0, 0.9);
         if (e.aiState === 'lurking' || e.aiState === 'gathering') { e.aiState = 'hunting'; e.huntTimer = 600 + d / 1.2; }
-        if (comDemo && e.type !== 'fighter') comThinkEvent('e', (d < FLASH_RADIUS ? '閃光でセンサーが焼けた (' + Math.round(FLASH_BLIND / 60) + '秒ほぼ盲目)。' : '') + '閃光を見た → 炸裂点 (' + _dirTxt(e.x, e.y, px, py) + ') に自機が居たと分かる', 'e' + e.uid);
+        if (e.type !== 'fighter') comThinkEvent('e', (d < FLASH_RADIUS ? '閃光でセンサーが焼けた (' + Math.round(FLASH_BLIND / 60) + '秒ほぼ盲目)。' : '') + '閃光を見た → 炸裂点 (' + _dirTxt(e.x, e.y, px, py) + ') に自機が居たと分かる', 'e' + e.uid);
     }
     for (const p of projectiles) {
         if (p.isPlayer || !p.active || p.type !== 'missile' || p._blind) continue;
@@ -12780,7 +12782,7 @@ function enemyUseFlash(e) {
         logMessage('SENSOR: 閃光 — 方位' + compassDeg(ang) + '°' + (d < FLASH_RADIUS ? '。センサーが焼けた (' + Math.round(FLASH_BLIND / 60) + '秒)' : '') + (lost ? '・ミサイル' + lost + '発の誘導が切れた' : ''), 'warning-msg');
         if (d < FLASH_RADIUS) _flashScreen = 18;
     }
-    if (comDemo) comThinkEvent('e', '閃光弾 — 追手の目を焼く' + (lost ? ' (ミサイル' + lost + '発の誘導を切った)' : ''), 'e' + e.uid);
+    comThinkEvent('e', '閃光弾 — 追手の目を焼く' + (lost ? ' (ミサイル' + lost + '発の誘導を切った)' : ''), 'e' + e.uid);
     if (typeof matchRecEvent === 'function') matchRecEvent('flashE', e.x, e.y, '敵の閃光弾');
     return true;
 }
@@ -12798,6 +12800,13 @@ function enemyPersonaLoadout(ship, P) {
         [bandBy, 0.15 + 0.5 * st + 0.2 * gr], ['fogspray', 0.1 + 0.55 * st + 0.3 * ca], ['fogblow', 0.05 + 0.65 * ag - 0.2 * st], ['fakecache', 0.1 + 0.45 * st + 0.35 * gr]]
         .map(([k, v]) => [k, v + (Math.random() - 0.5) * 0.3]).sort((a, b) => b[1] - a[1]);
     for (const [k, v] of cand) { if (budget <= 0) break; if (v < 0.25) continue; base[k] = 1; budget--; }
+    // 2026-11-11 (記録の解析: 慎重な潜航型が騙しの道具を1つも積まず、だまし討ちの作戦を選べなかった): 隠密+慎重が0.8以上なら、
+    //   騙しの道具 (偽艦影・偽コンテナ・ノイズ) を最低1つ — 枠が無ければ散布弾→煙幕→閃光の順で1つ入れ替える
+    if (st + ca >= 0.8 && !base.lure && !base.fakecache && !base.noise) {
+        const dk = st >= ca ? 'lure' : (Math.random() < 0.5 ? 'fakecache' : 'noise');
+        if (budget > 0) { base[dk] = 1; budget--; }
+        else { const drop = ['fogspray', 'smoke', 'flash', 'fogblow', 'fsos'].find(k => base[k] > 0); if (drop) { base[drop]--; base[dk] = 1; } }
+    }
     // 余りがあれば 慎重なら閃光・隠密なら煙幕を2個目に
     if (budget > 0 && ca >= 0.6) { base.flash = (base.flash || 0) + 1; budget--; }
     if (budget > 0 && st >= 0.6) { base.smoke = (base.smoke || 0) + 1; budget--; }
@@ -12808,7 +12817,7 @@ function enemyUseSpray(e) {
     if (!(e.itemSpray > 0)) return false;
     e._launchFlash = Math.max(e._launchFlash || 0, 60);
     e.itemSpray--; useFogSpray('e', e.x, e.y);
-    if (comDemo) comThinkEvent('e', '散布弾 — 周りの霧を濃くして身を隠す (' + Math.round(SPRAY_LIFE / 60) + '秒)', 'e' + e.uid);
+    comThinkEvent('e', '散布弾 — 周りの霧を濃くして身を隠す (' + Math.round(SPRAY_LIFE / 60) + '秒)', 'e' + e.uid);
     return true;
 }
 function enemyItemsStep(e) {
@@ -12822,7 +12831,7 @@ function enemyItemsStep(e) {
     // 第67弾 (オーナー「どちらのCOMもアイテムを使わず、出会い頭に殴り合うだけ」): 使う条件を緩め、戦闘の最中でも使う (旧: 耐久55%未満かつ気配が無い・20秒に1回の閃光はミサイル専用・ノイズは耐久75%未満…で、短い殴り合いでは一度も使わずに終わった)
     if ((e.itemRepair || 0) > 0 && !(e._kitT > 0) && ((hpF < 0.55 && (e.contactFreshness || 0) < 0.2 && hitAgo > 1200) || (hpF < 0.4 && hitAgo > 420 && !e.inVision)) && e.hp < e.maxHp - REPAIR_KIT_HP * 0.8) {
         e.itemRepair--; e._kitT = REPAIR_KIT_TIME; matchRecEvent('repairE', e.x, e.y, '敵: リペアキットを使う');
-        if (comDemo) comThinkEvent('e', '耐久' + _pct(hpF) + ' で気配が無い → リペアキットで修理 (残り' + e.itemRepair + '個)', 'e' + e.uid);
+        comThinkEvent('e', '耐久' + _pct(hpF) + ' で気配が無い → リペアキットで修理 (残り' + e.itemRepair + '個)', 'e' + e.uid);
     }
     // 閃光: 自分に向かうミサイルが来ている時 (退き際でなくても)
     if ((e.itemFlash || 0) > 0 && cd('_flashF', 20) && (incomingMissile(e, true) || (hpF < 0.5 && hitAgo < 600 && dBel < 2200))) { /* 第67弾: 傷が深く至近で撃たれている時も (相手のセンサーを焼いて離れる) */ e._flashF = now; enemyUseFlash(e); }
@@ -12837,20 +12846,21 @@ function enemyItemsStep(e) {
             e._beaconDone = true; e.itemBcn[k]--;
             const ang = Math.atan2(e.y - e._hideSpot.y, e.x - e._hideSpot.x) + (Math.random() - 0.5) * 0.5;
             launchLure('e', 'ship', e.x, e.y, e.x + Math.cos(ang) * 3000, e.y + Math.sin(ang) * 3000, k);
-            if (comDemo) comThinkEvent('e', '潜る前に' + ({ heat: '熱', optic: '光', em: 'EM', higgs: '霧' })[k] + 'ビーコンを反対方向へ — 追手の耳をそちらの帯域で逸らす', 'e' + e.uid);
+            comThinkEvent('e', '潜る前に' + ({ heat: '熱', optic: '光', em: 'EM', higgs: '霧' })[k] + 'ビーコンを反対方向へ — 追手の耳をそちらの帯域で逸らす', 'e' + e.uid);
         }
     } else if (!(e._hideT > 0)) e._beaconDone = false;
     // 偽SOS: 気配が長く無く (90秒)・隠密/慎重なら、行く手に置いて相手を誘う (手が空いている時の第2の用途)
     if ((e.lureSOS || 0) > 1 && st >= 0.5 && (e.contactFreshness || 0) < 0.05 && cd('_sosF', 120) && now - (e._quietStart || (e._quietStart = now)) > 5400) {
         e._sosF = now; e.lureSOS--; const a = e.angle + (Math.random() - 0.5) * 1.2; launchLure('e', 'sos', e.x, e.y, e.x + Math.cos(a) * 4000, e.y + Math.sin(a) * 4000);
-        if (comDemo) comThinkEvent('e', '長く気配が無い → 行く手に偽SOSを置いて誘う', 'e' + e.uid);
+        comThinkEvent('e', '長く気配が無い → 行く手に偽SOSを置いて誘う', 'e' + e.uid);
     }
     if ((e.contactFreshness || 0) >= 0.05) e._quietStart = now;
     // 偽コンテナ: 気配が無く (60秒) 静かな持ち場に居る間に、艦尾へ置いて待つ (取りに来た相手が爆発を受ける)
-    if ((e.itemFake || 0) > 0 && (e.contactFreshness || 0) < 0.05 && !e.inVision && (st >= 0.35 || (P.greed ?? 0.4) >= 0.5) && cd('_fakeF', 120) && now - (e._quietStart === undefined ? (e._quietStart = now) : e._quietStart) > 3600) {
+    // 2026-11-11: 最後の1個は狩人の作戦 (偽コンテナの罠) 用に取っておく — 記録では、接触前に使い切って作戦で選べなかった
+    if ((e.itemFake || 0) > 1 && (e.contactFreshness || 0) < 0.05 && !e.inVision && (st >= 0.35 || (P.greed ?? 0.4) >= 0.5) && cd('_fakeF', 120) && now - (e._quietStart === undefined ? (e._quietStart = now) : e._quietStart) > 3600) {
         e._fakeF = now; e.itemFake--; const a = e.angle + Math.PI + (Math.random() - 0.5) * 1.0;
         placeFakeCache('e', e.x + Math.cos(a) * FAKE_BEHIND, e.y + Math.sin(a) * FAKE_BEHIND);
-        if (comDemo) comThinkEvent('e', '長く気配が無い → 持ち場の後ろに偽コンテナを置く (取りに来た相手が爆発を受ける)', 'e' + e.uid);
+        comThinkEvent('e', '長く気配が無い → 持ち場の後ろに偽コンテナを置く (取りに来た相手が爆発を受ける)', 'e' + e.uid);
         matchRecEvent('fakeE', e.x, e.y, '敵: 偽コンテナを置く');
     }
     if (!(e.itemBlow > 0 || e.itemSpray > 0)) return;
@@ -12859,14 +12869,14 @@ function enemyItemsStep(e) {
     // 吹き飛ばし: 攻撃的で、濃い霧の中・推定が4000u以内なのに見えない時
     if (e.itemBlow > 0 && ag >= 0.55 && hHere > 0.55 && lk && e.contactFreshness > 0.25 && !e.inVision && dBel < 4000 && cd('_blowF', 90)) {
         e._blowF = now; e.itemBlow--; useFogBlow('e', e.x, e.y);
-        if (comDemo) comThinkEvent('e', '推定が' + Math.round(dBel / 100) * 100 + 'u以内なのに見えない → 吹き飛ばし弾で霧を晴らす', 'e' + e.uid);
+        comThinkEvent('e', '推定が' + Math.round(dBel / 100) * 100 + 'u以内なのに見えない → 吹き飛ばし弾で霧を晴らす', 'e' + e.uid);
     }
 }
 function enemyUseSmoke(e) {
     if (!(e.itemSmoke > 0)) return false;
     e.itemSmoke--;
     smokeClouds.push({ x: e.x, y: e.y, r: SMOKE_R, dens: SMOKE_DENS, life: SMOKE_LIFE, max: SMOKE_LIFE, follow: null });
-    if (comDemo) comThinkEvent('e', '煙幕弾 — この場にヒッグス雲 (' + Math.round(SMOKE_LIFE / 60) + '秒)', 'e' + e.uid);
+    comThinkEvent('e', '煙幕弾 — この場にヒッグス雲 (' + Math.round(SMOKE_LIFE / 60) + '秒)', 'e' + e.uid);
     if (typeof matchRecEvent === 'function') matchRecEvent('smokeE', e.x, e.y, '敵の煙幕弾');
     return true;
 }
@@ -12877,7 +12887,7 @@ function enemyUseNoise(e, ang) {
     // 偽艦影と同じ仕組みで、全速で12秒まっすぐ進む音源 (自機の受信には艦と同じに聞こえる)
     const seq = ++_lureSeq;
     lures.push({ owner: 'e', kind: 'ship', noise: true, x: e.x, y: e.y, tx: e.x, ty: e.y, vx: Math.cos(ang) * v, vy: Math.sin(ang) * v, a: ang, phase: 'on', life: NOISE_LIFE, sid: 'L-' + seq, wid: 'e-lure-' + seq });
-    if (comDemo) comThinkEvent('e', 'ノイズメーカー — ' + _dirTxt(e.x, e.y, e.x + Math.cos(ang) * 3000, e.y + Math.sin(ang) * 3000) + 'へ走らせて耳を逸らす', 'e' + e.uid);
+    comThinkEvent('e', 'ノイズメーカー — ' + _dirTxt(e.x, e.y, e.x + Math.cos(ang) * 3000, e.y + Math.sin(ang) * 3000) + 'へ走らせて耳を逸らす', 'e' + e.uid);
     return true;
 }
 // 機関停止 (惰性): 推力が無いので熱と推進のEMが消える。進路は変えられない (艦首は回して撃てる)。
@@ -13054,7 +13064,7 @@ function updateLures() {
             }
             if (L.owner === 'p') for (const e of enemies) {
                 if (e.hp <= 0 || e.type === 'fighter' || Math.hypot(e.x - L.x, e.y - L.y) >= LURE_REVEAL_R) continue;
-                if (comDemo) comThinkEvent('e', '遭難信号の発信源に何も無い — 囮だった (罠を警戒)', 'e' + e.uid);
+                comThinkEvent('e', '遭難信号の発信源に何も無い — 囮だった (罠を警戒)', 'e' + e.uid);
                 e._lureWary = _frameCount + 3600; lures.splice(i, 1); break;
             }
         }
@@ -13925,9 +13935,9 @@ function spawnEnemyDrone(carrier, kind) {
     f._noReward = true;
     enemies.push(f);
     carrier._launchFlash = 60;
-    if (kind === 'turret') { if (inPlayerVision(f.x, f.y)) logMessage('TACTICAL: 敵が砲台を据えた (' + compassDeg(Math.atan2(f.y - player.y, f.x - player.x)) + '°) — 射程' + DRONE_TURRET_RANGE + 'u', 'warning-msg'); matchRecEvent('turretE', f.x, f.y, '敵が砲台を据えた (拠点構築・罠)'); if (comDemo) comThinkEvent('e', '砲台を据えた (拠点構築・罠)', 'e' + carrier.uid); return; }
+    if (kind === 'turret') { if (inPlayerVision(f.x, f.y)) logMessage('TACTICAL: 敵が砲台を据えた (' + compassDeg(Math.atan2(f.y - player.y, f.x - player.x)) + '°) — 射程' + DRONE_TURRET_RANGE + 'u', 'warning-msg'); matchRecEvent('turretE', f.x, f.y, '敵が砲台を据えた (拠点構築・罠)'); comThinkEvent('e', '砲台を据えた (拠点構築・罠)', 'e' + carrier.uid); return; }
     logMessage('TACTICAL: 敵空母が' + (kind === 'mech' ? 'Tech' : '哨戒機') + 'を' + (kind === 'mech' ? '展開した — 組み立て完了' : '射出した'), 'warning-msg');
-    if (comDemo) comThinkEvent('e', (kind === 'mech' ? 'Techが完成 → 護衛・迎撃に出す' : '哨戒機を射出 → 周りを偵察させる'), 'e' + carrier.uid);
+    comThinkEvent('e', (kind === 'mech' ? 'Techが完成 → 護衛・迎撃に出す' : '哨戒機を射出 → 周りを偵察させる'), 'e' + carrier.uid);
     matchRecEvent(kind === 'mech' ? 'techE' : 'scoutE', f.x, f.y, kind === 'mech' ? '敵のTechが完成' : '敵が哨戒機を射出');
 }
 function _enemyDroneSees(f, R) { // 見えた (自機のドローン・自艦) — 第52弾: 相手のドローンの迎撃を優先 (Tech同士は相手のTechを最優先)・いなければ自艦
@@ -14873,7 +14883,7 @@ function persLabel(p) { return (p && p._adaptive ? '状況適応(' + ADAPT_MODES
 const COM_THINK_REPEAT = 900;
 let _thinkLast = {}, _thinkLastP = -1e9;
 function comThink(side, sig, text, key) {
-    if (!comDemo) return; // 第83弾: 思考ログの欄がOFFでも、試合の記録 (書き出し用) には残す
+    if (!comDemo && !(side === 'e' && matchRec)) return; // 2026-11-11: 通常プレイでも敵の思考は試合の記録に残す (リプレイの敵視点で見る・画面には出さない) // 第83弾: 思考ログの欄がOFFでも、試合の記録 (書き出し用) には残す
     // 同じ判断(sig)は15秒に1回まで (別の判断と交互に出ても数えるのは判断ごと)。15秒たっても文が同じなら出さない
     const m = _thinkLast[key || side] || (_thinkLast[key || side] = {});
     const L = m[sig];
@@ -14896,6 +14906,11 @@ function comThink(side, sig, text, key) {
 //   突撃 (従来の交戦) — 攻撃的な性格はまっすぐ詰める (選ばれる割合は性格で変わる)
 // 使う情報は敵が知り得るものだけ (方位の記録から解いた推定・自分が撃たれたか・自分が相手を直接見たか)。真の位置は撃つ判定 (当たり外れの物理) にだけ使う
 const HUNT_CD = 1500, HUNT_MAX_STRIKES = 3;
+// 2026-11-11 (試合の記録11件の分析・実機): 推定円の幅 r は「2σ (≒95%)」のつもりだが、敵の推定が真の位置を含んでいたのは見えていない時の 64% だけ
+//   (忍び寄りの接近中 60%・待機中 49%・影追い 20%)。幅が楽観的なまま撃つので、空の点へミサイルを撃っていた (例: 推定±1500u なのに実際のずれ 6000〜9600u)。
+//   → 撃つかどうかは「正直な幅」で判断する: r × (1.7 + 0.5×古さ(20秒で満)) — 外れて位置を晒す前に、もっと寄って/聴いて確かめる。自機COMも敵も同じ
+function huntHonestR(r, age) { return r * (1.7 + 0.5 * Math.min(1, (age || 0) / 1200)); }
+function saAge(sa) { return sa ? _frameCount - Math.max(sa.obs && sa.obs.length ? sa.obs[sa.obs.length - 1].f : -1e9, sa.ping ? sa.ping.f : -1e9) : 1e9; }
 function _huntEst(e) {
     const sa = e._sa; if (!sa || e._lkGuess) return null;
     if (!(sa.fix || sa.motion || sa.ping)) return null;
@@ -14986,7 +15001,7 @@ function huntTryFire(e, H, est, minHc) {
     if (e._weaponJamTimer > 0) { H.why = 'jam'; return false; }
     const d0 = Math.hypot(est.x - e.x, est.y - e.y), ff = weaponFlightFrames(w, d0);
     const ax = est.x + (est.vx || 0) * ff, ay = est.y + (est.vy || 0) * ff, d = Math.hypot(ax - e.x, ay - e.y);
-    const hc = hitChanceR(w, est.r + Math.hypot(est.vx || 0, est.vy || 0) * ff * 0.3, epm(e).seeker ? 1300 : 900);
+    const hc = hitChanceR(w, (est.r <= 300 && est.age < 60 ? est.r : huntHonestR(est.r, est.age)) + Math.hypot(est.vx || 0, est.vy || 0) * ff * 0.3, epm(e).seeker ? 1300 : 900); // 見えている (r≤300・新しい) 時はそのまま
     H.hc = hc;
     if (hc < minHc) { H.why = 'lowhc'; return false; }
     if (w === 'missile' && d > ENEMY_MISSILE_ENGAGE * epm(e).mslRange * 1.02) { H.why = 'far'; return false; }
@@ -15015,7 +15030,7 @@ function enemyGrabStep(e) {
     let G = e._grab;
     if (G) {
         const o = G.o, gone = G.kind === 'cache' ? !fieldSignals.includes(o) : !!o.salvaged;
-        if (gone || now - G.f > 60 * 90 || now - (e._lastHitF ?? -1e9) < 300) { if (comDemo) comThinkEvent('e', gone ? '拾い物を回収した → 次へ' : '拾い物を諦めた', 'e' + e.uid); e._grab = null; return false; }
+        if (gone || now - G.f > 60 * 90 || now - (e._lastHitF ?? -1e9) < 300) { comThinkEvent('e', gone ? '拾い物を回収した → 次へ' : '拾い物を諦めた', 'e' + e.uid); e._grab = null; return false; }
         const d = Math.hypot(o.x - e.x, o.y - e.y), near = G.kind === 'cache' ? CACHE_R * 0.5 : DERELICT_SALVAGE_R * 0.5;
         const ms = e._maxSpeeds();
         if (d > near) e._moveHeading(Math.atan2(o.y - e.y, o.x - e.x), ms ? (d > 1500 ? ms.cruise : ms.silent) : 1);
@@ -15032,7 +15047,7 @@ function enemyGrabStep(e) {
     const lk = e.playerLastKnownPos, P = e.personality || {};
     if (lk && e.contactFreshness > 0.3 && Math.hypot(lk.x - best.o.x, lk.y - best.o.y) < 2500 && Math.random() < (P.caution ?? 0.4)) return false;
     e._grab = Object.assign(best, { f: now });
-    if (comDemo) comThinkEvent('e', '目の前に' + (best.kind === 'cache' ? '漂流コンテナ' : '難破船') + ' (' + Math.round(bd / 100) * 100 + 'u) → 先に拾う', 'e' + e.uid);
+    comThinkEvent('e', '目の前に' + (best.kind === 'cache' ? '漂流コンテナ' : '難破船') + ' (' + Math.round(bd / 100) * 100 + 'u) → 先に拾う', 'e' + e.uid);
     return true;
 }
 function enemyHunterStep(e, heard, hard) {
@@ -15040,7 +15055,7 @@ function enemyHunterStep(e, heard, hard) {
     const now = _frameCount, P = e.personality || { aggression: 0.5, stealth: 0.4, caution: 0.4, greed: 0.4 };
     const ag = P.aggression ?? 0.5, st = P.stealth ?? 0.4, ca = P.caution ?? 0.4, gr = P.greed ?? 0.4;
     const hpF = e.hp / e.maxHp, thr = 0.12 + ca * 0.43;
-    const say = (t) => { if (comDemo || window.__thinkAll) comThinkEvent('e', t, 'e' + e.uid); };
+    const say = (t) => { if (comDemo || window.__thinkAll || matchRec) comThinkEvent('e', t, 'e' + e.uid); };
     let H = e._hunt;
     let est = _huntEst(e);
     // 相手の最後の動き (先読みに使う): 推定の中心の移り変わりから
@@ -15105,19 +15120,25 @@ function enemyHunterStep(e, heard, hard) {
         const w = {
             charge: Math.max(0.05, 0.15 + 1.1 * ag - 0.7 * st - 0.3 * ca) * (D < 2600 ? 3 : 1) * (1 + 1.2 * (e._huntFails || 0)) * (cls === 'carrier' ? 0.4 : 1),
             stalk: (0.35 + 1.1 * st + 0.5 * ca + 0.35 * ag) * stc * (cls === 'carrier' ? 0.45 : 1),
-            lure: lureK && D > 4000 ? (0.25 + 1.0 * st + 0.6 * ca + 0.3 * gr) * stc : 0,
+            lure: lureK && D > 2000 ? (0.6 + 1.3 * st + 0.8 * ca + 0.3 * gr) * stc : 0, // 2026-11-11: 記録11件で一度も選ばれなかった (4000u以上・重み0.25〜) → 2500u以上・重みを上げる
+            // 2026-11-11 (オーナー「だまし討ちされたと感じるシーンがない」): 偽装退却 = 見つかったと分かった時 (撃たれた・探信された) に、ノイズメーカーを『逃げる方向』へ全速で走らせ、
+            //   自分は機関を止めて横へ滑り、相手がノイズを追う間に背後へ回り込む / 偽コンテナの罠 = 相手の行く先に偽コンテナを置き、横の霧で待つ (開けたら爆発で位置が割れ、その場を撃つ)
+            feint: (e.itemNoise || 0) > 0 && D < 9000 && (now - (e._hpLossF ?? -1e9) < 1800 || now - (e._pingHeardF ?? -1e9) < 1800) ? (1.2 + 1.0 * st + 0.8 * ca) * stc : 0,
+            fakebox: (e.itemFake || 0) > 0 && D > 2000 ? (0.5 + 1.1 * st + 0.6 * gr + 0.4 * ca) * stc : 0,
             hold: (closing && D < 9000 ? 0.3 + 0.9 * ca + 0.7 * st : 0) + (now - (e._stratEndF ?? -1e9) < 900 && D < 10000 ? 3 : 0), // 待ち伏せの最中に気配を掴んだら、そのまま待つ
             screen: cls === 'carrier' && ((e.droneStock || 0) > 0 || myDrones > 0) && D > 3000 ? 0.8 + 0.6 * ag + 0.6 * ca + 0.4 * gr : 0,
             rush: cls === 'assault' && kOk && hpF > 0.5 && D < 12000 ? (0.3 + 1.0 * ag + 0.5 * hpF + 0.3 * st) : 0,
             snipe: bOk && cls !== 'carrier' && D > 5500 ? (0.15 + 0.7 * ca + 0.5 * st) * (cls === 'assault' ? 1.2 : 0.8) : 0,
             shadow: cls === 'stealth' && (est.moving || (e._lastMove && now - e._lastMove.f < 900)) && D < 12000 ? 0.4 + 1.1 * st + 0.6 * ca : 0, // 推定の中心の動きからも (速度つきの解はなかなか出ない)
         };
+        if (e._forceNext && w[e._forceNext] !== undefined) { for (const k in w) w[k] = k === e._forceNext ? 1 : 0; } e._forceNext = null; // 偽装退却/偽コンテナの罠の続き
         if (window.__huntForce && w[window.__huntForce] !== undefined) { for (const k in w) w[k] = k === window.__huntForce ? 1 : 0; }
+        if (window.__huntWLog) { const o = {}; for (const k in w) if (w[k] > 0) o[k] = +w[k].toFixed(2); o._it = [e.itemNoise || 0, e.itemFake || 0, lureK]; window.__huntWLog.push(o); }
         let tot = 0; for (const k in w) tot += w[k];
         let r = Math.random() * tot, pick = 'charge'; for (const k in w) { r -= w[k]; if (r <= 0) { pick = k; break; } }
         if (pick === 'charge') { e._huntCD = now + 1200 + Math.random() * 1200; say('【突撃】自機 (推定' + Math.round(D / 100) * 100 + 'u) へまっすぐ詰める — 攻撃性' + _pct(ag)); return false; }
         const side = Math.random() < 0.5 ? 1 : -1;
-        H = e._hunt = { k: pick, jp: { stalk: '忍び寄り', lure: '偽装の罠', hold: '待ち伏せ', screen: '艦載機の網', rush: '霧伝いの肉薄', snipe: 'ビームの狙撃', shadow: '影追い' }[pick], ph: pick === 'lure' ? 'set' : pick === 'hold' ? 'wait' : pick === 'screen' ? 'screen' : pick === 'shadow' ? 'shadow' : 'approach', t0: now, f0: now, side, w: sp.w, R: sp.R, hp0: e.hp, strikes: 0, lureK, force: pick === 'rush' ? 'kinetic' : pick === 'snipe' ? 'beam' : null };
+        H = e._hunt = { k: pick, jp: { stalk: '忍び寄り', lure: '偽装の罠', hold: '待ち伏せ', screen: '艦載機の網', rush: '霧伝いの肉薄', snipe: 'ビームの狙撃', shadow: '影追い', feint: '偽装退却', fakebox: '偽コンテナの罠' }[pick], ph: pick === 'feint' ? 'decoy' : pick === 'fakebox' ? 'place' : pick === 'lure' ? 'set' : pick === 'hold' ? 'wait' : pick === 'screen' ? 'screen' : pick === 'shadow' ? 'shadow' : 'approach', t0: now, f0: now, side, w: sp.w, R: sp.R, hp0: e.hp, strikes: 0, lureK, force: pick === 'rush' ? 'kinetic' : pick === 'snipe' ? 'beam' : null };
         if (H.force) { const sp2 = huntStrikePlan(e, est, H.force); if (sp2) { H.w = sp2.w; H.R = sp2.R; } }
         if (pick === 'lure') {
             const a0 = Math.atan2(e.y - est.y, e.x - est.x); // 推定から自分への向き
@@ -15138,8 +15159,10 @@ function enemyHunterStep(e, heard, hard) {
             rush: () => '耐久' + _pct(hpF) + 'の装甲を頼りに、静粛で背後へ回り込んで' + Math.round(H.R / 100) * 100 + 'uまで肉薄し、3連装の実弾を至近から叩き込む',
             snipe: () => 'チャージの警告 (' + BEAM_CHARGE_WARN_R + 'u) より遠く、' + Math.round(H.R / 100) * 100 + 'uからビームで狙撃する — 撃ったらすぐ場所を変える',
             shadow: () => '動いている自機の後ろ (相手の死角) について、視界の外で方位の記録を貯める → 推定が絞れたら背後から一撃',
+            feint: () => '見つかった (撃たれた/探信された) → ノイズメーカーを逃げる向きへ全速で走らせ、自分は機関を止めて横へ滑る。相手がノイズを追う間に背後へ回り込む',
+            fakebox: () => '自機の行く先に偽コンテナを置き、横の霧で機関を止めて待つ — 開けたら爆発で位置が割れる。その瞬間に撃つ',
         })[pick]() + ' (性格 攻' + _pct(ag) + '・隠' + _pct(st) + '・慎' + _pct(ca) + ')');
-        matchRecEvent('tacE', e.x, e.y, '敵の作戦「' + H.jp + '」' + ({ stalk: ' — 静かに背後へ回り込み、気付かれる前に撃つ', lure: ' — 囮で誘い出し、横の霧で待ち伏せる', hold: ' — 近づいてくる相手を止まって待つ', screen: ' — 艦載機で釘付けにし、母艦は別の向きから撃つ', rush: ' — 霧伝いに背後へ肉薄し、実弾を至近から', snipe: ' — チャージの警告の外からビームで狙撃', shadow: ' — 相手の後ろについて推定を絞り、背後から一撃' })[pick]); // 第80弾: 試合の記録で敵の作戦を振り返れる (プレイヤーが学べる)
+        matchRecEvent('tacE', e.x, e.y, '敵の作戦「' + H.jp + '」' + ({ stalk: ' — 静かに背後へ回り込み、気付かれる前に撃つ', lure: ' — 囮で誘い出し、横の霧で待ち伏せる', hold: ' — 近づいてくる相手を止まって待つ', screen: ' — 艦載機で釘付けにし、母艦は別の向きから撃つ', rush: ' — 霧伝いに背後へ肉薄し、実弾を至近から', snipe: ' — チャージの警告の外からビームで狙撃', shadow: ' — 相手の後ろについて推定を絞り、背後から一撃', feint: ' — ノイズメーカーで逃げたふりをして、背後へ回り込む', fakebox: ' — 行く先に偽コンテナを置き、開けた所を撃つ' })[pick]); // 第80弾: 試合の記録で敵の作戦を振り返れる (プレイヤーが学べる)
     }
     // ── 任務を進める ──
     e._quietRun = true; // 任務中は静粛 (推進と演算の信号×0.55)
@@ -15151,6 +15174,12 @@ function enemyHunterStep(e, heard, hard) {
     if (now - H.t0 > 60 * 300) return end('長引いた (5分)', false);
     const D = est ? Math.hypot(est.x - e.x, est.y - e.y) : null;
     // 至近で直接見えた → 撃てるなら撃つ (見えていれば推定は正確) / 撃てなければ交戦
+    // 偽コンテナの罠: 相手が罠へ近づいている間は、見えていても撃たない (開けた瞬間の爆発・センサー撹乱に合わせて撃つ — 先に撃つと罠に気付かれる)
+    if (hard && H.k === 'fakebox' && (H.ph === 'wait' || H.ph === 'go') && H.B && fieldSignals.some(f => f.fake === 'e' && Math.hypot(f.x - H.B.x, f.y - H.B.y) < 60)
+        && Math.hypot(player.x - H.B.x, player.y - H.B.y) < 3200 && Math.hypot(player.x - e.x, player.y - e.y) > 800 && now - (H.holdF || now) < 60 * 45) {
+        if (!H.holdF) { H.holdF = now; say('【偽コンテナの罠】自機が罠へ近づいてくる (' + Math.round(Math.hypot(player.x - H.B.x, player.y - H.B.y) / 100) * 100 + 'u) — 開けるまで撃たずに待つ'); }
+        e._drift(Math.atan2(player.y - e.y, player.x - e.x)); return true;
+    }
     if (hard && H.ph !== 'egress' && H.ph !== 'lurk') { // こちらが先に見つけた (相手が見ているかは分からない) — 撃てるまで艦首を向けて撃つ
         if (!est || est.r > 300 || est.age > 60) { est = { x: player.x, y: player.y, r: 150, vx: est ? est.vx : 0, vy: est ? est.vy : 0, moving: !!(est && est.moving), age: 0 }; } // 見えている (自分の目で) — 位置は分かる (第82弾: 粗い推定のままだと見えているのに「当たらない」と撃てなかった)
         const D = Math.hypot(est.x - e.x, est.y - e.y);
@@ -15167,6 +15196,61 @@ function enemyHunterStep(e, heard, hard) {
         if (now - H.sawF > 60 * 8) return end('目視したが撃てない → 交戦', true, 900);
         return true;
     } else H.sawF = 0;
+    if (H.k === 'feint') { // 偽装退却
+        if (H.ph === 'decoy') {
+            const away = est ? Math.atan2(e.y - est.y, e.x - est.x) : e.angle; // 相手から遠ざかる向き (逃げたように見せる)
+            enemyUseNoise(e, away + (Math.random() - 0.5) * 0.4);
+            H.qa = away + H.side * Math.PI / 2; H.ph = 'quiet'; H.tq = now + 60 * (14 + 10 * Math.random() + 8 * st);
+            if (e.itemSmoke > 0 && est && D < 3500) enemyUseSmoke(e);
+            say('【偽装退却】ノイズメーカーを ' + compassDeg(away) + '° へ全速で走らせた — 自分は機関を止めて ' + compassDeg(H.qa) + '° へ滑る (' + Math.round((H.tq - now) / 60) + '秒 息を潜める)');
+            matchRecEvent('feintE', e.x, e.y, '敵: ノイズメーカーで逃げたふり (偽装退却)');
+            return true;
+        }
+        if (H.ph === 'quiet') {
+            e._drift(H.qa); e._quietRun = true;
+            if (now > H.tq) { e._hunt = null; e._huntCD = 0; e._forceNext = 'stalk'; e._lastScentF = now; say('【偽装退却】相手がノイズを追ったはず → 背後へ回り込む (忍び寄りへ)'); }
+            return true;
+        }
+    }
+    if (H.k === 'fakebox') { // 偽コンテナの罠
+        if (H.ph === 'place') {
+            if (!H.B) {
+                if (!est) return end('相手を見失った', false);
+                // 置く所: 相手の針路の先 (動いていれば70秒先・最大4500u) / 動いていなければ 相手が次に向かいそうな拠点 (自分のものでないコロニー・回収されていない難破船) / それも無ければ推定とこちらの間
+                const mv = est.moving ? { vx: est.vx, vy: est.vy } : (e._lastMove && now - e._lastMove.f < 60 * 120 ? e._lastMove : null);
+                let bx, by;
+                if (mv && Math.hypot(mv.vx, mv.vy) > 0.2) { const t = Math.min(4500, Math.hypot(mv.vx, mv.vy) * 60 * 70) / Math.hypot(mv.vx, mv.vy); bx = est.x + mv.vx * t; by = est.y + mv.vy * t; }
+                else {
+                    let best = null, bd = 14000;
+                    for (const q of structures) if ((q.type === 'colony' && q.owner !== 'enemy') || (q.type === 'derelict' && !q.salvaged)) { const d = Math.hypot(q.x - est.x, q.y - est.y); if (d < bd) { bd = d; best = q; } }
+                    if (best) { const a = Math.atan2(est.y - best.y, est.x - best.x); bx = best.x + Math.cos(a) * 700; by = best.y + Math.sin(a) * 700; } else { bx = (est.x + e.x) / 2; by = (est.y + e.y) / 2; }
+                }
+                H.B = clampToMapCircle(bx, by, 1500);
+                const ha = Math.atan2(e.y - H.B.y, e.x - H.B.x) + H.side * 0.8, cv = findCoverSpot(H.B.x + Math.cos(ha) * 1500, H.B.y + Math.sin(ha) * 1500, 900);
+                H.S = cv ? { x: cv.x, y: cv.y } : clampToMapCircle(H.B.x + Math.cos(ha) * 1500, H.B.y + Math.sin(ha) * 1500, 1200);
+            }
+            const dB = Math.hypot(H.B.x - e.x, H.B.y - e.y);
+            if (dB > 700) { if (now - H.t0 > 60 * 150) return end('置き場所に着けない', false); if (dB > 5000) huntTransitEngine(e, '偽コンテナを置きに行く'); e._moveHeading(Math.atan2(H.B.y - e.y, H.B.x - e.x), ms.cruise); return true; }
+            e.itemFake--; placeFakeCache('e', H.B.x, H.B.y); H.ph = 'go'; H.placedF = now;
+            say('【偽コンテナの罠】' + _dirTxt(e.x, e.y, H.B.x, H.B.y) + ' に偽コンテナを置いた — 横の霧 (' + _dirTxt(e.x, e.y, H.S.x, H.S.y) + ') で待つ');
+            matchRecEvent('fakeE', H.B.x, H.B.y, '敵: 偽コンテナの罠を置く');
+            return true;
+        }
+        if (H.ph === 'go' || H.ph === 'wait') {
+            // 爆発した (相手が開けた) → 位置が割れた。待ち伏せとして撃つ
+            if (e._sa && e._sa.ping && e._sa.ping.f >= (H.placedF || 0) && e._sa.ping.f > now - 120 && Math.hypot(e._sa.ping.x - H.B.x, e._sa.ping.y - H.B.y) < 900) {
+                e._hunt = null; e._huntCD = 0; e._forceNext = 'hold'; e._lastScentF = now; e.contactFreshness = 1;
+                say('【偽コンテナの罠】掛かった — 開けた所 (' + _dirTxt(e.x, e.y, H.B.x, H.B.y) + ') に居る。撃つ');
+                matchRecEvent('tacE', e.x, e.y, '敵の作戦「偽コンテナの罠」が成功 — 爆発で位置が割れた所を撃ちに行く');
+                return true;
+            }
+            const dS = Math.hypot(H.S.x - e.x, H.S.y - e.y);
+            if (H.ph === 'go') { if (dS > 400) { e._moveHeading(Math.atan2(H.S.y - e.y, H.S.x - e.x), ms.cruise * 0.8); return true; } H.ph = 'wait'; H.waitF = now; }
+            e._drift(Math.atan2(H.B.y - e.y, H.B.x - e.x));
+            if (now - H.waitF > 60 * 180) return end('掛からなかった', false);
+            return true;
+        }
+    }
     if (H.k === 'prowl' && (H.ph === 'prowl' || H.ph === 'watch')) {
         if (enemyGrabStep(e)) return true; // 道中・見張り中でも目の前の拾い物は拾う
         if (est && est.age < 600 && (!H.probe || est.r <= Math.max(2500, D * 0.6) || D < 3500)) { e._hunt = null; e._huntCD = 0; e._lastScentF = now; if (H.ph === 'watch') e._stratEndF = now; say('【索敵行】気配を掴んだ (推定' + Math.round(D / 100) * 100 + 'u) → どう仕掛けるか考える' + (H.ph === 'watch' ? ' (見張っていた所 — 待ち伏せが有利)' : '')); return false; }
@@ -15417,7 +15501,7 @@ function enemyPlanStep(e) {
     const now = _frameCount, P = e.personality || { aggression: 0.5, stealth: 0.3, caution: 0.4 };
     let pl = e._plan;
     const end = (why, atk) => {
-        if (comDemo) comThinkEvent('e', '作戦終了: ' + why, 'e' + e.uid);
+        comThinkEvent('e', '作戦終了: ' + why, 'e' + e.uid);
         e._plan = null; e._planCD = now + PLAN_CD;
         if (atk) { e.aiState = 'hunting'; e.huntTimer = 900; e.lurking = false; const lk = e.playerLastKnownPos; if (lk) e.setTarget(lk.x, lk.y); }
         return false;
@@ -15437,7 +15521,7 @@ function enemyPlanStep(e) {
         if (useBcn) { e.itemBcn[_bk]--; _band = _bk; } else if (useShip) e.lureShip--; else e.lureSOS--;
         launchLure('e', (useBcn || useShip) ? 'ship' : 'sos', e.x, e.y, g.B.x, g.B.y, _band || undefined);
         pl = e._plan = { t0: now, A: g.A, B: g.B, ph: 'flank', hp0: e.hp };
-        if (comDemo) comThinkEvent('e', '作戦「囮で誘い背後を取る」: 自機の推定位置 (' + _dirTxt(e.x, e.y, lk.x, lk.y) + ') の横 (' + _dirTxt(e.x, e.y, g.B.x, g.B.y) + ') へ' + (_band ? ({ heat: '熱', optic: '光', em: 'EM', higgs: '霧' })[_band] + 'ビーコン' : useShip ? '偽艦影ブイ' : '偽SOS') + ' → 自分は反対側 (' + _dirTxt(e.x, e.y, g.A.x, g.A.y) + ') へ回り込んで待つ', 'e' + e.uid);
+        comThinkEvent('e', '作戦「囮で誘い背後を取る」: 自機の推定位置 (' + _dirTxt(e.x, e.y, lk.x, lk.y) + ') の横 (' + _dirTxt(e.x, e.y, g.B.x, g.B.y) + ') へ' + (_band ? ({ heat: '熱', optic: '光', em: 'EM', higgs: '霧' })[_band] + 'ビーコン' : useShip ? '偽艦影ブイ' : '偽SOS') + ' → 自分は反対側 (' + _dirTxt(e.x, e.y, g.A.x, g.A.y) + ') へ回り込んで待つ', 'e' + e.uid);
         return true;
     }
     if (e.hp < pl.hp0 - e.maxHp * 0.04) return end('被弾 — 待ち伏せは中止', true);
@@ -15449,7 +15533,7 @@ function enemyPlanStep(e) {
         const ms = e._maxSpeeds(), ang = Math.atan2(pl.A.y - e.y, pl.A.x - e.x);
         e._moveHeading(ang, ms ? ms.cruise * 0.8 : 1.0);
     } else {
-        if (pl.ph !== 'wait') { pl.ph = 'wait'; if (comDemo) comThinkEvent('e', '待ち伏せ位置に着いた → 止まって聴く (最長' + Math.round((PLAN_WAIT - (now - pl.t0)) / 60) + '秒)', 'e' + e.uid); }
+        if (pl.ph !== 'wait') { pl.ph = 'wait'; comThinkEvent('e', '待ち伏せ位置に着いた → 止まって聴く (最長' + Math.round((PLAN_WAIT - (now - pl.t0)) / 60) + '秒)', 'e' + e.uid); }
         if (e._coastIfIdle) e._coastIfIdle();
     }
     return true;
@@ -15458,13 +15542,13 @@ function enemyPlanStep(e) {
 function enemyStratStep(e, P) {
     const now = _frameCount, jp = { ambush: '拠点の待ち伏せ', bait: '餌で誘う', guard: '拠点を守る', trap: '罠 (砲台を据えて誘い込む)' };
     let S = e._strat;
-    if (S && (now > S.until || e.contactFreshness > 0.04)) { if (e.contactFreshness > 0.04 && S.ph === 'wait') e._stratEndF = now; /* 第80弾: 待ち伏せ中に気配 → 狩人の頭脳で「待ち伏せ」を続ける */ if (comDemo) comThinkEvent('e', '戦略「' + jp[S.id] + '」終了 (' + (now > S.until ? '時間' : '気配を掴んだ') + ')', 'e' + e.uid); e._strat = null; e._stratCD = now + 1200 + Math.random() * 2400; S = null; }
+    if (S && (now > S.until || e.contactFreshness > 0.04)) { if (e.contactFreshness > 0.04 && S.ph === 'wait') e._stratEndF = now; /* 第80弾: 待ち伏せ中に気配 → 狩人の頭脳で「待ち伏せ」を続ける */ comThinkEvent('e', '戦略「' + jp[S.id] + '」終了 (' + (now > S.until ? '時間' : '気配を掴んだ') + ')', 'e' + e.uid); e._strat = null; e._stratCD = now + 1200 + Math.random() * 2400; S = null; }
     if (!S) {
         if (now < (e._stratCD || 0) || now - (e._lastScentF || 0) < 1500) return false;
         const st = P.stealth ?? 0.4, ca = P.caution ?? 0.4, ag = P.aggression ?? 0.5, gr = P.greed ?? 0.4;
         const free = enemySlotsMax(e) - enemySlotsUsed(e), own = structures.filter(q => q.type === 'colony' && q.owner === 'enemy');
         const w = { gather: 0.6 + 1.7 * gr + (free > 0 ? 1.1 : 0.05), ambush: 0.35 + 2.1 * st + 0.9 * ca - 1.1 * ag + (free <= 0 ? 1.0 : 0),
-            bait: (e.lureSOS || 0) + (e.lureShip || 0) > 0 ? 0.25 + 1.5 * st + 0.7 * ca - 0.4 * ag : 0, guard: own.length ? 0.2 + 1.2 * ca + 0.5 * (1 - gr) : 0,
+            bait: (e.lureSOS || 0) + Math.max(0, (e.lureShip || 0) - 1) > 0 ? 0.25 + 1.5 * st + 0.7 * ca - 0.4 * ag : 0, guard: own.length ? 0.2 + 1.2 * ca + 0.5 * (1 - gr) : 0,
             trap: (e.turretStock || 0) > 0 ? 0.35 + 1.3 * st + 1.1 * ca - 0.5 * ag : 0 }; // 第66弾: 罠・拠点構築 (砲台を据え、囮で誘い込む)
         if (_frameCount < COM_EARLY_GATHER && free > 0) { w.gather += 3.0; w.ambush *= 0.25; w.trap *= 0.3; } // 第66弾: 序盤は全員集める
         let tot = 0; const v = {};
@@ -15487,17 +15571,17 @@ function enemyStratStep(e, P) {
             S.spot = cv ? { x: cv.x, y: cv.y } : clampToMapCircle(sx, sy, 800);
             S.until += Math.min(18000, Math.hypot(S.spot.x - e.x, S.spot.y - e.y) / 0.15); // 第66弾: 潜伏中の敵は約0.2u/f (12u/s)・着く前に時間切れにならない (旧: 罠・待ち伏せの位置に着かず、砲台を据えることが無かった)
             if (pick === 'bait') {
-                if ((e.lureSOS || 0) > 0) { e.lureSOS--; launchLure('e', 'sos', e.x, e.y, S.site.x, S.site.y); } else if ((e.lureShip || 0) > 0) { e.lureShip--; launchLure('e', 'ship', e.x, e.y, S.site.x, S.site.y); } else S.id = 'ambush';
+                if ((e.lureSOS || 0) > 0) { e.lureSOS--; launchLure('e', 'sos', e.x, e.y, S.site.x, S.site.y); } else if ((e.lureShip || 0) > 1) { e.lureShip--; launchLure('e', 'ship', e.x, e.y, S.site.x, S.site.y); } else S.id = 'ambush'; // 偽艦影の最後の1個は作戦 (偽装の罠) 用
             }
         }
-        if (comDemo) comThinkEvent('e', '戦略「' + jp[S.id] + '」(約' + Math.round((S.until - now) / 60) + '秒)' + (S.site ? ': ' + (S.site.lbl || 'コロニー') + 'の近く (' + _dirTxt(e.x, e.y, (S.spot || S.site).x, (S.spot || S.site).y) + ') ' + (S.id === 'bait' ? 'へ餌を置き、近くで待つ' : S.id === 'guard' ? 'を守る' : 'の霧/岩礁帯で待ち伏せる') : ''), 'e' + e.uid);
+        comThinkEvent('e', '戦略「' + jp[S.id] + '」(約' + Math.round((S.until - now) / 60) + '秒)' + (S.site ? ': ' + (S.site.lbl || 'コロニー') + 'の近く (' + _dirTxt(e.x, e.y, (S.spot || S.site).x, (S.spot || S.site).y) + ') ' + (S.id === 'bait' ? 'へ餌を置き、近くで待つ' : S.id === 'guard' ? 'を守る' : 'の霧/岩礁帯で待ち伏せる') : ''), 'e' + e.uid);
     }
     const g = S.id === 'guard' ? S.site : S.spot;
     if (!g) { e._strat = null; return false; }
     if (S.id === 'guard' && S.site.owner !== 'enemy') { e._strat = null; return false; }
     const d = Math.hypot(g.x - e.x, g.y - e.y);
     if (d > 400) { if (!(e.state === 'moving' && Math.hypot(e.targetX - g.x, e.targetY - g.y) < 600)) { e.setTarget(g.x, g.y); e._roam = 'strat'; } }
-    else { if (S.ph !== 'wait') { S.ph = 'wait'; if (comDemo) comThinkEvent('e', '待ち伏せ位置に着いた → 止まって待つ', 'e' + e.uid); if (S.id === 'trap' && !S.built && (e.turretStock || 0) > 0) { S.built = true; e.turretStock--; spawnEnemyDrone(e, 'turret'); if ((e.lureSOS || 0) > 0) { e.lureSOS--; launchLure('e', 'sos', e.x, e.y, S.site.x, S.site.y); } } } if (e.state === 'moving') e.setTarget(e.x, e.y); e._roam = null; }
+    else { if (S.ph !== 'wait') { S.ph = 'wait'; comThinkEvent('e', '待ち伏せ位置に着いた → 止まって待つ', 'e' + e.uid); if (S.id === 'trap' && !S.built && (e.turretStock || 0) > 0) { S.built = true; e.turretStock--; spawnEnemyDrone(e, 'turret'); if ((e.lureSOS || 0) > 0) { e.lureSOS--; launchLure('e', 'sos', e.x, e.y, S.site.x, S.site.y); } } } if (e.state === 'moving') e.setTarget(e.x, e.y); e._roam = null; }
     return true;
 }
 // 第80弾: 狩人の頭脳 (自機COM) — 敵COMと同じ考え方。使うのは追跡中の信号の推定 (方位の記録から解いた位置) だけ (艦か囮かは区別しない)
@@ -15589,7 +15673,7 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
     const est = comHunterEst(H.sid), D = est ? Math.hypot(est.x - player.x, est.y - player.y) : null;
     const tryFire = (minHc) => {
         const sp = comStrikePlan(est, H.force); if (!sp) return false; H.w = sp.w;
-        const ff = weaponFlightFrames(H.w, D), hc = hitChanceR(H.w, est.r + Math.hypot(est.vx, est.vy) * ff * 0.3, PM.seeker ? 1300 : 900);
+        const ff = weaponFlightFrames(H.w, D), hc = hitChanceR(H.w, huntHonestR(est.r, est.age) + Math.hypot(est.vx, est.vy) * ff * 0.3, PM.seeker ? 1300 : 900);
         H.hc = hc; H.why = '';
         if (hc < minHc) { H.why = 'lowhc'; return false; }
         if (!playerWeaponReady(player, H.w)) { H.why = 'reload'; return false; }
@@ -15797,7 +15881,7 @@ function comPlanStep(c, P, D, hpF, te, lk) {
     return true;
 }
 function comThinkEvent(side, text, key) {
-    if (!comDemo) return;
+    if (!comDemo && !(side === 'e' && matchRec)) return;
     const m = _thinkLast[(key || side) + ':ev'] || (_thinkLast[(key || side) + ':ev'] = {});
     if (m.text === text && _frameCount - m.t < 120) return;
     m.text = text; m.t = _frameCount;
@@ -15805,7 +15889,7 @@ function comThinkEvent(side, text, key) {
 }
 function _thinkWrite(side, text) {
     if (matchRec && matchRec.th && matchRec.th.length < 6000) matchRec.th.push([_frameCount - matchRec.f0, side, String(text).slice(0, 220)]); // 第83弾: 書き出し用
-    if (!thinkLogOn) return;
+    if (!thinkLogOn || !comDemo) return;
     const box = document.getElementById('think-log');
     if (!box) return;
     const d = document.createElement('div');
@@ -15850,12 +15934,19 @@ let matchRec = null;
 const REC_EVENTS_MAX = 3000;
 const _AI_JP = { lurking: '潜伏', gathering: '収集', hunting: '追跡', combat: '交戦' };
 let _comMatchInfo = null;
+const REC_HG_N = 100;
 function matchRecStart() {
     const lm = [];
     for (const st of structures) if (st.type === 'colony' || st.type === 'derelict') lm.push({ k: st.type, x: st.x, y: st.y });
     for (const st of stations) lm.push({ k: 'station', x: st.x, y: st.y });
     for (const n of resourceNodes) lm.push({ k: 'node', x: n.x, y: n.y });
     matchRec = { f0: _frameCount, ship: gameState.shipType, enemy: gameState.enemyType, com: !!comDemo, lm, s: [], ev: [], th: [], x: [], prevAi: {}, prevExpo: 0 };
+    try { // 2026-11-11 (リプレイモード): 霧の濃さの地図 (100×100マス・1マス700u・0〜255) を試合の始めに1回だけ残す — リプレイでヒッグスの層を描く
+        const N = REC_HG_N, cell = (MAP_RADIUS * 2) / N, x0 = MAP_CX - MAP_RADIUS, y0 = MAP_CY - MAP_RADIUS, u = new Uint8Array(N * N);
+        for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) u[j * N + i] = Math.max(0, Math.min(255, Math.round(higgsBaseAt(x0 + (i + 0.5) * cell, y0 + (j + 0.5) * cell) * 255)));
+        let bin = ''; for (let k = 0; k < u.length; k++) bin += String.fromCharCode(u[k]);
+        matchRec.hg = { n: N, x0, y0, cell, b64: btoa(bin) };
+    } catch (err) { matchRec.hg = null; }
     try { // 第83弾: 書き出し用のメタ情報 (版・性格・積み込み・マップの傾向)
         const sc = document.querySelector('script[src*="game.js"]'), E0 = enemies.find(q => q.type !== 'fighter');
         matchRec.meta = { ver: sc ? (sc.getAttribute('src').split('?v=')[1] || '') : '', at: new Date().toISOString(), mode: gameState.mode, com: !!comDemo, ship: gameState.shipType, enemy: gameState.enemyType,
@@ -15891,14 +15982,24 @@ function matchRecTick() {
         if (e.hp <= 0 && !e._dying) continue;
         if (e.type === 'fighter') { F.push([Math.round(e.x), Math.round(e.y)]); continue; }
         const b = e.playerLastKnownPos;
-        E.push({ id: e.uid, x: Math.round(e.x), y: Math.round(e.y), a: +e.angle.toFixed(2), hp: Math.max(0, e.hp / e.maxHp), ai: e.aiState, fr: +(e.contactFreshness || 0).toFixed(2), bx: b ? Math.round(b.x) : null, by: b ? Math.round(b.y) : null, seen: !!e.inVision });
+        // 2026-11-11 (リプレイの敵視点): 敵の推定 (中心と幅)・作戦と段階・作戦の目標地点・敵が自艦を直接見ているか・敵の視界の目安
+        const q = _huntEst(e), H = e._hunt, tgp = H ? (H.k === 'fakebox' || H.k === 'lure' ? (H.ph === 'place' || H.ph === 'set' ? H.B : H.S) : H.S || H.goal || H.P || null) : null;
+        E.push({ id: e.uid, x: Math.round(e.x), y: Math.round(e.y), a: +e.angle.toFixed(2), hp: Math.max(0, e.hp / e.maxHp), ai: e.aiState, fr: +(e.contactFreshness || 0).toFixed(2), bx: b ? Math.round(b.x) : null, by: b ? Math.round(b.y) : null, seen: !!e.inVision,
+                 es: (e.detectionTimer || 0) > 60 ? 1 : 0, ex: q ? Math.round(q.x) : null, ey: q ? Math.round(q.y) : null, er: q ? Math.round(huntHonestR(q.r, q.age)) : null, hu: H ? H.k + ':' + H.ph : '', tg: tgp && isFinite(tgp.x) ? [Math.round(tgp.x), Math.round(tgp.y)] : null, vr: Math.round(_visAt(e.x, e.y)) });
         const pv = matchRec.prevAi[e.uid];
         if (pv && pv !== e.aiState) matchRecEvent('aiE', e.x, e.y, '敵: ' + (_AI_JP[pv] || pv) + ' → ' + (_AI_JP[e.aiState] || e.aiState));
         matchRec.prevAi[e.uid] = e.aiState;
     }
     if (playerExposureLevel !== matchRec.prevExpo) { matchRecEvent('expoP', player.x, player.y, '自艦: ' + _EXPO_JP[matchRec.prevExpo] + ' → ' + _EXPO_JP[playerExposureLevel]); matchRec.prevExpo = playerExposureLevel; }
     const D = playerDrones.filter(d => d.hp > 0).map(d => [Math.round(d.x), Math.round(d.y)]);
-    matchRec.s.push({ t: _frameCount - matchRec.f0, P, E, F, D });
+    // 2026-11-11 (リプレイ): 自艦の視界の目安・自艦の推定円 (追跡していない信号も・最大4つ)・囮/ノイズ/偽コンテナの位置 (だまし討ちを振り返れる)
+    P.vr = Math.round(_visAt(player.x, player.y));
+    { const Q = []; for (const sid in _signalAnalysis) { const sa = _signalAnalysis[sid]; if (!sa || !sa.fix || sa.relay || _srcKnown[sid]) continue; const te = trackEstimate(sa, 0); if (!te || !(te.r > 0) || te.r > 9000) continue; Q.push([Math.round(te.x), Math.round(te.y), Math.round(te.r), sid === lockedSignalId ? 1 : 0]); if (Q.length >= 4) break; } if (Q.length) P.q = Q; }
+    const Z = [];
+    for (const L of lures) Z.push([Math.round(L.x), Math.round(L.y), L.noise ? 'noise' : L.band ? 'bcn' : L.kind, L.owner]);
+    for (const nm of noiseMakers) Z.push([Math.round(nm.x), Math.round(nm.y), 'noise', 'p']);
+    for (const f of fieldSignals) if (f.fake) Z.push([Math.round(f.x), Math.round(f.y), 'fake', f.fake]);
+    matchRec.s.push(Z.length ? { t: _frameCount - matchRec.f0, P, E, F, D, Z } : { t: _frameCount - matchRec.f0, P, E, F, D });
     if ((_frameCount - matchRec.f0) % 300 === 0) { // 第83弾: 5秒ごとに詳しい状態 (書き出し用・再生画面は使わない)
         try {
             const E0 = enemies.find(q => q.type !== 'fighter'), h = _com && _com.hunt, e = E0;
@@ -15919,7 +16020,7 @@ function matchRecordData() {
     const playerDead = !player || player.hp <= 0, e0 = enemies.find(q => q.type !== 'fighter');
     const res = { winner: playerDead ? 'enemy' : (sectorCleared ? 'player' : 'none'), sec: Math.round((matchRec.s.length ? matchRec.s[matchRec.s.length - 1].t : 0) / 60), pHp: player ? +(Math.max(0, player.hp) / player.maxHp).toFixed(3) : 0, eHp: e0 ? +(Math.max(0, e0.hp) / e0.maxHp).toFixed(3) : 0,
         cause: playerHitLog && playerHitLog.length ? playerHitLog[playerHitLog.length - 1] : null, stats: huntStats ? JSON.parse(JSON.stringify(huntStats)) : null, last: last.slice(-3) };
-    return { fmt: 1, meta: matchRec.meta, result: res, lm: matchRec.lm, s: matchRec.s, x: matchRec.x, ev: matchRec.ev, th: matchRec.th };
+    return { fmt: 2, meta: matchRec.meta, result: res, lm: matchRec.lm, hg: matchRec.hg || null, s: matchRec.s, x: matchRec.x, ev: matchRec.ev, th: matchRec.th };
 }
 async function exportMatchRecord() {
     const d = matchRecordData(); if (!d) { logMessage('記録: 保存できる記録がありません', 'system-msg'); return; }
@@ -15930,141 +16031,332 @@ async function exportMatchRecord() {
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fn; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
     logMessage('記録: ' + fn + ' を保存した (' + Math.round(blob.size / 1024) + 'KB)', 'system-msg');
 }
-// ── 再生画面 ──
-let _rp = null;
+// ── リプレイモード (2026-11-11 オーナー「試合の記録を敵側の視点でリプレイ・拡大縮小・倍速・ヒッグスのオン/オフ・思考のオン/オフ・相手の挙動を見る機能」) ──
+//   記録 R = matchRecordData() と同じ形 { fmt, meta, result, lm, hg, s:[1秒ごと], x:[5秒ごと], ev, th }。今の試合・保存したファイル・Gitの records/ から開ける
+//   視点: 俯瞰 (両艦の真の位置) / 自機視点 / 敵視点 — 自機/敵視点で「ヒッグスON」なら その艦が見えていた相手だけ描き、見えていない相手は その艦の推定 (円) で描く
+//   機能: 拡大縮小 (ホイール/ピンチ/＋−/全体) ・ドラッグで移動・追従・倍速 (×1〜×60)・10秒戻す/進む・思考ログ (視点の側だけ)・出来事の一覧 (押すとその時刻へ)
+//         作戦の帯 (敵の作戦の移り変わり＝色の帯・撃った/被弾の刻み・押すとその時刻へ)・作戦の目標地点 (待ち伏せ位置/罠)・囮/ノイズ/偽コンテナの位置・視界の目安の円・推定円
+let RP = null;
+const _RP_SPD = [1, 2, 4, 8, 16, 32, 60];
+const _RP_HU_JP = { prowl: '索敵行', stalk: '忍び寄り', lure: '偽装の罠', hold: '待ち伏せ', screen: '艦載機の網', rush: '霧伝いの肉薄', snipe: 'ビームの狙撃', shadow: '影追い', feint: '偽装退却', fakebox: '偽コンテナの罠' };
+const _RP_HU_COL = { prowl: '#6f8f9f', stalk: '#ff9a40', lure: '#ff5ab0', hold: '#ffd24a', screen: '#5fd0ff', rush: '#ff4d4d', snipe: '#c48bff', shadow: '#ffb070', feint: '#ff3fd0', fakebox: '#ff3fd0' };
+const _RP_ENG = { thermonuclear: '熱核', pulse: 'EM', higgs: 'ヒッグス', photon: 'フォトン' };
+const _RP_Z_JP = { ship: '偽艦影', sos: '偽SOS', bcn: 'ビーコン', noise: 'ノイズ', fake: '偽コンテナ' };
 function openReplay() {
     if (!matchRec || !matchRec.s.length) { logMessage('記録: この試合の記録がありません', 'system-msg'); return; }
+    openReplayWith(matchRecordData(), 'この試合');
+}
+function openReplayBrowser() { // ロビーから: 記録を選ぶところから
     const ov = document.getElementById('replay-overlay'); if (!ov) return;
     ov.classList.remove('hidden');
-    const sl = document.getElementById('rp-slider');
-    sl.max = matchRec.s.length - 1; sl.value = matchRec.s.length - 1;
-    // 表示範囲: 艦の通った所が収まる正方形 (最小8000u)
-    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
-    for (const sm of matchRec.s) { const pts = [sm.P].concat(sm.E); for (const q of pts) { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); } }
-    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, half = Math.max(4000, (Math.max(x1 - x0, y1 - y0) / 2) * 1.15 + 600);
-    _rp = { i: matchRec.s.length - 1, play: false, spd: 4, cx, cy, half, acc: 0, last: 0 };
-    { // 第63弾: COM対戦は 双方の艦種と性格 (プリセット名と4軸) を記録の上に出す
-        const mb = document.getElementById('rp-match'), I = _comMatchInfo;
-        if (mb) {
-            if (matchRec.com && I) {
-                const pn = k => (COM_PRESETS[k] && COM_PRESETS[k].label) || '';
-                const row = (cls, lab, ship, pre, p) => '<div class="rp-m ' + cls + '"><b>' + lab + '</b> ' + SHIP_JP[ship] + ' <span>' + (pn(pre) ? pn(pre) + ' ' : '') + persLabel(p) + '</span></div>';
-                mb.innerHTML = row('p', '自機COM', I.ship, I.pPre, I.pp) + row('e', '敵COM', I.enemy, I.ePre, I.ep); mb.style.display = '';
-            } else { mb.innerHTML = ''; mb.style.display = 'none'; }
-        }
-    }
-    _rpRenderEvents();
-    _rpDraw();
-    _rpStartLoop();
+    if (!RP || !RP.R) { RP = { R: null }; _rpPaintEmpty(); }
+    _rpListOpen(true);
 }
-function closeReplay() { const ov = document.getElementById('replay-overlay'); if (ov) ov.classList.add('hidden'); if (_rp) _rp.play = false; }
+function openReplayWith(R, title) {
+    const ov = document.getElementById('replay-overlay'); if (!ov || !R || !R.s || !R.s.length) { logMessage('記録: 再生できる記録がありません', 'system-msg'); return; }
+    ov.classList.remove('hidden');
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const sm of R.s) for (const q of [sm.P].concat(sm.E || [])) { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); }
+    const half = Math.max(4000, (Math.max(x1 - x0, y1 - y0) / 2) * 1.15 + 600);
+    const keep = RP && RP.R ? RP : null;
+    RP = { R, title: title || '', i: R.s.length - 1, play: false, spd: keep ? keep.spd : 4, persp: keep ? keep.persp : 'god', fog: keep ? keep.fog : true, think: keep ? keep.think : true, est: keep ? keep.est !== false : true, trail: keep ? keep.trail !== false : true,
+           follow: false, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, half, fit: { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, half }, last: 0, hgImg: null, eId: null, thinkN: -1 };
+    { const ids = new Set(); for (const sm of R.s) for (const e of sm.E || []) ids.add(e.id); RP.eId = ids.size ? [...ids][0] : null; }
+    _rpBuildHg(); _rpRenderInfo(); _rpRenderEvents(); _rpTimeline(); _rpSyncButtons();
+    const sl = document.getElementById('rp-slider'); sl.max = R.s.length - 1; sl.value = RP.i;
+    _rpListOpen(false); _rpDraw(); _rpStartLoop();
+}
+function closeReplay() { const ov = document.getElementById('replay-overlay'); if (ov) ov.classList.add('hidden'); if (RP) RP.play = false; }
 function _rpFmt(t) { const s2 = Math.floor(t / 60); return Math.floor(s2 / 60) + ':' + String(s2 % 60).padStart(2, '0'); }
-const _EV_COL = { lull: '#bfe9ff', traceP: '#ffcf88', convoy: '#ffcf88', convoyP: '#7dff9a', convoyE: '#ffa040', partE: '#ffcf88', fireP: '#5ff0ff', fireE: '#ffa040', hitP: '#ff5050', hitE: '#7dff9a', deathP: '#ff3030', killE: '#7dff9a', nodeP: '#50c8ff', nodeE: '#ff9a50', colonyP: '#50c8ff', colonyE: '#ff9a50', salvP: '#9fffc0', aiE: '#ffcf88', expoP: '#ff8080', lureP: '#c48bff', lureE: '#c48bff', flashP: '#ffffff', flashE: '#ffffff', smokeE: '#9fb8ff', shield: '#88ccff', clear: '#7dff9a', supplyP: '#9fffc0', escP: '#ffe08a', salvE: '#ffcf88', zoneP: '#ff8ce0', zoneE: '#ff8ce0' };
+const _EV_COL = { lull: '#bfe9ff', traceP: '#ffcf88', convoy: '#ffcf88', convoyP: '#7dff9a', convoyE: '#ffa040', partE: '#ffcf88', fireP: '#5ff0ff', fireE: '#ffa040', hitP: '#ff5050', hitE: '#7dff9a', deathP: '#ff3030', killE: '#7dff9a', nodeP: '#50c8ff', nodeE: '#ffa040', tacE: '#ff9a40', tacP: '#5ff0ff', lureE: '#ff5ab0', feintE: '#ff3fd0', fakeE: '#ff3fd0', trapP: '#ff3fd0', trapE: '#7dff9a', hackOkE: '#ff3fd0', hackOkP: '#7dff9a', spin: '#ffff66' };
+function _rpRenderInfo() {
+    const mb = document.getElementById('rp-match'); if (!mb || !RP || !RP.R) return;
+    const M = RP.R.meta || {}, Rs = RP.R.result || {};
+    const pn = k => (COM_PRESETS[k] && COM_PRESETS[k].label) || '';
+    const pers = p => p ? '攻' + Math.round((p.aggression || 0) * 100) + ' 隠' + Math.round((p.stealth || 0) * 100) + ' 貪' + Math.round((p.greed || 0) * 100) + ' 慎' + Math.round((p.caution || 0) * 100) : '';
+    const win = Rs.winner === 'player' ? '自機の勝ち' : Rs.winner === 'enemy' ? '敵の勝ち' : '決着なし';
+    mb.innerHTML = '<span class="rp-src">' + (RP.title || '') + '</span>'
+        + '<span class="rp-m p"><b>' + (M.com ? '自機COM' : '自機') + '</b> ' + (SHIP_JP[M.ship] || M.ship || '') + ' ' + (pn(M.pPre) || '') + ' <i>' + pers(M.pp) + '</i></span>'
+        + '<span class="rp-m e"><b>敵</b> ' + (SHIP_JP[M.enemy] || M.enemy || '') + ' ' + (pn(M.ePre) || '') + ' <i>' + pers(M.ep) + '</i></span>'
+        + '<span class="rp-res">' + win + ' ・ ' + _rpFmt((Rs.sec || 0) * 60) + (M.ver ? ' ・ 版' + M.ver : '') + '</span>';
+    mb.style.display = '';
+}
 function _rpRenderEvents() {
-    const box = document.getElementById('rp-events'); if (!box) return;
+    const box = document.getElementById('rp-events'); if (!box || !RP || !RP.R) return;
     box.innerHTML = '';
-    matchRec.ev.forEach((ev, k) => {
+    const imp = document.getElementById('rp-evimp'), only = imp && imp.classList.contains('on');
+    (RP.R.ev || []).forEach((ev, k) => {
+        if (only && !/fire|hit|tac|lure|feint|fake|trap|hack|death|kill|clear|escE|escP|flash|smoke/.test(ev.kind)) return;
         const d = document.createElement('div'); d.className = 'rp-ev'; d.dataset.k = k; d.dataset.t = ev.t;
         const tm = document.createElement('b'); tm.textContent = _rpFmt(ev.t); d.appendChild(tm);
         const tx = document.createElement('span'); tx.textContent = ' ' + ev.text; tx.style.color = _EV_COL[ev.kind] || '#cfe'; d.appendChild(tx);
         box.appendChild(d);
     });
 }
-function _rpSetIndex(i) { if (!_rp) return; _rp.i = Math.max(0, Math.min(matchRec.s.length - 1, i)); document.getElementById('rp-slider').value = _rp.i; _rpDraw(); }
+// 作戦の帯: 敵 (上段) と自機COM (下段) の作戦を色の帯で・撃った/被弾の刻み
+function _rpTimeline() {
+    const cv = document.getElementById('rp-tl'); if (!cv || !RP || !RP.R) return;
+    const R = RP.R, W = cv.clientWidth || 300, H = cv.clientHeight || 22, dpr = Math.min(2, window.devicePixelRatio || 1);
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+    const T = R.s[R.s.length - 1].t || 1, X = t => (t / T) * W;
+    const band = (get, y, h) => { const xs = R.x || []; for (let k = 0; k < xs.length; k++) { const hu = get(xs[k]); if (!hu) continue; const kk = hu.split(':')[0], t1 = k + 1 < xs.length ? xs[k + 1].t : T; g.fillStyle = _RP_HU_COL[kk] || '#888'; g.fillRect(X(xs[k].t), y, Math.max(1, X(t1) - X(xs[k].t)), h); } };
+    g.fillStyle = 'rgba(255,255,255,0.05)'; g.fillRect(0, 0, W, H);
+    band(x => x.e && x.e.hu, 2, 7); band(x => x.p && x.p.hu, 12, 4);
+    for (const ev of R.ev || []) {
+        if (!/fireE|fireP|hitP|hitE|tacE|feintE|fakeE|lureE|trapP|hackOkE/.test(ev.kind)) continue;
+        g.fillStyle = _EV_COL[ev.kind] || '#fff'; const h = /hit/.test(ev.kind) ? H : /tac|feint|fake|lure|trap|hack/.test(ev.kind) ? 9 : 5;
+        g.fillRect(X(ev.t), /tac|feint|fake|lure|trap|hack/.test(ev.kind) ? 0 : H - h, /tac|feint|fake|lure|trap|hack/.test(ev.kind) ? 2 : 1, h);
+    }
+    RP.tlT = T;
+}
+function _rpBuildHg() {
+    RP.hgImg = null; const hg = RP.R.hg; if (!hg || !hg.b64) return;
+    try {
+        const bin = atob(hg.b64), N = hg.n, c = document.createElement('canvas'); c.width = N; c.height = N;
+        const g = c.getContext('2d'), im = g.createImageData(N, N);
+        for (let k = 0; k < N * N; k++) { const v = bin.charCodeAt(k) / 255; im.data[k * 4] = 60 + 70 * v; im.data[k * 4 + 1] = 40 + 30 * v; im.data[k * 4 + 2] = 140 + 100 * v; im.data[k * 4 + 3] = Math.round(220 * Math.pow(v, 0.8)); }
+        g.putImageData(im, 0, 0); RP.hgImg = c;
+    } catch (err) { RP.hgImg = null; }
+}
+function _rpSample(fi) { // 少数のサンプル位置 → 前後の1秒を補間した状態
+    const S = RP.R.s, i0 = Math.max(0, Math.min(S.length - 1, Math.floor(fi))), i1 = Math.min(S.length - 1, i0 + 1), u = Math.max(0, Math.min(1, fi - i0)), A = S[i0], B = S[i1];
+    if (u < 0.001 || i0 === i1) return A;
+    const L = (a, b) => a + (b - a) * u, LA = (a, b) => a + _angDiff(b, a) * u;
+    const P = Object.assign({}, A.P, { x: L(A.P.x, B.P.x), y: L(A.P.y, B.P.y), a: LA(A.P.a, B.P.a) });
+    const E = (A.E || []).map(e => { const f = (B.E || []).find(q => q.id === e.id); return f ? Object.assign({}, e, { x: L(e.x, f.x), y: L(e.y, f.y), a: LA(e.a, f.a) }) : e; });
+    return Object.assign({}, A, { t: L(A.t, B.t), P, E });
+}
+function _rpPaintEmpty() {
+    const cv = document.getElementById('rp-canvas'); if (!cv) return; const g = cv.getContext('2d'); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, cv.width, cv.height);
+    ['rp-state', 'rp-think', 'rp-events'].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ''; });
+    const mb = document.getElementById('rp-match'); if (mb) { mb.innerHTML = '<span class="rp-src">記録を選んでください (右上の「記録一覧」か「ファイル」)</span>'; mb.style.display = ''; }
+}
+function _rpView() { // 画面の座標変換
+    const cv = document.getElementById('rp-canvas'), W = cv.clientWidth || 300, H = cv.clientHeight || 300;
+    const sc = Math.min(W, H) / (2 * RP.half); return { W, H, sc, ox: W / 2 - RP.cx * sc, oy: H / 2 - RP.cy * sc };
+}
 function _rpDraw() {
-    if (!_rp || !matchRec) return;
+    if (!RP || !RP.R) return;
     const cv = document.getElementById('rp-canvas'); if (!cv) return;
     const dpr = Math.min(2, window.devicePixelRatio || 1), W = cv.clientWidth || 300, H = cv.clientHeight || 300;
-    if (cv.width !== Math.round(W * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    const R = RP.R, S = R.s, cur = _rpSample(RP.i), persp = RP.persp, fog = RP.fog && persp !== 'god';
+    const me = persp === 'e' ? (cur.E || []).find(e => e.id === RP.eId) || (cur.E || [])[0] : null;
+    if (RP.follow) { const f = persp === 'e' && me ? me : cur.P; RP.cx = f.x; RP.cy = f.y; }
     const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.clearRect(0, 0, W, H); g.fillStyle = 'rgba(2,10,6,0.55)'; g.fillRect(0, 0, W, H); // 第35弾: 背景の画像が透けるように
-    const sc = Math.min(W, H) / (2 * _rp.half), ox = W / 2 - _rp.cx * sc, oy = H / 2 - _rp.cy * sc;
-    const X = (x) => ox + x * sc, Y = (y) => oy + y * sc;
-    // 地図の縁とランドマーク
+    g.clearRect(0, 0, W, H); g.fillStyle = 'rgba(2,8,10,0.78)'; g.fillRect(0, 0, W, H);
+    const V = _rpView(), sc = V.sc, X = (x) => V.ox + x * sc, Y = (y) => V.oy + y * sc;
+    // ヒッグスの層 (霧の濃さの地図)
+    if (RP.fog && RP.hgImg && R.hg) { g.save(); g.globalAlpha = 0.55; g.imageSmoothingEnabled = true; g.drawImage(RP.hgImg, X(R.hg.x0), Y(R.hg.y0), R.hg.n * R.hg.cell * sc, R.hg.n * R.hg.cell * sc); g.restore(); }
+    // 地図の縁・ランドマーク
     g.strokeStyle = 'rgba(0,255,170,0.25)'; g.lineWidth = 1; g.beginPath(); g.arc(X(MAP_CX), Y(MAP_CY), MAP_RADIUS * sc, 0, Math.PI * 2); g.stroke();
-    for (const l of matchRec.lm) {
-        g.fillStyle = l.k === 'colony' ? '#3aa8ff' : l.k === 'station' ? '#3fffa0' : l.k === 'derelict' ? '#8a8a8a' : '#c79bff';
-        const r = l.k === 'node' ? 2.5 : 4; g.fillRect(X(l.x) - r, Y(l.y) - r, r * 2, r * 2);
-    }
-    const S = matchRec.s, i = _rp.i, cur = S[i];
-    // 航跡: 全体を薄く、今までを濃く
+    for (const l of R.lm || []) { g.fillStyle = l.k === 'colony' ? '#3aa8ff' : l.k === 'station' ? '#3fffa0' : l.k === 'derelict' ? '#8a8a8a' : '#c79bff'; const r = l.k === 'node' ? 2.5 : 4; g.fillRect(X(l.x) - r, Y(l.y) - r, r * 2, r * 2); }
+    // 航跡
+    const iNow = Math.floor(RP.i);
     const trail = (get, col) => {
-        g.strokeStyle = col; g.globalAlpha = 0.18; g.lineWidth = 1.5; g.beginPath(); let st = false;
+        if (!RP.trail) return;
+        g.strokeStyle = col; g.globalAlpha = 0.12; g.lineWidth = 1.2; g.beginPath(); let st = false;
         for (let k = 0; k < S.length; k++) { const q = get(S[k]); if (!q) { st = false; continue; } if (!st) { g.moveTo(X(q.x), Y(q.y)); st = true; } else g.lineTo(X(q.x), Y(q.y)); }
-        g.stroke(); g.globalAlpha = 0.9; g.lineWidth = 2; g.beginPath(); st = false;
-        for (let k = 0; k <= i; k++) { const q = get(S[k]); if (!q) { st = false; continue; } if (!st) { g.moveTo(X(q.x), Y(q.y)); st = true; } else g.lineTo(X(q.x), Y(q.y)); }
+        g.stroke(); g.globalAlpha = 0.85; g.lineWidth = 2; g.beginPath(); st = false;
+        for (let k = Math.max(0, iNow - 240); k <= iNow; k++) { const q = get(S[k]); if (!q) { st = false; continue; } if (!st) { g.moveTo(X(q.x), Y(q.y)); st = true; } else g.lineTo(X(q.x), Y(q.y)); }
         g.stroke(); g.globalAlpha = 1;
     };
-    trail(sm => sm.P, '#5ff0ff');
-    const eIds = new Set(); for (const sm of S) for (const e of sm.E) eIds.add(e.id);
-    for (const id of eIds) trail(sm => sm.E.find(e => e.id === id), '#ffa040');
-    // 出来事 (今の時刻までの直近20秒)
-    for (const ev of matchRec.ev) {
+    const showP = persp !== 'e' || !fog || (me && me.es), // 敵視点で霧ON: 敵が自艦を直接見ている時だけ
+          showE = (e) => persp !== 'p' || !fog || e.seen;  // 自機視点で霧ON: 自艦から見えている時だけ
+    if (persp !== 'e' || !fog) trail(sm => sm.P, '#5ff0ff');
+    if (persp !== 'p' || !fog) { const ids = new Set(); for (const sm of S) for (const e of sm.E || []) ids.add(e.id); for (const id of ids) trail(sm => (sm.E || []).find(e => e.id === id), '#ffa040'); }
+    // 視界の目安の円
+    const visC = (q, col) => { if (!q || !q.vr) return; g.setLineDash([2, 4]); g.strokeStyle = col; g.globalAlpha = 0.45; g.beginPath(); g.arc(X(q.x), Y(q.y), q.vr * sc, 0, Math.PI * 2); g.stroke(); g.setLineDash([]); g.globalAlpha = 1; };
+    if (persp === 'p' || persp === 'god') visC(cur.P, '#5ff0ff');
+    for (const e of cur.E || []) if (persp === 'e' && e === me || persp === 'god') visC(e, '#ffa040');
+    // 出来事 (直近20秒)
+    for (const ev of R.ev || []) {
         if (ev.t > cur.t || ev.t < cur.t - 1200) continue;
-        const a = 1 - (cur.t - ev.t) / 1200;
-        g.globalAlpha = 0.3 + 0.7 * a; g.strokeStyle = g.fillStyle = _EV_COL[ev.kind] || '#cfe';
+        if (fog && persp === 'p' && /fireE|tacE|lureE|feintE|fakeE/.test(ev.kind)) continue; // 相手の行動は見えない
+        if (fog && persp === 'e' && /fireP|tacP/.test(ev.kind)) continue;
+        const a = 1 - (cur.t - ev.t) / 1200; g.globalAlpha = 0.3 + 0.7 * a; g.strokeStyle = g.fillStyle = _EV_COL[ev.kind] || '#cfe';
         const x = X(ev.x), y = Y(ev.y);
-        if (ev.kind === 'fireP' || ev.kind === 'fireE') { g.beginPath(); g.arc(x, y, 5, 0, Math.PI * 2); g.stroke(); }
-        else if (ev.kind === 'hitP' || ev.kind === 'hitE' || ev.kind === 'deathP' || ev.kind === 'killE') { g.lineWidth = 2; g.beginPath(); g.moveTo(x - 5, y - 5); g.lineTo(x + 5, y + 5); g.moveTo(x + 5, y - 5); g.lineTo(x - 5, y + 5); g.stroke(); g.lineWidth = 1; }
+        if (/fire/.test(ev.kind)) { g.beginPath(); g.arc(x, y, 5, 0, Math.PI * 2); g.stroke(); }
+        else if (/hit|death|kill/.test(ev.kind)) { g.lineWidth = 2; g.beginPath(); g.moveTo(x - 5, y - 5); g.lineTo(x + 5, y + 5); g.moveTo(x + 5, y - 5); g.lineTo(x - 5, y + 5); g.stroke(); g.lineWidth = 1; }
         else { g.beginPath(); g.moveTo(x, y - 5); g.lineTo(x + 5, y); g.lineTo(x, y + 5); g.lineTo(x - 5, y); g.closePath(); g.stroke(); }
     }
     g.globalAlpha = 1;
-    // 艦 (今の時刻)
-    const ship = (q, col) => { g.save(); g.translate(X(q.x), Y(q.y)); g.rotate(q.a); g.fillStyle = col; g.beginPath(); g.moveTo(9, 0); g.lineTo(-6, -5); g.lineTo(-6, 5); g.closePath(); g.fill(); g.restore(); };
-    for (const f of cur.F) { g.fillStyle = '#ffb070'; g.fillRect(X(f[0]) - 1.5, Y(f[1]) - 1.5, 3, 3); }
-    for (const d of cur.D) { g.fillStyle = '#8ff'; g.fillRect(X(d[0]) - 1.5, Y(d[1]) - 1.5, 3, 3); }
-    for (const e of cur.E) {
-        // 敵が「自艦はここ」と思っている点
-        if (e.bx !== null && e.fr > 0.05) {
-            g.setLineDash([3, 3]); g.strokeStyle = 'rgba(255,160,64,' + (0.3 + 0.6 * e.fr) + ')';
-            g.beginPath(); g.moveTo(X(e.x), Y(e.y)); g.lineTo(X(e.bx), Y(e.by)); g.stroke();
-            g.beginPath(); g.arc(X(e.bx), Y(e.by), 7, 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
-        }
-        ship(e, e.hp > 0 ? '#ff8030' : '#663');
+    // 囮・ノイズ・偽コンテナ (誰のものか: 敵=桃 / 自機=水色)。霧ONでは自分の物と、正体の分からない「信号」として相手の物も
+    for (const z of cur.Z || []) {
+        const mine = (persp === 'e' && z[3] === 'e') || (persp !== 'e' && z[3] === 'p'), col = z[3] === 'e' ? '#ff5ab0' : '#5ff0ff';
+        const x = X(z[0]), y = Y(z[1]);
+        if (fog && !mine) { g.strokeStyle = '#cfd8dc'; g.globalAlpha = 0.6; g.beginPath(); g.arc(x, y, 4, 0, Math.PI * 2); g.stroke(); g.globalAlpha = 1; continue; } // 霧の中では正体が分からない
+        g.strokeStyle = g.fillStyle = col; g.lineWidth = 1.5;
+        if (z[2] === 'fake') { g.strokeRect(x - 5, y - 5, 10, 10); g.beginPath(); g.moveTo(x - 5, y - 5); g.lineTo(x + 5, y + 5); g.moveTo(x + 5, y - 5); g.lineTo(x - 5, y + 5); g.stroke(); }
+        else { g.beginPath(); g.arc(x, y, 6, 0, Math.PI * 2); g.stroke(); g.beginPath(); g.arc(x, y, 2, 0, Math.PI * 2); g.fill(); }
+        g.font = '10px sans-serif'; g.fillText(_RP_Z_JP[z[2]] || z[2], x + 8, y - 6); g.lineWidth = 1;
     }
-    if (cur.P.est) { g.setLineDash([3, 3]); g.strokeStyle = 'rgba(95,240,255,0.7)'; g.beginPath(); g.arc(X(cur.P.est.x), Y(cur.P.est.y), Math.max(6, cur.P.est.r * sc), 0, Math.PI * 2); g.stroke(); g.setLineDash([]); }
-    ship(cur.P, '#5ff0ff');
-    // 状態の文
-    document.getElementById('rp-time').textContent = _rpFmt(cur.t) + ' / ' + _rpFmt(S[S.length - 1].t);
-    const lines = ['<span style="color:#5ff0ff">自艦</span> 耐久' + Math.round(cur.P.hp * 100) + '%・' + (_EXPO_JP[cur.P.ex] || '') + (cur.P.est ? '・敵を推定±' + cur.P.est.r + 'u' : '')];
-    for (const e of cur.E) {
-        const dd = Math.round(Math.hypot(e.x - cur.P.x, e.y - cur.P.y) / 100) * 100;
-        const err = e.bx !== null && e.fr > 0.05 ? '・自艦をここと推定 (ずれ' + Math.round(Math.hypot(e.bx - cur.P.x, e.by - cur.P.y) / 100) * 100 + 'u・確信' + Math.round(e.fr * 100) + '%)' : '・自艦を掴んでいない';
-        lines.push('<span style="color:#ffa040">敵</span> ' + (_AI_JP[e.ai] || e.ai) + '・耐久' + Math.round(e.hp * 100) + '%・距離' + dd + 'u' + (e.seen ? '・自艦から見えている' : '') + err);
+    // 艦
+    const ship = (q, col, lbl) => { g.save(); g.translate(X(q.x), Y(q.y)); g.rotate(q.a || 0); g.fillStyle = col; g.beginPath(); g.moveTo(10, 0); g.lineTo(-7, -6); g.lineTo(-7, 6); g.closePath(); g.fill(); g.restore(); if (lbl) { g.fillStyle = col; g.font = '10px sans-serif'; g.fillText(lbl, X(q.x) + 10, Y(q.y) + 14); } };
+    for (const f of cur.F || []) if (persp !== 'p' || !fog) { g.fillStyle = '#ffb070'; g.fillRect(X(f[0]) - 1.5, Y(f[1]) - 1.5, 3, 3); }
+    for (const d of cur.D || []) if (persp !== 'e' || !fog) { g.fillStyle = '#8ff'; g.fillRect(X(d[0]) - 1.5, Y(d[1]) - 1.5, 3, 3); }
+    for (const e of cur.E || []) {
+        // 敵の推定 (敵が思う自艦の位置): 円 (正直な幅) か 旧記録は点
+        if (RP.est && persp !== 'p') {
+            if (e.ex !== undefined && e.ex !== null) { g.setLineDash([4, 4]); g.strokeStyle = 'rgba(255,160,64,0.8)'; g.beginPath(); g.arc(X(e.ex), Y(e.ey), Math.max(6, e.er * sc), 0, Math.PI * 2); g.stroke(); g.beginPath(); g.moveTo(X(e.x), Y(e.y)); g.lineTo(X(e.ex), Y(e.ey)); g.globalAlpha = 0.35; g.stroke(); g.globalAlpha = 1; g.setLineDash([]); g.fillStyle = 'rgba(255,160,64,0.9)'; g.font = '10px sans-serif'; g.fillText('敵の推定', X(e.ex) + 6, Y(e.ey) - 6); }
+            else if (e.bx !== null && e.fr > 0.05) { g.setLineDash([3, 3]); g.strokeStyle = 'rgba(255,160,64,' + (0.3 + 0.6 * e.fr) + ')'; g.beginPath(); g.moveTo(X(e.x), Y(e.y)); g.lineTo(X(e.bx), Y(e.by)); g.stroke(); g.beginPath(); g.arc(X(e.bx), Y(e.by), 7, 0, Math.PI * 2); g.stroke(); g.setLineDash([]); }
+        }
+        // 作戦の目標地点 (待ち伏せ位置・罠の位置)
+        if (e.tg && persp !== 'p') { g.strokeStyle = _RP_HU_COL[(e.hu || '').split(':')[0]] || '#ffa040'; g.setLineDash([2, 3]); g.beginPath(); g.moveTo(X(e.x), Y(e.y)); g.lineTo(X(e.tg[0]), Y(e.tg[1])); g.stroke(); g.setLineDash([]); g.beginPath(); g.moveTo(X(e.tg[0]) - 6, Y(e.tg[1])); g.lineTo(X(e.tg[0]) + 6, Y(e.tg[1])); g.moveTo(X(e.tg[0]), Y(e.tg[1]) - 6); g.lineTo(X(e.tg[0]), Y(e.tg[1]) + 6); g.stroke(); }
+        if (showE(e)) ship(e, e.hp > 0 ? '#ff8030' : '#663', e.hu ? (_RP_HU_JP[e.hu.split(':')[0]] || '') : '');
+    }
+    // 自艦の推定円 (自機の追跡)
+    if (RP.est && persp !== 'e') {
+        const Q = cur.P.q || (cur.P.est ? [[cur.P.est.x, cur.P.est.y, cur.P.est.r, 1]] : []);
+        for (const q of Q) { g.setLineDash([3, 3]); g.strokeStyle = q[3] ? 'rgba(95,240,255,0.85)' : 'rgba(95,240,255,0.45)'; g.beginPath(); g.arc(X(q[0]), Y(q[1]), Math.max(6, q[2] * sc), 0, Math.PI * 2); g.stroke(); g.setLineDash([]); }
+    }
+    if (showP) ship(cur.P, '#5ff0ff', persp === 'e' && fog ? '見えた' : '');
+    // 縮尺
+    { const want = 80 / sc, steps = [100, 200, 500, 1000, 2000, 5000, 10000, 20000]; const u = steps.find(v => v >= want) || 20000; g.strokeStyle = '#9fc9bb'; g.beginPath(); g.moveTo(12, H - 14); g.lineTo(12 + u * sc, H - 14); g.stroke(); g.fillStyle = '#9fc9bb'; g.font = '10px sans-serif'; g.fillText(u + 'u', 14, H - 18); }
+    // 文字
+    document.getElementById('rp-time').textContent = _rpFmt(cur.t) + ' / ' + _rpFmt(S[S.length - 1].t) + ' ×' + RP.spd;
+    _rpStateText(cur, me);
+    _rpThinkText(cur.t);
+    const sl = document.getElementById('rp-slider'); if (sl && +sl.value !== Math.floor(RP.i)) sl.value = Math.floor(RP.i);
+    { const cvt = document.getElementById('rp-tlcur'); if (cvt && RP.tlT) cvt.style.left = (cur.t / RP.tlT * 100) + '%'; }
+    const box = document.getElementById('rp-events'); let lastK = -1;
+    box.querySelectorAll('.rp-ev').forEach(d => { const t = +d.dataset.t; d.classList.toggle('past', t <= cur.t); if (t <= cur.t) lastK = +d.dataset.k; d.classList.remove('now'); });
+    if (lastK >= 0) { const el = box.querySelector('.rp-ev[data-k="' + lastK + '"]'); if (el) { el.classList.add('now'); if (RP.play) el.scrollIntoView({ block: 'nearest' }); } }
+}
+function _rpStateText(cur, me) {
+    const R = RP.R, xs = R.x || []; let xd = null; for (const q of xs) { if (q.t <= cur.t) xd = q; else break; }
+    const lines = [];
+    const P = cur.P;
+    if (RP.persp !== 'e') {
+        let l = '<span style="color:#5ff0ff">自艦</span> 耐久' + Math.round(P.hp * 100) + '%・' + (_EXPO_JP[P.ex] || '');
+        if (xd && xd.p) l += '・' + (_RP_ENG[xd.p.eng] || xd.p.eng) + '・' + ({ silent: '潜航', cruise: '巡航', flank: '全速' })[xd.p.st] + (xd.p.co ? '・機関停止' : '') + (xd.p.hu ? '・作戦 ' + (_RP_HU_JP[xd.p.hu.split(':')[0]] || xd.p.hu) : '') + (xd.p.stg ? '・戦略 ' + xd.p.stg : '');
+        lines.push(l);
+    }
+    for (const e of cur.E || []) {
+        if (RP.persp === 'p' && RP.fog && !e.seen) { lines.push('<span style="color:#ffa040">敵</span> 見えていない' + (P.q ? '・推定' + P.q.length + 'つ' : '')); continue; }
+        const dd = Math.round(Math.hypot(e.x - P.x, e.y - P.y) / 100) * 100;
+        let l = '<span style="color:#ffa040">敵</span> ' + (_AI_JP[e.ai] || e.ai) + '・耐久' + Math.round(e.hp * 100) + '%' + (RP.persp !== 'p' ? '・自艦まで' + dd + 'u' : '');
+        if (e.hu) l += '・作戦 <b style="color:' + (_RP_HU_COL[e.hu.split(':')[0]] || '#fff') + '">' + (_RP_HU_JP[e.hu.split(':')[0]] || e.hu) + '</b>(' + e.hu.split(':')[1] + ')';
+        if (RP.persp !== 'p') {
+            if (e.ex !== undefined && e.ex !== null) l += '・推定±' + e.er + 'u (実際のずれ ' + Math.round(Math.hypot(e.ex - P.x, e.ey - P.y) / 100) * 100 + 'u)';
+            else if (e.bx !== null && e.fr > 0.05) l += '・自艦をここと推定 (ずれ' + Math.round(Math.hypot(e.bx - P.x, e.by - P.y) / 100) * 100 + 'u)';
+            else l += '・自艦を掴んでいない';
+            if (e.es) l += '・<b style="color:#ff6060">自艦を目視</b>';
+        }
+        if (e.seen && RP.persp !== 'e') l += '・自艦から見えている';
+        if (xd && xd.e && RP.persp !== 'p') l += '<br>&nbsp;&nbsp;' + (_RP_ENG[xd.e.eng] || xd.e.eng || '') + (xd.e.hid ? '・潜伏中' : '') + '・弾 M' + (xd.e.am ?? '-') + ' K' + (xd.e.ak ?? '-');
+        lines.push(l);
     }
     document.getElementById('rp-state').innerHTML = lines.join('<br>');
-    // 出来事の一覧: 今より前を濃く、直近を枠で
-    const box = document.getElementById('rp-events');
-    let lastK = -1;
-    box.querySelectorAll('.rp-ev').forEach(d => { const t = +d.dataset.t; d.classList.toggle('past', t <= cur.t); if (t <= cur.t) lastK = +d.dataset.k; d.classList.remove('now'); });
-    if (lastK >= 0) { const el = box.querySelector('.rp-ev[data-k="' + lastK + '"]'); if (el) { el.classList.add('now'); if (_rp.play || _rp.follow !== false) el.scrollIntoView({ block: 'nearest' }); } }
+}
+function _rpThinkText(t) {
+    const box = document.getElementById('rp-think'); if (!box) return;
+    if (!RP.think) { if (box.style.display !== 'none') box.style.display = 'none'; return; }
+    box.style.display = '';
+    const th = RP.R.th || [], side = RP.persp === 'p' ? 'p' : RP.persp === 'e' ? 'e' : null;
+    let n = 0; for (let k = 0; k < th.length; k++) { if (th[k][0] > t) break; n = k + 1; }
+    const key = n + RP.persp; if (key === RP.thinkN) return; RP.thinkN = key;
+    const out = []; for (let k = n - 1; k >= 0 && out.length < 30; k--) { if (side && th[k][1] !== side) continue; out.push(th[k]); }
+    out.reverse();
+    box.innerHTML = out.length ? out.map(q => '<div class="rp-th ' + q[1] + '"><b>' + _rpFmt(q[0]) + '</b> ' + String(q[2]).replace(/</g, '&lt;') + '</div>').join('') : '<div class="rp-th">(この時刻までの思考ログはありません' + (RP.R.meta && !RP.R.meta.com ? ' — 通常プレイの記録は敵の思考だけ' : '') + ')</div>';
+    box.scrollTop = box.scrollHeight;
+}
+function _rpSetIndex(i) { if (!RP || !RP.R) return; RP.i = Math.max(0, Math.min(RP.R.s.length - 1, i)); _rpDraw(); }
+function _rpSeekT(t) { if (!RP || !RP.R) return; let k = RP.R.s.findIndex(sm => sm.t >= t); if (k < 0) k = RP.R.s.length - 1; RP.play = false; _rpSyncButtons(); _rpSetIndex(k); }
+function _rpSyncButtons() {
+    if (!RP) return; const set = (id, on, txt) => { const b = document.getElementById(id); if (!b) return; b.classList.toggle('on', !!on); if (txt) b.textContent = txt; };
+    set('rp-play', RP.play, RP.play ? '❚❚' : '▶'); set('rp-spd', true, '×' + RP.spd);
+    set('rp-fog', RP.fog, 'ヒッグス ' + (RP.fog ? 'ON' : 'OFF')); set('rp-thk', RP.think, '思考 ' + (RP.think ? 'ON' : 'OFF'));
+    set('rp-est', RP.est, '推定 ' + (RP.est ? 'ON' : 'OFF')); set('rp-trl', RP.trail, '航跡 ' + (RP.trail ? 'ON' : 'OFF')); set('rp-fol', RP.follow, '追従 ' + (RP.follow ? 'ON' : 'OFF'));
+    document.querySelectorAll('#rp-persp button').forEach(b => b.classList.toggle('on', b.dataset.p === RP.persp));
 }
 function _rpLoop(ts) {
-    // 第30弾: 開いている間だけ回す (旧: ページ読み込み時に _rp=null で即終了し、再生が二度と進まなかった)
     _rpLoopOn = false;
-    if (!_rp) return;
     const ov = document.getElementById('replay-overlay');
-    if (ov && !ov.classList.contains('hidden') && _rp.play) {
-        const dt = _rp.last ? Math.min(0.25, (ts - _rp.last) / 1000) : 0;
-        _rp.acc += dt * _rp.spd; // 1サンプル=1秒 → 再生の速さ倍
-        if (_rp.acc >= 1) { const n = Math.floor(_rp.acc); _rp.acc -= n; _rpSetIndex(_rp.i + n); if (_rp.i >= matchRec.s.length - 1) { _rp.play = false; document.getElementById('rp-play').textContent = '▶'; } }
+    if (!RP || !ov || ov.classList.contains('hidden')) return;
+    if (RP.R && RP.play) {
+        const dt = RP.last ? Math.min(0.25, (ts - RP.last) / 1000) : 0;
+        RP.i += dt * RP.spd; // 1サンプル=1秒
+        if (RP.i >= RP.R.s.length - 1) { RP.i = RP.R.s.length - 1; RP.play = false; _rpSyncButtons(); }
+        _rpDraw();
     }
-    _rp.last = ts;
-    if (ov && !ov.classList.contains('hidden')) { _rpLoopOn = true; requestAnimationFrame(_rpLoop); }
+    RP.last = ts;
+    _rpLoopOn = true; requestAnimationFrame(_rpLoop);
 }
 let _rpLoopOn = false;
-function _rpStartLoop() { if (_rpLoopOn) return; _rpLoopOn = true; if (_rp) _rp.last = 0; requestAnimationFrame(_rpLoop); }
+function _rpStartLoop() { if (_rpLoopOn) return; _rpLoopOn = true; if (RP) RP.last = 0; requestAnimationFrame(_rpLoop); }
+function _rpZoom(m, sx, sy) {
+    if (!RP || !RP.R) return; const V = _rpView(); const wx = sx === undefined ? RP.cx : (sx - V.ox) / V.sc, wy = sy === undefined ? RP.cy : (sy - V.oy) / V.sc;
+    const nh = Math.max(600, Math.min(60000, RP.half / m)); if (!RP.follow) { RP.cx = wx + (RP.cx - wx) * (nh / RP.half); RP.cy = wy + (RP.cy - wy) * (nh / RP.half); } RP.half = nh; _rpDraw();
+}
+// 記録の読み込み (ファイル・Gitの records/)
+async function _rpParseBuf(buf) {
+    const u = new Uint8Array(buf);
+    if (u[0] === 0x7b) return JSON.parse(new TextDecoder().decode(u)); // 既に展開されている (配信側で解凍された) / 素のJSON
+    const txt = await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+    return JSON.parse(txt);
+}
+async function _rpLoadUrl(url, title) {
+    try { const r = await fetch(url, { cache: 'no-store' }); if (!r.ok) throw new Error('HTTP ' + r.status); const R = await _rpParseBuf(await r.arrayBuffer()); openReplayWith(R, title); }
+    catch (err) { const el = document.getElementById('rp-list-body'); if (el) el.insertAdjacentHTML('afterbegin', '<div class="rp-err">読み込めない: ' + String(err).slice(0, 120) + '</div>'); }
+}
+let _rpIndex = null;
+async function _rpListOpen(on) {
+    const box = document.getElementById('rp-list'); if (!box) return;
+    box.classList.toggle('hidden', !on); if (!on) return;
+    const body = document.getElementById('rp-list-body');
+    const cur = matchRec && matchRec.s && matchRec.s.length ? '<div class="rp-li cur" data-cur="1"><b>この試合</b> <span>' + _rpFmt(matchRec.s[matchRec.s.length - 1].t) + '</span></div>' : '';
+    body.innerHTML = cur + '<div class="rp-li dim">Gitの記録 (records/) を読み込み中…</div>';
+    try {
+        if (!_rpIndex) { const r = await fetch('../records/index.json', { cache: 'no-store' }); if (!r.ok) throw new Error('HTTP ' + r.status); _rpIndex = await r.json(); }
+        const rows = (_rpIndex.files || []).map(f => '<div class="rp-li" data-f="' + f.f + '"><b>' + (f.at || '').slice(5, 16).replace('T', ' ') + '</b> ' + (SHIP_JP[f.ship] || f.ship) + ' ' + ((COM_PRESETS[f.pPre] && COM_PRESETS[f.pPre].label) || '') + ' <i>vs</i> ' + (SHIP_JP[f.enemy] || f.enemy) + ' ' + ((COM_PRESETS[f.ePre] && COM_PRESETS[f.ePre].label) || '') + ' <span class="w-' + f.winner + '">' + (f.winner === 'player' ? '自機勝' : f.winner === 'enemy' ? '敵勝' : '—') + '</span> <span>' + _rpFmt((f.sec || 0) * 60) + '</span>' + (f.dir === 'sim' ? ' <em>sim</em>' : '') + '</div>');
+        body.innerHTML = cur + (rows.length ? rows.join('') : '<div class="rp-li dim">records/ に記録がありません</div>');
+    } catch (err) { body.innerHTML = cur + '<div class="rp-li dim">Gitの記録一覧を読めない (' + String(err).slice(0, 60) + ') — 「ファイル」から .json.gz を開けます</div>'; }
+}
 (() => {
     const ov = document.getElementById('replay-overlay'); if (!ov) return;
-    document.getElementById('rp-close').addEventListener('click', closeReplay);
-    { const sv = document.getElementById('rp-save'); if (sv) sv.addEventListener('click', exportMatchRecord); }
-    document.getElementById('rp-slider').addEventListener('input', (ev) => { if (_rp) { _rp.play = false; document.getElementById('rp-play').textContent = '▶'; _rpSetIndex(+ev.target.value); } });
-    document.getElementById('rp-play').addEventListener('click', () => { if (!_rp) return; if (_rp.i >= matchRec.s.length - 1) _rpSetIndex(0); _rp.play = !_rp.play; document.getElementById('rp-play').textContent = _rp.play ? '❚❚' : '▶'; });
-    document.getElementById('rp-spd').addEventListener('click', (ev) => { if (!_rp) return; const L = [1, 4, 16, 60]; _rp.spd = L[(L.indexOf(_rp.spd) + 1) % L.length]; ev.target.textContent = '×' + _rp.spd; });
-    document.getElementById('rp-events').addEventListener('click', (ev) => { const d = ev.target.closest('.rp-ev'); if (!d || !_rp) return; const t = +d.dataset.t; let k = matchRec.s.findIndex(sm => sm.t >= t); if (k < 0) k = matchRec.s.length - 1; _rp.play = false; document.getElementById('rp-play').textContent = '▶'; _rpSetIndex(k); });
+    const on = (id, ev, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(ev, fn); };
+    on('rp-close', 'click', closeReplay);
+    on('rp-save', 'click', () => { if (RP && RP.R && RP.title === 'この試合') exportMatchRecord(); else if (RP && RP.R) { const blob = new Blob([JSON.stringify(RP.R)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'darkecho_replay.json'; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 3000); } });
+    on('rp-slider', 'input', (ev) => { if (RP && RP.R) { RP.play = false; _rpSyncButtons(); _rpSetIndex(+ev.target.value); } });
+    on('rp-play', 'click', () => { if (!RP || !RP.R) return; if (RP.i >= RP.R.s.length - 1) RP.i = 0; RP.play = !RP.play; _rpSyncButtons(); _rpStartLoop(); });
+    on('rp-spd', 'click', () => { if (!RP) return; RP.spd = _RP_SPD[(_RP_SPD.indexOf(RP.spd) + 1) % _RP_SPD.length]; _rpSyncButtons(); _rpDraw(); });
+    on('rp-back', 'click', () => _rpSetIndex(RP.i - 10)); on('rp-fwd', 'click', () => _rpSetIndex(RP.i + 10));
+    on('rp-zin', 'click', () => _rpZoom(1.5)); on('rp-zout', 'click', () => _rpZoom(1 / 1.5));
+    on('rp-zfit', 'click', () => { if (!RP || !RP.fit) return; RP.follow = false; RP.cx = RP.fit.cx; RP.cy = RP.fit.cy; RP.half = RP.fit.half; _rpSyncButtons(); _rpDraw(); });
+    const tog = (id, k) => on(id, 'click', () => { if (!RP) return; RP[k] = !RP[k]; RP.thinkN = -1; _rpSyncButtons(); _rpDraw(); });
+    tog('rp-fog', 'fog'); tog('rp-thk', 'think'); tog('rp-est', 'est'); tog('rp-trl', 'trail'); tog('rp-fol', 'follow');
+    on('rp-evimp', 'click', (ev) => { ev.target.classList.toggle('on'); _rpRenderEvents(); _rpDraw(); });
+    document.querySelectorAll('#rp-persp button').forEach(b => b.addEventListener('click', () => { if (!RP) return; RP.persp = b.dataset.p; RP.thinkN = -1; if (RP.persp !== 'god' && !RP.follow) { RP.follow = true; if (RP.half > 9000) RP.half = 7000; } _rpSyncButtons(); _rpDraw(); }));
+    on('rp-events', 'click', (ev) => { const d = ev.target.closest('.rp-ev'); if (d) _rpSeekT(+d.dataset.t); });
+    on('rp-tlwrap', 'click', (ev) => { if (!RP || !RP.tlT) return; const r = ev.currentTarget.getBoundingClientRect(); _rpSeekT((ev.clientX - r.left) / r.width * RP.tlT); });
+    on('rp-open', 'click', () => _rpListOpen(document.getElementById('rp-list').classList.contains('hidden')));
+    on('rp-file', 'change', async (ev) => { const f = ev.target.files && ev.target.files[0]; if (!f) return; try { openReplayWith(await _rpParseBuf(await f.arrayBuffer()), f.name); } catch (err) { logMessage('記録: 読み込めない — ' + err, 'warning-msg'); } ev.target.value = ''; });
+    on('rp-list-body', 'click', (ev) => { const d = ev.target.closest('.rp-li'); if (!d || d.classList.contains('dim')) return; if (d.dataset.cur) { openReplay(); return; } _rpLoadUrl('../records/' + d.dataset.f, d.dataset.f.split('/').pop()); });
+    // 地図の操作: ドラッグで移動 (追従を切る)・ホイールで拡大縮小・2本指で拡大縮小
+    const cv = document.getElementById('rp-canvas');
+    if (cv) {
+        let drag = null, pinch = null;
+        cv.addEventListener('pointerdown', (ev) => { if (!RP || !RP.R) return; cv.setPointerCapture(ev.pointerId); drag = { x: ev.clientX, y: ev.clientY, cx: RP.cx, cy: RP.cy, id: ev.pointerId }; });
+        cv.addEventListener('pointermove', (ev) => { if (!drag || pinch || ev.pointerId !== drag.id) return; const V = _rpView(); const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y; if (Math.abs(dx) + Math.abs(dy) > 3 && RP.follow) { RP.follow = false; _rpSyncButtons(); } RP.cx = drag.cx - dx / V.sc; RP.cy = drag.cy - dy / V.sc; _rpDraw(); });
+        cv.addEventListener('pointerup', () => { drag = null; }); cv.addEventListener('pointercancel', () => { drag = null; });
+        cv.addEventListener('wheel', (ev) => { ev.preventDefault(); const r = cv.getBoundingClientRect(); _rpZoom(ev.deltaY < 0 ? 1.2 : 1 / 1.2, ev.clientX - r.left, ev.clientY - r.top); }, { passive: false });
+        cv.addEventListener('touchstart', (ev) => { if (ev.touches.length === 2) { const a = ev.touches[0], b = ev.touches[1]; pinch = { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), h: RP ? RP.half : 1 }; drag = null; } }, { passive: true });
+        cv.addEventListener('touchmove', (ev) => { if (pinch && ev.touches.length === 2 && RP) { const a = ev.touches[0], b = ev.touches[1], d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY); RP.half = Math.max(600, Math.min(60000, pinch.h * pinch.d / Math.max(10, d))); _rpDraw(); } }, { passive: true });
+        cv.addEventListener('touchend', (ev) => { if (ev.touches.length < 2) pinch = null; }, { passive: true });
+    }
+    window.addEventListener('resize', () => { if (RP && RP.R && !ov.classList.contains('hidden')) { _rpTimeline(); _rpDraw(); } });
     document.getElementById('btn-replay-go')?.addEventListener('click', openReplay);
     document.getElementById('btn-replay-db')?.addEventListener('click', openReplay);
-    window.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !ov.classList.contains('hidden')) { closeReplay(); ev.stopPropagation(); } }, true);
+    document.getElementById('btn-replay-lobby')?.addEventListener('click', openReplayBrowser);
+    window.addEventListener('keydown', (ev) => {
+        if (ov.classList.contains('hidden')) return;
+        if (ev.key === 'Escape') { closeReplay(); ev.stopPropagation(); }
+        else if (ev.key === ' ') { document.getElementById('rp-play')?.click(); ev.preventDefault(); ev.stopPropagation(); }
+        else if (ev.key === 'ArrowLeft') { _rpSetIndex((RP ? RP.i : 0) - 10); ev.stopPropagation(); } else if (ev.key === 'ArrowRight') { _rpSetIndex((RP ? RP.i : 0) + 10); ev.stopPropagation(); }
+        else if (ev.key === '+' || ev.key === '=') { _rpZoom(1.5); ev.stopPropagation(); } else if (ev.key === '-') { _rpZoom(1 / 1.5); ev.stopPropagation(); }
+    }, true);
 })();
 
 // 第22弾: 戦闘モードのバー (画面下)。ロック (完全/想定) している間だけ出す。COM対戦では自機COMの選択を表示 (押せない)
@@ -16818,7 +17110,7 @@ function enemyClueAt(x, y, lbl) {
         e.playerLastKnownPos = { x, y }; e.contactFreshness = Math.max(e.contactFreshness || 0, 0.6);
         e.aiState = 'hunting'; e.lurking = false; e.gatherTarget = null; e.huntTarget = { x, y }; e._huntSearched = true; e._pursue = 'chase';
         e.huntTimer = Math.max(e.huntTimer || 0, Math.round((40 + 60 * pp.aggression) * 60) + Math.round(Math.hypot(x - e.x, y - e.y) / 0.6));
-        if (comDemo) comThinkEvent('e', lbl + 'との通信途絶 — 自機は今そこに居る → 向かう (' + _dirTxt(e.x, e.y, x, y) + '・' + Math.round(Math.hypot(x - e.x, y - e.y) / 100) * 100 + 'u)', 'e' + e.uid);
+        comThinkEvent('e', lbl + 'との通信途絶 — 自機は今そこに居る → 向かう (' + _dirTxt(e.x, e.y, x, y) + '・' + Math.round(Math.hypot(x - e.x, y - e.y) / 100) * 100 + 'u)', 'e' + e.uid);
     }
 }
 // 第71弾: 長く気配が無ければ、相手も寄る所 (自分のものでないコロニー・ノード) を順に取りに行く。

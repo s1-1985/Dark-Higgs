@@ -2774,3 +2774,42 @@ body.in-game #zoom-ctl #zoom-fab .ico { width: 22px; height: 22px; display: bloc
 #dock-prompt .prompt-content span { font-size: 11px; text-shadow: none; }
 #dock-prompt .pulse-icon { width: 8px; height: 8px; }
 #dock-prompt .btn { padding: 3px 10px; font-size: 11px; min-height: 0; }
+
+/* ── 2026-11-11 リプレイモード (視点切替・拡大縮小・思考ログ・作戦の帯・記録一覧) ── */
+.rp-box { width: min(1280px, 98vw); height: min(800px, 97vh); padding: 6px 8px; }
+.rp-head { flex-wrap: wrap; gap: 6px 10px; }
+.rp-head button, .rp-filebtn { font-size: 11px; background: rgba(0,255,170,0.08); color: #9fe9cc; border: 1px solid rgba(0,255,170,0.35); border-radius: 4px; padding: 3px 8px; cursor: pointer; font-family: inherit; }
+.rp-head button.on { background: rgba(0,255,170,0.24); color: #eafff6; border-color: #00ffaa; }
+.rp-seg { display: inline-flex; border-radius: 5px; overflow: hidden; }
+.rp-seg button { border-radius: 0 !important; margin: 0; }
+.rp-seg button[data-p="p"].on { background: rgba(95,240,255,0.28); border-color: #5ff0ff; }
+.rp-seg button[data-p="e"].on { background: rgba(255,160,64,0.30); border-color: #ffa040; color: #fff2e0; }
+.rp-tg { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.rp-right { margin-left: auto; display: inline-flex; gap: 4px; align-items: center; }
+.rp-filebtn { display: inline-block; }
+#rp-close { color: #ff8080; }
+#rp-match { gap: 12px; align-items: baseline; }
+#rp-match .rp-src { color: #7fb8a8; } #rp-match .rp-res { color: #ffe08a; margin-left: auto; } #rp-match i { color: #8fb3a6; font-style: normal; font-size: 10px; }
+.rp-mapwrap { position: relative; flex: 2.1; min-width: 0; height: 100%; }
+.rp-mapwrap #rp-canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+.rp-zoom { position: absolute; right: 8px; top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.rp-zoom button { width: 40px; height: 32px; background: rgba(0,20,16,0.75); color: #9fe9cc; border: 1px solid rgba(0,255,170,0.4); border-radius: 5px; cursor: pointer; font-size: 13px; }
+#rp-list { position: absolute; left: 8px; top: 8px; width: min(440px, 80%); max-height: 80%; overflow-y: auto; background: rgba(1,14,12,0.96); border: 1px solid rgba(0,255,170,0.45); border-radius: 6px; padding: 6px; z-index: 2; }
+#rp-list.hidden { display: none; }
+.rp-lh { color: #00ffaa; font-size: 12px; margin-bottom: 4px; } .rp-lh small { color: #7fb8a8; }
+.rp-li { font-size: 11px; color: #cfe; padding: 4px 6px; border-radius: 4px; cursor: pointer; border-bottom: 1px solid rgba(0,255,170,0.08); }
+.rp-li:hover { background: rgba(0,255,170,0.12); } .rp-li b { color: #9fe9cc; font-weight: normal; margin-right: 4px; } .rp-li i { color: #7fb8a8; }
+.rp-li.cur b { color: #ffe08a; } .rp-li.dim { color: #7a958c; cursor: default; } .rp-li em { color: #c48bff; font-style: normal; font-size: 10px; }
+.rp-li .w-player { color: #5ff0ff; } .rp-li .w-enemy { color: #ffa040; } .rp-err { color: #ff8080; font-size: 11px; }
+.rp-side { flex: 1; min-width: 240px; max-width: 420px; }
+#rp-think { max-height: 38%; overflow-y: auto; font-size: 11px; line-height: 1.45; background: rgba(0,0,0,0.3); border-radius: 4px; padding: 3px 6px; }
+.rp-th { color: #cfe; } .rp-th.p { color: #8feaff; } .rp-th.e { color: #ffbe82; } .rp-th b { color: #7fb8a8; font-weight: normal; margin-right: 4px; }
+.rp-evh { font-size: 11px; color: #7fb8a8; display: flex; align-items: center; gap: 6px; }
+.rp-mini { font-size: 10px; background: rgba(0,255,170,0.08); color: #9fe9cc; border: 1px solid rgba(0,255,170,0.3); border-radius: 3px; padding: 1px 6px; cursor: pointer; }
+.rp-mini.on { background: rgba(0,255,170,0.25); color: #fff; }
+#rp-tlwrap { position: relative; height: 22px; cursor: pointer; border-radius: 3px; overflow: hidden; }
+#rp-tl { width: 100%; height: 100%; display: block; }
+#rp-tlcur { position: absolute; top: 0; bottom: 0; width: 2px; background: #ffffff; box-shadow: 0 0 4px #fff; pointer-events: none; }
+.rp-ctl button { min-width: 40px; }
+@media (max-height: 520px) { .rp-box { height: 98vh; } #rp-think { max-height: 30%; } .rp-head button, .rp-filebtn { padding: 2px 6px; font-size: 10px; } }
+@media (max-width: 760px) { .rp-main { flex-direction: column; } .rp-side { max-width: none; min-width: 0; max-height: 40%; } }
