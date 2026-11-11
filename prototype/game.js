@@ -430,7 +430,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261110h';
+const SPRITE_VER = '20261111a';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -493,6 +493,8 @@ const SPRITE_FILES = {
     icon_atk:    'assets/icon_atk.png',
     // 第35弾 (Higgsfield gpt_image_2_5): 漂流コンテナ・輸送船・機雷・開けた跡 (透過) / 嵐の放電・霧のゆらぎ・熱泉 (黒地・加算で描く)
     field_cache:  'assets/field_cache.png',
+    field_trap:   'assets/field_trap.png',   // 偽コンテナ (自分で置いた・見抜いた) の印。ゲーム中の本物そっくりの絵は field_cache のまま (見た目で分からないように)
+    fx_trap_blast: 'assets/fx_trap_blast.png', // 偽コンテナの爆発
     field_convoy: 'assets/field_convoy.png',
     field_mine:   'assets/field_mine.png',
     field_looted: 'assets/field_looted.png',
@@ -6656,6 +6658,13 @@ function comLoadout(side, ship) {
     const st = comCfg && comCfg.lo && comCfg.lo[side] && comCfg.lo[side][ship];
     const lo = Object.assign({ mat: 0 }, st || DEFAULT_LOADOUT[ship]);
     fixLoadoutWeapons(lo, ship); // 第48弾
+    if (side === 'p' && !st && comCfg && comCfg.pp && (SHIP_DRONES[ship] || []).includes('fakecache')) { // 偽コンテナ: 積み込みを編集していない自機COMは、隠密/貪欲な性格なら枠に余裕があれば1個積む
+        const pp = comCfg.pp;
+        if ((pp.stealth ?? 0.4) >= 0.35 || (pp.greed ?? 0.4) >= 0.5) {
+            if (loadoutSlots(lo, ship) >= (HOLD_CAP[ship] || 0)) { const drop = ['mat', 'smoke', 'flash', 'noise'].find(k => (lo[k] || 0) >= 1); if (drop) lo[drop]--; } // 既定の積み込みは満杯 → 資材・煙幕・閃光・ノイズのどれか1枠と入れ替える
+            if (loadoutSlots(lo, ship) < (HOLD_CAP[ship] || 0)) lo.fakecache = 1;
+        }
+    }
     if (side === 'e') { // 敵が使わない物 (資材・設置物・人型など) は外す — 枠を空けて弾や消耗品に回せるように
         lo.mat = 0;
         for (const t of SHIP_DRONES[ship] || []) if (!(ENEMY_USES.includes(t) || (t === 'attack' && ship === 'carrier'))) lo[t] = 0;
@@ -9067,7 +9076,8 @@ function fakeCacheBlast(f, victim) {
     const isP = victim === player;
     let dmg = Math.round(victim.maxHp * FAKE_DMG_FRAC); dmg = Math.max(0, Math.min(dmg, Math.floor(victim.hp) - 1));
     victim.hp -= dmg;
-    createExplosion(f.x, f.y, '#ffcc66', 34, true); addShake(isP ? 14 : 6); sfxOr('wpn_mine_blast', 'explosion');
+    createExplosion(f.x, f.y, '#ffcc66', 34, true); addShake(isP ? 14 : 6);
+    if (spriteReady(SPRITES.fx_trap_blast)) effects.push({ type: 'fx-sprite', x: f.x, y: f.y, img: SPRITES.fx_trap_blast, r: 110, life: 1.0, decay: 0.02 }); sfxOr('wpn_mine_blast', 'explosion');
     effects.push({ x: victim.x, y: victim.y - 30, text: '偽コンテナ -' + dmg, life: 1.4, type: 'floatText', c: '#ffdd66' });
     applyDaze(victim, FAKE_DAZE, '偽コンテナの爆発');
     if (isP) {
@@ -9380,6 +9390,7 @@ function drawFieldSignals(ctx) {
         if (known) drawKnownMark(ctx, f.x, f.y, known, k, inv, t);
         if (known && known.kind === 'trap') { // 偽コンテナ (自分のもの・見抜いたもの): 赤い×の印
             const R = Math.max(240, 24 * inv);
+            if (spriteReady(SPRITES.field_trap)) { const L = Math.max(150, 30 * inv); ctx.save(); ctx.globalAlpha = 0.95; ctx.translate(f.x, f.y); ctx.rotate(f.ph || 0); ctx.drawImage(SPRITES.field_trap, -L / 2, -L / 2, L, L); ctx.restore(); }
             ctx.save(); ctx.strokeStyle = '#ff5a4a'; ctx.lineWidth = 2 * inv; ctx.globalAlpha = 0.85;
             ctx.beginPath(); ctx.moveTo(f.x - R, f.y - R); ctx.lineTo(f.x + R, f.y + R); ctx.moveTo(f.x + R, f.y - R); ctx.lineTo(f.x - R, f.y + R); ctx.stroke();
             ctx.setLineDash([5 * inv, 7 * inv]); ctx.beginPath(); ctx.arc(f.x, f.y, CACHE_R, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
@@ -15787,6 +15798,10 @@ function comExtrasStep(c, P, D, hpF, contact) {
     const quietFor = (now - (c.lastContactF || 0)) / 60;
     const hHere = getHiggsIntensity(player.x, player.y);
     const mobile = (t) => playerDrones.some(d => d.type === t && d.hp > 0);
+    // 偽コンテナ: 気配が無く (60秒) 照射を受けていない間に、隠密/貪欲な性格なら艦尾に置いて待つ (敵が取りに来たら爆発・位置が割れる)。120秒に1回
+    if (can('fakecache') && !contact && quietFor > 60 && playerExposureLevel < 2 && ((P.stealth ?? 0.4) >= 0.35 || (P.greed ?? 0.4) >= 0.5) && now - (c.fakeF || -1e9) > 7200) {
+        c.fakeF = now; c.itemF = now; deployDrone('fakecache'); comThinkEvent('p', '気配が無い → 艦尾に偽コンテナを置く (取りに来た相手が爆発を受け、位置が割れる)'); return;
+    }
     if (gameState.shipType === 'carrier') {
         if (can('scout') && !mobile('scout') && !contact && (P.caution >= 0.4 || P.stealth >= 0.4) && activeDeployCount() < CARGO_CAP.carrier) { c.itemF = now; deployDrone('scout'); comThinkEvent('p', '哨戒機を出す (気配なし・慎重/隠密 → 周りを偵察)'); return; }
         const needMat = DRONE_SPEC.mech.mat;
@@ -16675,6 +16690,7 @@ function startComDemo() {
     gameState.mode = comCfg.mode;
     // 第22弾: 自機COMの積み込み (デモは保存しないので、この試合の間だけ使う)
     if (comCfg.lo && comCfg.lo.p && comCfg.lo.p[comCfg.ship]) gameState.loadout = Object.assign({}, gameState.loadout, { [comCfg.ship]: Object.assign({}, comCfg.lo.p[comCfg.ship]) });
+    else { const _lp = comLoadout('p', comCfg.ship); if (_lp.fakecache) gameState.loadout = Object.assign({}, gameState.loadout, { [comCfg.ship]: _lp }); } // 偽コンテナ: 隠密/貪欲な自機COMは既定の積み込みに1個足す
     toggleThinkLog(comCfg.think);
     startGame(comCfg.ship);
     toggleHiggsView(!comCfg.higgsView);
