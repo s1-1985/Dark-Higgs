@@ -14725,14 +14725,16 @@ function enemyHunterStep(e, heard, hard) {
     const D = est ? Math.hypot(est.x - e.x, est.y - e.y) : null;
     // 至近で直接見えた → 撃てるなら撃つ (見えていれば推定は正確) / 撃てなければ交戦
     if (hard && H.ph !== 'egress' && H.ph !== 'lurk') { // こちらが先に見つけた (相手が見ているかは分からない) — 撃てるまで艦首を向けて撃つ
-        if (!est) { est = { x: player.x, y: player.y, r: 200, vx: 0, vy: 0, moving: false, age: 0 }; } // 見えている (自分の目で) — 位置は分かる
+        if (!est || est.r > 300 || est.age > 60) { est = { x: player.x, y: player.y, r: 150, vx: est ? est.vx : 0, vy: est ? est.vy : 0, moving: !!(est && est.moving), age: 0 }; } // 見えている (自分の目で) — 位置は分かる (第82弾: 粗い推定のままだと見えているのに「当たらない」と撃てなかった)
         const D = Math.hypot(est.x - e.x, est.y - e.y);
-        const sp = est && huntStrikePlan(e, est);
+        const sp = est && huntStrikePlan(e, est, H.force);
         if (!H.sawF) { H.sawF = now; say('【' + H.jp + '】自機を目視 (' + Math.round(D / 100) * 100 + 'u) — 先に撃つ'); }
-        if (sp) {
+        if (sp && H.force === 'kinetic' && sp.w === 'kinetic' && D > 780) { // 第82弾: 肉薄は実弾の射程まで詰める (旧: 目視した途端に1000uからミサイルを撃っていた — 試合の記録で確認)
+            H.w = 'kinetic'; e._moveHeading(Math.atan2(est.y - e.y, est.x - e.x), ms.cruise); H.sawF = Math.max(H.sawF, now - 60 * 4);
+        } else if (sp) {
             H.w = (sp.w === 'beam' && D < 2500 && _eHas(e, 'kinetic') && (e.ammoK === undefined || e.ammoK > 0)) ? (D <= 760 ? 'kinetic' : sp.w) : sp.w;
             if (H.w === 'missile' && D <= 760 && _eHas(e, 'kinetic') && !(e._kReload > 0) && (e.ammoK === undefined || e.ammoK > 0) && e._mReload > 0) H.w = 'kinetic';
-            if (huntTryFire(e, H, est, 0.2)) { H.strikes++; H.ph = 'egress'; H.eg = null; H.sawF = 0; say('【' + H.jp + '】目視で' + _WPN_JP[H.w] + 'を撃った (' + Math.round(D / 100) * 100 + 'u) → 離れて霧へ'); return true; }
+            if (huntTryFire(e, H, est, 0.2)) { H.strikes++; if (H.force === 'kinetic' && hpF > 0.45) { say('【' + H.jp + '】' + Math.round(D / 100) * 100 + 'uから実弾を叩き込んだ → 装甲を頼りにそのまま殴り合う'); return end('肉薄して撃った → 交戦', true, 900); } H.ph = 'egress'; H.eg = null; H.sawF = 0; say('【' + H.jp + '】目視で' + _WPN_JP[H.w] + 'を撃った (' + Math.round(D / 100) * 100 + 'u) → 離れて霧へ'); return true; }
             if (H.why !== 'turn' && H.why !== 'charge') e._drift(Math.atan2(est.y - e.y, est.x - e.x));
         }
         if (now - H.sawF > 60 * 8) return end('目視したが撃てない → 交戦', true, 900);
@@ -15428,10 +15430,12 @@ function matchRecStart() {
 }
 function matchRecEvent(kind, x, y, text) {
     if (!matchRec || matchRec.ev.length >= REC_EVENTS_MAX) return;
+    if (sectorCleared && !(kind === 'win' || /制圧|撃沈/.test(String(text)))) return; // 第82弾: 決着後の余韻 (約70秒) の出来事は残さない — 記録の終わりが勝敗になる
     matchRec.ev.push({ t: _frameCount - matchRec.f0, kind, x: Math.round(x), y: Math.round(y), text });
 }
 function matchRecTick() {
     if (!matchRec || !player || (_frameCount - matchRec.f0) % 60) return;
+    if (sectorCleared) return; // 第82弾: 決着後は記録しない
     const P = { x: Math.round(player.x), y: Math.round(player.y), a: +player.angle.toFixed(2), hp: Math.max(0, player.hp / player.maxHp), ex: playerExposureLevel, st: powerStance };
     // 自艦の推定 (追跡中の信号)
     if (lockedSignalId && _signalAnalysis[lockedSignalId] && _signalAnalysis[lockedSignalId].fix) {
