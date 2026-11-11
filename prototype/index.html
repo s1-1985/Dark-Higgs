@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261111a">
+    <link rel="stylesheet" href="style.css?v=20261111f">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -258,6 +258,10 @@
                 <button class="act-icon-btn btn-info drone-btn" id="btn-item-fogblow" data-dtype="fogblow" title="吹き飛ばし弾 (1枠) — 自艦を中心に半径3000uの霧を30秒晴らす (30秒で戻る)。見通せるが隠れもできない">
                     <i class="ico" style="--ico:url(assets/icons/icon_density.png)"></i>
                     <span>吹飛</span><em class="cg-n"></em>
+                </button>
+                <button class="act-icon-btn btn-info drone-btn" id="btn-item-fakecache" data-dtype="fakecache" title="偽コンテナ (1枠) — 艦尾に漂流コンテナそっくりの罠を置く。開けた相手は爆発(耐久の30%)＋位置が割れる。演算力が高いと見抜かれる">
+                    <i class="ico" style="--ico:url(assets/icons/icon_fakecache.png)"></i>
+                    <span>偽箱</span><em class="cg-n"></em>
                 </button>
                 <button class="act-icon-btn btn-info drone-btn" id="btn-item-bcn_heat" data-dtype="bcn_heat" title="熱ビーコン (1枠) — 押してから地点をタップ。そこへ射出し、熱だけを強く90秒出す (動かない)。敵はその帯域で聴いていれば寄ってくる">
                     <i class="ico" style="--ico:url(assets/icons/icon_lure.png)"></i>
@@ -807,7 +811,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261111a"></script>
+    <script src="game.js?v=20261111f"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -849,7 +853,7 @@
             drone: ['btn-drone-recall','btn-drone-attack','btn-drone-mech','btn-drone-build','btn-drone-scout','btn-drone-decoy',
                     'btn-drone-buoy','btn-drone-barrier','btn-drone-higgs', 'btn-hack'],
             engine: ['btn-eng-thermonuclear', 'btn-eng-pulse', 'btn-eng-higgs', 'btn-eng-photon', 'btn-focus-balance', 'btn-focus-engine', 'btn-focus-sensor', 'btn-focus-weapon', 'btn-focus-analysis', 'btn-focus-mt'],
-            escape: ['btn-item-repair', 'btn-item-flash', 'btn-item-noise', 'btn-item-smoke', 'btn-item-fsos', 'btn-item-lure', 'btn-item-bcn_heat', 'btn-item-bcn_optic', 'btn-item-bcn_em', 'btn-item-bcn_higgs', 'btn-item-fogspray', 'btn-item-fogblow', 'btn-boost', 'btn-coast'],
+            escape: ['btn-item-repair', 'btn-item-flash', 'btn-item-noise', 'btn-item-smoke', 'btn-item-fsos', 'btn-item-lure', 'btn-item-bcn_heat', 'btn-item-bcn_optic', 'btn-item-bcn_em', 'btn-item-bcn_higgs', 'btn-item-fogspray', 'btn-item-fogblow', 'btn-item-fakecache', 'btn-boost', 'btn-coast'],
         };
         var _apop  = document.getElementById('action-popover');
         var _store = document.getElementById('action-store');
