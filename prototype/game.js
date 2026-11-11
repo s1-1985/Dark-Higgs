@@ -14446,7 +14446,7 @@ function persLabel(p) { return (p && p._adaptive ? '状況適応(' + ADAPT_MODES
 const COM_THINK_REPEAT = 900;
 let _thinkLast = {}, _thinkLastP = -1e9;
 function comThink(side, sig, text, key) {
-    if (!comDemo || !thinkLogOn) return;
+    if (!comDemo) return; // 第83弾: 思考ログの欄がOFFでも、試合の記録 (書き出し用) には残す
     // 同じ判断(sig)は15秒に1回まで (別の判断と交互に出ても数えるのは判断ごと)。15秒たっても文が同じなら出さない
     const m = _thinkLast[key || side] || (_thinkLast[key || side] = {});
     const L = m[sig];
@@ -15370,13 +15370,15 @@ function comPlanStep(c, P, D, hpF, te, lk) {
     return true;
 }
 function comThinkEvent(side, text, key) {
-    if (!comDemo || !thinkLogOn) return;
+    if (!comDemo) return;
     const m = _thinkLast[(key || side) + ':ev'] || (_thinkLast[(key || side) + ':ev'] = {});
     if (m.text === text && _frameCount - m.t < 120) return;
     m.text = text; m.t = _frameCount;
     _thinkWrite(side, text);
 }
 function _thinkWrite(side, text) {
+    if (matchRec && matchRec.th && matchRec.th.length < 6000) matchRec.th.push([_frameCount - matchRec.f0, side, String(text).slice(0, 220)]); // 第83弾: 書き出し用
+    if (!thinkLogOn) return;
     const box = document.getElementById('think-log');
     if (!box) return;
     const d = document.createElement('div');
@@ -15426,7 +15428,14 @@ function matchRecStart() {
     for (const st of structures) if (st.type === 'colony' || st.type === 'derelict') lm.push({ k: st.type, x: st.x, y: st.y });
     for (const st of stations) lm.push({ k: 'station', x: st.x, y: st.y });
     for (const n of resourceNodes) lm.push({ k: 'node', x: n.x, y: n.y });
-    matchRec = { f0: _frameCount, ship: gameState.shipType, enemy: gameState.enemyType, com: !!comDemo, lm, s: [], ev: [], prevAi: {}, prevExpo: 0 };
+    matchRec = { f0: _frameCount, ship: gameState.shipType, enemy: gameState.enemyType, com: !!comDemo, lm, s: [], ev: [], th: [], x: [], prevAi: {}, prevExpo: 0 };
+    try { // 第83弾: 書き出し用のメタ情報 (版・性格・積み込み・マップの傾向)
+        const sc = document.querySelector('script[src*="game.js"]'), E0 = enemies.find(q => q.type !== 'fighter');
+        matchRec.meta = { ver: sc ? (sc.getAttribute('src').split('?v=')[1] || '') : '', at: new Date().toISOString(), mode: gameState.mode, com: !!comDemo, ship: gameState.shipType, enemy: gameState.enemyType,
+            pp: comDemo && _com && _com.pp ? Object.assign({}, _com.pp) : null, ep: E0 && E0.personality ? Object.assign({}, E0.personality) : null,
+            pPre: _comMatchInfo ? _comMatchInfo.pPre : null, ePre: _comMatchInfo ? _comMatchInfo.ePre : null, theme: mapTheme ? mapTheme.name : '',
+            pEngine: gameState.engineType, eEngine: E0 ? E0.engine : null, pFocus: genFocusKey, pLoadout: gameState.loadout ? JSON.parse(JSON.stringify(gameState.loadout[gameState.shipType] || {})) : null };
+    } catch (err) { matchRec.meta = { err: String(err) }; }
 }
 function matchRecEvent(kind, x, y, text) {
     if (!matchRec || matchRec.ev.length >= REC_EVENTS_MAX) return;
@@ -15455,6 +15464,36 @@ function matchRecTick() {
     if (playerExposureLevel !== matchRec.prevExpo) { matchRecEvent('expoP', player.x, player.y, '自艦: ' + _EXPO_JP[matchRec.prevExpo] + ' → ' + _EXPO_JP[playerExposureLevel]); matchRec.prevExpo = playerExposureLevel; }
     const D = playerDrones.filter(d => d.hp > 0).map(d => [Math.round(d.x), Math.round(d.y)]);
     matchRec.s.push({ t: _frameCount - matchRec.f0, P, E, F, D });
+    if ((_frameCount - matchRec.f0) % 300 === 0) { // 第83弾: 5秒ごとに詳しい状態 (書き出し用・再生画面は使わない)
+        try {
+            const E0 = enemies.find(q => q.type !== 'fighter'), h = _com && _com.hunt, e = E0;
+            const X = { t: _frameCount - matchRec.f0,
+                p: { sp: +(player.currentSpeed || 0).toFixed(2), eng: gameState.engineType, st: powerStance, co: !!playerCoasting, sn: BANDS.map(b => sensorsOn[b] ? sensorLv[b] : 0).join(''), foc: genFocusKey, ex: playerExposureLevel,
+                    thr: THREATS ? THREATS.map(q => q.kind).join(',') : '', am: cargo.ammoM, ak: cargo.ammoK, dr: playerDrones.filter(d => d.hp > 0).length, lk: lockedSignalId ? 1 : 0,
+                    hu: h ? h.k + ':' + h.ph : '', stg: _com && _com.st ? _com.st.id : '', md: _com ? _com.mode : '', sg: [player.heatSig, player.opticalSig, player.emSig, player.higgsSig].map(v => +(v || 0).toFixed(2)) } };
+            if (e) { const q = _huntEst(e); X.e = { sp: +(e.currentSpeed || 0).toFixed(2), eng: e.engine, ai: e.aiState, hu: e._hunt ? e._hunt.k + ':' + e._hunt.ph : '', stg: e._strat ? e._strat.id : '', hid: e._hiding ? 1 : 0, am: e.ammoM, ak: e.ammoK,
+                est: q ? { er: Math.round(Math.hypot(q.x - player.x, q.y - player.y)), r: Math.round(q.r), age: q.age } : null, sg: [e.heatSig, e.opticalSig, e.emSig, e.higgsSig].map(v => +(v || 0).toFixed(2)), see: e.inVision ? 1 : 0 }; }
+            matchRec.x.push(X);
+        } catch (err) { /* 記録の失敗で試合を止めない */ }
+    }
+}
+// 第83弾: 試合の記録を1つのJSONにまとめる (結果つき)。再生画面の「保存」ボタンと、ヘッドレスの一括実行 (tools/sim_matches.js) が使う
+function matchRecordData() {
+    if (!matchRec) return null;
+    const last = matchRec.ev.filter(q => /撃沈|制圧/.test(q.text || ''));
+    const playerDead = !player || player.hp <= 0, e0 = enemies.find(q => q.type !== 'fighter');
+    const res = { winner: playerDead ? 'enemy' : (sectorCleared ? 'player' : 'none'), sec: Math.round((matchRec.s.length ? matchRec.s[matchRec.s.length - 1].t : 0) / 60), pHp: player ? +(Math.max(0, player.hp) / player.maxHp).toFixed(3) : 0, eHp: e0 ? +(Math.max(0, e0.hp) / e0.maxHp).toFixed(3) : 0,
+        cause: playerHitLog && playerHitLog.length ? playerHitLog[playerHitLog.length - 1] : null, stats: huntStats ? JSON.parse(JSON.stringify(huntStats)) : null, last: last.slice(-3) };
+    return { fmt: 1, meta: matchRec.meta, result: res, lm: matchRec.lm, s: matchRec.s, x: matchRec.x, ev: matchRec.ev, th: matchRec.th };
+}
+async function exportMatchRecord() {
+    const d = matchRecordData(); if (!d) { logMessage('記録: 保存できる記録がありません', 'system-msg'); return; }
+    const m = d.meta || {}, ts = (m.at || new Date().toISOString()).replace(/[-:]/g, '').slice(0, 13);
+    const name = 'darkecho_' + ts + '_' + (m.ship || '') + '-vs-' + (m.enemy || '') + '_' + d.result.winner + '_' + d.result.sec + 's.json';
+    let blob = new Blob([JSON.stringify(d)], { type: 'application/json' }), fn = name;
+    try { if (typeof CompressionStream !== 'undefined') { const cs = new Response(blob.stream().pipeThrough(new CompressionStream('gzip'))); blob = await cs.blob(); fn = name + '.gz'; } } catch (err) { /* 圧縮できなければ素のJSON */ }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fn; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+    logMessage('記録: ' + fn + ' を保存した (' + Math.round(blob.size / 1024) + 'KB)', 'system-msg');
 }
 // ── 再生画面 ──
 let _rp = null;
@@ -15583,6 +15622,7 @@ function _rpStartLoop() { if (_rpLoopOn) return; _rpLoopOn = true; if (_rp) _rp.
 (() => {
     const ov = document.getElementById('replay-overlay'); if (!ov) return;
     document.getElementById('rp-close').addEventListener('click', closeReplay);
+    { const sv = document.getElementById('rp-save'); if (sv) sv.addEventListener('click', exportMatchRecord); }
     document.getElementById('rp-slider').addEventListener('input', (ev) => { if (_rp) { _rp.play = false; document.getElementById('rp-play').textContent = '▶'; _rpSetIndex(+ev.target.value); } });
     document.getElementById('rp-play').addEventListener('click', () => { if (!_rp) return; if (_rp.i >= matchRec.s.length - 1) _rpSetIndex(0); _rp.play = !_rp.play; document.getElementById('rp-play').textContent = _rp.play ? '❚❚' : '▶'; });
     document.getElementById('rp-spd').addEventListener('click', (ev) => { if (!_rp) return; const L = [1, 4, 16, 60]; _rp.spd = L[(L.indexOf(_rp.spd) + 1) % L.length]; ev.target.textContent = '×' + _rp.spd; });
