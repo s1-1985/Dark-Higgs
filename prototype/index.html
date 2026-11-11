@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261110l">
+    <link rel="stylesheet" href="style.css?v=20261111a">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -709,7 +709,7 @@
                 <div class="rp-box">
                     <div class="rp-head"><span class="rp-title">試合の記録</span><span id="rp-time">0:00</span>
                         <span class="rp-legend"><i style="color:#5ff0ff">▲自艦</i> <i style="color:#ffa040">▲敵</i> <i style="color:#ffa040">◯敵が思う自艦の位置</i> <i style="color:#5ff0ff">◯自艦の推定</i></span>
-                        <button id="rp-close" title="閉じる">✕</button></div>
+                        <button id="rp-save" title="この試合の記録をファイルに保存 (解析用)">保存</button> <button id="rp-close" title="閉じる">✕</button></div>
                     <div id="rp-match" style="display:none"></div>
                     <div class="rp-main">
                         <canvas id="rp-canvas"></canvas>
@@ -807,7 +807,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261110l"></script>
+    <script src="game.js?v=20261111a"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
