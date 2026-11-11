@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261111g">
+    <link rel="stylesheet" href="style.css?v=20261111h">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -623,6 +623,7 @@
                     <!-- 第19弾: COM対戦デモ (自機もCOMが操作する観戦・調整用) -->
                     <div class="com-entry">
                         <button class="btn btn-small" id="btn-com-demo">COM対戦デモ ▶ <span>自機もCOMが操作・性格を選んで観戦</span></button>
+                        <button class="btn btn-small" id="btn-replay-lobby">リプレイ ▶ <span>試合の記録を敵の視点でも見直す</span></button>
                     </div>
                 </div>
             </div>
@@ -711,15 +712,20 @@
 
             <div id="replay-overlay" class="hidden">
                 <div class="rp-box">
-                    <div class="rp-head"><span class="rp-title">試合の記録</span><span id="rp-time">0:00</span>
-                        <span class="rp-legend"><i style="color:#5ff0ff">▲自艦</i> <i style="color:#ffa040">▲敵</i> <i style="color:#ffa040">◯敵が思う自艦の位置</i> <i style="color:#5ff0ff">◯自艦の推定</i></span>
-                        <button id="rp-save" title="この試合の記録をファイルに保存 (解析用)">保存</button> <button id="rp-close" title="閉じる">✕</button></div>
+                    <div class="rp-head"><span class="rp-title">リプレイ</span><span id="rp-time">0:00</span>
+                        <span id="rp-persp" class="rp-seg"><button data-p="god" title="両艦の真の位置を見る">俯瞰</button><button data-p="p" title="自機が知っていたことだけ">自機視点</button><button data-p="e" title="敵が知っていたことだけ・敵の推定と作戦">敵視点</button></span>
+                        <span class="rp-tg"><button id="rp-fog" title="ON: 霧の濃さを描き、視点の艦が見えていなかった相手は隠す / OFF: 真の位置を全部描く">ヒッグス ON</button><button id="rp-thk" title="思考ログ (視点の側)">思考 ON</button><button id="rp-est" title="推定円・敵が思う自艦の位置・作戦の目標地点">推定 ON</button><button id="rp-trl">航跡 ON</button><button id="rp-fol" title="視点の艦を追う">追従 OFF</button></span>
+                        <span class="rp-right"><button id="rp-open" title="今の試合・Gitの records/ の記録">記録一覧</button><label class="rp-filebtn" title=".json.gz を開く">ファイル<input type="file" id="rp-file" accept=".gz,.json,application/gzip,application/json" hidden></label><button id="rp-save" title="この記録をファイルに保存 (解析用)">保存</button><button id="rp-close" title="閉じる (Esc)">✕</button></span></div>
                     <div id="rp-match" style="display:none"></div>
                     <div class="rp-main">
-                        <canvas id="rp-canvas"></canvas>
-                        <div class="rp-side"><div id="rp-state"></div><div id="rp-events"></div></div>
+                        <div class="rp-mapwrap"><canvas id="rp-canvas"></canvas>
+                            <div class="rp-zoom"><button id="rp-zin" title="拡大 (+/ホイール/ピンチ)">＋</button><button id="rp-zout" title="縮小">−</button><button id="rp-zfit" title="全体">全体</button></div>
+                            <div id="rp-list" class="hidden"><div class="rp-lh">記録一覧 <small>(Gitの records/ ・今の試合)</small></div><div id="rp-list-body"></div></div>
+                        </div>
+                        <div class="rp-side"><div id="rp-state"></div><div id="rp-think"></div><div class="rp-evh">出来事 <button id="rp-evimp" class="rp-mini" title="撃った・被弾・作戦・囮などだけ">要点だけ</button></div><div id="rp-events"></div></div>
                     </div>
-                    <div class="rp-ctl"><button id="rp-play">▶</button><input type="range" id="rp-slider" min="0" max="0" value="0" step="1"><button id="rp-spd">×4</button></div>
+                    <div id="rp-tlwrap" title="作戦の帯 (上=敵・下=自機COM)・刻み=撃った/被弾/作戦。押すとその時刻へ"><canvas id="rp-tl"></canvas><div id="rp-tlcur"></div></div>
+                    <div class="rp-ctl"><button id="rp-back" title="10秒戻す (←)">⏪</button><button id="rp-play" title="再生/停止 (Space)">▶</button><button id="rp-fwd" title="10秒進む (→)">⏩</button><input type="range" id="rp-slider" min="0" max="0" value="0" step="1"><button id="rp-spd" title="再生の速さ">×4</button></div>
                 </div>
             </div>
 
@@ -818,7 +824,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261111g"></script>
+    <script src="game.js?v=20261111h"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
