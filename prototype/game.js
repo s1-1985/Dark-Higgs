@@ -6087,9 +6087,10 @@ function updateDrawBeams(ctx) {
         const ef = effects[i];
         if (ef.type !== 'beam') continue;
         // 第22弾: ビームは6秒残す (最初の1.2秒は最大の明るさ → 消えるまで薄れる)。旧: 約0.4秒で消え、何を撃たれたか分からなかった
-        const _now = performance.now();
-        if (ef.born === undefined) ef.born = _now;
-        const _age = (_now - ef.born) / 1000;
+        // 2026-11-11 (オーナー報告「ビームが残っているのに機体が動く」): 表示時間を実時間(performance.now)で数えていたが、
+        // 照射中の硬直 (_beamHold) はゲームのフレーム数で数える → 倍速で硬直だけ先に解けていた。表示もゲームのフレームで数えて揃える
+        if (ef.born === undefined) ef.born = _frameCount;
+        const _age = (_frameCount - ef.born) / 60;
         if (_age >= BEAM_FX_SEC) { effects.splice(i, 1); continue; }
         ef.a = _age < 1.2 ? 1 : 1 - (_age - 1.2) / (BEAM_FX_SEC - 1.2);
         const _bdx = ef.tx - ef.x, _bdy = ef.ty - ef.y;
