@@ -5228,7 +5228,7 @@ class Ship {
                 alloc: _isF ? { sensors: 0, ai: 0 } : { sensors: _al.sensors / 100, ai: _al.ai / 100 },
                 quiet: !!this._hiding || !!this._quietRun, ff: _ff, ft: this._fireFlashType, launch: _lf,
                 charge: this._eCharge > 0 ? _em.chargeLeak : 0, beamCool: this._bReload > 0, mslReload: this._mReload > 0,
-                comms: _frameCount - (this._commsF || -99) < 3 || (this.aiState === 'gathering' && this._capT > 0),
+                comms: _frameCount - (this._commsF || -99) < 3 || (this.aiState === 'gathering' && this._capT > 0) || _frameCount < (this._hackUntil || 0),
                 repair: (this._kitT || 0) > 0, sysEngine: this._sysEngineTimer > 0, leak: _lk,
                 hHere: higgsHere, storm: getStormIntensity(this.x, this.y), thermal: getThermalIntensity(this.x, this.y),
                 pm: _em, wounded: this.hp / this.maxHp < WOUNDED_HP_FRAC, pulsePh: this.uid * 37,
@@ -8362,6 +8362,7 @@ function partsDocked() {
 function updateParts() {
     if (_lureFreeCD > 0) _lureFreeCD -= gameSpeedFactor;
     updateEnemyDerelictSalvage(); // 第33弾
+    if (_frameCount % 30 === 0) for (const e of enemies) if (e.hp > 0 && !e._dying && e.type !== 'fighter') enemyHackStep(e); // 敵のハック
     if (_frameCount % 120 === 0) for (const e of enemies) if (e.hp > 0 && !e._dying && e.type !== 'fighter') enemySwapAtColony(e);
     for (let i = mines.length - 1; i >= 0; i--) {
         const mn = mines[i];
@@ -9152,16 +9153,24 @@ function fakeCacheBlast(f, victim) {
 //   ⚠️ 敵側が自機のドローンをハックする処理は未実装 (自機側だけ)
 const HACK_RANGE1 = 5000, HACK_RANGE2 = 3000, HACK_NEED = { fighter: 600, mech: 1200 }, HACK_LINE_LIFE = 900;
 let _hack = null, _hackUntil = 0, _hackLvKey = '';
-function hackLevel(kind) {
-    const col = coloniesOwned('player'), an = genFocusKey === 'analysis', c = col - (kind === 'mech' ? 1 : 0);
-    return { s1: c >= 3 || (c >= 2 && an), s2: c >= 3, col };
+// 2026-11-11 (オーナー「敵もハックを同じに・基準はコロニーの数で説明したが、性格には演算力の数値で」): 判定は **演算力の数値** — コロニー数・解析コア・解析重視の合計 H で比べる (自機も敵も同じ式 `hackPower`)。
+//   H = (1 + 0.6×占有コロニー数 (上限なし) + 解析コアなどの部品) × (解析重視なら ×1.2)。しきい値 (戦闘機 第1=2.6・第2=2.8 / Tech 第1=3.3・第2=3.4) は、コロニー数で言うと
+//   戦闘機: 2つ+解析重視(2.64)で第1・3つ(2.8)で第2 / Tech: 3つ+解析重視(3.36)で第1・4つ(3.4)で第2 になる値。解析コアなど部品でも届く
+const HACK_FOCUS_MULT = 1.2, HACK_THR = { fighter: { s1: 2.6, s2: 2.8 }, mech: { s1: 3.3, s2: 3.4 } };
+function hackPower(side, who) {
+    const col = coloniesOwned(side === 'player' ? 'player' : 'enemy'), parts = side === 'player' ? (PM.ana || 0) : (who && who.pm ? who.pm.ana || 0 : 0);
+    const focus = side === 'player' ? genFocusKey : (who && who._focus);
+    return (1 + ANA_COLONY * col + parts) * (focus === 'analysis' ? HACK_FOCUS_MULT : 1);
 }
+function hackStages(kind, H) { const t = HACK_THR[kind]; return { s1: H + 1e-6 >= t.s1, s2: H + 1e-6 >= t.s2 }; }
+function hackSigma(kind, H) { const m = H - HACK_THR[kind].s1; return m < 0.1 ? 0.35 : m < 0.7 ? 0.17 : 0.09; } // 方角の誤差 ±20°/±10°/±5°
+function hackLevel(kind) { const H = hackPower('player'), S = hackStages(kind, H); return { s1: S.s1, s2: S.s2, H, col: coloniesOwned('player') }; }
 function _hackable(e) { return e.hp > 0 && !e._dying && e.type === 'fighter' && (!e._kind || e._kind === 'mech'); }
 function updateHack() {
     if (!player || player.hp <= 0) { _hack = null; return; }
     const lf = hackLevel('fighter'), lm = hackLevel('mech'), key = (lf.s1 ? 1 : 0) + (lf.s2 ? 2 : 0) + (lm.s1 ? 4 : 0) + (lm.s2 ? 8 : 0);
     if (String(key) !== _hackLvKey) {
-        if (_hackLvKey !== '' && key > +_hackLvKey) logMessage('AI: 演算力が上がった — 敵の戦闘機: ' + (lf.s2 ? '通信に侵入して奪える' : lf.s1 ? '発進元の方角が分かる' : 'ハック不可') + ' / Tech: ' + (lm.s2 ? '奪える' : lm.s1 ? '発進元の方角が分かる' : 'ハック不可') + ' (コロニー' + lf.col + '・' + (genFocusKey === 'analysis' ? '解析重視' : '解析重視でない') + ')', 'system-msg');
+        if (_hackLvKey !== '' && key > +_hackLvKey) logMessage('AI: 演算力 ' + (Math.round(lf.H * 10) / 10) + ' — 敵の戦闘機: ' + (lf.s2 ? '通信に侵入して奪える' : lf.s1 ? '発進元の方角が分かる' : 'ハック不可') + ' / Tech: ' + (lm.s2 ? '奪える' : lm.s1 ? '発進元の方角が分かる' : 'ハック不可') + ' (コロニー' + lf.col + '・' + (genFocusKey === 'analysis' ? '解析重視' : '解析重視でない') + ')', 'system-msg');
         _hackLvKey = String(key);
     }
     if (!lf.s1 && !lm.s1) { _hack = null; return; }
@@ -9172,7 +9181,7 @@ function updateHack() {
         if (!(e.visible || inPlayerVision(e.x, e.y) || droneVisionSees(e.x, e.y))) continue;
         const kind = e._kind === 'mech' ? 'mech' : 'fighter', L = kind === 'mech' ? lm : lf;
         if (L.s1 && e._home && e._home.hp > 0 && now - (e._hk1F || -1e9) > 900) { // 第1段階: 発進元の方角
-            e._hk1F = now; const sig = L.col - (kind === 'mech' ? 1 : 0) >= 4 ? 0.09 : L.col - (kind === 'mech' ? 1 : 0) >= 3 ? 0.17 : 0.35;
+            e._hk1F = now; const sig = hackSigma(kind, L.H);
             if (e._hkErr === undefined) e._hkErr = _gauss() * sig * 0.5;
             const ang = Math.atan2(e._home.y - e.y, e._home.x - e.x) + e._hkErr, deg = compassDeg(ang);
             e._hkLine = { ang, until: now + HACK_LINE_LIFE, sig };
@@ -9202,6 +9211,47 @@ function hackTakeControl(e, kind) {
     matchRecEvent('hack2', e.x, e.y, '敵ドローンの制御を奪った (' + (kind === 'mech' ? 'Tech' : '戦闘機') + ')');
     _hack = null; _hackUntil = 0;
     if (huntStats) huntStats.hacked = (huntStats.hacked || 0) + 1;
+}
+
+// 敵のハック (自機と同じ式・同じしきい値・演算力は敵の占有コロニー数 + 敵の部品 + 敵の航行モード)。敵の母艦が自機のドローン (戦闘機・Tech) を見ていれば:
+//   第1段階: 15秒ごとに自艦の方角 (発進元) が敵の方位の記録に入る (誤差は自機と同じ) / 第2段階: 3000u以内に10秒 (Tech 20秒) 居ると制御を奪われ、敵の艦載機 (Tech) になる。侵入中は敵の通信のEMが漏れる
+function enemyHackStep(e) {
+    const H = hackPower('enemy', e);
+    if (H + 1e-6 < HACK_THR.fighter.s1) { e._hack = null; return; }
+    const vr = Math.max(VIS_CLOSE, _visAt(e.x, e.y)), canSee = (x, y) => { const d = Math.hypot(x - e.x, y - e.y); return d < vr && losReach(e.x, e.y, Math.atan2(y - e.y, x - e.x), vr) >= d; };
+    const now = _frameCount; let best = null, bd = Infinity, bk = 'fighter';
+    for (const d of playerDrones) {
+        if (d.hp <= 0 || (d.type !== 'attack' && d.type !== 'mech')) continue;
+        const kind = d.type === 'mech' ? 'mech' : 'fighter', S = hackStages(kind, H); if (!S.s1) continue;
+        const dist = Math.hypot(d.x - e.x, d.y - e.y); if (dist > HACK_RANGE1 || !canSee(d.x, d.y)) continue;
+        if (e._sa && player && now - (d._hk1E || -1e9) > 900) { // 第1段階: 発進元 (自艦) の方角
+            d._hk1E = now; const sig = hackSigma(kind, H); if (d._hkErrE === undefined) d._hkErrE = _gauss() * sig * 0.5;
+            _addObs(e._sa, d.x, d.y, Math.atan2(player.y - d.y, player.x - d.x) + d._hkErrE, sig, 0.8, '255,130,130', 'hack');
+            if (!(e._dlSolveF > now - 30)) { e._dlSolveF = now; solveFix(e._sa); }
+            e.contactFreshness = Math.max(e.contactFreshness || 0, 0.3);
+            if (comDemo) comThinkEvent('e', '自機の' + (kind === 'mech' ? 'Tech' : '戦闘機') + 'の通信をハック — 発進元の方位を得た (誤差±' + Math.round(sig * 57.3) + '°)', 'e' + e.uid);
+            matchRecEvent('hackE1', d.x, d.y, '敵が自機ドローンをハック (第1段階)');
+        }
+        if (S.s2 && dist < HACK_RANGE2 && dist < bd) { bd = dist; best = d; bk = kind; }
+    }
+    if (best) {
+        if (e._hack && e._hack.d === best) e._hack.p += 30; else { e._hack = { d: best, p: 0, need: HACK_NEED[bk], kind: bk }; if (comDemo) comThinkEvent('e', '自機の' + (bk === 'mech' ? 'Tech' : '戦闘機') + 'へ侵入開始 (' + Math.round(HACK_NEED[bk] / 60) + '秒)', 'e' + e.uid); }
+        e._hackUntil = now + 45;
+        if (e._hack.p >= e._hack.need) enemyHackTake(e, best, bk);
+    } else e._hack = null;
+}
+function enemyHackTake(e, d, kind) {
+    const type = kind === 'mech' ? 'mech' : 'attack', spec = DRONE_SPEC[type], frac = Math.max(0.3, d.hp / spec.hp);
+    let f;
+    if (kind === 'mech') { spawnEnemyDrone(e, 'mech'); f = enemies[enemies.length - 1]; }
+    else { f = new Ship(d.x, d.y, false, 'fighter'); f._home = e; f.aiState = 'hunting'; f.lurking = false; f._noReward = true; f._ammo = DRONE_AMMO.attack; enemies.push(f); }
+    f.x = d.x; f.y = d.y; f.angle = d.angle || 0; f.maxHp = spec.hp; f.hp = Math.max(1, spec.hp * frac); f._hacked = true;
+    const i = playerDrones.indexOf(d); if (i >= 0) playerDrones.splice(i, 1);
+    createExplosion(d.x, d.y, '#ff6666', 10, false); effects.push({ x: d.x, y: d.y, r: 0, maxR: 420, a: 0.7, c: '#ff6666', type: 'circle' });
+    logMessage('WARN: 自機の' + (kind === 'mech' ? 'Tech' : '戦闘機') + 'が敵に通信をハックされ、制御を奪われた — 敵の艦載機になった', 'warning-msg');
+    if (comDemo) comThinkEvent('e', '自機の' + (kind === 'mech' ? 'Tech' : '戦闘機') + 'の制御を奪った', 'e' + e.uid);
+    matchRecEvent('hackE2', d.x, d.y, '敵が自機ドローンの制御を奪った (' + (kind === 'mech' ? 'Tech' : '戦闘機') + ')');
+    e._hack = null; e._hackUntil = 0;
 }
 function drawHackFx(ctx) {
     const inv = 1 / camera.zoom;
