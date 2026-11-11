@@ -201,6 +201,8 @@ const SIG_ACT = {
     launch:     { optic: 0.35, em: 0.40 },               // ドローンの発進
     assemble:   { em: 0.35, heat: 0.10 },                // 資材からの組み立て
     comms:      { em: 0.30 },                            // 制圧・補給の通信
+    hackPulse:  { em: 1.0, heat: 0.10 },                 // ハック波の発射 (外れても出る大量の電磁波)
+    hackLink:   { em: 0.45 },                            // ハックの侵入中 (リンク維持)
     repair:     { heat: 0.30, optic: 0.20 },             // リペアキットの修理 (溶接)
     engSwitch:  { em: 0.30 },                            // エンジン切替
     sysEngine:  { heat: 0.35 },                          // 機関損傷 (冷却系の漏れ)
@@ -246,6 +248,8 @@ function emitSigs(o) {
     if (o.launch > 0) add(SIG_ACT.launch, o.launch);
     if (o.assemble) add(SIG_ACT.assemble, 1);
     if (o.comms) add(SIG_ACT.comms, 1);
+    if (o.hackPulse) add(SIG_ACT.hackPulse, 1);
+    if (o.hackLink) add(SIG_ACT.hackLink, 1);
     if (o.repair) add(SIG_ACT.repair, 1);
     if (o.engSwitch) add(SIG_ACT.engSwitch, 1);
     if (o.sysEngine) add(SIG_ACT.sysEngine, 1);
@@ -2316,6 +2320,7 @@ function updateStatusStrip() {
     // 状態異常 (名前と残り秒数)。時間で解消する
     const chips = [], sec = (v) => Math.ceil(v / 60);
     if (player._weaponJamTimer > 0) chips.push(['火器管制ダウン', sec(player._weaponJamTimer), 'bad']);
+    if (player._haltTimer > 0) chips.push(['機関停止', sec(player._haltTimer), 'bad']);
     if (player._sysEngineTimer > 0) chips.push(['機関損傷', sec(player._sysEngineTimer), 'bad']);
     if (player._sysSensorTimer > 0) chips.push(['センサー損傷', sec(player._sysSensorTimer), 'sen']); else if (player._daze > 0) chips.push(['センサー撹乱', sec(player._daze), 'sen']);
     if (player._commJam > 0) chips.push(['通信障害', sec(player._commJam), 'sen']);
@@ -3888,6 +3893,7 @@ class Ship {
         return { silent: base * SILENT_SPEED_MULT, cruise: base, flank: base * 1.5 };
     }
     _moveHeading(targetAng, desired) {
+        if (this._haltTimer > 0) desired = 0; // ハックによる機関停止
         const cls = ENEMY_CLASS[this.type];
         const d = _angDiff(targetAng, this.angle);
         if (!cls) { // 艦載機は小回りが利く (従来どおり)
@@ -4021,7 +4027,7 @@ class Ship {
                 mt: { e: mtOver('engine'), w: mtOver('weapons'), s: mtOver('sensors'), a: mtOver('ai') },
                 quiet: silentRunning || playerCoasting, ff: _ff, ft: this._fireFlashType, launch: _lf,
                 charge: _chg ? PM.chargeLeak : 0, beamCool: !!this.beamReloading, mslReload: !!this.missileReloading,
-                assemble: cargoAssembling(), comms: !!(_capturing || _resupply || _frameCount < _hackUntil), repair: (this._kitT || 0) > 0 || repairActive,
+                assemble: cargoAssembling(), comms: !!(_capturing || _resupply || _frameCount < _hackUntil), hackPulse: _frameCount < _hackBurstUntil, hackLink: !!hackSessP, repair: (this._kitT || 0) > 0 || repairActive,
                 engSwitch: engineSwitchT > 0, sysEngine: this._sysEngineTimer > 0,
                 leak: { heat: sensorLeak('heat'), optic: sensorLeak('optic'), em: sensorLeak('em'), higgs: sensorLeak('higgs') },
                 hHere: _hHere, storm: getStormIntensity(this.x, this.y), thermal: getThermalIntensity(this.x, this.y),
@@ -4124,7 +4130,7 @@ class Ship {
                 this.angle += Math.sign(d) * Math.min(Math.abs(d), tr);
                 if (playerCoasting) return d; // 第17弾: 機関停止中は艦首だけ回す (進路は変わらない)
                 const tm = Math.min(1, Math.abs(d) / (Math.PI * 0.12));
-                const ts = targetSpd * (1 - (SHIP_TURN_SLOW[gameState.shipType] || 0.5) * tm);
+                const ts = (this._haltTimer > 0 ? 0 : targetSpd) * (1 - (SHIP_TURN_SLOW[gameState.shipType] || 0.5) * tm); // 機関停止中は推力ゼロ
                 const ar = (SHIP_ACCEL_RATE[gameState.shipType] || 0.008) * gameSpeedFactor * (boostT > 0 ? BOOST_ACCEL : 1) * PM.accel * engineAgility(gameState.engineType).accel; // 第42弾: EMは加速×1.5
                 // 第17弾: 機関が損傷・過熱している間は逆噴射も効かず、ゆっくりしか減速できない (噴射で稼いだ速度が残る)
                 const brake = (this._sysEngineTimer || 0) > 0 ? 0.25 : 2.5;
@@ -5228,7 +5234,7 @@ class Ship {
                 alloc: _isF ? { sensors: 0, ai: 0 } : { sensors: _al.sensors / 100, ai: _al.ai / 100 },
                 quiet: !!this._hiding || !!this._quietRun, ff: _ff, ft: this._fireFlashType, launch: _lf,
                 charge: this._eCharge > 0 ? _em.chargeLeak : 0, beamCool: this._bReload > 0, mslReload: this._mReload > 0,
-                comms: _frameCount - (this._commsF || -99) < 3 || (this.aiState === 'gathering' && this._capT > 0) || _frameCount < (this._hackUntil || 0),
+                comms: _frameCount - (this._commsF || -99) < 3 || (this.aiState === 'gathering' && this._capT > 0) || _frameCount < (this._hackUntil || 0), hackPulse: _frameCount < (this._hackBurstUntil || 0), hackLink: !!this._hackSess,
                 repair: (this._kitT || 0) > 0, sysEngine: this._sysEngineTimer > 0, leak: _lk,
                 hHere: higgsHere, storm: getStormIntensity(this.x, this.y), thermal: getThermalIntensity(this.x, this.y),
                 pm: _em, wounded: this.hp / this.maxHp < WOUNDED_HP_FRAC, pulsePh: this.uid * 37,
@@ -6041,6 +6047,15 @@ function updateDrawEffects(ctx) {
         } else if (ef.type === 'sonar' || ef.type === 'sonar-fill' || ef.type === 'sonar-boundary') {
             // ソナー系エフェクトはヒッグスフォグより手前に描く: updateDrawSonarEffects() で更新+描画
             continue;
+        } else if (ef.type === 'hackcone') {
+            // ハック波 (自艦が撃ったものだけ描く): 細い扇が広がりながら薄れる。敵のハック波は電磁波として聞こえるだけ
+            ef.t = (ef.t || 0) + 1; if (ef.t > 70) { effects.splice(i, 1); continue; }
+            if (ef.own) {
+                const u = ef.t / 70, r = ef.R * Math.min(1, ef.t / 28);
+                ctx.save(); ctx.globalAlpha = (1 - u) * 0.5; ctx.fillStyle = '#66ddff'; ctx.strokeStyle = '#bff3ff'; ctx.lineWidth = 2 / camera.zoom;
+                ctx.beginPath(); ctx.moveTo(ef.x, ef.y); ctx.arc(ef.x, ef.y, r, ef.ang - HACK_PULSE_HALF, ef.ang + HACK_PULSE_HALF); ctx.closePath(); ctx.globalAlpha = (1 - u) * 0.14; ctx.fill();
+                ctx.globalAlpha = (1 - u) * 0.8; ctx.stroke(); ctx.restore();
+            }
         } else if (ef.type === 'trapblast') {
             // 2026-11-11 (オーナー「爆発はアニメーションに」): 偽コンテナの爆発 — 閃光 → 火球 (絵が膨らんで回る) → 衝撃波の輪 → 煙 + 飛び散る破片。約1.5秒 (描画フレームで進む)
             ef.t = (ef.t || 0) + 1;
@@ -8162,8 +8177,8 @@ const PARTS = {
     armor:     { cat: 'hull', name: '増加装甲',       up: '耐久+25%', down: '最高速×0.9・旋回×0.85', f: m => { m.hp += 0.25; m.speed *= 0.9; m.turn *= 0.85; } },
     slope:     { cat: 'hull', name: '傾斜装甲',       up: '正面±30°からの被弾−30%', down: '後ろからの被弾 ×1.5→×2.0', f: m => { m.front = 0.3; m.rear = 2.0; } },
     damcon:    { cat: 'hull', name: 'ダメコン班',     up: 'リペアキット×1.5・サブシステム損傷の時間が半分', down: '取り付け枠を2つ使う', w: 2, f: m => { m.kit *= 1.5; m.subsys *= 0.5; } },
-    ram:       { cat: 'hull', name: '電波吸収塗装',   up: '光・電磁波×0.75', down: '耐久−15%', f: m => { m.optic *= 0.75; m.em *= 0.75; m.hp -= 0.15; } },
-    ecm:       { cat: 'ew',   name: 'ECM',            up: '敵の推定の誤差×1.5', down: '電磁波+0.1 (ECM自体が聞こえる)', f: m => { m.ecm *= 1.5; m.emAdd += 0.1; } },
+    ram:       { cat: 'hull', name: '電波吸収塗装',   up: '光・電磁波×0.75', down: '耐久−15%', f: m => { m.optic *= 0.75; m.em *= 0.75; m.hp -= 0.15; m.hackRes += 0.3; } },
+    ecm:       { cat: 'ew',   name: 'ECM',            up: '敵の推定の誤差×1.5', down: '電磁波+0.1 (ECM自体が聞こえる)', f: m => { m.ecm *= 1.5; m.emAdd += 0.1; m.hackRes += 0.5; } },
     lurel:     { cat: 'ew',   name: '囮発射機',       up: '偽艦影ブイを資材なしで90秒ごとに出せる', down: '枠を使う (他の部品が載らない)', f: m => { m.lureFree = 1; } },
     hangar:    { cat: 'ew',   name: '格納庫拡張',     up: '積載+3枠', down: '最高速×0.95', f: m => { m.hold += 3; m.speed *= 0.95; } },
     // 第60弾 (オーナー「カスタムアイテムのバリエーションをもっと」): 追加の部品 12種
@@ -8177,10 +8192,10 @@ const PARTS = {
     passive:   { cat: 'sen',  name: '受動特化受信機',   up: 'センサーが漏らす信号が半分', down: '受信距離×0.9', f: m => { m.leakMul *= 0.5; m.rxRange *= 0.9; } },
     inertial:  { cat: 'eng',  name: '慣性制御装置',     up: '旋回×1.2・加速×1.2', down: '電磁波+0.04', f: m => { m.turn *= 1.2; m.accel *= 1.2; m.emAdd += 0.04; } },
     ablative:  { cat: 'hull', name: 'アブレーション装甲', up: '正面±30°の被弾−20%・後ろの被弾 ×1.5→×1.3', down: '最高速×0.95', f: m => { m.front = Math.max(m.front, 0.2); m.rear = Math.min(m.rear, 1.3); m.speed *= 0.95; } },
-    emshield:  { cat: 'hull', name: '電磁シールド',     up: '状態異常 (センサー損傷・機関損傷・火器管制ダウン等) の時間×0.6', down: '耐久−5%', f: m => { m.subsys *= 0.6; m.hp -= 0.05; } },
-    chaff:     { cat: 'ew',   name: 'チャフ散布機',     up: '敵の推定の誤差×1.25・光学×0.9', down: '電磁波+0.05', f: m => { m.ecm *= 1.25; m.optic *= 0.9; m.emAdd += 0.05; } },
+    emshield:  { cat: 'hull', name: '電磁シールド',     up: '状態異常 (センサー損傷・機関損傷・火器管制ダウン等) の時間×0.6', down: '耐久−5%', f: m => { m.subsys *= 0.6; m.hp -= 0.05; m.hackRes += 0.8; } },
+    chaff:     { cat: 'ew',   name: 'チャフ散布機',     up: '敵の推定の誤差×1.25・光学×0.9', down: '電磁波+0.05', f: m => { m.ecm *= 1.25; m.optic *= 0.9; m.emAdd += 0.05; m.hackRes += 0.3; } },
     // 第36弾 (オーナー): 輸送船だけが積んでいるレア部品 — 効果が大きく代償が小さい (拿捕で2つ・撃沈で1つ選べる)
-    qcore:     { cat: 'sen',  rare: true, name: '量子演算コア',   up: '演算力+1.0 (解析・識別が速い)', down: '電磁波+0.03', f: m => { m.ana += 1.0; m.emAdd += 0.03; } },
+    qcore:     { cat: 'sen',  rare: true, name: '量子演算コア',   up: '演算力+1.0 (解析・識別が速い)', down: '電磁波+0.03', f: m => { m.ana += 1.0; m.emAdd += 0.03; m.hackRes += 0.5; } },
     compos:    { cat: 'hull', rare: true, name: '複合装甲',       up: '耐久+30%', down: '最高速×0.96', f: m => { m.hp += 0.30; m.speed *= 0.96; } },
     ion:       { cat: 'eng',  rare: true, name: 'イオン推進',     up: '最高速×1.15・熱×0.85', down: '加速×0.9', f: m => { m.speed *= 1.15; m.heat *= 0.85; m.accel *= 0.9; } },
     phase:     { cat: 'ew',   rare: true, name: '位相迷彩',       up: '熱・光・電磁波×0.8', down: '耐久−5%', f: m => { m.heat *= 0.8; m.optic *= 0.8; m.em *= 0.8; m.hp -= 0.05; } },
@@ -8190,7 +8205,7 @@ const PM_DEF = { kinProx: 0, opticFire: 1, kinDmg: 1, kinNoFall: 0, kinMag: 8, k
     mirv: 0, seeker: 0, mslReload: 1, mslRange: 1, mslLaunchHeat: 1, mslQuiet: 0, mslSpeed: 1, emp: 0, mslDmg: 1, mine: 0,
     beamCharge: 1, chargeLeak: 1, beamWidth: BEAM_HIT_WIDTH, beamDmg: 1, beamFog: 1, beamReveal: 1, beamReload: 1, dmgAll: 1, fcsLeak: 0,
     sonarRange: 1, sonarHeard: 1, ana: 0, leakMul: 1, rxRange: 1, turn: 1, wake: 1, heat: 1, speed: 1, accel: 1, overheat: 1,
-    hp: 0, front: 0, rear: 1.5, kit: 1, subsys: 1, optic: 1, em: 1, ecm: 1, lureFree: 0, hold: 0, mslTurn: 1, hitStatus: null };
+    hp: 0, front: 0, rear: 1.5, kit: 1, subsys: 1, optic: 1, em: 1, ecm: 1, hackRes: 0, lureFree: 0, hold: 0, mslTurn: 1, hitStatus: null };
 const DRAFT_BIAS = { colony: ['eng', 'hull'], node: ['sen', 'ew'], derelict: ['kin', 'msl', 'beam', 'fcs'], cache: null };
 const DRAFT_BIAS_W = 3, LURE_FREE_CD = 5400, MINE_MAX = 4, MINE_R = 400, MINE_ARM = 180, MINE_LIFE = 18000, FCS_LEAK_R = 18000;
 const PLAYER_HP_BASE = { assault: 3500, stealth: 700, carrier: 2500 };
@@ -8251,17 +8266,19 @@ function enemyPickVariants(e) {
 const STATUS_DEF = {
     sensor: { jp: 'センサー損傷', dur: 900 }, engine: { jp: '機関損傷', dur: 900 }, fcs: { jp: '火器管制ダウン', dur: 600 },
     daze: { jp: 'センサー撹乱', dur: 600 }, comm: { jp: '通信障害', dur: 1200 }, burn: { jp: '延焼', dur: 720 },
+    halt: { jp: '機関停止', dur: 900 }, // ハックで機関を止められる (推力ゼロ・惰性で減速・艦首は回せる・噴射も不可)
 };
-function applyStatus(t, id) {
+function applyStatus(t, id, baseDur) {
     if (!t || t.hp <= 0 || t._dying || t instanceof Drone) return;
     const D = STATUS_DEF[id]; if (!D) return;
-    const sm = t === player ? PM.subsys : (epm(t).subsys || 1), dur = Math.round(D.dur * sm);
+    const sm = t === player ? PM.subsys : (epm(t).subsys || 1), dur = Math.round((baseDur || D.dur) * sm);
     if (id === 'sensor') t._sysSensorTimer = Math.max(t._sysSensorTimer || 0, dur);
     else if (id === 'engine') t._sysEngineTimer = Math.max(t._sysEngineTimer || 0, dur);
     else if (id === 'fcs') t._weaponJamTimer = Math.max(t._weaponJamTimer || 0, dur);
     else if (id === 'daze') applyDaze(t, dur, '妨害弾頭');
     else if (id === 'comm') t._commJam = Math.max(t._commJam || 0, dur);
     else if (id === 'burn') t._burn = Math.max(t._burn || 0, dur);
+    else if (id === 'halt') t._haltTimer = Math.max(t._haltTimer || 0, dur);
     effects.push({ x: t.x, y: t.y - 58, text: D.jp + '!', life: 1.3, type: 'floatText', c: '#ff9500' });
     if (t === player) sfxOr('alm_status_' + id, 'ui', 0.9);
     if (t === player) logMessage('STATUS: ' + D.jp + ' — 約' + Math.round(dur / 60) + '秒で復旧 (AIの解析力が高いほど早い)', 'warning-msg');
@@ -8276,6 +8293,7 @@ function applyHitStatus(isP, owner, type, target) {
 function statusRecoverTick(s) {
     const g = (s === player ? genAlloc.ai : ((s.gen && s.gen.ai) || 50)) / 50, ex = Math.max(0, g - 1) * 0.8 * gameSpeedFactor;
     if (ex > 0) for (const k of ['_weaponJamTimer', '_sysEngineTimer', '_sysSensorTimer', '_daze']) if (s[k] > 0) s[k] -= ex;
+    if (s._haltTimer > 0) s._haltTimer -= gameSpeedFactor + ex; // 機関停止も解析力が高いほど早く復旧
     if (s._commJam > 0) s._commJam -= gameSpeedFactor + ex;
     if (s._burn > 0) { s._burn -= gameSpeedFactor + ex; s.hp -= s.maxHp * 0.00005 * gameSpeedFactor; }
 }
@@ -8363,6 +8381,8 @@ function updateParts() {
     if (_lureFreeCD > 0) _lureFreeCD -= gameSpeedFactor;
     updateEnemyDerelictSalvage(); // 第33弾
     if (_frameCount % 30 === 0) for (const e of enemies) if (e.hp > 0 && !e._dying && e.type !== 'fighter') enemyHackStep(e); // 敵のハック
+    updateHackSessions();
+    if (_frameCount % 60 === 0) { for (const e of enemies) if (e.hp > 0 && !e._dying && e.type !== 'fighter') enemyHackAI(e); comHackStep(); }
     if (_frameCount % 120 === 0) for (const e of enemies) if (e.hp > 0 && !e._dying && e.type !== 'fighter') enemySwapAtColony(e);
     for (let i = mines.length - 1; i >= 0; i--) {
         const mn = mines[i];
@@ -9229,6 +9249,7 @@ function enemyHackStep(e) {
             _addObs(e._sa, d.x, d.y, Math.atan2(player.y - d.y, player.x - d.x) + d._hkErrE, sig, 0.8, '255,130,130', 'hack');
             if (!(e._dlSolveF > now - 30)) { e._dlSolveF = now; solveFix(e._sa); }
             e.contactFreshness = Math.max(e.contactFreshness || 0, 0.3);
+            logMessage('WARN: ' + _droneName(d) + 'の通信を探られた — 敵に自艦の方角を知られた (敵のハック 第1段階・誤差±' + Math.round(sig * 57.3) + '°)', 'warning-msg');
             if (comDemo) comThinkEvent('e', '自機の' + (kind === 'mech' ? 'Tech' : '戦闘機') + 'の通信をハック — 発進元の方位を得た (誤差±' + Math.round(sig * 57.3) + '°)', 'e' + e.uid);
             matchRecEvent('hackE1', d.x, d.y, '敵が自機ドローンをハック (第1段階)');
         }
@@ -9237,6 +9258,8 @@ function enemyHackStep(e) {
     if (best) {
         if (e._hack && e._hack.d === best) e._hack.p += 30; else { e._hack = { d: best, p: 0, need: HACK_NEED[bk], kind: bk }; if (comDemo) comThinkEvent('e', '自機の' + (bk === 'mech' ? 'Tech' : '戦闘機') + 'へ侵入開始 (' + Math.round(HACK_NEED[bk] / 60) + '秒)', 'e' + e.uid); }
         e._hackUntil = now + 45;
+        if (!best._warnHackF || now - best._warnHackF > 1800) { best._warnHackF = now; logMessage('WARN: ' + _droneName(best) + 'が侵入を受けている (約' + Math.round(HACK_NEED[bk] / 60) + '秒で奪われる) — 母艦の近くへ戻す(帰還)か、侵入元の敵艦から3000u以上離す・見えない所へ逃がす', 'warning-msg'); sfxOr('alm_status_comm', 'ui', 0.9); }
+        best._underHack = { until: now + 60, u: Math.min(1, e._hack.p / e._hack.need) };
         if (e._hack.p >= e._hack.need) enemyHackTake(e, best, bk);
     } else e._hack = null;
 }
@@ -9253,8 +9276,130 @@ function enemyHackTake(e, d, kind) {
     matchRecEvent('hackE2', d.x, d.y, '敵が自機ドローンの制御を奪った (' + (kind === 'mech' ? 'Tech' : '戦闘機') + ')');
     e._hack = null; e._hackUntil = 0;
 }
+
+// ═══ 艦への直接ハック (2026-11-11 オーナー案「演算力が高いと相手の艦を直接ハックして 火器管制ダウン・機関停止などにできる。指向性ソナーのような波を特定方向へ打ち、
+//     そこに相手が居ればハックを仕掛けられる。外しても大量のEMを出すリスク。遠くからハックして機関停止にして奇襲を仕掛ける戦略」・値は「設定は任せる」の委任 → 実装で決めた値) ═══
+//   ハック波 (`fireHackPulse`): 半角 ±8° の細い扇・届く距離 = 2500 + 1500×演算力H (上限9000u)・再使用20秒・**当たっても外れても4秒間 大量のEM**（`hackPulse`＝電磁波1.0。敵は聞いて方角を知る）
+//   当たった相手: ハック耐性 R = 艦種 (潜航2.2/攻撃2.8/空母3.2) + 部品 (ECM+0.5・電磁シールド+0.8・電波吸収塗装+0.3・チャフ+0.3・量子演算コア+0.5) + 0.5×その艦の演算力H
+//     q = H/R が 1未満 → 侵入できない (応答は捉える＝点の観測は得る) / 1以上 → 侵入開始。侵入にかかる時間 = 14秒×(R/H)² (3〜24秒)。侵入中は**リンクを維持**する必要があり (相手が届く距離×1.3を超えて離れる/どちらかが沈む で中断)、リンクの間もEM (0.45) が漏れる
+//   成功: 効果 (火器管制ダウン12秒 / 機関停止15秒 / センサー損傷15秒 / 通信障害20秒) × (0.8+0.4×(q−1)、0.8〜1.8) の間。相手の部品 (電磁シールド・ダメコン班) と相手のAIの解析力で短くなる (`applyStatus`)
+//   自機も敵も同じ式 (敵COMは `enemyHackAI`)。侵入されると自機に警告が出る (侵入の%と、離れれば中断できること)
+var HACK_PULSE_HALF = 0.14, HACK_PULSE_CD = 1200, HACK_RANGE_BASE = 2500, HACK_RANGE_PER_H = 1500, HACK_RANGE_MAX = 9000, HACK_BURST_F = 240;
+var HACK_SESS_BASE = 840, HACK_SESS_MIN = 180, HACK_SESS_MAX = 1440, HACK_BREAK = 1.3;
+var HACK_RES_CLASS = { stealth: 2.2, assault: 2.8, carrier: 3.2 };
+var HACK_EFFECTS = { fcs: { jp: '火器管制ダウン', st: 'fcs', dur: 720 }, halt: { jp: '機関停止', st: 'halt', dur: 900 }, sensor: { jp: 'センサー損傷', st: 'sensor', dur: 900 }, comm: { jp: '通信障害', st: 'comm', dur: 1200 } };
+var _hackPulseCD = 0, _hackBurstUntil = 0, hackSessP = null;
+function hackPulseRange(H) { return Math.min(HACK_RANGE_MAX, HACK_RANGE_BASE + HACK_RANGE_PER_H * H); }
+function hackResist(sh) {
+    const isP = sh === player, cls = isP ? gameState.shipType : ENEMY_CLASS[sh.type];
+    return (HACK_RES_CLASS[cls] || 2.6) + (isP ? (PM.hackRes || 0) : (epm(sh).hackRes || 0)) + 0.5 * hackPower(isP ? 'player' : 'enemy', isP ? null : sh);
+}
+function hackSessTime(H, R) { const r = R / H; return Math.max(HACK_SESS_MIN, Math.min(HACK_SESS_MAX, Math.round(HACK_SESS_BASE * r * r))); }
+function fireHackPulse(att, angle, effect) {
+    const isP = att === 'p', A = isP ? player : att; if (!A || A.hp <= 0 || A._dying) return false;
+    const E = HACK_EFFECTS[effect] || HACK_EFFECTS.halt, H = hackPower(isP ? 'player' : 'enemy', isP ? null : A), range = hackPulseRange(H), now = _frameCount;
+    if (isP) { _hackPulseCD = HACK_PULSE_CD; _hackBurstUntil = now + HACK_BURST_F; hackSessP = null; } else { att._hackCD = now + HACK_PULSE_CD; att._hackBurstUntil = now + HACK_BURST_F; att._hackSess = null; }
+    effects.push({ type: 'hackcone', x: A.x, y: A.y, ang: angle, R: range, t: 0, own: isP });
+    sfxUI('ui_select');
+    const targets = isP ? enemies.filter(e => e.hp > 0 && !e._dying && e.type !== 'fighter') : (player && player.hp > 0 ? [player] : []);
+    let hit = null, bd = Infinity;
+    for (const t of targets) { const d = Math.hypot(t.x - A.x, t.y - A.y); if (d > range) continue; if (Math.abs(_angDiff(Math.atan2(t.y - A.y, t.x - A.x), angle)) > HACK_PULSE_HALF) continue; if (d < bd) { bd = d; hit = t; } }
+    if (isP) matchRecEvent('hackPulseP', A.x, A.y, '自艦がハック波を発射 (' + E.jp + '・届く距離' + Math.round(range) + 'u・' + (hit ? '応答あり' : '外れ') + ')');
+    else matchRecEvent('hackPulseE', A.x, A.y, '敵がハック波を発射 (' + E.jp + ')');
+    if (!hit) {
+        if (isP) logMessage('HACK: ハック波 — 応答なし (外れ)。大量の電磁波を出した — 敵に方向を知られる', 'warning-msg');
+        else if (comDemo) comThinkEvent('e', 'ハック波を撃ったが相手は居なかった (EMを出した)', 'e' + att.uid);
+        return false;
+    }
+    const R = hackResist(hit), q = H / R;
+    // 当たれば、撃った側は相手の位置を点で知る (指向性ソナーのような応答)
+    const err = 250 + 0.08 * bd;
+    if (isP) {
+        const sid = 'e-' + hit.uid; if (!_signalAnalysis[sid]) _signalAnalysis[sid] = _newSignalAnalysis(); if (!_contactLabels[sid]) _contactLabels[sid] = _contactLabelNext++;
+        _signalAnalysis[sid].ping = { x: hit.x + (Math.random() - 0.5) * err, y: hit.y + (Math.random() - 0.5) * err, r: err, f: now, src: 'hack' }; solveFix(_signalAnalysis[sid]);
+    } else if (att._sa) { att._sa.ping = { x: player.x + (Math.random() - 0.5) * err, y: player.y + (Math.random() - 0.5) * err, r: err, f: now, src: 'hack' }; solveFix(att._sa); att.contactFreshness = Math.max(att.contactFreshness || 0, 0.6); }
+    if (q < 1) {
+        if (isP) logMessage('HACK: 応答あり — 艦影を捉えた (方位' + compassDeg(Math.atan2(hit.y - A.y, hit.x - A.x)) + '°・約' + Math.round(bd / 100) * 100 + 'u)。だが相手のハック耐性が演算力を上回り侵入できない (演算力' + (Math.round(H * 10) / 10) + ')', 'warning-msg');
+        else if (comDemo) comThinkEvent('e', 'ハック波が当たったが耐性が高く侵入できない', 'e' + att.uid);
+        return false;
+    }
+    const S = { att, tgt: hit, effect, p: 0, need: hackSessTime(H, R), q, H };
+    if (isP) { hackSessP = S; logMessage('HACK: 応答あり — 侵入開始 (' + E.jp + '・約' + Math.round(S.need / 60) + '秒)。リンクの間は電磁波が漏れる。相手が' + Math.round(range * HACK_BREAK) + 'u以上離れると中断', 'system-msg'); }
+    else { att._hackSess = S; logMessage('WARN: ハック波を受けた — 侵入されている (約' + Math.round(S.need / 60) + '秒で機能を奪われる)。侵入元から' + Math.round(hackPulseRange(H) * HACK_BREAK) + 'u以上離れれば中断できる', 'warning-msg'); sfxOr('alm_status_comm', 'ui', 0.9); if (comDemo) comThinkEvent('e', 'ハック侵入開始 (' + E.jp + ')', 'e' + att.uid); }
+    return true;
+}
+function _stepHackSess(S, att) {
+    const A = att === 'p' ? player : att, T = S.tgt, now = _frameCount;
+    const end = (why) => { if (att === 'p') hackSessP = null; else att._hackSess = null; if (att === 'p') logMessage('HACK: 侵入が途切れた — ' + why, 'warning-msg'); else if (T === player) logMessage('HACK: 侵入が途切れた (' + why + ')', 'system-msg'); };
+    if (!A || A.hp <= 0 || A._dying) { if (att !== 'p') att._hackSess = null; else hackSessP = null; return; }
+    if (!T || T.hp <= 0 || T._dying) { end('相手が沈んだ'); return; }
+    const H = hackPower(att === 'p' ? 'player' : 'enemy', att === 'p' ? null : att);
+    if (Math.hypot(T.x - A.x, T.y - A.y) > hackPulseRange(H) * HACK_BREAK) { end('相手が遠くなりリンクが切れた'); return; }
+    S.p += gameSpeedFactor;
+    if (S.p < S.need) return;
+    const E = HACK_EFFECTS[S.effect] || HACK_EFFECTS.halt, mult = Math.max(0.8, Math.min(1.8, 0.8 + 0.4 * (S.q - 1)));
+    applyStatus(T, E.st, Math.round(E.dur * mult));
+    if (att === 'p') { logMessage('HACK: 成功 — 敵に' + E.jp + ' (約' + Math.round(E.dur * mult / 60) + '秒)。今が奇襲の好機', 'system-msg'); matchRecEvent('hackOkP', T.x, T.y, '敵をハック: ' + E.jp); hackSessP = null; }
+    else { att._hackSess = null; if (comDemo) comThinkEvent('e', 'ハック成功 — 自機に' + E.jp, 'e' + att.uid); matchRecEvent('hackOkE', T.x, T.y, '敵にハックされた: ' + E.jp); }
+}
+function updateHackSessions() {
+    if (_hackPulseCD > 0) _hackPulseCD -= gameSpeedFactor;
+    if (hackSessP) _stepHackSess(hackSessP, 'p');
+    for (const e of enemies) if (e._hackSess) _stepHackSess(e._hackSess, e);
+}
+// ハック波を向ける方向: 推定が絞れていれば推定の位置 (誤差/距離 ≤ 0.12・届く距離の内・600u以上) へ / 無ければ、5秒以内の方位の記録 (誤差 σ≤0.06rad・観測した所から400u以内) の方向へ (距離は分からない＝遠くから止める)
+function _hackAim(sa, ox, oy, H) {
+    if (sa.fix || sa.ping || sa.motion) {
+        const te = trackEstimate(sa, 0);
+        if (te && te.r > 0) { const d = Math.hypot(te.x - ox, te.y - oy); if (d <= hackPulseRange(H) && d >= 600 && te.r / d <= 0.12) return { ang: Math.atan2(te.y - oy, te.x - ox), d }; }
+    }
+    const o = sa.obs && sa.obs[sa.obs.length - 1];
+    if (o && _frameCount - o.f < 300 && o.sig <= 0.06 && Math.hypot(ox - o.ox, oy - o.oy) < 400) return { ang: o.ang, d: null };
+    return null;
+}
+// 敵COMのハック: 推定が十分絞れていて (誤差/距離 ≤ 0.12)・届く距離の内・演算力が十分 (相手の耐性を平均3.0と見て H≥3.0) の時に撃つ。交戦中は火器管制ダウン・それ以外は機関停止 (止めてから忍び寄る)
+function enemyHackAI(e) {
+    if (e.type === 'fighter' || e.hp <= 0 || e._dying || e._hackSess || _frameCount < (e._hackCD || 0) || !e._sa || !player || player.hp <= 0) return;
+    const H = hackPower('enemy', e); if (H < 3.0) return;
+    const aim = _hackAim(e._sa, e.x, e.y, H); if (!aim) return;
+    if ((e.contactFreshness || 0) < 0.15) return;
+    fireHackPulse(e, aim.ang, (aim.d !== null && (e.aiState === 'combat' || aim.d < 2200)) ? 'fcs' : 'halt');
+}
+// 自機COMのハック (同じ基準。追跡中の信号が艦影らしい時)
+function comHackStep() {
+    if (comDemo !== true || !player || player.hp <= 0 || hackSessP || _hackPulseCD > 0 || !lockedSignalId) return;
+    const H = hackPower('player'); if (H < 3.0) return;
+    const sa = _signalAnalysis[lockedSignalId]; if (!sa) return;
+    const idn = identInfo(lockedSignalId); if (!idn || idn.low || (idn.p !== undefined && idn.p < 0.5)) return;
+    const aim = _hackAim(sa, player.x, player.y, H); if (!aim) return;
+    const eff = aim.d !== null && aim.d < 2200 ? 'fcs' : 'halt';
+    comThinkEvent('p', 'ハック波を撃つ — ' + (aim.d !== null ? '推定の方向 (距離' + Math.round(aim.d / 100) * 100 + 'u)' : '最新の方位の方向') + '・' + HACK_EFFECTS[eff].jp + 'を狙う (止めてから忍び寄る)');
+    fireHackPulse('p', aim.ang, eff);
+}
+function lpmSelectHack(effect) {
+    hideLongPressMenu();
+    if (!_lpmWorld || !player || player.hp <= 0 || comDemo) return;
+    if (_hackPulseCD > 0) { logMessage('HACK: ハック波は再使用まで' + Math.ceil(_hackPulseCD / 60) + '秒', 'warning-msg'); return; }
+    const H = hackPower('player');
+    logMessage('HACK: ハック波を発射 — 方位' + compassDeg(Math.atan2(_lpmWorld.y - player.y, _lpmWorld.x - player.x)) + '° (' + HACK_EFFECTS[effect].jp + '・演算力' + (Math.round(H * 10) / 10) + '・届く距離' + Math.round(hackPulseRange(H)) + 'u)', 'system-msg');
+    fireHackPulse('p', Math.atan2(_lpmWorld.y - player.y, _lpmWorld.x - player.x), effect);
+}
 function drawHackFx(ctx) {
     const inv = 1 / camera.zoom;
+    for (const d of playerDrones) { // 敵に侵入されているドローン: 赤い輪が侵入の進みを示す
+        const U = d._underHack; if (!U || _frameCount > U.until || d.hp <= 0) continue;
+        const R = Math.max(70, 22 * inv);
+        ctx.save(); ctx.strokeStyle = '#ff5a5a'; ctx.lineWidth = 2.2 * inv; ctx.globalAlpha = 0.9;
+        ctx.beginPath(); ctx.arc(d.x, d.y, R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * U.u); ctx.stroke();
+        ctx.globalAlpha = 0.4; ctx.setLineDash([4 * inv, 6 * inv]); ctx.beginPath(); ctx.arc(d.x, d.y, R, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); ctx.restore();
+        queueTag(d.x, d.y - R, '侵入 ' + Math.round(U.u * 100) + '%', _droneName(d), '255,90,90', 'top', 1);
+    }
+    if (hackSessP && hackSessP.tgt && hackSessP.tgt.hp > 0 && (hackSessP.tgt.visible || inPlayerVision(hackSessP.tgt.x, hackSessP.tgt.y))) { // 自艦が侵入中の相手 (見えている時だけ進みを出す)
+        const t = hackSessP.tgt, R = Math.max(110, 26 * inv), u = Math.min(1, hackSessP.p / hackSessP.need);
+        ctx.save(); ctx.strokeStyle = '#66ddff'; ctx.lineWidth = 2.4 * inv; ctx.globalAlpha = 0.9;
+        ctx.beginPath(); ctx.arc(t.x, t.y, R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * u); ctx.stroke(); ctx.restore();
+        queueTag(t.x, t.y - R, 'HACK ' + Math.round(u * 100) + '%', HACK_EFFECTS[hackSessP.effect].jp, '102,221,255', 'top', 1);
+    }
     for (const e of enemies) { // 第1段階の方角の線 (発進元の方へ)
         const L = e._hkLine; if (!L || _frameCount > L.until || e.hp <= 0) continue;
         const k = (L.until - _frameCount) / HACK_LINE_LIFE;
@@ -12760,6 +12905,7 @@ function useBoost() {
     if (!player || player.hp <= 0) return;
     if (boostCD > 0) { logMessage('離脱: 緊急噴射は再使用まで' + Math.ceil(boostCD / 60) + '秒', 'warning-msg'); return; }
     if ((player._sysEngineTimer || 0) > 0) { logMessage('離脱: 機関が損傷・過熱中 — 噴射できない', 'warning-msg'); return; }
+    if ((player._haltTimer || 0) > 0) { logMessage('離脱: 機関停止中 (ハックされた) — 噴射できない', 'warning-msg'); return; }
     if (repairActive || buildLocked()) { logMessage('離脱: 修復・設置の最中は噴射できない', 'warning-msg'); return; }
     if (engineSwitchT > 0) { logMessage('離脱: エンジン切替中は噴射できない', 'warning-msg'); return; } // 第21弾
     if (playerCoasting) { playerCoasting = false; }

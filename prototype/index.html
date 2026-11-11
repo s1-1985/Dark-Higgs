@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261111f">
+    <link rel="stylesheet" href="style.css?v=20261111g">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -805,13 +805,20 @@
         <button onclick="lpmSelectStop()" style="display:block; width:100%; background:#140a00; border:1px solid #ffaa44; color:#ffbb66; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">■ 停止</button>
         <button onclick="lpmSelectDirSonar()" style="display:block; width:100%; background:#001418; border:1px solid #00d4ff; color:#66e6ff; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">◎ 指向ソナー</button>
         <button onclick="lpmSelectSigList()" style="display:block; width:100%; background:#0a0f14; border:1px solid #6b8aa8; color:#9ab6d0; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">≡ 信号一覧</button>
+        <div style="font-size:8px; color:#66ddff; margin:2px 0 2px; letter-spacing:1px;">⌁ ハック波 (押した方向へ)</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:3px; margin-bottom:4px;">
+            <button onclick="lpmSelectHack('fcs')" title="火器管制ダウン: 発砲できなくなる" style="background:#14080a; border:1px solid #ff6677; color:#ff8899; padding:5px 2px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:8px;">火器管制</button>
+            <button onclick="lpmSelectHack('halt')" title="機関停止: 推力が止まり、惰性で減速する" style="background:#14100a; border:1px solid #ffaa44; color:#ffbb66; padding:5px 2px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:8px;">機関停止</button>
+            <button onclick="lpmSelectHack('sensor')" title="センサー損傷: 探知が大きく落ちる" style="background:#0a1414; border:1px solid #44ccdd; color:#66e6ff; padding:5px 2px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:8px;">センサー</button>
+            <button onclick="lpmSelectHack('comm')" title="通信障害: ドローンが自動制御になる・AIの助言が遅れる" style="background:#100a14; border:1px solid #bb88ff; color:#cc99ff; padding:5px 2px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:8px;">通信</button>
+        </div>
         <div id="lpm-drones"></div>
         <div id="lpm-lures"></div>
         <button onclick="hideLongPressMenu()" style="display:block; width:100%; background:#0a0a0a; border:1px solid #446655; color:#668877; padding:5px 4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">× キャンセル</button>
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261111f"></script>
+    <script src="game.js?v=20261111g"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
