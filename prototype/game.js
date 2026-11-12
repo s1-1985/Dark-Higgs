@@ -438,7 +438,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261112n';
+const SPRITE_VER = '20261112o';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -4810,6 +4810,9 @@ class Ship {
                     matchRecEvent('launchE', this.x, this.y, '敵が艦載機を発進');
                     comThinkEvent('e', '戦闘機を射出 → 推定位置 (' + _dirTxt(this.x, this.y, _bel.x, _bel.y) + ') へ向かわせる (残り' + this.droneStock + '機)', 'e' + this.uid);
                 }
+                // 第102弾: 敵を掴んでいる間は砲台も据える (自機COMの _comDeploy と同じ条件: 攻撃性≥0.5・慎重さ≥0.5・照射以上を受けた時)
+                { const _P = this.personality || {}; if ((this.turretStock || 0) > 0 && _hasContact && !this._hunt && !enemies.some(f => f.type === 'fighter' && f._kind === 'turret' && f._home === this && f.hp > 0)
+                    && ((_P.aggression ?? 0.5) >= 0.5 || (_P.caution ?? 0.4) >= 0.5 || _engaged) && (_frameCount + this.uid) % 60 === 0) { this.turretStock--; spawnEnemyDrone(this, 'turret'); } }
             }
 
             // ── 第17弾: 潜伏 — 後退した敵は濃い霧/岩礁帯で止まって修復し、45秒で狩りに戻る ──
