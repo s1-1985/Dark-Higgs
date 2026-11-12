@@ -438,7 +438,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261112g';
+const SPRITE_VER = '20261112h';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -1265,7 +1265,7 @@ function combatManeuver(me, tx, ty, tAng, D, mode, prio, oppArc, incoming) {
         const dphi = _angDiff(tAng + Math.PI, polar); // 相手の真後ろまで、周りを何rad回るか
         if (Math.abs(dphi) > 0.4) {
             const dir = dphi >= 0 ? 1 : -1;
-            const corr = Math.max(-0.9, Math.min(0.9, (dist - D) / Math.max(400, D) * 1.5)); // 遠ければ内へ・近ければ外へ
+            const corr = Math.max(-0.9, Math.min(0.9, (dist - D) / Math.max(250, D * 0.5) * 2)); // 遠ければ内へ・近ければ外へ (第97弾: 内への巻き込みを強く — 旧は射程の外 (約800u) を周回し続けて撃てなかった)
             return { ang: polar + dir * (Math.PI / 2 + corr), spd: 1, why: 'flank' };
         }
     }
@@ -3746,6 +3746,13 @@ function assumedHitChance(te, w, lk) {
     // 第18弾: 弾が届く時刻の見越し点での幅 (着弾までに相手が動ける分を含む)
     return hitChanceR(w, assumedAimPoint(te, w).r, PM.seeker ? 1300 : 900);
 }
+// 第97弾: 自機COMが撃つ判断に使う命中の見込み — 敵 (huntHonestR) と同じく推定円を正直に広げて見る。
+//   旧: 敵だけ円を1.7〜2.2倍に広げて撃つ判断をしていた (実機の記録で円の中に居たのは64%) ため、鏡合わせで自機COMが約2.5倍多く撃って圧勝した
+function comHitChance(te, w, lk, sa) {
+    if (lk.full) return 0.95;
+    if (!lk.assumed || lk.dist > weaponRange(w)) return 0;
+    return hitChanceR(w, huntHonestR(assumedAimPoint(te, w).r, saAge(sa)), PM.seeker ? 1300 : 900);
+}
 // 推定円の幅 r から見た命中の見込み (自機も敵も同じ)。当たり得る幅 = シーカー/ビーム幅/散布
 function hitChanceR(w, r, seek) {
     const sd = Math.max(80, (r || 1e9) / 2); // 推定円R ≈ 2σ
@@ -4077,11 +4084,11 @@ class Ship {
         // 第20弾: 艦載機は機銃(実弾)だけ。旧: 実弾の射程外だとミサイルへ切り替え、弾数の管理外で撃ち放題だった (自機の戦闘機も機銃だけ)
         if (this.type === 'fighter') return d <= 760 ? 'kinetic' : null;
         const ws = this.wset; // 第48弾: 積んでいない武器は撃てない
-        const ok = (w) => (ws && !ws.includes(w)) ? false : w === 'kinetic' ? d <= 760 && (this.ammoK === undefined || this.ammoK > 0) && !(this._kReload > 0)
+        const ok = (w) => (ws && !ws.includes(w)) ? false : w === 'kinetic' ? d <= 790 && (this.ammoK === undefined || this.ammoK > 0) && !(this._kReload > 0)
                         : w === 'missile' ? d <= ENEMY_MISSILE_ENGAGE * 1.05 * epm(this).mslRange && (this.ammoM === undefined || this.ammoM > 0) && !(this._mReload > 0)
                         : w === 'beam' ? !(this._bReload > 0) : false;
         if (ok(pref)) return pref;
-        for (const w of ['missile', 'kinetic', 'beam']) if (w !== pref && ok(w)) return w;
+        for (const w of ['missile', 'kinetic', 'beam']) if (w !== pref && ok(w) && !(w === 'beam' && d < 2500)) return w; // 第97弾: 近距離で代わりにビームを選ばない (10秒チャージの間 艦首が向かず撃てない・自機COMは遠くでだけビーム)
         return null;
     }
     _relocateAfterFire(far, aimAng, retreat) {
@@ -4864,7 +4871,7 @@ class Ship {
             // 状態別AI実行
             // ──────────────────────────────────────
             let _planActive = false;
-            if (!_hideActive && !_supplyActive && this.type !== 'fighter') _planActive = enemyHunterStep(this, playerSigDetected, _hardDetect) || enemyGrabStep(this) || enemyPlanStep(this); // 第80弾: 狩人の頭脳 (忍び寄り・偽装の罠・待ち伏せ) / 第46弾: 作戦「囮で誘い背後を取る」
+            if (!_hideActive && !_supplyActive && this.type !== 'fighter') _planActive = enemyHunterStep(this, playerSigDetected, _hardDetect) || enemyGrabStep(this) || enemyItemStep(this) || enemyPlanStep(this); // 第80弾: 狩人の頭脳 (忍び寄り・偽装の罠・待ち伏せ) / 第46弾: 作戦「囮で誘い背後を取る」
             if (_hideActive || _supplyActive || _planActive) {
                 // 潜伏中 (上で処理済み)
             } else if (this.aiState === 'combat') {
@@ -4987,7 +4994,7 @@ class Ship {
                     if (outmatched && wType === 'kinetic') wType = this._wpref('missile');
                     this.weaponType = wType;
                     // kinetic は射程800しか飛ばないので、それを超える間合いでは強制的にミサイルへ
-                    if (wType === 'kinetic' && distToBelief > 760) wType = this._wpref('missile');
+                    if (wType === 'kinetic' && distToBelief > 790) wType = this._wpref('missile'); // 第97弾: 760→790 (自機の実弾の射程800と揃える。旧: 回り込みの周回 (約800u) が射程の外で、双方撃てないまま周回し自機COMだけ撃った)
                     // 第20弾: 弾数・リロード・ビームのチャージ (自機と同じ)。使えない兵装は持ち替え、何も無ければ撃たない
                     wType = this._usableWeapon(wType, distToBelief);
                     // 第39弾: 見えていない相手には、推定円が十分に小さい時だけ撃つ (自機COMと同じ基準: 見込み ≥ 65% − 35%×攻撃性)。方位しか無ければ撃たない
@@ -5053,7 +5060,7 @@ class Ship {
                         projectiles.push(_eproj);
                     }
                     playSound('shoot_' + wType, Math.max(0.25, 1 - (player ? Math.hypot(this.x - player.x, this.y - player.y) : 0) / 9000));
-                    this.fireCooldown = prof.fireCD * (this.upgFireCD || 1); // 実弾の連射間隔 (ミサイル・ビームはリロードが律速)
+                    this.fireCooldown = (this.type === 'fighter' ? prof.fireCD : WEAPON_COOLDOWNS[wType]) * (this.upgFireCD || 1); // 実弾の連射間隔 (ミサイル・ビームはリロードが律速)。第97弾: 戦艦は自機と同じクールダウン (実弾15f)。旧: 艦種表の105〜200fで、自機COMの約7倍遅く 鏡合わせで撃ち負けた
                     // 第20弾: 弾を消費してリロード (実弾=8斉射マガジン / ミサイル=1発ごとに10秒 / ビーム=35秒)
                     if (wType === 'kinetic' && this.ammoK !== undefined) { this.ammoK--; if (this._kMag === undefined) this._kMag = epm(this).kinMag; if (--this._kMag <= 0 || this.ammoK <= 0) this._kReload = KINETIC_RELOAD_TIME * epm(this).kinReload * shipFx(this).reload; }
                     else if (wType === 'missile' && this.ammoM !== undefined) { this.ammoM--; this._mReload = MISSILE_RELOAD_TIME * epm(this).mslReload * shipFx(this).reload; }
@@ -5257,7 +5264,7 @@ class Ship {
                         this.setTarget(_amb.x, _amb.y); this._roam = 'patrol';
                         comThinkEvent('e', '気配なし → 偽SOSを ' + _dirTxt(this.x, this.y, _sp.x, _sp.y) + ' に出し、その近くの霧で待ち伏せる', 'e' + this.uid);
                     } else if (this.type !== 'fighter' && !_hasScent && ((_frameCount - (this._lastScentF || 0) > ENEMY_ROAM_QUIET * (1.4 - _pers.aggression) * (0.7 + 0.8 * (_pers.stealth ?? 0.4)) && Math.random() < 0.02)
-                               || (this._partHunt = enemySlotsUsed(this) < enemySlotsMax(this) && _frameCount - (this._lastScentF || 0) > ENEMY_PART_QUIET && (comDoctrine(_pers).partHunt || _frameCount < COM_EARLY_GATHER) && Math.random() < 0.15 + (_frameCount < COM_EARLY_GATHER ? 0.4 : _pers.greed * 0.3)))) { // 第41弾: 寄り道は自機COMと同じ方針 (隠密は寄り道しない)
+                               || (this._partHunt = enemySlotsUsed(this) < enemySlotsMax(this) && _frameCount - (this._lastScentF || 0) > (_frameCount < COM_EARLY_GATHER ? 120 : ENEMY_PART_QUIET) && (comDoctrine(_pers).partHunt || _frameCount < COM_EARLY_GATHER) && Math.random() < (_frameCount < COM_EARLY_GATHER ? 1 : 0.15 + _pers.greed * 0.3)))) { // 第41弾: 寄り道は自機COMと同じ方針 (隠密は寄り道しない)
                         // 第33弾: 部品の枠が空いていれば、20秒気配が無いだけで部品を取りに出る (長い静けさを待たない)
                         // 第20弾: 長く何も聞こえない → 隠れ場所伝いに区間ごとに哨戒へ (行き先: 自分のものでないノード / コロニー / マップ中央)
                         let g = this._roamGoal;
@@ -5291,6 +5298,7 @@ class Ship {
                             g = this._roamGoal = { x: sn.x, y: sn.y, lbl: 'まだ聴いていない海域' };
                             comThinkEvent('e', '長く気配なし (攻撃性' + _pct(_pers.aggression) + ') → ' + g.lbl + 'へ哨戒に出る (' + _dirTxt(this.x, this.y, g.x, g.y) + ')', 'e' + this.uid);
                         }
+                        if (g.col || g.der || g.node) this._item = { o: g.col || g.der || g.node, f: _frameCount }; // 第97弾: 取りに行くと決めた物は取り終えるまで続ける (自機COMの c.item と同じ)
                         const dG = Math.hypot(g.x - this.x, g.y - this.y), aG = Math.atan2(g.y - this.y, g.x - this.x), leg = Math.min(dG, 3500 + Math.random() * 1500);
                         if ((g.col || g.der || g.node) && dG < 3000) { this.setTarget(g.x + Math.cos(aG + Math.PI) * 150, g.y + Math.sin(aG + Math.PI) * 150); if (g.node && dG < 600) this.aiState = 'gathering'; } // 最後は直接 (コロニー600u/8秒・難破船500u/3秒・ノードは収集へ)
                         else { const spot = findHidingSpot(this.x + Math.cos(aG) * leg, this.y + Math.sin(aG) * leg, 1500); this.setTarget(spot.x, spot.y); }
@@ -15300,7 +15308,7 @@ function enemyShoot(e, wType, ax, ay, why) {
         projectiles.push(pr);
     }
     playSound('shoot_' + wType, Math.max(0.25, 1 - Math.hypot(e.x - player.x, e.y - player.y) / 9000));
-    e.fireCooldown = prof.fireCD * (e.upgFireCD || 1);
+    e.fireCooldown = (e.type === 'fighter' ? prof.fireCD : WEAPON_COOLDOWNS[wType]) * (e.upgFireCD || 1); // 第97弾: 自機と同じクールダウン
     if (wType === 'kinetic' && e.ammoK !== undefined) { e.ammoK--; if (e._kMag === undefined) e._kMag = epm(e).kinMag; if (--e._kMag <= 0 || e.ammoK <= 0) e._kReload = KINETIC_RELOAD_TIME * epm(e).kinReload * shipFx(e).reload; }
     else if (wType === 'missile' && e.ammoM !== undefined) { e.ammoM--; e._mReload = MISSILE_RELOAD_TIME * epm(e).mslReload * shipFx(e).reload; }
     else if (wType === 'beam') { e._bReload = BEAM_RELOAD_TIME * epm(e).beamReload * shipFx(e).reload; e._eCharge = 0; e._beamHold = _frameCount + BEAM_HOLD_F; }
@@ -15337,6 +15345,21 @@ function huntTransitEngine(e, why) {
     if (e._engSwT > 0 || now - (e._huntEngF ?? -1e9) < 60 * 120 || e.engine === 'thermonuclear') return;
     if (engineSpeedFactor(e.engine || 'thermonuclear', getHiggsIntensity(e.x, e.y)) >= 0.6) return;
     if (enemyRequestEngine(e, 'thermonuclear', why + ' — 今のエンジンでは遅すぎる (熱核の熱は後ろへ出るので、向かう先からは聞こえにくい)')) { e._huntEngF = now; e._engLockUntil = now + 60 * 90; }
+}
+// 第97弾 (記録の解析: 鏡合わせ試合で敵は最初のコロニー占有が自機COMの約4倍遅い・占有数 10回/63回): 自機COMは「取りに行くと決めた物を取り終えるまで続ける」(c.item)が、
+//   敵は気配を聞くたびに行き先を忘れて戻っていた → 敵も同じ: 行き先 (コロニー・ノード・難破船) を決めたら、危険が無い限り取り終えるまで向かう
+function enemyItemStep(e) {
+    const I = e._item; if (!I || e.type === 'fighter') return false;
+    const now = _frameCount, o = I.o, isNode = !o.type, isDer = o.type === 'derelict';
+    const gone = isDer ? !!o.salvaged : o.owner === 'enemy';
+    const hpF = e.hp / e.maxHp, hitAgo = now - (e._lastHitF ?? -1e9);
+    const danger = e.aiState === 'combat' || e._hiding || hpF < 0.4 || hitAgo < 600 || !!incomingMissile(e, true) || !!(e._hunt && e._hunt.k);
+    if (gone || danger || now - I.f > 18000) { comThinkEvent('e', gone ? '取りに行った物を取り終えた → 次へ' : danger ? '危険 (交戦・被弾・ミサイル・耐久) → 取るのを中断' : '時間切れ → 次へ', 'e' + e.uid); e._item = null; return false; }
+    const d = Math.hypot(o.x - e.x, o.y - e.y), near = (isNode ? NODE_CAP_R : isDer ? DERELICT_SALVAGE_R : COLONY_HACK_R) * 0.6;
+    if (isNode && d < 600) { e.aiState = 'gathering'; e.gatherTarget = o; e._capT = e._capT || 0; return false; } // ノードは「収集」の状態が制圧する
+    if (d > near) { const ms = e._maxSpeeds(); e._moveHeading(Math.atan2(o.y - e.y, o.x - e.x), ms ? ms.cruise : 1); e.state = 'moving'; e._roam = 'item'; }
+    else { e._v = Math.max(0, (e._v || 0) * 0.9); if (e._coastIfIdle) e._coastIfIdle(); }
+    return true;
 }
 function enemyGrabStep(e) {
     const hph = e._hunt && e._hunt.ph;
@@ -15400,10 +15423,10 @@ function enemyHunterStep(e, heard, hard) {
                 const ahead = (q) => { if (!lm) return 1; const hd = Math.atan2(lm.vy, lm.vx), a = Math.atan2(q.y - lm.y, q.x - lm.x), dq = Math.hypot(q.x - lm.x, q.y - lm.y); return Math.cos(_angDiff(a, hd)) > 0.6 && dq < 20000 ? 3.5 : 0.6; };
                 const sc = sites.filter(t => now - (vis[t.o.x + ',' + t.o.y] || -1e9) > 60 * 360).map(t => ({ t, v: t.w * ahead(t.o) * (0.5 + Math.random()) / (1 + Math.hypot(t.o.x - e.x, t.o.y - e.y) / 9000) })).sort((a, b) => b.v - a.v);
                 if (sc.length && Math.random() < 0.75) {
-                    const t = sc[0].t, q = t.o, a0 = Math.atan2(e.y - q.y, e.x - q.x) + (Math.random() - 0.5) * 2, off = 1300 + Math.random() * 600;
+                    const t = sc[0].t, q = t.o, a0 = Math.atan2(e.y - q.y, e.x - q.x) + (Math.random() - 0.5) * 2, takeIt = q.type === 'colony' || !q.type, off = takeIt ? 220 : 1300 + Math.random() * 600; // 第97弾: コロニー・ノードの見張りは占有できる距離で (旧: 1300〜1900u脇＝見張るだけで取らなかった)
                     vis[q.x + ',' + q.y] = now;
-                    const cv = findCoverSpot(q.x + Math.cos(a0) * off, q.y + Math.sin(a0) * off, 1200);
-                    goal = { x: cv ? cv.x : q.x + Math.cos(a0) * off, y: cv ? cv.y : q.y + Math.sin(a0) * off, lbl: (lm && ahead(q) > 1 ? '自機の向かう先らしい' : '') + t.lbl + 'の脇の' + (cv ? (cv.kind === 'fog' ? '霧' : '岩礁帯') : '暗がり'), site: { x: q.x, y: q.y }, lblS: t.lbl };
+                    const cv = takeIt ? null : findCoverSpot(q.x + Math.cos(a0) * off, q.y + Math.sin(a0) * off, 1200);
+                    goal = { nodeObj: !q.type ? q : null, x: cv ? cv.x : q.x + Math.cos(a0) * off, y: cv ? cv.y : q.y + Math.sin(a0) * off, lbl: (lm && ahead(q) > 1 ? '自機の向かう先らしい' : '') + t.lbl + 'の脇の' + (cv ? (cv.kind === 'fog' ? '霧' : '岩礁帯') : '暗がり'), site: { x: q.x, y: q.y }, lblS: t.lbl };
                 }
                 if (!goal) { const g = searchNext(e, e.x, e.y); if (g) goal = { x: g.x, y: g.y, lbl: 'まだ聴いていない海域' }; }
                 if (goal && Math.hypot(goal.x - e.x, goal.y - e.y) > 2500) {
@@ -15572,6 +15595,7 @@ function enemyHunterStep(e, heard, hard) {
         const dG = Math.hypot(H.goal.x - e.x, H.goal.y - e.y);
         if (H.ph === 'watch') { // 拠点の脇で機関を止めて見張る (相手が来たら狩人の頭脳が仕掛け方を選ぶ — 近づいてくれば待ち伏せ)
             e._drift(H.goal.site ? Math.atan2(H.goal.site.y - e.y, H.goal.site.x - e.x) : null);
+            const nO = H.goal.nodeObj; if (nO && nO.owner !== 'enemy' && Math.hypot(nO.x - e.x, nO.y - e.y) < NODE_CAP_R) { e._commsF = now; if ((e._capT = (e._capT || 0) + 1) >= NODE_CAP_TIME) { enemyCaptureNode(e, nO); e._capT = 0; e.resourcePoints = (e.resourcePoints || 0) + 1; } } // 第97弾: 見張りながらノードを制圧 (EMが漏れる)
             if (now - H.watchF > H.watchT) { e._hunt = null; e._huntEndF = now - 60 * 40; e._huntCD = now + 300; say('【索敵行】' + Math.round(H.watchT / 60) + '秒見張った — 誰も来ない → 次の場所へ'); return false; }
             return true;
         }
@@ -17585,9 +17609,9 @@ function comPilotStep() {
         _comCMOff(); // 推定だけの間は測量の航路を引く (戦闘モードは見えている時だけ)
         const w = currentWeapon(), sa = _signalAnalysis[enemySid(te)];
         const lm = sa && sa.misses && sa.misses[sa.misses.length - 1], lo = sa && sa.obs[sa.obs.length - 1];
-        const hc = assumedHitChance(te, w, lk);
+        const hc = comHitChance(te, w, lk, sa);
         let bw = w, bh = hc;
-        for (const w2 of ['beam', 'missile']) { if (!playerHasWeapon(w2)) continue; const h2 = assumedHitChance(te, w2, lk); if (h2 > bh + 0.15) { bw = w2; bh = h2; } }
+        for (const w2 of ['beam', 'missile']) { if (!playerHasWeapon(w2)) continue; const h2 = comHitChance(te, w2, lk, sa); if (h2 > bh + 0.15) { bw = w2; bh = h2; } }
         const no = sigNo(enemySid(te));
         if (lm && (!lo || lo.f < lm.f + 90)) held = 'SIG-' + no + ' 推定点は外れた → 新しい方位を取るまで撃たない';
         else if (bw !== w && bh >= fireThr) {
