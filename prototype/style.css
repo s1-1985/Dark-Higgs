@@ -2891,3 +2891,19 @@ body.prp-epov #hud-left, body.prp-epov #status-strip, body.prp-epov #hud-top { b
 body.play-replay #band-tuner, body.play-replay #ss-cp { pointer-events: none; }
 body.prp-epov #combat-bar, body.prp-epov #recenter-chip { display: none !important; }
 body.play-replay #zoom-ctl #zoom-stack { flex-wrap: wrap-reverse; max-height: calc(100vh - var(--hud-top) - 80px); align-content: flex-end; flex-direction: column; }
+
+/* ═══ 第90弾 ═══ */
+/* ソナーの種類: 選んだ時に中の文字が消えていた (箱と文字が同じ色 currentColor になっていた) */
+.sonar-band-btn[data-band="heat"] { --sbc: #ffa03c; } .sonar-band-btn[data-band="optic"] { --sbc: #3cffb4; } .sonar-band-btn[data-band="em"] { --sbc: #e664ff; } .sonar-band-btn[data-band="higgs"] { --sbc: #3cf0ff; }
+.sonar-band-btn.on .sb-mark { background: var(--sbc) !important; color: #02130e !important; border-color: var(--sbc) !important; }
+/* 自艦の放射のバーは帯域のON/OFFに関係なく濃く (OFFで薄くするのは受信の方だけ) */
+.band-btn.off { opacity: 1 !important; }
+.band-btn.off .bt-label, .band-btn.off .bt-bar { opacity: 0.5; }
+.band-btn .bt-tx-fill { opacity: 1 !important; }
+/* 機関: エンジン (橙・上) と 配分の重点 (青・下) を色で分ける */
+.eng-btn { color: #ffb36b !important; border-color: rgba(255,160,70,0.45) !important; background: rgba(40,18,4,0.6) !important; }
+.eng-btn.active { color: #1a0a00 !important; background: linear-gradient(#ffc380, #ff9a3c) !important; border-color: #ffd09a !important; box-shadow: 0 0 8px rgba(255,150,60,0.6); }
+.focus-btn, #btn-focus-mt { color: #8fd0ff !important; border-color: rgba(100,180,255,0.4) !important; background: rgba(4,16,34,0.6) !important; }
+.focus-btn.active { color: #021428 !important; background: linear-gradient(#a8dcff, #5fb0ff) !important; border-color: #cfeaff !important; box-shadow: 0 0 8px rgba(90,170,255,0.6); }
+.focus-btn.active .fx-mark { border-color: #021428; }
+#action-popover .eng-btn + .focus-btn, #action-popover #btn-focus-balance { margin-top: 0; }

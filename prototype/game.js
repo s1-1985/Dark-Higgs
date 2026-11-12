@@ -1790,6 +1790,29 @@ function _amoebaPath(ctx, pts) {
     ctx.closePath();
 }
 
+// 第90弾: 霧の板 (画面より小さい解像度・最大1024px) — 全面を霧で塗り、穴 (中心と方向ごとの届く距離) を縁から内側へ段々と消す
+let _fogCv = null, _fogCx = null;
+const FOG_HOLE_LAYERS = [[1.08, 0.18], [1.0, 0.38], [0.93, 0.5], [0.85, 0.65], [0.74, 1]]; // [半径の倍率, 消す強さ] — 縁の外側わずかに薄く・内側へ段々と晴れる
+function drawFogHoles(ctx, holes, fogCol, fogAlpha) {
+    const sc = Math.min(1, 1024 / Math.max(1, cssW)), w = Math.max(1, Math.ceil(cssW * sc)), h = Math.max(1, Math.ceil(cssH * sc));
+    if (!_fogCv) { _fogCv = document.createElement('canvas'); _fogCx = _fogCv.getContext('2d'); }
+    if (_fogCv.width !== w || _fogCv.height !== h) { _fogCv.width = w; _fogCv.height = h; }
+    const fc = _fogCx, z = camera.zoom * sc;
+    fc.setTransform(1, 0, 0, 1, 0, 0); fc.globalCompositeOperation = 'source-over'; fc.globalAlpha = 1; fc.clearRect(0, 0, w, h);
+    fc.fillStyle = fogCol; fc.globalAlpha = fogAlpha; fc.fillRect(0, 0, w, h);
+    fc.setTransform(z, 0, 0, z, -camera.x * z, -camera.y * z);
+    fc.globalCompositeOperation = 'destination-out'; fc.fillStyle = '#000';
+    for (const [k, a] of FOG_HOLE_LAYERS) {
+        fc.globalAlpha = a;
+        for (const H of holes) {
+            fc.beginPath();
+            for (let i = 0; i < H.n; i++) { const an = i / H.n * Math.PI * 2, r = Math.max(10, H.r[i]) * k, x = H.x + Math.cos(an) * r, y = H.y + Math.sin(an) * r; if (i) fc.lineTo(x, y); else fc.moveTo(x, y); }
+            fc.closePath(); fc.fill();
+        }
+    }
+    fc.globalCompositeOperation = 'source-over'; fc.globalAlpha = 1;
+    ctx.save(); ctx.setTransform(_dpr, 0, 0, _dpr, 0, 0); ctx.imageSmoothingEnabled = true; ctx.drawImage(_fogCv, 0, 0, cssW, cssH); ctx.restore();
+}
 function drawFogOfWar(ctx) {
     if (!player || player.hp <= 0) return;
     if (higgsViewOff) return; // ヒッグス表示OFF: 暗幕を描かない (見た目だけ)
@@ -1815,27 +1838,15 @@ function drawFogOfWar(ctx) {
     const mh = vh + 1000;
 
     const pts   = getAmoebaPoints(cx, cy, playerVisionRadius, NUM_PTS, t);
-    const ptsM  = getAmoebaPoints(cx, cy, playerVisionRadius, NUM_PTS, t, 1.06);
-    const ptsO  = getAmoebaPoints(cx, cy, playerVisionRadius, NUM_PTS, t, 1.12);
-
-    // ── アメーバ穴付きフォグ (even-odd)。第16弾: 縁の内側は一切暗くしない — ぼかしは縁の外側だけ ──
+    // 第90弾 (オーナー): 霧は縮小した別の板に描き、見える範囲を「縁ほど薄く」消す (縁の内側が段々と暗くなる)。通信のあるドローンの有視界も同じようにはっきり抜く
+    const holes = [{ x: cx, y: cy, r: _visRays, n: VIS_RAYS }];
+    for (const d of playerDrones) if (d.hp > 0 && d._visPts && d._q >= DRONE_LINK_WEAK) holes.push({ x: d.x, y: d.y, r: d._visPts, n: 24 });
+    drawFogHoles(ctx, holes, fogCol, fogAlpha);
     ctx.save();
-    ctx.fillStyle = fogCol;
-    ctx.globalAlpha = fogAlpha;
-    ctx.beginPath();
-    ctx.moveTo(mx, my); ctx.lineTo(mx + mw, my); ctx.lineTo(mx + mw, my + mh); ctx.lineTo(mx, my + mh); ctx.closePath();
-    _amoebaPath(ctx, ptsO);
-    ctx.fill('evenodd');
-    ctx.globalAlpha = fogAlpha * 0.65;
-    ctx.beginPath(); _amoebaPath(ctx, ptsO); _amoebaPath(ctx, ptsM); ctx.fill('evenodd');
-    ctx.globalAlpha = fogAlpha * 0.3;
-    ctx.beginPath(); _amoebaPath(ctx, ptsM); _amoebaPath(ctx, pts); ctx.fill('evenodd');
-
-    // ── 視界の縁 (この線の内側に入った敵は100%見える) ──
     ctx.beginPath(); _amoebaPath(ctx, pts);
     ctx.strokeStyle = '#00ffb4';
-    ctx.globalAlpha = 0.22 + hHere * 0.1;
-    ctx.lineWidth = 1.4 / camera.zoom;
+    ctx.globalAlpha = 0.10 + hHere * 0.06;
+    ctx.lineWidth = 1 / camera.zoom;
     ctx.stroke();
     ctx.globalAlpha = 1;
     ctx.restore();
@@ -7020,8 +7031,8 @@ function _applyGenMT() {
 }
 // ═══ 第59弾 (オーナー): AIの解析力をその場で調整 — 帯域バーの右隣のトグル。低 → 標準 → 高 → 最大 (MT の AI ゲイン 0.5/1/1.5/2) ═══
 //   高いほど 解析・識別が速い (×1.4まで)・助言が速く細かい・視界外の命中の観測が正確。代わりに演算の電磁波・熱が漏れる (ゲイン²)。低いと漏れは減るが 解析が遅く 誤判断が増える
-const AI_LEVELS = [{ g: 0.5, jp: '低' }, { g: 1, jp: '標準' }, { g: 1.5, jp: '高' }, { g: 2, jp: '最大' }];
-function aiLevelIdx() { const r = genAlloc.ai / 50; let bi = 1, bd = 9; AI_LEVELS.forEach((l, i) => { const d = Math.abs(l.g - r); if (d < bd) { bd = d; bi = i; } }); return bi; }
+const AI_LEVELS = [{ g: 0.5, jp: '低' }, { g: 0.75, jp: 'やや低' }, { g: 1, jp: '標準' }, { g: 1.5, jp: '高' }, { g: 2, jp: '最大' }]; // 第90弾: 5段階
+function aiLevelIdx() { const r = genAlloc.ai / 50; let bi = 2, bd = 9; AI_LEVELS.forEach((l, i) => { const d = Math.abs(l.g - r); if (d < bd) { bd = d; bi = i; } }); return bi; }
 function cycleAiLevel() {
     const n = (aiLevelIdx() + 1) % AI_LEVELS.length;
     setGenMT('ai', AI_LEVELS[n].g);
@@ -7036,7 +7047,7 @@ function _syncAiBtn(force) {
     if (!force && key === _aiBtnLast) return; _aiBtnLast = key;
     b.querySelectorAll('.ai-seg i').forEach((e, k) => e.classList.toggle('on', k <= i));
     b.querySelector('.ai-val').textContent = AI_LEVELS[i].jp;
-    b.classList.toggle('hot', i >= 2); b.classList.toggle('low', i === 0);
+    b.classList.toggle('hot', i >= 3); b.classList.toggle('low', i <= 1);
 }
 document.getElementById('btn-ai-level')?.addEventListener('click', (e) => { e.stopPropagation(); if (!comDemo) cycleAiLevel(); });
 function _syncMTPanel() {
@@ -9221,6 +9232,7 @@ function fakeCacheBlast(f, victim) {
 //   ⚠️ 敵側が自機のドローンをハックする処理は未実装 (自機側だけ)
 const HACK_RANGE1 = 5000, HACK_RANGE2 = 3000, HACK_NEED = { fighter: 600, mech: 1200 }, HACK_LINE_LIFE = 900;
 let _hack = null, _hackUntil = 0, _hackLvKey = '';
+let droneHackMode = false, droneHackPick = null, _droneHackCands = []; // 第90弾: ドローンへの侵入 (全周囲の侵入波・候補をタップで選ぶ)
 // 2026-11-11 (オーナー「敵もハックを同じに・基準はコロニーの数で説明したが、性格には演算力の数値で」): 判定は **演算力の数値** — コロニー数・解析コア・解析重視の合計 H で比べる (自機も敵も同じ式 `hackPower`)。
 //   H = (1 + 0.6×占有コロニー数 (上限なし) + 解析コアなどの部品) × (解析重視なら ×1.2)。しきい値 (戦闘機 第1=2.6・第2=2.8 / Tech 第1=3.3・第2=3.4) は、コロニー数で言うと
 //   戦闘機: 2つ+解析重視(2.64)で第1・3つ(2.8)で第2 / Tech: 3つ+解析重視(3.36)で第1・4つ(3.4)で第2 になる値。解析コアなど部品でも届く
@@ -9243,7 +9255,7 @@ function updateHack() {
         _hackLvKey = String(key);
     }
     if (!lf.s1 && !lm.s1) { _hack = null; return; }
-    const now = _frameCount; let best = null, bd = Infinity;
+    const now = _frameCount; let best = null, bd = Infinity; const cands = [];
     for (const e of enemies) {
         if (!_hackable(e)) continue;
         const d = Math.hypot(e.x - player.x, e.y - player.y); if (d > HACK_RANGE1) continue;
@@ -9259,8 +9271,12 @@ function updateHack() {
             logMessage('AI: 敵の' + (kind === 'mech' ? 'Tech' : '戦闘機') + 'の通信をハック — 発進元は方位' + deg + '° (誤差±' + Math.round(sig * 57.3) + '°)。その先に母艦が居る', 'system-msg');
             matchRecEvent('hack1', e.x, e.y, '敵ドローンをハック (第1段階): 発進元の方位' + deg + '°');
         }
-        if (L.s2 && d < HACK_RANGE2 && d < bd) { bd = d; best = e; }
+        if (L.s2 && d < HACK_RANGE2 && hackLinkStrength(player, e, HACK_RANGE2) > 0) { cands.push(e); if (d < bd) { bd = d; best = e; } } // 第90弾: 濃いヒッグスの中のドローン/自艦は侵入できない
     }
+    _droneHackCands = cands;
+    // 第90弾 (オーナー「くるくる回る戦闘機に指向性を当てるのは難しい」): ドローンへの侵入は自艦の周りへの全周囲の侵入波 — 候補が複数なら地図でタップして選ぶ (COMは Tech→近い順で自動)
+    if (comDemo) best = cands.find(q => q._kind === 'mech') || best;
+    else { if (droneHackPick && !cands.includes(droneHackPick)) droneHackPick = null; best = droneHackPick; }
     if (best) {
         const kind = best._kind === 'mech' ? 'mech' : 'fighter';
         if (_hack && _hack.e === best) _hack.p += 30; else { _hack = { e: best, p: 0, need: HACK_NEED[kind], kind }; logMessage('AI: 敵の' + (kind === 'mech' ? 'Tech' : '戦闘機') + 'へ侵入開始 — ' + Math.round(_hack.need / 60) + '秒 (その間は通信のEMが漏れる)', 'system-msg'); }
@@ -9303,7 +9319,7 @@ function enemyHackStep(e) {
             comThinkEvent('e', '自機の' + (kind === 'mech' ? 'Tech' : '戦闘機') + 'の通信をハック — 発進元の方位を得た (誤差±' + Math.round(sig * 57.3) + '°)', 'e' + e.uid);
             matchRecEvent('hackE1', d.x, d.y, '敵が自機ドローンをハック (第1段階)');
         }
-        if (S.s2 && dist < HACK_RANGE2 && dist < bd) { bd = dist; best = d; bk = kind; }
+        if (S.s2 && dist < HACK_RANGE2 && hackLinkStrength(e, d, HACK_RANGE2) > 0 && (dist < bd || (kind === 'mech' && bk !== 'mech'))) { bd = dist; best = d; bk = kind; } // 第90弾: 濃いヒッグスの中は届かない・Techを先に (自機COMと同じ選び方)
     }
     if (best) {
         if (e._hack && e._hack.d === best) e._hack.p += 30; else { e._hack = { d: best, p: 0, need: HACK_NEED[bk], kind: bk }; comThinkEvent('e', '自機の' + (bk === 'mech' ? 'Tech' : '戦闘機') + 'へ侵入開始 (' + Math.round(HACK_NEED[bk] / 60) + '秒)', 'e' + e.uid); }
@@ -9355,7 +9371,7 @@ function fireHackPulse(att, angle, effect) {
     sfxUI('ui_select');
     const targets = isP ? enemies.filter(e => e.hp > 0 && !e._dying && e.type !== 'fighter') : (player && player.hp > 0 ? [player] : []);
     let hit = null, bd = Infinity;
-    for (const t of targets) { const d = Math.hypot(t.x - A.x, t.y - A.y); if (d > range) continue; if (Math.abs(_angDiff(Math.atan2(t.y - A.y, t.x - A.x), angle)) > HACK_PULSE_HALF) continue; if (d < bd) { bd = d; hit = t; } }
+    for (const t of targets) { const d = Math.hypot(t.x - A.x, t.y - A.y); if (d > range) continue; if (Math.abs(_angDiff(Math.atan2(t.y - A.y, t.x - A.x), angle)) > HACK_PULSE_HALF) continue; if (hackLinkStrength(A, t, range) <= 0) continue; if (d < bd) { bd = d; hit = t; } } // 第90弾: 濃いヒッグスの中・霧で届かない相手には当たらない
     if (isP) matchRecEvent('hackPulseP', A.x, A.y, '自艦がハック波を発射 (' + E.jp + '・届く距離' + Math.round(range) + 'u・' + (hit ? '応答あり' : '外れ') + ')');
     else matchRecEvent('hackPulseE', A.x, A.y, '敵がハック波を発射 (' + E.jp + ')');
     if (!hit) {
@@ -9395,7 +9411,8 @@ function _stepHackSess(S, att) {
     if (!A || A.hp <= 0 || A._dying) { if (att !== 'p') att._hackSess = null; else hackSessP = null; return; }
     if (!T || T.hp <= 0 || T._dying) { end('相手が沈んだ'); return; }
     const H = hackPower(att === 'p' ? 'player' : 'enemy', att === 'p' ? null : att);
-    if (Math.hypot(T.x - A.x, T.y - A.y) > hackPulseRange(H, A) * HACK_BREAK) { end('相手が遠くなりリンクが切れた'); return; }
+    S.link = hackLinkStrength(A, T, hackPulseRange(H, A) * HACK_BREAK); // 第90弾: 回線の強さ (距離と間の霧・どちらかが濃いヒッグスの中なら0)
+    if (S.link <= 0) { end(getHiggsIntensity(T.x, T.y) >= HIGGS_DENSE || getHiggsIntensity(A.x, A.y) >= HIGGS_DENSE ? '濃いヒッグスの中に入られ回線が切れた' : '相手が遠く (または霧の向こう) になり回線が切れた'); return; }
     if (T._linkGuard > now) { end('相手が断線パルスで回線を閉じた'); return; }
     S.p += gameSpeedFactor;
     if (S.p < S.need) return;
@@ -9465,7 +9482,30 @@ function selectHackWave(effect) {
     if (hackPending) { const H = hackPower('player'); logMessage('HACK: ハック波 (' + HACK_EFFECTS[effect].jp + ') — 地図で方向をタップ (届く距離' + Math.round(hackPulseRange(H)) + 'u・半角±8°・外れても電磁波が出る)', 'system-msg'); }
     sfxUI('ui_select');
 }
+function selectDroneHack() {
+    if (!player || player.hp <= 0 || comDemo || playReplay) return;
+    const lf = hackLevel('fighter');
+    if (!lf.s2) { logMessage('HACK: ドローンへ侵入するには演算力' + HACK_THR.fighter.s2 + '以上が要る (今' + (Math.round(lf.H * 10) / 10) + ')。下の「演算力」をタップで内訳', 'warning-msg'); return; }
+    const c = _droneHackCands;
+    if (droneHackMode && c.length) { droneHackPick = c.find(q => q._kind === 'mech') || c.slice().sort((a, b) => Math.hypot(a.x - player.x, a.y - player.y) - Math.hypot(b.x - player.x, b.y - player.y))[0]; droneHackMode = false; logMessage('HACK: ドローン侵入 — 自動で選んだ (' + (droneHackPick._kind === 'mech' ? 'Tech' : '戦闘機') + '・' + Math.round(Math.hypot(droneHackPick.x - player.x, droneHackPick.y - player.y)) + 'u)', 'system-msg'); }
+    else if (!c.length) { droneHackMode = false; logMessage('HACK: 周り' + HACK_RANGE2 + 'u に侵入できる敵のドローンが見えていない (濃いヒッグスの中は届かない)', 'warning-msg'); }
+    else if (c.length === 1) { droneHackPick = c[0]; droneHackMode = false; logMessage('HACK: ドローン侵入 — ' + (c[0]._kind === 'mech' ? 'Tech' : '戦闘機') + 'へ (離れる/濃い霧に入られると切れる)', 'system-msg'); }
+    else { droneHackMode = true; logMessage('HACK: ドローン侵入 — 地図の候補 (' + c.length + '機・番号つき) をタップして選ぶ。もう一度押すと自動 (Tech→近い順)', 'system-msg'); }
+    document.getElementById('btn-hackw-drone')?.classList.toggle('pending-fire', droneHackMode);
+    sfxUI('ui_select');
+}
+function tryPickDroneHack(wx, wy) {
+    if (!droneHackMode) return false;
+    const r = 60 / camera.zoom; let best = null, bd = r;
+    for (const e of _droneHackCands) { const d = Math.hypot(e.x - wx, e.y - wy); if (d < bd) { bd = d; best = e; } }
+    if (!best) return false;
+    droneHackPick = best; droneHackMode = false; document.getElementById('btn-hackw-drone')?.classList.remove('pending-fire');
+    logMessage('HACK: ドローン侵入 — ' + (best._kind === 'mech' ? 'Tech' : '戦闘機') + 'を選んだ', 'system-msg'); sfxUI('ui_select');
+    return true;
+}
+document.getElementById('btn-hackw-drone')?.addEventListener('click', (e) => { e.stopPropagation(); selectDroneHack(); });
 function tryFireHackPending(wx, wy) {
+    if (tryPickDroneHack(wx, wy)) return true;
     if (!hackPending || !player || player.hp <= 0) return false;
     const eff = hackPending; hackPending = null;
     document.querySelectorAll('.hackw-btn').forEach(b => b.classList.remove('pending-fire'));
@@ -9484,8 +9524,73 @@ function lpmSelectHack(effect) {
     logMessage('HACK: ハック波を発射 — 方位' + compassDeg(Math.atan2(_lpmWorld.y - player.y, _lpmWorld.x - player.x)) + '° (' + HACK_EFFECTS[effect].jp + '・演算力' + (Math.round(H * 10) / 10) + '・届く距離' + Math.round(hackPulseRange(H)) + 'u)', 'system-msg');
     fireHackPulse('p', Math.atan2(_lpmWorld.y - player.y, _lpmWorld.x - player.x), effect);
 }
+// ═══ 第90弾 (オーナー): 画面の警告の演出 — ハックで侵入されている間のノイズ / ミサイル接近 / ビームの高エネルギー反応 ═══ (描画だけ・乱数は描画用)
+function drawAlertFx(ctx) {
+    if (!player || player.hp <= 0) return;
+    const W = cssW, Hh = cssH, now = performance.now() / 1000, R = _nativeRandom, ins = uiInsets();
+    const L = ins.left, T = ins.top, Rr = W - ins.right, B = Hh;
+    ctx.save();
+    // ── 侵入されている: 走査線・横ずれの帯・色の欠片。進むほど強く ──
+    const S = (enemies.find(e => e._hackSess && e._hackSess.tgt === player) || {})._hackSess;
+    if (S) {
+        const u = Math.min(1, S.p / S.need), k = 0.25 + 0.6 * u;
+        ctx.globalAlpha = 0.08 + 0.1 * k; ctx.fillStyle = '#ff2a6a';
+        for (let y = T + ((now * 90) % 4); y < B; y += 4) ctx.fillRect(L, y, Rr - L, 1);
+        const nb = Math.round(3 + 10 * k);
+        for (let i = 0; i < nb; i++) { const y = T + R() * (B - T), h = 2 + R() * 10 * k, x = L + R() * (Rr - L) * 0.6, w = 40 + R() * (Rr - L) * 0.5;
+            ctx.globalAlpha = 0.12 + 0.3 * k * R(); ctx.fillStyle = R() < 0.5 ? '#ff3fd0' : '#3cf0ff'; ctx.fillRect(x, y, w, h); }
+        if (R() < 0.15 * k) { ctx.globalAlpha = 0.06 + 0.1 * k; ctx.fillStyle = '#ffffff'; ctx.fillRect(L, T, Rr - L, B - T); }
+        // 警告の箱 (何をすれば切れるか)
+        const A = S.att, deg = A ? compassDeg(Math.atan2(A.y - player.y, A.x - player.x)) : null, link = Math.round((S.link ?? 1) * 100);
+        const lines = ['⚠ 侵入されている ' + Math.round(u * 100) + '% — ' + (HACK_EFFECTS[S.effect] || {}).jp + ' (約' + Math.max(0, Math.ceil((S.need - S.p) / 60)) + '秒)', '回線の強さ ' + link + '%' + (deg !== null ? '・方位' + deg + '°から' : ''), '切る: 濃いヒッグス(70%以上)に入る / 離れて回線を0に / 断線パルス'];
+        const bw = Math.min(460, Rr - L - 20), bx = L + (Rr - L - bw) / 2, by = T + 12 + (THREATS.some(t => t.kind === 'beam') ? 30 : 0);
+        ctx.globalAlpha = 0.88; ctx.fillStyle = 'rgba(40,0,20,0.9)'; ctx.fillRect(bx, by, bw, 58); ctx.strokeStyle = '#ff3fd0'; ctx.lineWidth = 1.5; ctx.strokeRect(bx, by, bw, 58);
+        ctx.fillStyle = 'rgba(255,63,208,0.85)'; ctx.fillRect(bx, by + 56, bw * (1 - u), 2);
+        ctx.globalAlpha = 1; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+        ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = '#ffd0f0'; ctx.fillText(lines[0], bx + 8 + (R() < 0.1 * k ? 3 : 0), by + 5);
+        ctx.font = '11px sans-serif'; ctx.fillStyle = '#ffb0e0'; ctx.fillText(lines[1], bx + 8, by + 22); ctx.fillStyle = '#e8c8ff'; ctx.fillText(lines[2], bx + 8, by + 38);
+    }
+    // ── ミサイル接近: その方向の画面の縁が赤く脈打ち、矢印と文字 ──
+    const cx = (L + Rr) / 2, cy = (T + B) / 2;
+    for (const t of THREATS) {
+        if (t.kind !== 'msl') continue;
+        const a = t.ang + (t.jit || 0), pulse = 0.5 + 0.5 * Math.sin(now * 14);
+        const dx = Math.cos(a), dy = Math.sin(a), sx = dx > 0 ? (Rr - 18 - cx) / dx : (L + 18 - cx) / dx, sy = dy > 0 ? (B - 18 - cy) / dy : (T + 18 - cy) / dy, sc = Math.min(Math.abs(sx), Math.abs(sy));
+        const ex = cx + dx * sc, ey = cy + dy * sc;
+        const g = ctx.createRadialGradient(ex, ey, 0, ex, ey, 160); g.addColorStop(0, 'rgba(255,40,40,' + (0.35 + 0.3 * pulse) + ')'); g.addColorStop(1, 'rgba(255,40,40,0)');
+        ctx.globalAlpha = 1; ctx.fillStyle = g; ctx.fillRect(ex - 160, ey - 160, 320, 320);
+        ctx.save(); ctx.translate(ex - dx * 18, ey - dy * 18); ctx.rotate(a); ctx.fillStyle = '#ff4040'; ctx.globalAlpha = 0.7 + 0.3 * pulse;
+        ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(-8, -11); ctx.lineTo(-3, 0); ctx.lineTo(-8, 11); ctx.closePath(); ctx.fill(); ctx.restore();
+        ctx.globalAlpha = 0.95; ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = '#ffd0d0'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('ミサイル接近 ' + compassDeg(a) + '°', Math.max(L + 70, Math.min(Rr - 70, ex - dx * 54)), Math.max(T + 14, Math.min(B - 14, ey - dy * 40)));
+    }
+    // ── ビームの高エネルギー反応: 画面の縁全体が紫に脈打ち、上に帯 ──
+    const bt = THREATS.find(t => t.kind === 'beam');
+    if (bt) {
+        const pulse = 0.5 + 0.5 * Math.sin(now * 9), lw = 10 + 8 * pulse;
+        ctx.globalAlpha = 0.25 + 0.35 * pulse; ctx.strokeStyle = '#c86bff'; ctx.lineWidth = lw; ctx.strokeRect(L + lw / 2, T + lw / 2, Rr - L - lw, B - T - lw);
+        ctx.globalAlpha = 0.92; const tx = '⚡ 高エネルギー反応 — ' + (bt.txt ? bt.txt.replace(/^.*?(距離)/, '$1') : 'ビームのチャージの疑い');
+        ctx.font = 'bold 12px sans-serif'; const tw = ctx.measureText(tx).width + 20, bx = (L + Rr) / 2 - tw / 2, by = T + 10;
+        ctx.fillStyle = 'rgba(30,6,48,0.9)'; ctx.fillRect(bx, by, tw, 22); ctx.strokeStyle = '#c86bff'; ctx.lineWidth = 1; ctx.strokeRect(bx, by, tw, 22);
+        ctx.fillStyle = '#ecd2ff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(tx, (L + Rr) / 2, by + 11);
+    }
+    ctx.restore();
+}
 function drawHackFx(ctx) {
     const inv = 1 / camera.zoom;
+    // 第90弾: 撃つ側は「どこまで届くか」を見て撃つ — ハック波を選んでいる間は届く距離の円 (霧の向こう・濃いヒッグスの中には届かない)
+    if (hackPending && player && player.hp > 0) {
+        const R = hackPulseRange(hackPower('player'), player);
+        ctx.save(); ctx.strokeStyle = '#ff66cc'; ctx.globalAlpha = 0.75; ctx.lineWidth = 1.6 * inv; ctx.setLineDash([12 * inv, 10 * inv]);
+        ctx.beginPath(); ctx.arc(player.x, player.y, R, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); ctx.restore();
+        queueTag(player.x, player.y - R, 'ハック波 届く距離 ' + Math.round(R / 100) * 100 + 'u', '霧が濃いほど縮む・濃いヒッグス(70%)の中には届かない', '255,102,204', 'top', 1);
+    }
+    if (_droneHackCands.length && player && player.hp > 0 && (droneHackMode || !droneHackPick)) { // ドローン侵入の候補 (番号)
+        ctx.save(); ctx.strokeStyle = '#ff66cc'; ctx.globalAlpha = droneHackMode ? 0.7 : 0.3; ctx.lineWidth = 1.2 * inv; ctx.setLineDash([6 * inv, 8 * inv]);
+        ctx.beginPath(); ctx.arc(player.x, player.y, HACK_RANGE2, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+        _droneHackCands.forEach((e, i) => { const R = Math.max(50, 18 * inv); ctx.globalAlpha = droneHackMode ? 0.95 : 0.45; ctx.beginPath(); ctx.arc(e.x, e.y, R, 0, Math.PI * 2); ctx.stroke(); if (droneHackMode) queueTag(e.x, e.y - R, String(i + 1), e._kind === 'mech' ? 'Tech' : '戦闘機', '255,102,204', 'top', 1); });
+        ctx.restore();
+    }
     for (const d of playerDrones) { // 敵に侵入されているドローン: 赤い輪が侵入の進みを示す
         const U = d._underHack; if (!U || _frameCount > U.until || d.hp <= 0) continue;
         const R = Math.max(70, 22 * inv);
@@ -9498,7 +9603,7 @@ function drawHackFx(ctx) {
         const t = hackSessP.tgt, R = Math.max(110, 26 * inv), u = Math.min(1, hackSessP.p / hackSessP.need);
         ctx.save(); ctx.strokeStyle = '#66ddff'; ctx.lineWidth = 2.4 * inv; ctx.globalAlpha = 0.9;
         ctx.beginPath(); ctx.arc(t.x, t.y, R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * u); ctx.stroke(); ctx.restore();
-        queueTag(t.x, t.y - R, 'HACK ' + Math.round(u * 100) + '%', HACK_EFFECTS[hackSessP.effect].jp, '102,221,255', 'top', 1);
+        queueTag(t.x, t.y - R, 'HACK ' + Math.round(u * 100) + '%', HACK_EFFECTS[hackSessP.effect].jp + '・回線' + Math.round((hackSessP.link ?? 1) * 100) + '%', '102,221,255', 'top', 1);
     }
     for (const e of enemies) { // 第1段階の方角の線 (発進元の方へ)
         const L = e._hkLine; if (!L || _frameCount > L.until || e.hp <= 0) continue;
@@ -9780,8 +9885,8 @@ function drawDroneVision(ctx) {
         ctx.beginPath();
         for (let k = 0; k < 24; k++) { const a = k / 24 * Math.PI * 2, r = pts[k]; const x = d.x + Math.cos(a) * r, y = d.y + Math.sin(a) * r; if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
         ctx.closePath();
-        ctx.globalAlpha = linked ? 0.07 : 0.03; ctx.fillStyle = 'rgb(' + col + ')'; ctx.fill();
-        ctx.globalAlpha = linked ? 0.5 : 0.2; ctx.strokeStyle = 'rgb(' + col + ')'; ctx.stroke();
+        if (!linked) { ctx.globalAlpha = 0.03; ctx.fillStyle = 'rgb(' + col + ')'; ctx.fill(); } // 第90弾: 通信のあるドローンの有視界は霧を抜く (drawFogHoles) — ここは縁だけ
+        ctx.globalAlpha = linked ? 0.22 : 0.2; ctx.strokeStyle = 'rgb(' + col + ')'; ctx.stroke();
     }
     ctx.restore();
 }
@@ -10636,7 +10741,7 @@ function pingHeardBy(range, dirAng, halfAngle, sideRange) {
             while (df < -Math.PI) df += Math.PI * 2; while (df > Math.PI) df -= Math.PI * 2;
             if (Math.abs(df) > halfAngle) lim = sideRange;
         }
-        if (d > lim) continue;
+        if (d > lim || !sonarReaches(player.x, player.y, e.x, e.y, lim)) continue; // 第90弾: 濃いヒッグスの中の相手には届かない
         e._pingHeardF = _frameCount;
         // 第50弾 (オーナー): 全周囲ソナーは聞こえても正確な方角は分からない (大きな誤差・敵には「探信された」ことだけ確か)。指向性を照射方向の内で受けた時だけ発信元の方角が分かる
         const directional = dirAng !== null && dirAng !== undefined && lim === range;
@@ -10701,17 +10806,25 @@ function comSonarBand(c) { // 自機COM: 相手を最近聞いた帯域 / 無け
 }
 function sonarNeedBand() { logMessage('SONAR: ソナーの種類 (熱源・光・電磁波・ヒッグス) を選んでから打つ — 索敵のポップオーバーで選ぶ', 'warning-msg'); const g = document.getElementById('action-popover'); if (g) { g.classList.add('shake'); setTimeout(() => g.classList.remove('shake'), 500); } sfxUI('ui_error'); }
 // 第74弾 (オーナー): ソナーもヒッグスの霧に遮られる — 経路の平均の濃さで届く距離が縮み、目標のいる場所が濃い雲 (SONAR_FOG_BLOCK以上) の中なら反射が埋もれて映らない (100%の雲の中は見えない)。自艦も敵も同じ
-const SONAR_FOG_PATH = 0.85, SONAR_FOG_BLOCK = 0.9;
+const SONAR_FOG_PATH = 0.85, SONAR_FOG_BLOCK = 0.7; // 第90弾 (オーナー): 濃いヒッグス (70%以上) の中には ソナーもハックも届かない (旧 90%)
+const HIGGS_DENSE = 0.7; // 第90弾: 「濃いヒッグスの中」— ソナー・ハックの電波は 入って来ない/出て行かない (出す側は 出力×(1−濃さ))
 function sonarFog(x0, y0, x1, y1) {
     let sum = 0; const N = 8;
     for (let i = 1; i <= N; i++) sum += getHiggsIntensity(x0 + (x1 - x0) * i / N, y0 + (y1 - y0) * i / N);
-    return { mean: sum / N, end: getHiggsIntensity(x1, y1) };
+    return { mean: sum / N, end: getHiggsIntensity(x1, y1), start: getHiggsIntensity(x0, y0) };
 }
 // 届くか: 距離 ≤ 出力の半径 ×(1 − 経路の濃さ×0.85) かつ 目標の場所が濃い雲の外
 function sonarReaches(x0, y0, x1, y1, range) {
     const d = Math.hypot(x1 - x0, y1 - y0); if (d > range) return false;
     const f = sonarFog(x0, y0, x1, y1);
-    return f.end < SONAR_FOG_BLOCK && d <= range * (1 - SONAR_FOG_PATH * Math.min(1, f.mean));
+    return f.end < SONAR_FOG_BLOCK && d <= waveReach(range, f);
+}
+// 第90弾: 電波 (ソナー・ハック) の届く距離 = 出力 × (1 − 経路の濃さ×0.85) × (出す側が濃い霧の中なら 1 − 濃さ)。濃いヒッグス (70%以上) の中から出すと ほぼ届かない
+function waveReach(range, f) { return range * (1 - SONAR_FOG_PATH * Math.min(1, f.mean)) * (f.start >= HIGGS_DENSE ? Math.max(0, 1 - f.start) : 1); }
+// ハックの回線の強さ (0〜1): 0 で断線。距離が届く距離に近いほど・間の霧が濃いほど弱い。どちらかが濃いヒッグスの中なら 0
+function hackLinkStrength(A, T, range) {
+    const f = sonarFog(A.x, A.y, T.x, T.y); if (f.end >= HIGGS_DENSE || f.start >= HIGGS_DENSE) return 0;
+    const R = waveReach(range, f); return R > 0 ? Math.max(0, 1 - Math.hypot(T.x - A.x, T.y - A.y) / R) : 0;
 }
 function fireOmniSonar(power, band) {
     if (!player || player.hp <= 0) return;
@@ -14528,7 +14641,7 @@ function firePingFromEnemy(e) {
     const heardR = (_dir ? ENEMY_PING_RANGE : ENEMY_PING_RANGE) * SONAR_HEARD;
     const _inCone = _dir ? Math.abs(_angDiff(Math.atan2(player.y - e.y, player.x - e.x), _dir.ang)) <= _dir.half : true;
     const heardLim = _dir ? (_inCone ? heardR : ENEMY_PING_RANGE * SONAR_SIDE_LEAK) : heardR;
-    if (distP <= heardLim) {
+    if (distP <= heardLim && sonarReaches(e.x, e.y, player.x, player.y, heardLim)) { // 第90弾: 濃いヒッグスの中に居れば探信は届かない
     const ang = Math.atan2(e.y - player.y, e.x - player.x);
     const esid = enemySid(e);
     if (_dir && _inCone) {
@@ -14614,6 +14727,7 @@ function _thrPut(key, kind, ang, sd, conf, label, logText) {
         THREATS.push(t);
         if (logText && !_thrLogged[key]) { _thrLogged[key] = _frameCount; logMessage('WARN: 方位' + compassDeg(ang + t.jit) + '° ' + logText, 'warning-msg'); ringMarkBearing(compassDeg(ang + t.jit), kind === 'sig' ? '#ffcc66' : '#ff6a6a'); }
     }
+    if (logText) t.txt = logText; // 第90弾: 画面の警告に出す文
     if (_frameCount > t.jf) { t.jit = _gauss() * sd; t.jf = _frameCount + 120; }
     const aim = ang + t.jit;
     if (t.kind !== kind || !t.shown) { t.ang = aim; t.shown = true; } else t.ang += _angDiff(aim, t.ang) * 0.3;
@@ -16682,6 +16796,7 @@ function prpEnemyHud() {
     const msl = projectiles.some(p => p.isPlayer && p.type === 'missile' && Math.hypot(p.x - e.x, p.y - e.y) < 2600);
     const ex = hitAgo < 480 || msl ? 3 : pingAgo < 900 || (e.detectionTimer || 0) > 60 ? 2 : heard ? 1 : 0;
     const ch = document.getElementById('hud-expo'), tx = document.getElementById('hud-expo-text');
+    if (playReplay) playReplay.ex = ex;
     if (ch && ch._pe !== ex) { ch._pe = ex; ch.className = 'expo-' + ex; if (tx) tx.textContent = _EXPO_E[ex]; _hudCache.expo = null; }
     const ai = enemyAiAdvice(e, { hitAgo, pingAgo, heard, msl });
     const xt = document.getElementById('xo-text'), xb = document.getElementById('xo-bar');
@@ -16733,15 +16848,8 @@ function prpSeesPt(e, x, y) {
 function prpDrawFog(ctx, e) {
     if (higgsViewOff) return;
     const r = prpEnemyRays(e), hHere = getHiggsIntensity(e.x, e.y), fogAlpha = 0.86 + hHere * 0.10, fogCol = hHere > 0.5 ? '#2c0406' : hHere > 0.2 ? '#22030a' : '#0e0103';
-    const vw = cssW / camera.zoom, vh = cssH / camera.zoom, mx = camera.x - 500, my = camera.y - 500, mw = vw + 1000, mh = vh + 1000;
-    const pts = k => { const o = []; for (let i = 0; i < VIS_RAYS; i++) { const a = i / VIS_RAYS * Math.PI * 2; o.push({ x: e.x + Math.cos(a) * r[i] * k, y: e.y + Math.sin(a) * r[i] * k }); } return o; };
-    const p0 = pts(1), pM = pts(1.06), pO = pts(1.12);
-    ctx.save(); ctx.fillStyle = fogCol; ctx.globalAlpha = fogAlpha;
-    ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(mx + mw, my); ctx.lineTo(mx + mw, my + mh); ctx.lineTo(mx, my + mh); ctx.closePath(); _amoebaPath(ctx, pO); ctx.fill('evenodd');
-    ctx.globalAlpha = fogAlpha * 0.65; ctx.beginPath(); _amoebaPath(ctx, pO); _amoebaPath(ctx, pM); ctx.fill('evenodd');
-    ctx.globalAlpha = fogAlpha * 0.3; ctx.beginPath(); _amoebaPath(ctx, pM); _amoebaPath(ctx, p0); ctx.fill('evenodd');
-    ctx.beginPath(); _amoebaPath(ctx, p0); ctx.strokeStyle = '#ff6a5a'; ctx.globalAlpha = 0.3; ctx.lineWidth = 1.4 / camera.zoom; ctx.stroke();
-    ctx.restore();
+    const holes = [{ x: e.x, y: e.y, r, n: VIS_RAYS }];
+    drawFogHoles(ctx, holes, fogCol, fogAlpha);
 }
 // 敵の席の重ね描き (霧の上): 方位の記録・推定円・作戦の目標・敵の周りのリング
 function prpDrawPovOverlay(ctx, e) {
@@ -16770,6 +16878,28 @@ function prpDrawPovOverlay(ctx, e) {
         ctx.beginPath(); ctx.arc(tg.x, tg.y, 26 * zc, 0, Math.PI * 2); ctx.stroke(); queueTag(tg.x, tg.y, '作戦「' + H.jp + '」の行き先', H.ph || '', '255,210,74', 't', 1); }
     if (H && H.B && (H.k === 'fakebox' || H.k === 'lure')) { ctx.globalAlpha = 0.9; ctx.strokeStyle = '#ff3fd0'; ctx.lineWidth = 2 * zc; ctx.strokeRect(H.B.x - 40 * zc, H.B.y - 40 * zc, 80 * zc, 80 * zc); queueTag(H.B.x, H.B.y, H.k === 'fakebox' ? '偽コンテナの置き場所' : '囮の置き場所', '', '255,63,208', 't', 1); }
     ctx.restore();
+}
+// 第90弾 (オーナー「敵の席のリングも自艦と同じ表示に」): 自艦のリング (drawShipRing) をそのまま使い、描く間だけ 自艦 → 敵 に差し替える
+//   脅威 = 敵が観測できる物 (自艦のミサイルの接近・自艦のビームのチャージ・自艦に見られて狙われている・直近に受けた方位) / 記録 = 敵の方位の記録 (e._sa)。描画だけ・終わったら全部戻す
+const _prpRingMarks = [], _prpHitDirs = [];
+function prpDrawShipRingAs(ctx, e) {
+    const now = _frameCount, TH = [];
+    const put = (key, kind, ang, sig, conf, label) => TH.push({ key, kind, ang, sig, conf, label, exp: now + 40, born: now - 20, jit: 0, jf: now + 999, shown: true });
+    for (const p of projectiles) if (p.isPlayer && p.type === 'missile' && Math.hypot(p.x - e.x, p.y - e.y) < 2600) put('m' + (p._id || 0), 'msl', Math.atan2(p.y - e.y, p.x - e.x), 0.08, 1, 'ミサイル');
+    if ((player._beamCharge || 0) > 0 && Math.hypot(player.x - e.x, player.y - e.y) < BEAM_CHARGE_WARN_R) put('b', 'beam', Math.atan2(player.y - e.y, player.x - e.x), 1.0, 0.5, '高エネルギー');
+    if (e.inVision && (player.targetEntity === e)) put('l', 'lock', Math.atan2(player.y - e.y, player.x - e.x), 0.05, 1, 'ロック');
+    if (e._sa && e._sa.obs) for (const o of e._sa.obs) if (now - o.f < 300) { put('s' + o.f, 'sig', Math.atan2(o.oy + Math.sin(o.ang) * 9000 - e.y, o.ox + Math.cos(o.ang) * 9000 - e.x), Math.min(0.6, o.sig || 0.05), 0.6, '信号'); if (TH.length > 7) break; }
+    const sv = { player, pb: passiveBearings, lk: lockedSignalId, sa: _signalAnalysis, hd: playerHitDirs, ex: playerExposureLevel, rm: _ringMarks, cg: cargo, th: THREATS.splice(0) };
+    try {
+        for (const t of TH) THREATS.push(t);
+        player = e; passiveBearings = []; _signalAnalysis = e._sa ? { 'E-view': e._sa } : {}; lockedSignalId = e._sa && (e._sa.fix || e._sa.ping) ? 'E-view' : null;
+        playerHitDirs = _prpHitDirs; playerExposureLevel = playReplay && playReplay.ex !== undefined ? playReplay.ex : 0; _ringMarks = _prpRingMarks; cargo = { stock: {}, mat: 0, asm: null, ammoK: 0, ammoM: 0 };
+        drawShipRing(ctx);
+    } catch (err) { /* 描画の失敗で試合を止めない */ }
+    finally {
+        player = sv.player; passiveBearings = sv.pb; lockedSignalId = sv.lk; _signalAnalysis = sv.sa; playerHitDirs = sv.hd; playerExposureLevel = sv.ex; _ringMarks = sv.rm; cargo = sv.cg;
+        THREATS.length = 0; for (const t of sv.th) THREATS.push(t);
+    }
 }
 // 敵の周りのリング (画面座標): 艦首・方位の目盛り・直近5秒に受けた方位 (帯域色)
 function prpDrawPovRing(ctx, e) {
@@ -18876,7 +19006,7 @@ function renderWorld() {
 
         drawHiggsMedium(ctx);
         flushTags(ctx); // 第40弾: 地図の名札 (画面座標でまとめて)
-        if (_pov) { prpDrawPovRing(ctx, _pov); drawScaleBar(ctx); } else drawHUDOverlay(ctx);
+        if (_pov) { prpDrawShipRingAs(ctx, _pov); drawScaleBar(ctx); } else { drawHUDOverlay(ctx); drawAlertFx(ctx); }
         if (playReplay) prpTick();
         if (_rfc % 3 === 0) drawMinimap(); // 第89弾: 描画の回数で数える (倍速では _frameCount が飛び、HUDがほとんど更新されなかった)
         if (_rfc % 10 === 0) updateEnvInfo();
