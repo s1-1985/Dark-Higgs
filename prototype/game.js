@@ -1,3 +1,6 @@
+// 描画・音・UIが使う乱数 (試合の再現に使う種つきの乱数とは別)
+const _nativeRandom = Math.random;
+let _inStep = false; // ロジック (stepWorld) の中か
 // Init canvas
 
 const canvas = document.getElementById('gameCanvas');
@@ -309,6 +312,7 @@ function pathAtten(pm, b) { let k = 1; for (const m in PATH_MEDIA) k *= 1 - Math
 function pathNoise(pm, b) { let k = 1; for (const m in PATH_MEDIA) k += (pm[m] || 0) * PATH_MEDIA[m].n[b]; return k; }
 // 経路は0.5秒・300u動くまで使い回す (発信源ごと・聴く側ごと)
 function pathMediaCached(src, key, sx, sy, rx, ry) {
+    if (!_inStep) return pathMedia(sx, sy, rx, ry); // 2026-11-11: 描画 (受信バー等) からは使わない・入れない — 描画の頻度で試合が変わらないように (同じ種で同じ試合)
     const c = src._pmc || (src._pmc = {});
     const e = c[key];
     if (e && _frameCount - e.f < 30 && Math.abs(e.sx - sx) + Math.abs(e.sy - sy) + Math.abs(e.rx - rx) + Math.abs(e.ry - ry) < 300) return e.v;
@@ -593,20 +597,20 @@ function _sfxInit() {
     _sfx = { bus, comp };
     _sfx.sbus = audioCtx.createGain(); _sfx.sbus.gain.value = 0.9; _sfx.sbus.connect(audioCtx.destination); // 第68弾: 効果音ファイル用 (圧縮器と残響を通さない — 尾は音源に含まれている)
     const len = audioCtx.sampleRate * 2, buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate), ch = buf.getChannelData(0);
-    let b0 = 0; for (let k = 0; k < len; k++) { const w = Math.random() * 2 - 1; b0 = 0.97 * b0 + 0.03 * w; ch[k] = w * 0.6 + b0 * 4; } // 白色+低域寄りのノイズ
+    let b0 = 0; for (let k = 0; k < len; k++) { const w = _nativeRandom() * 2 - 1; b0 = 0.97 * b0 + 0.03 * w; ch[k] = w * 0.6 + b0 * 4; } // 白色+低域寄りのノイズ
     _noiseBuf = buf;
     return _sfx;
 }
 // ノイズ+フィルタ+包絡線 (爆発・噴射・ビームの空気の音)
 function _sfxNoise(t0, dur, type, f0, f1, q, peak, att) {
     const src = audioCtx.createBufferSource(); src.buffer = _noiseBuf; src.loop = true;
-    src.playbackRate.value = 0.8 + Math.random() * 0.4;
+    src.playbackRate.value = 0.8 + _nativeRandom() * 0.4;
     const f = audioCtx.createBiquadFilter(); f.type = type; f.Q.value = q;
     f.frequency.setValueAtTime(f0, t0); f.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t0 + dur);
     const g = audioCtx.createGain();
     g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(peak, t0 + (att || 0.006)); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     src.connect(f); f.connect(g); g.connect(_sfx.bus);
-    src.start(t0, Math.random()); src.stop(t0 + dur + 0.05);
+    src.start(t0, _nativeRandom()); src.stop(t0 + dur + 0.05);
 }
 // 音程の変化する唸り(正弦/三角)+必要なら倍音
 function _sfxTone(t0, dur, wave, f0, f1, peak, att, detune) {
@@ -751,7 +755,7 @@ function sfx(id, vol, opt) {
     if (sfxVolume <= 0) return true;
     if (/^(sonar_|alm_|hit_player|expl_|det_impact)/.test(id)) bgmDuck(id.charAt(0)==='s' ? 2.5 : 1.8);
     let fi = 0;
-    if (e.f.length > 1) { fi = Math.floor(Math.random() * e.f.length); if (fi === _sfxLastIdx[id]) fi = (fi + 1) % e.f.length; }
+    if (e.f.length > 1) { fi = Math.floor(_nativeRandom() * e.f.length); if (fi === _sfxLastIdx[id]) fi = (fi + 1) % e.f.length; }
     const file = e.f[fi], buf = _sfxBufs[file];
     if (!buf) { _sfxFetch(e.f[0]); for (const f of e.f) _sfxFetch(f); return false; }
     if (!_sfxInit()) return false;
@@ -761,7 +765,7 @@ function sfx(id, vol, opt) {
     if (_sfxActive >= 28) return true;
     _sfxLastAt[id] = now; _sfxLastIdx[id] = fi;
     const src = audioCtx.createBufferSource(); src.buffer = buf;
-    if (!SFX_NOJIT.test(id) && !(opt && opt.nojit)) src.playbackRate.value = 1 + (Math.random() * 0.06 - 0.03); // 毎回同じに聞こえない (±3%)
+    if (!SFX_NOJIT.test(id) && !(opt && opt.nojit)) src.playbackRate.value = 1 + (_nativeRandom() * 0.06 - 0.03); // 毎回同じに聞こえない (±3%)
     const g = audioCtx.createGain(); g.gain.value = Math.max(0, Math.min(1.6, vol * sfxVolume * (SFX_GAIN[id] ?? 1)));
     src.connect(g); g.connect(_sfx.sbus);
     _sfxActive++; src.onended = () => { _sfxActive--; try { g.disconnect(); } catch (e2) {} };
@@ -780,7 +784,7 @@ function sfxLoop(id, on, vol) {
     if (audioCtx.state === 'suspended') audioCtx.resume();
     const src = audioCtx.createBufferSource(); src.buffer = buf; src.loop = true;
     const g = audioCtx.createGain(); g.gain.value = 0.0001; g.gain.setTargetAtTime(tv, now, 0.25);
-    src.connect(g); g.connect(_sfx.sbus); src.start(now, Math.random() * buf.duration * 0.5);
+    src.connect(g); g.connect(_sfx.sbus); src.start(now, _nativeRandom() * buf.duration * 0.5);
     _sfxLoops[id] = { src, g, on: true, offAt: 0 };
 }
 // 止めたループの片付け (毎秒)
@@ -948,7 +952,7 @@ function startAmbient() {
     const lg = audioCtx.createGain(); lg.gain.value = 0.016;
     lfo.connect(lg); lg.connect(master.gain);
     d1.start(); d2.start(); tn.start(); lfo.start();
-    _amb = { master, tensionGain: tg, lp, nodes: [d1, d2, tn, lfo], echoTimer: 900 + Math.random() * 1500 };
+    _amb = { master, tensionGain: tg, lp, nodes: [d1, d2, tn, lfo], echoTimer: 900 + _nativeRandom() * 1500 };
 }
 function stopAmbient() {
     if (!_amb) return;
@@ -1313,6 +1317,7 @@ const LOCK_PERSIST_BASE = 2.0; // ロック保持倍率 (visionRadius × N)
 
 // GEN配分 (ゼロサム: エンジン/武器/センサー/AI の合計=100)
 let genAlloc = { engine: 40, weapons: 30, sensors: 30, ai: 50 };
+let _comXoR = null;
 let _xoEvalF = -1e9, _xoLast = null; // 第39弾: AIの助言の間隔
 let _pfx = null, _pfxF = -1; const SYS_SENSOR_RX = 0.35; // 第39弾: 航行モードの効果のキャッシュ / センサー損傷の受信距離
 let genFocusKey = 'balance'; // 第39弾: 今の航行モード (最上部で宣言 — 初期化中の参照でTDZにならないよう)
@@ -4406,6 +4411,7 @@ class Ship {
 
             // 第39弾: 聴くのは自艦と同じく1秒ごと (直近1秒の最大値)。至近の直接探知 (見える) は毎フレーム
             const _listen = (_frameCount + this.uid * 13) % 60 === 0;
+            this._myDetR = myDetectRange; // プレイ画面のリプレイ (敵の席の霧)
             let playerSigDetected = false;
             let _hardDetect = false; // 至近の直接探知 (位置誤差ほぼ無し)
             let detectedSigStrength = 0, _hBand = null, _hNoise = 1, _hNb = 0;
@@ -4414,6 +4420,7 @@ class Ship {
             if (player && player.hp > 0) {
                 if (_listen && this.type !== 'fighter' || _listen && distToPlayer < 2500) {
                     const h = hearSource(player, 'e' + this.uid, this.x, this.y, player.x, player.y, b => sigToward(player, b, this.x, this.y), sigRange, enemyBands(this), bandGainE(this)); // 第21弾: 敵も聴いている帯域だけ / 第43弾: 感度
+                    { const lv = this._rxLv || (this._rxLv = {}); for (const b of BANDS) lv[b] = 0; hearLevels(player, 'e' + this.uid, this.x, this.y, player.x, player.y, b => sigToward(player, b, this.x, this.y), sigRange, lv, BANDS, bandGainE(this)); this._rxF = _frameCount; this._rxOn = enemyBands(this).slice(); this._rxBand = h ? h.band : null; this._sigRangeV = sigRange; } // 2026-11-11 (プレイ画面のリプレイ・敵の席): 敵が自艦の信号をどう受けていたか (帯域ごと・しきい値に対する比)
                     if (h) { playerSigDetected = true; detectedSigStrength = h.sig; domSig = h.band; _hBand = h.band; _hNoise = h.noise; _hNb = h.nb; this._heardBand = h.band; this._heardBandF = _frameCount; } // 第41弾: 聞こえた帯域 (帯域の選び方に使う)
                 }
                 // 接近探知 (デブリ擬態中は岩塊に紛れて至近でも掴めない — 至近を通過されてもやり過ごせる)
@@ -6669,7 +6676,7 @@ function startGame(shipType) {
     generateSector();
     if (!gameLoopRunning) {
         gameLoopRunning = true;
-        gameLoop();
+        requestAnimationFrame(gameLoop); // 2026-11-11: 出撃の処理の中で1歩進めない (どの入り方でも同じ試合になるように)
     }
     let _briefed = false;
     try { _briefed = localStorage.getItem('darkEchoBriefed') === '1'; } catch (e) {}
@@ -12663,7 +12670,7 @@ function cargoAssembling() { return !!(cargo.asm && !cargo.asm.ready); }
 function useEscapeItem(type, tx, ty) {
     if (!player || player.hp <= 0) return;
     if (type === 'flash') useFlash();
-    else if (type === 'noise') useNoise();
+    else if (type === 'noise') useNoise(tx !== undefined ? Math.atan2(ty - player.y, tx - player.x) : undefined);
     else if (type === 'smoke') useSmoke();
     else if (type === 'repair') {
         player._kitT = REPAIR_KIT_TIME;
@@ -12672,7 +12679,7 @@ function useEscapeItem(type, tx, ty) {
     }
     else if (type === 'fogspray') useFogSpray('p', player.x, player.y);
     else if (type === 'fakecache') {
-        const a = player.angle + Math.PI, f = placeFakeCache('p', player.x + Math.cos(a) * FAKE_BEHIND, player.y + Math.sin(a) * FAKE_BEHIND);
+        const a = player.angle + Math.PI, f = tx !== undefined ? placeFakeCache('p', tx, ty) : placeFakeCache('p', player.x + Math.cos(a) * FAKE_BEHIND, player.y + Math.sin(a) * FAKE_BEHIND); // 自機COMの偽コンテナの罠は置き場所を指定
         sfxUI('item_lure_ship'); matchRecEvent('fakeP', f.x, f.y, '自艦: 偽コンテナを置く');
         logMessage('離脱: 偽コンテナを艦尾に置いた — 漂流コンテナと同じ信号を出す。開けた相手は爆発 (耐久の' + Math.round(FAKE_DMG_FRAC * 100) + '%)。置いた自分には開けない・敵が見抜く前に誘い込む', 'system-msg');
     }
@@ -12728,10 +12735,10 @@ function useFlash() {
 }
 // ノイズメーカー: 自艦の全速と同じ熱と航跡を出しながら艦首方向へ直進する囮。
 // 敵は「強い方の音」を自艦と思い込む → こちらは潜航/機関停止で別方向へ
-function useNoise() {
+function useNoise(aim) {
     if (player) matchRecEvent('escP', player.x, player.y, '自艦: ノイズメーカー');
     const sp = shipCruiseSpeed(gameState.shipType, genAlloc.engine, STANCE_GAIN.flank);
-    const a = player.angle;
+    const a = aim !== undefined ? aim : player.angle; // 2026-11-11: 自機COMの偽装退却は向きを指定して流す (敵の enemyUseNoise と同じ)
     noiseMakers.push({ x: player.x + Math.cos(a) * 40, y: player.y + Math.sin(a) * 40, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
         life: NOISE_LIFE, _wid: 'noise-' + (++_wakeIdSeq) });
     sfxUI('item_noise');
@@ -14868,7 +14875,7 @@ function loadComCfg() {
     try { const c = JSON.parse(localStorage.getItem('darkEchoComDemo') || 'null'); if (c && c.pp && c.ep) { const r = Object.assign(comDefaultCfg(), c); if (!r.lo || !r.lo.p || !r.lo.e) r.lo = { p: {}, e: {} }; return r; } } catch (e) {}
     return comDefaultCfg();
 }
-function saveComCfg() { try { localStorage.setItem('darkEchoComDemo', JSON.stringify(comCfg)); } catch (e) {} }
+function saveComCfg() { if (playReplay || /[?&]replay=1/.test(location.search)) return; try { localStorage.setItem('darkEchoComDemo', JSON.stringify(comCfg)); } catch (e) {} }
 // その試合で使う性格 ('p'=自機 / 'e'=敵)
 function comPersonalityFor(side) {
     const pre = side === 'p' ? comCfg.pPreset : comCfg.ePreset;
@@ -15625,22 +15632,26 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
         // 第81弾: 艦種ごとの戦術 (敵と同じ) — 空母=艦載機の網 / 攻撃型=霧伝いの肉薄・狙撃 / 潜航型=影追い
         const myStrike = playerDrones.filter(d => d.hp > 0 && (d.type === 'attack' || d.type === 'mech')).length + ((cargo.stock.attack || 0) > 0 ? 1 : 0);
         const kOk = playerHasWeapon('kinetic') && cargo.ammoK > 0, bOk = playerHasWeapon('beam');
+        const _hitAgoP = playerHitLog.length ? now - playerHitLog[playerHitLog.length - 1].f : 1e9;
         const w = {
             charge: Math.max(0.05, 0.15 + 1.1 * ag - 0.7 * st - 0.3 * ca) * (D < 2600 ? 3 : 1) * (1 + 1.2 * (c.huntFails || 0)) * (cls === 'carrier' ? 0.4 : 1),
             stalk: (0.35 + 1.1 * st + 0.5 * ca + 0.35 * ag) * stc * (cls === 'carrier' ? 0.45 : 1),
-            lure: kinds.length && D > 4000 ? (0.25 + 1.0 * st + 0.6 * ca + 0.3 * gr) * stc : 0,
+            lure: kinds.length && D > 2000 ? (0.6 + 1.3 * st + 0.8 * ca + 0.3 * gr) * stc : 0, // 敵と同じ重み
+            feint: (cargo.stock.noise || 0) > 0 && D < 9000 && (_hitAgoP < 1800 || now - (threatObs.pingF ?? -1e9) < 1800) ? (1.2 + 1.0 * st + 0.8 * ca) * stc : 0, // 2026-11-11: 自機COMも偽装退却 (敵と同じ)
+            fakebox: (cargo.stock.fakecache || 0) > 0 && D > 2000 ? (0.5 + 1.1 * st + 0.6 * gr + 0.4 * ca) * stc : 0, // 自機COMも偽コンテナの罠
             hold: closing && D < 9000 ? 0.3 + 0.9 * ca + 0.7 * st : 0,
             screen: cls === 'carrier' && myStrike > 0 && D > 3000 ? 0.8 + 0.6 * ag + 0.6 * ca + 0.4 * gr : 0,
             rush: cls === 'assault' && kOk && hpF > 0.5 && D < 12000 ? 0.3 + 1.0 * ag + 0.5 * hpF + 0.3 * st : 0,
             snipe: bOk && cls !== 'carrier' && D > 5500 ? (0.15 + 0.7 * ca + 0.5 * st) * (cls === 'assault' ? 1.2 : 0.8) : 0,
             shadow: cls === 'stealth' && (est.moving || (c.lastMove && c.lastMove.sid === lockedSignalId && now - c.lastMove.f < 900)) && D < 12000 ? 0.4 + 1.1 * st + 0.6 * ca : 0,
         };
+        if (c.forceNext && w[c.forceNext] !== undefined) { for (const k in w) w[k] = k === c.forceNext ? 1 : 0; } c.forceNext = null; // 偽装退却/偽コンテナの罠の続き (敵と同じ)
         if (window.__huntForceP && w[window.__huntForceP] !== undefined) { for (const k in w) w[k] = k === window.__huntForceP ? 1 : 0; }
         let tot = 0; for (const k in w) tot += w[k];
         let r = Math.random() * tot, pick = 'charge'; for (const k in w) { r -= w[k]; if (r <= 0) { pick = k; break; } }
         if (pick === 'charge') { c.huntCD = now + 1200 + Math.random() * 1200; say('【突撃】SIG-' + sigNo(lockedSignalId) + ' (推定' + Math.round(D / 100) * 100 + 'u) へまっすぐ詰める — 攻撃性' + _pct(ag)); return false; }
         const side = Math.random() < 0.5 ? 1 : -1;
-        H = c.hunt = { k: pick, jp: { stalk: '忍び寄り', lure: '偽装の罠', hold: '待ち伏せ', screen: '艦載機の網', rush: '霧伝いの肉薄', snipe: 'ビームの狙撃', shadow: '影追い' }[pick], ph: pick === 'lure' ? 'set' : pick === 'hold' ? 'wait' : pick === 'screen' ? 'screen' : pick === 'shadow' ? 'shadow' : 'approach', t0: now, f0: now, side, w: sp.w, R: sp.R, hp0: player.hp, strikes: 0, sid: lockedSignalId, lureK: kinds[0], force: pick === 'rush' ? 'kinetic' : pick === 'snipe' ? 'beam' : null };
+        H = c.hunt = { k: pick, jp: { stalk: '忍び寄り', lure: '偽装の罠', hold: '待ち伏せ', screen: '艦載機の網', rush: '霧伝いの肉薄', snipe: 'ビームの狙撃', shadow: '影追い', feint: '偽装退却', fakebox: '偽コンテナの罠' }[pick], ph: pick === 'feint' ? 'decoy' : pick === 'fakebox' ? 'place' : pick === 'lure' ? 'set' : pick === 'hold' ? 'wait' : pick === 'screen' ? 'screen' : pick === 'shadow' ? 'shadow' : 'approach', t0: now, f0: now, side, w: sp.w, R: sp.R, hp0: player.hp, strikes: 0, sid: lockedSignalId, lureK: kinds[0], force: pick === 'rush' ? 'kinetic' : pick === 'snipe' ? 'beam' : null };
         if (H.force) { const sp2 = comStrikePlan(est, H.force); if (sp2) { H.w = sp2.w; H.R = sp2.R; } }
         if (pick === 'lure') {
             const hb = c.heardBand && now - (c.heardBandF || -1e9) < 3600 ? 'bcn_' + c.heardBand : null;
@@ -15660,6 +15671,8 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
             rush: () => '装甲を頼りに、潜航で背後へ回り込んで' + Math.round(H.R / 100) * 100 + 'uまで肉薄し、実弾を至近から叩き込む',
             snipe: () => 'チャージの警告 (' + BEAM_CHARGE_WARN_R + 'u) より遠く、' + Math.round(H.R / 100) * 100 + 'uからビームで狙撃する',
             shadow: () => '動いているSIG-' + sigNo(H.sid) + 'の後ろ (死角) について記録を貯め、絞れたら背後から一撃',
+            feint: () => '見つかった (撃たれた/探信された) → ノイズメーカーを逃げる向きへ全速で走らせ、自分は機関を止めて横へ滑る。相手がノイズを追う間に背後へ回り込む',
+            fakebox: () => 'SIG-' + sigNo(H.sid) + 'の行く先に偽コンテナを置き、横の霧で機関を止めて待つ — 開けたら爆発で位置が割れる。その瞬間に撃つ',
         })[pick]() + ' (性格 攻' + _pct(ag) + '・隠' + _pct(st) + '・慎' + _pct(ca) + ')');
         matchRecEvent('tacP', player.x, player.y, '自機COMの作戦「' + H.jp + '」');
         if (pick === 'screen') { if (!playerDrones.some(d => d.hp > 0 && d.type === 'attack') && (cargo.stock.attack || 0) > 0) deployDrone('attack'); droneOrder('attack', 'attack', est.x, est.y); if (playerDrones.some(d => d.hp > 0 && d.type === 'mech')) droneOrder('mech', 'attack', est.x, est.y); H.sent = now; H.sendF = now; }
@@ -15668,6 +15681,12 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
     if (player.hp < H.hp0 - 1) { H.hp0 = player.hp; if (H.ph !== 'egress' && H.ph !== 'lurk') return end('撃たれた — 気付かれた → 交戦', 900); }
     if (hpF < retreat) return end('耐久' + _pct(hpF) + ' < 退き際 → 退く', 1800);
     if (now - H.t0 > 60 * 300) return end('長引いた (5分)');
+    // 偽コンテナの罠: 相手が罠へ近づいている間は、見えていても撃たない (敵と同じ — 先に撃つと罠に気付かれる)
+    if (seen && H.k === 'fakebox' && (H.ph === 'wait' || H.ph === 'go') && H.B && fieldSignals.some(f => f.fake === 'p' && Math.hypot(f.x - H.B.x, f.y - H.B.y) < 60)
+        && Math.hypot(te.x - H.B.x, te.y - H.B.y) < 3200 && Math.hypot(te.x - player.x, te.y - player.y) > 800 && now - (H.holdF || now) < 60 * 45) {
+        if (!H.holdF) { H.holdF = now; say('【偽コンテナの罠】相手が罠へ近づいてくる (' + Math.round(Math.hypot(te.x - H.B.x, te.y - H.B.y) / 100) * 100 + 'u) — 開けるまで撃たずに待つ'); }
+        if (!playerCoasting && player.currentSpeed > 0.1) toggleCoast(true); return true;
+    }
     if (seen && H.ph !== 'egress' && H.ph !== 'lurk') return end('相手が見えた → 撃ち合い', 900);
     if (lockedSignalId !== H.sid && _signalAnalysis[H.sid]) window._lockSignal(H.sid);
     const est = comHunterEst(H.sid), D = est ? Math.hypot(est.x - player.x, est.y - player.y) : null;
@@ -15686,6 +15705,65 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
         if (/^e-/.test(H.sid)) issueFireOrder(); else freeFireAt(ax, ay);
         return true;
     };
+    // 2026-11-11 (オーナー「戦術・戦略は自機COMも敵COMも同じレベル」): 偽装退却・偽コンテナの罠 — 敵 (enemyHunterStep) と同じ手順
+    if (H.k === 'feint') { // 偽装退却
+        if (H.ph === 'decoy') {
+            const away = est ? Math.atan2(player.y - est.y, player.x - est.x) : player.angle, na = away + (Math.random() - 0.5) * 0.4; // 相手から遠ざかる向き (逃げたように見せる)
+            if (!_comUseItem('noise', player.x + Math.cos(na) * 3000, player.y + Math.sin(na) * 3000)) return end('ノイズメーカーが無い', 0);
+            c.noiseF = now;
+            H.qa = away + H.side * Math.PI / 2; H.ph = 'quiet'; H.qf = now; H.tq = now + 60 * (14 + 10 * Math.random() + 8 * st);
+            H.qp = clampToMapCircle(player.x + Math.cos(H.qa) * 2500, player.y + Math.sin(H.qa) * 2500, 1500);
+            if ((cargo.stock.smoke || 0) > 0 && est && D < 3500) _comUseItem('smoke');
+            say('【偽装退却】ノイズメーカーを ' + compassDeg(na) + '° へ全速で走らせた — 自分は機関を止めて ' + compassDeg(H.qa) + '° へ滑る (' + Math.round((H.tq - now) / 60) + '秒 息を潜める)');
+            matchRecEvent('feintP', player.x, player.y, '自機COM: ノイズメーカーで逃げたふり (偽装退却)');
+            return true;
+        }
+        if (H.ph === 'quiet') { // 最初の3秒だけ横へ噴かし、あとは機関を止めて漂う
+            if (now - H.qf < 180 || player.currentSpeed < 0.15) _comHGo(c, H.qp.x, H.qp.y, 'silent'); else if (!playerCoasting) toggleCoast(true);
+            if (now > H.tq) { c.hunt = null; c.huntCD = 0; c.forceNext = 'stalk'; say('【偽装退却】相手がノイズを追ったはず → 背後へ回り込む (忍び寄りへ)'); }
+            return true;
+        }
+    }
+    if (H.k === 'fakebox') { // 偽コンテナの罠
+        if (H.ph === 'place') {
+            if (!H.B) {
+                if (!est) return end('見失った');
+                // 置く所: 相手の針路の先 (動いていれば70秒先・最大4500u) / 動いていなければ相手が次に向かいそうな拠点 (自分のものでないコロニー・回収されていない難破船) / それも無ければ推定とこちらの間
+                const hv = _huntVel(H, est), mv = est.moving ? { vx: est.vx, vy: est.vy } : hv;
+                let bx, by;
+                if (mv && Math.hypot(mv.vx, mv.vy) > 0.2) { const sp0 = Math.hypot(mv.vx, mv.vy), t = Math.min(4500, sp0 * 60 * 70) / sp0; bx = est.x + mv.vx * t; by = est.y + mv.vy * t; }
+                else {
+                    let best = null, bd = 14000;
+                    for (const q of structures) if ((q.type === 'colony' && q.owner !== 'player') || (q.type === 'derelict' && !q.salvaged)) { const d = Math.hypot(q.x - est.x, q.y - est.y); if (d < bd) { bd = d; best = q; } }
+                    if (best) { const a = Math.atan2(est.y - best.y, est.x - best.x); bx = best.x + Math.cos(a) * 700; by = best.y + Math.sin(a) * 700; } else { bx = (est.x + player.x) / 2; by = (est.y + player.y) / 2; }
+                }
+                H.B = clampToMapCircle(bx, by, 1500);
+                const ha = Math.atan2(player.y - H.B.y, player.x - H.B.x) + H.side * 0.8, cv = findCoverSpot(H.B.x + Math.cos(ha) * 1500, H.B.y + Math.sin(ha) * 1500, 900);
+                H.S = cv ? { x: cv.x, y: cv.y } : clampToMapCircle(H.B.x + Math.cos(ha) * 1500, H.B.y + Math.sin(ha) * 1500, 1200);
+            }
+            const dB = Math.hypot(H.B.x - player.x, H.B.y - player.y);
+            if (dB > 700) { if (now - H.t0 > 60 * 150) return end('置き場所に着けない'); _comHGo(c, H.B.x, H.B.y, dB > 3500 ? 'cruise' : 'silent'); return true; }
+            if (!_comUseItem('fakecache', H.B.x, H.B.y)) return end('偽コンテナが無い', 0);
+            H.ph = 'go'; H.placedF = now;
+            say('【偽コンテナの罠】' + _dirTxt(player.x, player.y, H.B.x, H.B.y) + ' に偽コンテナを置いた — 横の霧 (' + _dirTxt(player.x, player.y, H.S.x, H.S.y) + ') で待つ');
+            return true;
+        }
+        if (H.ph === 'go' || H.ph === 'wait') {
+            for (const sid in _signalAnalysis) { const sa = _signalAnalysis[sid], pg = sa && sa.ping; // 爆発した (相手が開けた) → 位置が割れた。待ち伏せとして撃つ
+                if (pg && pg.f >= (H.placedF || 0) && pg.f > now - 120 && Math.hypot(pg.x - H.B.x, pg.y - H.B.y) < 900) {
+                    c.hunt = null; c.huntCD = 0; c.forceNext = 'hold'; window._lockSignal(sid);
+                    say('【偽コンテナの罠】掛かった — 開けた所 (' + _dirTxt(player.x, player.y, H.B.x, H.B.y) + ') に居る。撃つ');
+                    matchRecEvent('tacP', player.x, player.y, '自機COMの作戦「偽コンテナの罠」が成功 — 爆発で位置が割れた所を撃ちに行く');
+                    return true;
+                }
+            }
+            const dS = Math.hypot(H.S.x - player.x, H.S.y - player.y);
+            if (H.ph === 'go') { if (dS > 400) { _comHGo(c, H.S.x, H.S.y, 'silent'); return true; } H.ph = 'wait'; H.waitF = now; }
+            if (!playerCoasting && player.currentSpeed > 0.1) toggleCoast(true);
+            if (now - H.waitF > 60 * 180) return end('掛からなかった');
+            return true;
+        }
+    }
     switch (H.ph) {
         case 'approach': {
             if (!est || est.age > 3600) { if (now - (H.lostF || (H.lostF = now)) > 60 * 75) return end('見失った'); if (!playerCoasting && player.currentSpeed > 0.2) toggleCoast(true); return true; }
@@ -15952,7 +16030,7 @@ function matchRecStart() {
         matchRec.meta = { ver: sc ? (sc.getAttribute('src').split('?v=')[1] || '') : '', at: new Date().toISOString(), mode: gameState.mode, com: !!comDemo, ship: gameState.shipType, enemy: gameState.enemyType,
             pp: comDemo && _com && _com.pp ? Object.assign({}, _com.pp) : null, ep: E0 && E0.personality ? Object.assign({}, E0.personality) : null,
             pPre: _comMatchInfo ? _comMatchInfo.pPre : null, ePre: _comMatchInfo ? _comMatchInfo.ePre : null, theme: mapTheme ? mapTheme.name : '',
-            pEngine: gameState.engineType, eEngine: E0 ? E0.engine : null, pFocus: genFocusKey, pLoadout: gameState.loadout ? JSON.parse(JSON.stringify(gameState.loadout[gameState.shipType] || {})) : null };
+            pEngine: gameState.engineType, eEngine: E0 ? E0.engine : null, pFocus: genFocusKey, seed: comDemo ? _simSeed : undefined, cfg: comDemo ? window._comCfgSnap : undefined, gs: comDemo ? window._gsSnap : undefined, pLoadout: gameState.loadout ? JSON.parse(JSON.stringify(gameState.loadout[gameState.shipType] || {})) : null };
     } catch (err) { matchRec.meta = { err: String(err) }; }
 }
 function matchRecEvent(kind, x, y, text) {
@@ -16064,11 +16142,12 @@ function openReplayWith(R, title) {
     { const ids = new Set(); for (const sm of R.s) for (const e of sm.E || []) ids.add(e.id); RP.eId = ids.size ? [...ids][0] : null; }
     _rpBuildHg(); _rpRenderInfo(); _rpRenderEvents(); _rpTimeline(); _rpSyncButtons();
     const sl = document.getElementById('rp-slider'); sl.max = R.s.length - 1; sl.value = RP.i;
+    { const pb = document.getElementById('rp-launch'); if (pb) { const ok = prpCanPlay(R); pb.disabled = !ok; pb.title = ok ? '同じ試合をプレイ画面でもう一度動かす (敵の席に座って見る・操作はできない)' : 'この記録はプレイ画面で再生できない (COM対戦で、種と設定を残した記録だけ — 2026-11-11 以降)'; } }
     _rpListOpen(false); _rpDraw(); _rpStartLoop();
 }
 function closeReplay() { const ov = document.getElementById('replay-overlay'); if (ov) ov.classList.add('hidden'); if (RP) RP.play = false; }
 function _rpFmt(t) { const s2 = Math.floor(t / 60); return Math.floor(s2 / 60) + ':' + String(s2 % 60).padStart(2, '0'); }
-const _EV_COL = { lull: '#bfe9ff', traceP: '#ffcf88', convoy: '#ffcf88', convoyP: '#7dff9a', convoyE: '#ffa040', partE: '#ffcf88', fireP: '#5ff0ff', fireE: '#ffa040', hitP: '#ff5050', hitE: '#7dff9a', deathP: '#ff3030', killE: '#7dff9a', nodeP: '#50c8ff', nodeE: '#ffa040', tacE: '#ff9a40', tacP: '#5ff0ff', lureE: '#ff5ab0', feintE: '#ff3fd0', fakeE: '#ff3fd0', trapP: '#ff3fd0', trapE: '#7dff9a', hackOkE: '#ff3fd0', hackOkP: '#7dff9a', spin: '#ffff66' };
+const _EV_COL = { lull: '#bfe9ff', traceP: '#ffcf88', convoy: '#ffcf88', convoyP: '#7dff9a', convoyE: '#ffa040', partE: '#ffcf88', fireP: '#5ff0ff', fireE: '#ffa040', hitP: '#ff5050', hitE: '#7dff9a', deathP: '#ff3030', killE: '#7dff9a', nodeP: '#50c8ff', nodeE: '#ffa040', tacE: '#ff9a40', tacP: '#5ff0ff', lureE: '#ff5ab0', feintE: '#ff3fd0', fakeE: '#ff3fd0', feintP: '#5ff0ff', fakeP: '#5ff0ff', trapP: '#ff3fd0', trapE: '#7dff9a', hackOkE: '#ff3fd0', hackOkP: '#7dff9a', spin: '#ffff66' };
 function _rpRenderInfo() {
     const mb = document.getElementById('rp-match'); if (!mb || !RP || !RP.R) return;
     const M = RP.R.meta || {}, Rs = RP.R.result || {};
@@ -16104,7 +16183,7 @@ function _rpTimeline() {
     g.fillStyle = 'rgba(255,255,255,0.05)'; g.fillRect(0, 0, W, H);
     band(x => x.e && x.e.hu, 2, 7); band(x => x.p && x.p.hu, 12, 4);
     for (const ev of R.ev || []) {
-        if (!/fireE|fireP|hitP|hitE|tacE|feintE|fakeE|lureE|trapP|hackOkE/.test(ev.kind)) continue;
+        if (!/fireE|fireP|hitP|hitE|tacE|tacP|feintE|feintP|fakeE|fakeP|lureE|trapP|trapE|hackOkE/.test(ev.kind)) continue;
         g.fillStyle = _EV_COL[ev.kind] || '#fff'; const h = /hit/.test(ev.kind) ? H : /tac|feint|fake|lure|trap|hack/.test(ev.kind) ? 9 : 5;
         g.fillRect(X(ev.t), /tac|feint|fake|lure|trap|hack/.test(ev.kind) ? 0 : H - h, /tac|feint|fake|lure|trap|hack/.test(ev.kind) ? 2 : 1, h);
     }
@@ -16174,6 +16253,7 @@ function _rpDraw() {
     for (const ev of R.ev || []) {
         if (ev.t > cur.t || ev.t < cur.t - 1200) continue;
         if (fog && persp === 'p' && /fireE|tacE|lureE|feintE|fakeE/.test(ev.kind)) continue; // 相手の行動は見えない
+        if (fog && persp === 'e' && /fireP|tacP|feintP|fakeP|escP/.test(ev.kind)) continue; // 敵の視点では自機の行動は見えない
         if (fog && persp === 'e' && /fireP|tacP/.test(ev.kind)) continue;
         const a = 1 - (cur.t - ev.t) / 1200; g.globalAlpha = 0.3 + 0.7 * a; g.strokeStyle = g.fillStyle = _EV_COL[ev.kind] || '#cfe';
         const x = X(ev.x), y = Y(ev.y);
@@ -16359,6 +16439,211 @@ async function _rpListOpen(on) {
     }, true);
 })();
 
+// ═══ プレイ画面のリプレイ (2026-11-11 オーナー「実際のプレイ画面で敵側の動きのリプレイを観たい。操作の介入はできない。敵側から自艦のシグネチャがどう見えていたかを検証したい」) ═══
+//   COM対戦は人の操作が入らないので、試合の種 (seed) と出撃時の設定があれば同じ試合をもう一度作れる (ロジックだけ種つきの乱数 — withSimRng)。
+//   「試合の記録」画面の ▶プレイ画面で再生 → このページを ?replay=1 で開き直し、同じ設定・同じ種でCOM対戦を始める。操作はできない (観戦のみ)。
+//   視点 = 敵の席 / 自機の席。敵の席では カメラ・霧 (敵の目で見える所だけ晴れる)・自艦は敵に見えている時だけ描く・敵が受けた自艦の信号 (帯域ごと)・敵の方位の記録・敵の推定円・作戦の目標地点 を出す。
+//   ⚠️ 版 (?v=) が記録と違うと同じ試合にならない。記録の1秒ごとの位置と比べて、ずれたら表示する。通常プレイ (人の操作) の記録は再生できない。
+let playReplay = null;
+const PRP_KEY = 'darkEchoReplayJob';
+const _PRP_BAND_JP = { heat: '熱', optic: '光', em: '電磁波', higgs: 'ヒッグス' };
+const _PRP_BAND_COL = { heat: '#ff8a3c', optic: '#ffe066', em: '#c78bff', higgs: '#5fc8ff' };
+function prpCanPlay(R) { const m = R && R.meta; return !!(m && m.com && m.seed !== undefined && m.cfg && m.gs); }
+function prpLaunch(R, title) {
+    if (!prpCanPlay(R)) { logMessage('記録: この記録はプレイ画面で再生できない (COM対戦で、種と設定を残した記録だけ — 2026-11-11 以降)', 'warning-msg'); return; }
+    const m = R.meta, tr = (R.s || []).map(q => [q.t, q.P ? q.P.x : null, q.P ? q.P.y : null, q.E && q.E[0] ? q.E[0].x : null, q.E && q.E[0] ? q.E[0].y : null]);
+    const job = { seed: m.seed, cfg: m.cfg, gs: m.gs, ver: m.ver || '', dbg: !!m.dbg, tr, title: title || '', res: R.result || null, view: 'e' };
+    try { localStorage.setItem(PRP_KEY, JSON.stringify(job)); } catch (err) { logMessage('記録: 記録が大きすぎて再生の準備ができない', 'warning-msg'); return; }
+    location.href = location.pathname + '?replay=1';
+}
+function prpPov() { if (!playReplay || playReplay.view !== 'e') return null; const e = enemies.find(q => q.type !== 'fighter' && (q.hp > 0 || q._dying)); return e || null; }
+function prpStart() {
+    let job = null; try { job = JSON.parse(localStorage.getItem(PRP_KEY) || 'null'); } catch (err) { job = null; }
+    if (!job) { logMessage('リプレイ: 再生する記録が見つからない', 'warning-msg'); return; }
+    playReplay = { job, view: job.view || 'e', drift: null, endT: job.tr && job.tr.length ? job.tr[job.tr.length - 1][0] : 0, verOk: true };
+    const sc = document.querySelector('script[src*="game.js"]'), ver = sc ? (sc.getAttribute('src').split('?v=')[1] || '') : '';
+    playReplay.verOk = !job.ver || job.ver === ver; playReplay.ver = ver;
+    document.body.classList.add('play-replay');
+    Object.assign(gameState, JSON.parse(JSON.stringify(job.gs)));
+    comCfg = JSON.parse(JSON.stringify(job.cfg));
+    window.__rpSeed = job.seed;
+    startComDemo();
+    toggleThinkLog(true);
+    if (!thinkLogOn) toggleThinkLog(true);
+    cameraFollowPlayer = true;
+    prpBuildBar();
+    logMessage('リプレイ: 記録した試合をもう一度動かしている (操作はできない)。上の帯で 敵の席/自機の席・ヒッグス表示・思考・倍速 を切り替える', 'system-msg');
+}
+function prpBuildBar() {
+    let bar = document.getElementById('prp-bar');
+    if (!bar) { bar = document.createElement('div'); bar.id = 'prp-bar'; document.body.appendChild(bar); }
+    bar.innerHTML = '<span class="prp-t" id="prp-t">0:00</span>'
+        + '<span class="prp-seg"><button data-v="e" id="prp-ve">敵の席</button><button data-v="p" id="prp-vp">自機の席</button></span>'
+        + '<button id="prp-higgs" title="霧を描く/外す (見た目だけ)">ヒッグス</button><button id="prp-think" title="思考ログ">思考</button>'
+        + '<button id="prp-pause" title="一時停止 (Space)">⏸</button><button id="prp-spd" title="倍速">1x</button><button id="prp-ff" title="30秒進める (描かずに計算)">+30秒</button>'
+        + '<button id="prp-restart" title="最初から">↺</button><button id="prp-exit" title="終わってロビーへ">終了</button>'
+        + '<span class="prp-st" id="prp-st"></span>';
+    let pov = document.getElementById('prp-pov');
+    if (!pov) { pov = document.createElement('div'); pov.id = 'prp-pov'; document.body.appendChild(pov); }
+    bar.addEventListener('click', ev => {
+        const b = ev.target.closest('button'); if (!b) return;
+        if (b.dataset.v) { playReplay.view = b.dataset.v; cameraFollowPlayer = true; _prpSync(); }
+        else if (b.id === 'prp-higgs') toggleHiggsView(!higgsViewOff);
+        else if (b.id === 'prp-think') toggleThinkLog(!thinkLogOn);
+        else if (b.id === 'prp-pause') togglePause(!userPaused);
+        else if (b.id === 'prp-spd') { const i = GAME_SPEEDS.indexOf(gameSpeed); setGameSpeed(GAME_SPEEDS[(i + 1) % GAME_SPEEDS.length]); }
+        else if (b.id === 'prp-ff') prpFastForward(1800);
+        else if (b.id === 'prp-restart') location.reload();
+        else if (b.id === 'prp-exit') { try { localStorage.removeItem(PRP_KEY); } catch (err) {} location.href = location.pathname; }
+        _prpSync();
+    });
+    _prpSync();
+}
+function _prpSync() {
+    if (!playReplay) return;
+    const q = id => document.getElementById(id);
+    q('prp-ve') && q('prp-ve').classList.toggle('on', playReplay.view === 'e'); q('prp-vp') && q('prp-vp').classList.toggle('on', playReplay.view === 'p');
+    q('prp-higgs') && q('prp-higgs').classList.toggle('on', !higgsViewOff); q('prp-think') && q('prp-think').classList.toggle('on', !!thinkLogOn);
+    if (q('prp-pause')) q('prp-pause').textContent = userPaused ? '▶' : '⏸';
+    if (q('prp-spd')) q('prp-spd').textContent = gameSpeed + 'x';
+    document.body.classList.toggle('prp-epov', playReplay.view === 'e');
+}
+// 描かずに n フレーム進める (見た目の粒は捨てる — 計測の __simSteps と同じ)
+function prpFastForward(n) {
+    for (let i = 0; i < n; i++) { if (!player || player.hp <= 0 || sectorCleared) break; stepWorld(); }
+    effects.length = 0; damagePuffs.length = 0; particles.length = 0; debris.length = 0;
+}
+// 記録の1秒ごとの位置と比べる (同じ試合を再現できているか)
+function prpCheckDrift() {
+    const P = playReplay; if (!P || !matchRec || P.drift) return;
+    const t = _frameCount - matchRec.f0; if (t % 60) return;
+    const tr = P.job.tr, k = Math.round(t / 60); const r = tr && tr[k]; if (!r || r[0] !== t) return;
+    const e0 = enemies.find(q => q.type !== 'fighter');
+    const dp = r[1] !== null && player ? Math.hypot(player.x - r[1], player.y - r[2]) : 0, de = r[3] !== null && e0 ? Math.hypot(e0.x - r[3], e0.y - r[4]) : 0;
+    if (dp > 120 || de > 120) P.drift = { t, dp: Math.round(dp), de: Math.round(de) };
+}
+function prpTick() { // 描画のたび (状態は読むだけ)
+    const P = playReplay; if (!P) return;
+    prpCheckDrift();
+    P.rf = (P.rf || 0) + 1; if (P.rf % 6) return; // 描画6回に1回 (倍速でも更新する)
+    const t = matchRec ? Math.max(0, _frameCount - matchRec.f0) : 0, mm = s => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+    const el = document.getElementById('prp-t'); if (el) el.textContent = mm(t / 60) + ' / ' + mm(P.endT / 60);
+    const st = document.getElementById('prp-st');
+    if (st) {
+        let s = '', cls = 'ok';
+        if (!P.verOk) { s = '⚠ 版が記録と違う (' + P.job.ver + ' → ' + P.ver + ') — 同じ試合にならないことがある'; cls = 'warn'; }
+        if (P.job.dbg) { s = '⚠ 記録中にデバッグの操作があった — 同じ試合にならない'; cls = 'warn'; }
+        if (P.drift) { s = '⚠ ' + mm(P.drift.t / 60) + ' から記録とずれた (自機' + P.drift.dp + 'u・敵' + P.drift.de + 'u) — 以後は記録と違う試合'; cls = 'bad'; }
+        else if (!s) s = t > P.endT ? '記録の終わり (' + (P.job.res ? ({ player: '自機の勝ち', enemy: '敵の勝ち', none: '決着なし' })[P.job.res.winner] || '' : '') + ')' : '記録と一致して進行中';
+        st.textContent = s; st.className = 'prp-st ' + cls;
+    }
+    _prpSync();
+    prpUpdatePov();
+}
+// 敵の席のパネル: 敵が自艦の信号をどう受けていたか・どう見積もっていたか
+function prpUpdatePov() {
+    const box = document.getElementById('prp-pov'); if (!box) return;
+    const e = prpPov(); if (!e) { box.innerHTML = ''; return; }
+    const P = e.personality || {}, H = e._hunt, now = _frameCount;
+    const lv = e._rxLv || {}, on = e._rxOn || [], est = _huntEst(e);
+    const seeIt = (e.detectionTimer || 0) > 60 || !!e._prpSees;
+    let h = '<div class="pv-h">敵の席 — ' + ({ assault: '攻撃型', stealth: '潜航型', carrier: '空母型' }[ENEMY_CLASS[e.type]] || e.type) + ' <small>攻' + _pct(P.aggression ?? 0) + ' 隠' + _pct(P.stealth ?? 0) + ' 慎' + _pct(P.caution ?? 0) + ' 貪' + _pct(P.greed ?? 0) + '</small></div>';
+    h += '<div class="pv-r">耐久 <b>' + _pct(Math.max(0, e.hp / e.maxHp)) + '</b> ・ ' + (_AI_JP[e.aiState] || e.aiState || '') + (H ? ' ・ 作戦「' + H.jp + '」' + (H.ph || '') : '') + '</div>';
+    h += '<div class="pv-s">自艦の信号をどう受けたか <small>(' + (e._rxF ? Math.round((now - e._rxF) / 60) + '秒前に聴いた' : 'まだ聴いていない') + ')</small></div>';
+    for (const b of BANDS) {
+        const v = lv[b] || 0, w = Math.min(100, v / 2 * 100), isOn = on.includes(b), out = sigPeak(player, b);
+        h += '<div class="pv-b' + (isOn ? ' on' : '') + '"><span class="pv-bn" style="color:' + _PRP_BAND_COL[b] + '">' + _PRP_BAND_JP[b] + '</span><span class="pv-bar"><i style="width:' + w.toFixed(0) + '%;background:' + _PRP_BAND_COL[b] + '"></i><em style="left:25%"></em><em style="left:50%"></em></span>'
+            + '<span class="pv-bv">' + (isOn ? (v >= 0.5 ? '方位◎' : v > 0.05 ? '弱い' : '—') : 'OFF') + '</span><span class="pv-out" title="自艦が出していた強さ">出' + Math.round(out * 100) + '</span></div>';
+    }
+    h += '<div class="pv-n">刻み: 25%=しきい値の半分 (方位が取れる) / 50%=しきい値。「出」= 自艦が出していた強さ (直近1秒の最大)</div>';
+    if (est) {
+        const err = Math.hypot(est.x - player.x, est.y - player.y);
+        h += '<div class="pv-s">自艦の位置の見積もり</div><div class="pv-r">推定 ±' + Math.round(huntHonestR(est.r, est.age)) + 'u (' + Math.round(est.age / 60) + '秒前の記録) ・ <span class="' + (err > est.r * 1.7 ? 'bad' : 'ok') + '">実際のずれ ' + Math.round(err) + 'u</span></div>';
+    } else h += '<div class="pv-s">自艦の位置の見積もり</div><div class="pv-r">' + (e._lkGuess ? '方位だけ (位置は解けていない)' : '無し') + '</div>';
+    h += '<div class="pv-r">目視: ' + (seeIt ? '<b class="bad">見えている</b>' : '見えていない') + ' ・ 方位の記録 ' + (e._sa && e._sa.obs ? e._sa.obs.length : 0) + '本</div>';
+    box.innerHTML = h;
+}
+// 敵の目 (至近探知の距離と視線) で見える範囲
+const _prpRays = new Float32Array(VIS_RAYS); let _prpRaysF = -1, _prpRaysE = null;
+function prpEnemyRays(e) {
+    if (_prpRaysF === _frameCount && _prpRaysE === e) return _prpRays;
+    _prpRaysF = _frameCount; _prpRaysE = e;
+    const R = Math.max(VIS_CLOSE, e._myDetR || _visAt(e.x, e.y)), h0 = getHiggsIntensity(e.x, e.y);
+    for (let k = 0; k < VIS_RAYS; k++) _prpRays[k] = losReach(e.x, e.y, k / VIS_RAYS * Math.PI * 2, R, h0);
+    return _prpRays;
+}
+function prpSeesPt(e, x, y) {
+    const r = prpEnemyRays(e), a = Math.atan2(y - e.y, x - e.x);
+    let f = a / (Math.PI * 2) * VIS_RAYS; f = ((f % VIS_RAYS) + VIS_RAYS) % VIS_RAYS;
+    const i = Math.floor(f), t = f - i;
+    return Math.hypot(x - e.x, y - e.y) <= r[i] * (1 - t) + r[(i + 1) % VIS_RAYS] * t;
+}
+function prpDrawFog(ctx, e) {
+    if (higgsViewOff) return;
+    const r = prpEnemyRays(e), hHere = getHiggsIntensity(e.x, e.y), fogAlpha = 0.86 + hHere * 0.10, fogCol = hHere > 0.5 ? '#2c0406' : hHere > 0.2 ? '#22030a' : '#0e0103';
+    const vw = cssW / camera.zoom, vh = cssH / camera.zoom, mx = camera.x - 500, my = camera.y - 500, mw = vw + 1000, mh = vh + 1000;
+    const pts = k => { const o = []; for (let i = 0; i < VIS_RAYS; i++) { const a = i / VIS_RAYS * Math.PI * 2; o.push({ x: e.x + Math.cos(a) * r[i] * k, y: e.y + Math.sin(a) * r[i] * k }); } return o; };
+    const p0 = pts(1), pM = pts(1.06), pO = pts(1.12);
+    ctx.save(); ctx.fillStyle = fogCol; ctx.globalAlpha = fogAlpha;
+    ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(mx + mw, my); ctx.lineTo(mx + mw, my + mh); ctx.lineTo(mx, my + mh); ctx.closePath(); _amoebaPath(ctx, pO); ctx.fill('evenodd');
+    ctx.globalAlpha = fogAlpha * 0.65; ctx.beginPath(); _amoebaPath(ctx, pO); _amoebaPath(ctx, pM); ctx.fill('evenodd');
+    ctx.globalAlpha = fogAlpha * 0.3; ctx.beginPath(); _amoebaPath(ctx, pM); _amoebaPath(ctx, p0); ctx.fill('evenodd');
+    ctx.beginPath(); _amoebaPath(ctx, p0); ctx.strokeStyle = '#ff6a5a'; ctx.globalAlpha = 0.3; ctx.lineWidth = 1.4 / camera.zoom; ctx.stroke();
+    ctx.restore();
+}
+// 敵の席の重ね描き (霧の上): 方位の記録・推定円・作戦の目標・敵の周りのリング
+function prpDrawPovOverlay(ctx, e) {
+    const zc = 1 / camera.zoom, sa = e._sa, now = _frameCount;
+    ctx.save();
+    if (sa && sa.obs) for (const o of sa.obs) { // 方位の記録 (観測点から方位へ・古いほど薄い)
+        const age = now - o.f, a = Math.max(0.12, 0.85 - age / 5400), L = 9000;
+        ctx.globalAlpha = a; ctx.strokeStyle = '#ff9a40'; ctx.lineWidth = 1.6 * zc; ctx.setLineDash([10 * zc, 8 * zc]);
+        ctx.beginPath(); ctx.moveTo(o.ox, o.oy); ctx.lineTo(o.ox + Math.cos(o.ang) * L, o.oy + Math.sin(o.ang) * L); ctx.stroke();
+        ctx.setLineDash([]); ctx.globalAlpha = a * 0.25; ctx.fillStyle = '#ff9a40';
+        const sg = Math.min(0.5, o.sig || 0.05); ctx.beginPath(); ctx.moveTo(o.ox, o.oy); ctx.arc(o.ox, o.oy, L, o.ang - sg, o.ang + sg); ctx.closePath(); ctx.fill();
+        ctx.globalAlpha = a; ctx.beginPath(); ctx.arc(o.ox, o.oy, 5 * zc, 0, Math.PI * 2); ctx.fill();
+    }
+    const est = _huntEst(e);
+    if (est) { // 敵が思う自艦の位置 (撃つ判断に使う正直な幅)
+        const R = huntHonestR(est.r, est.age);
+        ctx.globalAlpha = 0.9; ctx.strokeStyle = '#ff4d4d'; ctx.lineWidth = 2.2 * zc; ctx.setLineDash([16 * zc, 10 * zc]);
+        ctx.beginPath(); ctx.arc(est.x, est.y, R, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+        ctx.globalAlpha = 0.1; ctx.fillStyle = '#ff4d4d'; ctx.fill();
+        ctx.globalAlpha = 0.95; ctx.beginPath(); ctx.moveTo(est.x - 60 * zc, est.y); ctx.lineTo(est.x + 60 * zc, est.y); ctx.moveTo(est.x, est.y - 60 * zc); ctx.lineTo(est.x, est.y + 60 * zc); ctx.stroke();
+        queueTag(est.x, est.y - R, '敵の推定: 自艦はこの辺り', '±' + Math.round(R) + 'u・' + Math.round(est.age / 60) + '秒前', '255,90,90', 'b', 1);
+        if (est.moving) { ctx.beginPath(); ctx.moveTo(est.x, est.y); ctx.lineTo(est.x + est.vx * 600, est.y + est.vy * 600); ctx.stroke(); }
+    }
+    const H = e._hunt, tg = H ? (H.k === 'fakebox' || H.k === 'lure' ? (H.ph === 'place' || H.ph === 'set' ? H.B : H.S) : H.S || H.goal || H.P || H.ip || null) : null;
+    if (tg) { ctx.globalAlpha = 0.85; ctx.strokeStyle = '#ffd24a'; ctx.lineWidth = 1.6 * zc; ctx.setLineDash([6 * zc, 6 * zc]); ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(tg.x, tg.y); ctx.stroke(); ctx.setLineDash([]);
+        ctx.beginPath(); ctx.arc(tg.x, tg.y, 26 * zc, 0, Math.PI * 2); ctx.stroke(); queueTag(tg.x, tg.y, '作戦「' + H.jp + '」の行き先', H.ph || '', '255,210,74', 't', 1); }
+    if (H && H.B && (H.k === 'fakebox' || H.k === 'lure')) { ctx.globalAlpha = 0.9; ctx.strokeStyle = '#ff3fd0'; ctx.lineWidth = 2 * zc; ctx.strokeRect(H.B.x - 40 * zc, H.B.y - 40 * zc, 80 * zc, 80 * zc); queueTag(H.B.x, H.B.y, H.k === 'fakebox' ? '偽コンテナの置き場所' : '囮の置き場所', '', '255,63,208', 't', 1); }
+    ctx.restore();
+}
+// 敵の周りのリング (画面座標): 艦首・方位の目盛り・直近5秒に受けた方位 (帯域色)
+function prpDrawPovRing(ctx, e) {
+    const s = worldToScreen(e.x, e.y), R = 92, now = _frameCount;
+    ctx.save(); ctx.translate(s.sx, s.sy);
+    ctx.globalAlpha = 0.8; ctx.strokeStyle = '#ff6a5a'; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.stroke();
+    for (let d = 0; d < 360; d += 30) { const a = (d - 90) * Math.PI / 180, l = d % 90 ? 5 : 10; ctx.beginPath(); ctx.moveTo(Math.cos(a) * R, Math.sin(a) * R); ctx.lineTo(Math.cos(a) * (R - l), Math.sin(a) * (R - l)); ctx.stroke(); }
+    ctx.globalAlpha = 0.9; ctx.fillStyle = '#ff6a5a'; const ha = e.angle; ctx.beginPath(); ctx.moveTo(Math.cos(ha) * (R + 12), Math.sin(ha) * (R + 12)); ctx.lineTo(Math.cos(ha + 0.12) * (R + 2), Math.sin(ha + 0.12) * (R + 2)); ctx.lineTo(Math.cos(ha - 0.12) * (R + 2), Math.sin(ha - 0.12) * (R + 2)); ctx.fill();
+    const sa = e._sa; if (sa && sa.obs) for (const o of sa.obs) { if (now - o.f > 300) continue; const a = Math.atan2(o.oy + Math.sin(o.ang) * 9000 - e.y, o.ox + Math.cos(o.ang) * 9000 - e.x), sg = Math.max(0.04, Math.min(0.6, o.sig || 0.05));
+        ctx.globalAlpha = 0.9 * (1 - (now - o.f) / 300); ctx.strokeStyle = _PRP_BAND_COL[e._rxBand] || '#ff9a40'; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(0, 0, R + 6, a - sg, a + sg); ctx.stroke(); }
+    ctx.restore();
+}
+document.getElementById('rp-launch')?.addEventListener('click', () => { if (RP && RP.R) prpLaunch(RP.R, RP.title); });
+(() => { // ?replay=1 で開いた時: 読み込みが済んだらリプレイを始める
+    if (!/[?&]replay=1/.test(location.search)) return;
+    const go = () => setTimeout(() => { try { prpStart(); } catch (err) { console.error(err); } }, 300);
+    if (document.readyState === 'complete') go(); else window.addEventListener('load', go);
+    window.addEventListener('keydown', ev => { // 操作は効かない (リプレイの操作だけ)
+        if (!playReplay) return;
+        if (ev.key === ' ') { togglePause(!userPaused); _prpSync(); }
+        else if (ev.key === 'v' || ev.key === 'V') { playReplay.view = playReplay.view === 'e' ? 'p' : 'e'; _prpSync(); }
+        else if (ev.key === 'Escape' || ev.key === '+' || ev.key === '-' || ev.key === '=') return;
+        ev.stopImmediatePropagation(); ev.preventDefault();
+    }, true);
+})();
+
 // 第22弾: 戦闘モードのバー (画面下)。ロック (完全/想定) している間だけ出す。COM対戦では自機COMの選択を表示 (押せない)
 const _CM_JP = { manual: '手動', face: '正対', flank: '回り込み', auto: '兵装', near: '近', mid: '中', far: '遠', attack: '攻撃', evade: '回避' };
 const _CMWHY_JP = { dodge: 'ミサイルを横へかわす', flank: '後方へ回り込み中', close: '間合いを詰める', open: '間合いを開く', hold: '艦首を向けて保持' };
@@ -16426,7 +16711,7 @@ function comExtrasStep(c, P, D, hpF, contact) {
     const hHere = getHiggsIntensity(player.x, player.y);
     const mobile = (t) => playerDrones.some(d => d.type === t && d.hp > 0);
     // 偽コンテナ: 気配が無く (60秒) 照射を受けていない間に、隠密/貪欲な性格なら艦尾に置いて待つ (敵が取りに来たら爆発・位置が割れる)。120秒に1回
-    if (can('fakecache') && !contact && quietFor > 60 && playerExposureLevel < 2 && ((P.stealth ?? 0.4) >= 0.35 || (P.greed ?? 0.4) >= 0.5) && now - (c.fakeF || -1e9) > 7200) {
+    if (can('fakecache') && (cargo.stock.fakecache || 0) > 1 && !contact && quietFor > 60 && playerExposureLevel < 2 && ((P.stealth ?? 0.4) >= 0.35 || (P.greed ?? 0.4) >= 0.5) && now - (c.fakeF || -1e9) > 7200) {
         c.fakeF = now; c.itemF = now; deployDrone('fakecache'); comThinkEvent('p', '気配が無い → 艦尾に偽コンテナを置く (取りに来た相手が爆発を受け、位置が割れる)'); return;
     }
     if (gameState.shipType === 'carrier') {
@@ -16476,7 +16761,7 @@ function comStallPers(c, base, now, lastF) {
 function comStratCtx(c, P) {
     const cls = gameState.shipType, drones = SHIP_DRONES[cls] || [];
     const has = (k) => drones.includes(k) && (cargo.stock[k] || 0) > 0;
-    const lures = ['fsos', 'lure', 'bcn_heat', 'bcn_optic', 'bcn_em', 'bcn_higgs'].filter(has);
+    const lures = ['fsos', 'lure', 'bcn_heat', 'bcn_optic', 'bcn_em', 'bcn_higgs'].filter(k => has(k) && !(k === 'lure' && (cargo.stock.lure || 0) < 2)); // 偽艦影の最後の1個は狩人の作戦 (偽装の罠) 用 — 敵と同じ
     const mobile = (t) => playerDrones.some(d => d.type === t && d.hp > 0);
     const owned = structures.filter(s => s.type === 'colony' && s.owner === 'player');
     const slotsFree = partSlotsMax() - partSlotsUsed();
@@ -16758,7 +17043,7 @@ function comPilotStep() {
         (c.rej || (c.rej = {}))[lockedSignalId] = now; // 艦影45%を超えるまで追い直さない (識別が25%前後で揺れて付け外しを繰り返した)
         window._lockSignal(null); c.lockSid = null;
     }
-    const r = xoEvaluate();
+    const r = xoEvaluate(); _comXoR = r; // COM対戦の画面のAIバーはこれを出すだけ (描画からxoEvaluateを呼ぶと内部の記憶が変わり、同じ種でも試合が変わった)
     c.mode = '';
     const D = c.D = comDoctrine(P); // 第41弾: 性格から立ち回りの方針
     if (contact) c.lastContactF = now;
@@ -17319,7 +17604,9 @@ function startComDemo() {
     if (comCfg.lo && comCfg.lo.p && comCfg.lo.p[comCfg.ship]) gameState.loadout = Object.assign({}, gameState.loadout, { [comCfg.ship]: Object.assign({}, comCfg.lo.p[comCfg.ship]) });
     else { const _lp = comLoadout('p', comCfg.ship); if (_lp.fakecache) gameState.loadout = Object.assign({}, gameState.loadout, { [comCfg.ship]: _lp }); } // 偽コンテナ: 隠密/貪欲な自機COMは既定の積み込みに1個足す
     toggleThinkLog(comCfg.think);
-    startGame(comCfg.ship);
+    window._comCfgSnap = JSON.parse(JSON.stringify(comCfg)); window._gsSnap = JSON.parse(JSON.stringify(gameState)); // プレイ画面のリプレイ: 同じ設定で同じ試合を作り直す
+    _frameCount = 0; _simSeed = (window.__rpSeed !== undefined ? window.__rpSeed : (_nativeRandom() * 4294967296)) >>> 0; _simRng = _mulberry(_simSeed); // 試合の種 (記録に残す → 同じ試合を再生できる)
+    withSimRng(() => startGame(comCfg.ship));
     toggleHiggsView(!comCfg.higgsView);
     logMessage('COM対戦デモ: 自機もCOMが操作する (観戦のみ)。メニューで ヒッグス表示 / 思考ログ を切替、終わる時は「COM対戦を終えてロビーへ」', 'system-msg');
 }
@@ -17728,7 +18015,8 @@ function updateTacStrip() {
     const _aiF = Math.max(0, Math.min(1, genAlloc.ai / 100));
     const _xoEvery = Math.round((120 - 120 * _aiF * 0.9) * (player._commJam > 0 ? 3 : 1)); // 第60弾: 通信障害の間は助言が遅れる
     let r;
-    if (_frameCount - (_xoEvalF || -1e9) >= _xoEvery || !_xoLast) { r = xoEvaluate(); if (r && r.text) r = Object.assign({}, r, { text: aiRoundText(r.text, _aiF) }); _xoLast = r; _xoEvalF = _frameCount; }
+    if (comDemo) { r = _comXoR ? Object.assign({}, _comXoR, { text: _comXoR.text ? aiRoundText(_comXoR.text, _aiF) : _comXoR.text }) : null; _xoLast = r; }
+    else if (_frameCount - (_xoEvalF || -1e9) >= _xoEvery || !_xoLast) { r = xoEvaluate(); if (r && r.text) r = Object.assign({}, r, { text: aiRoundText(r.text, _aiF) }); _xoLast = r; _xoEvalF = _frameCount; }
     else r = _xoLast;
     const key = r ? (r.tone + '|' + r.text + '|' + (r.act ? r.act.label : '')) : '';
     if (key !== _xoState) {
@@ -17918,7 +18206,13 @@ function initSfxVolumeUI() {
     wire(['sfx-vol', 'sfx-vol-m'], () => sfxVolume, setSfxVolume);
     wire(['bgm-vol', 'bgm-vol-m'], () => bgmVolume, setBgmVolume);
 }
-function stepWorld() {
+// 2026-11-11 (オーナー「実際のプレイ画面で敵側の動きのリプレイを観たい」): 試合を種(seed)から再現する。
+//   ロジック (stepWorld と試合の生成) だけ種つきの乱数を使い、描画・音・UIは元の乱数のまま → 同じ種のCOM対戦は同じ試合になる
+let _simRng = null, _simSeed = 0;
+function _mulberry(seed) { let a = seed >>> 0; return function () { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+function withSimRng(fn) { if (!_simRng || Math.random === _simRng) return fn(); Math.random = _simRng; try { return fn(); } finally { Math.random = _nativeRandom; } }
+function stepWorld() { _inStep = true; try { withSimRng(_stepWorldCore); } finally { _inStep = false; } if (playReplay) prpCheckDrift(); } // 記録と比べるのは読むだけ
+function _stepWorldCore() {
         _frameCount++;
         if (debugMode) { if (_dbgGod && player && player.hp > 0 && !player._dying) player.hp = player.maxHp; if (_dbgInfoOn && _frameCount % 20 === 0) { const el = document.getElementById('dbg-info'); if (el) el.textContent = _dbgInfoText(); } }
         updateEffectiveRadarRange();
@@ -18270,7 +18564,8 @@ function renderWorld() {
         }
         _tickZoomAnim();
         // カメラ追従
-        if (cameraFollowPlayer && player) centerCameraOnPlayer();
+        const _pov = prpPov(); // プレイ画面のリプレイ: 敵の席
+        if (cameraFollowPlayer && player) { if (_pov) { const _px = player.x, _py = player.y; player.x = _pov.x; player.y = _pov.y; centerCameraOnPlayer(); player.x = _px; player.y = _py; } else centerCameraOnPlayer(); }
 
         // Rendering — ベース変換を _dpr 倍に固定 (高精細でくっきり)。以降の描画は全てCSS px基準。
         ctx.setTransform(_dpr, 0, 0, _dpr, 0, 0);
@@ -18316,6 +18611,13 @@ function renderWorld() {
         });
 
         projectiles.forEach(p => { if (!p.isPlayer) p.draw(ctx); }); // 敵弾は霧の下 (視界の内側なら見える)
+        let _povVis = null;
+        if (_pov) { // 敵の席: 自機側の物は霧の下に描く (敵の目で見える所だけ見える)・敵の物は見えている扱いで霧の上に
+            projectiles.forEach(p => { if (p.isPlayer) p.draw(ctx); });
+            drawPlayerDrones(ctx);
+            if (player && (player.hp > 0 || player._dying > 0)) player.draw(ctx);
+            _povVis = enemies.map(e => e.inVision); for (const e of enemies) e.inVision = true;
+        }
         if (!mapMode) { emitDamageSmoke(player); for (const e of enemies) emitDamageSmoke(e); } // 第21弾: 損傷の煙・火花
         if (_frameCount % 8 === 0) updateCombatBar(); // 第22弾
         updateDrawEffects(ctx);
@@ -18323,19 +18625,23 @@ function renderWorld() {
 
         // ── 有視界フォグ ──
         // マップモード中はフォグを抑制して全体を戦術マップとして表示(索敵済みの情報のみ可視)。
+        if (_pov) { if (!mapMode) prpDrawFog(ctx, _pov); }
+        else {
         if (player && (player.hp > 0 || player._dying > 0) && !mapMode) drawFogOfWar(ctx); // 第22弾: 撃沈の演出中も霧は残す
         if (player && player.hp > 0) drawDensityOverlay(ctx); // 第21弾: 霧の濃さと地形 (自艦の周り / ボタンで全マップ)
         if (player && player.hp > 0) drawRefRing(ctx); // 第43弾
+        }
 
         // ── 第16弾: 「見えているもの」と「自分のもの」は霧の上に描く ──
         // 視界の内側の敵艦は100%の不透明度で (旧: 霧のグラデーションと雲の加算合成の下に描かれ半透明に見えた)。
         // 自分のミサイル・ドローン・デコイは霧の中でも位置が分かるように (自分が撃ったものの位置は知っている)。
         drawSmokeClouds(ctx); // 第17弾: 煙幕は艦影の下 (見えている敵を薄めない)
         enemies.forEach(e => e.draw(ctx));
+        if (_povVis) enemies.forEach((e, i) => { e.inVision = _povVis[i]; });
         drawDecoys(ctx);
-        drawPlayerDrones(ctx);
+        if (!_pov) drawPlayerDrones(ctx);
         drawSaberFx(ctx); // 第36弾: Techのビームサーベル
-        projectiles.forEach(p => { if (p.isPlayer) p.draw(ctx); });
+        if (!_pov) projectiles.forEach(p => { if (p.isPlayer) p.draw(ctx); });
         drawNoiseMakers(ctx);
         drawLures(ctx); // 第21弾
         drawFieldSignals(ctx); // 第31弾
@@ -18343,9 +18649,9 @@ function renderWorld() {
         drawDroneVision(ctx); // 第44弾: ドローンの有視界
         drawMines(ctx); // 第32弾
         drawLootTraces(ctx); drawConvoys(ctx); // 第34弾
-        drawOwnOrdnanceMarkers(ctx);
+        if (!_pov) { drawOwnOrdnanceMarkers(ctx);
         drawColonyIntel(ctx);
-        if (player && (player.hp > 0 || player._dying > 0)) player.draw(ctx);
+        if (player && (player.hp > 0 || player._dying > 0)) player.draw(ctx); }
         drawDamagePuffs(ctx); // 第21弾: 損傷の煙・火花は艦影の上
         updateDrawBeams(ctx); // 第22弾: ビームは霧と艦影の上
 
@@ -18362,15 +18668,15 @@ function renderWorld() {
         drawIdentifiedTerrain(ctx, _vpX, _vpY, _vpW, _vpH);
 
         // ── センサー痕跡(ソナーの影/コンタクト) — ヒッグスより手前に表示 ──
-        for (const e of enemies) e.drawSensorTrace(ctx);
+        if (!_pov) for (const e of enemies) e.drawSensorTrace(ctx);
 
         // ── シグネチャ・スレットリング (最前面・フォグの上) ──
-        if (player && player.hp > 0) drawPassiveAntenna(ctx);
+        if (player && player.hp > 0 && !_pov) drawPassiveAntenna(ctx);
 
         // ── 武器射程 + 射角アーク: "実際にどこを撃てるか" (射角 kinetic±150/missile±45/beam±10) ──
         // 第15弾: 撃つ相手(推定位置/視認)が射程の1.5倍以内に居る時・射撃命令中だけ表示 (常時の同心円を減らす)
         const _arcTe = player && player.hp > 0 ? bestFireTarget() : null;
-        const _arcShow = !!player && player.hp > 0 && (!!player._fireOrder || (_arcTe && Math.hypot((_arcTe.inVision ? _arcTe.x : _arcTe.displayX) - player.x, (_arcTe.inVision ? _arcTe.y : _arcTe.displayY) - player.y) < weaponRange(currentWeapon()) * 1.5));
+        const _arcShow = !_pov && !!player && player.hp > 0 && (!!player._fireOrder || (_arcTe && Math.hypot((_arcTe.inVision ? _arcTe.x : _arcTe.displayX) - player.x, (_arcTe.inVision ? _arcTe.y : _arcTe.displayY) - player.y) < weaponRange(currentWeapon()) * 1.5));
         if (_arcShow) {
             const wType  = currentWeapon();
             const wRange = weaponRange(wType); // 発射判定と同じ射程 (第13弾: 旧表示1600/4400/16000は実射程と不一致だった)
@@ -18401,16 +18707,20 @@ function renderWorld() {
         }
 
         // ── パッシブ方位ウェッジ (ワールド空間・三角測量用) ──
+        if (_pov) prpDrawPovOverlay(ctx, _pov); // 敵の席: 敵の方位の記録・推定円・作戦の行き先
+        else {
         if (player && player.hp > 0) drawPassiveBearings(ctx);
         // §4-4: 三角測量精度円描画 (手動TRIボタンで実行した結果を表示)
         if (player && player.hp > 0) { drawTriangulationCircle(ctx); drawSigZones(ctx); }
         if (player && player.hp > 0) drawWeaponRange(ctx); // 第20弾: 今の兵装の射程 (霧の上)
+        }
 
         ctx.restore();
 
         drawHiggsMedium(ctx);
         flushTags(ctx); // 第40弾: 地図の名札 (画面座標でまとめて)
-        drawHUDOverlay(ctx);
+        if (_pov) { prpDrawPovRing(ctx, _pov); drawScaleBar(ctx); } else drawHUDOverlay(ctx);
+        if (playReplay) prpTick();
         if (_frameCount % 3 === 0) drawMinimap();
         if (_frameCount % 10 === 0) updateEnvInfo();
         if (_frameCount % 8 === 0) updateTacStrip();
@@ -18637,6 +18947,7 @@ function toggleDebugMode(on) {
     debugMode = on === undefined ? !debugMode : !!on;
     const b = document.getElementById('mm-debug'); if (b) { b.textContent = 'デバッグモード: ' + (debugMode ? 'ON' : 'OFF'); b.classList.toggle('btn-warn-on', debugMode); }
     const p = document.getElementById('debug-panel'); if (p) p.style.display = debugMode ? 'flex' : 'none';
+    if (debugMode && matchRec && matchRec.meta) matchRec.meta.dbg = true; // デバッグの操作が入った試合は、プレイ画面のリプレイで同じ試合にならない
     if (debugMode) { _dbgBuild(); document.getElementById('mobile-menu-modal')?.classList.add('hidden'); logMessage('DEBUG: デバッグモードON — 保存は無効 (戦歴・クレジットに残らない)', 'warning-msg'); }
     else { _dbgGod = false; _dbgFreeze = false; }
 }
