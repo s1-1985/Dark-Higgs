@@ -438,7 +438,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261112m';
+const SPRITE_VER = '20261112n';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -4807,6 +4807,8 @@ class Ship {
                     this._launchFlash = 60; // 第20弾: 発進は光とEMが漏れる (自機と同じ)
                     this.droneSpawnTimer = _engaged ? (380 + Math.floor(Math.random() * 320)) : (700 + Math.floor(Math.random() * 500));
                     logMessage('TACTICAL: 敵空母がファイタードローンを射出！', 'warning-msg');
+                    matchRecEvent('launchE', this.x, this.y, '敵が艦載機を発進');
+    matchRecEvent('launchE', d.x, d.y, '敵が艦載機を発進');
                     comThinkEvent('e', '戦闘機を射出 → 推定位置 (' + _dirTxt(this.x, this.y, _bel.x, _bel.y) + ') へ向かわせる (残り' + this.droneStock + '機)', 'e' + this.uid);
                 }
             }
@@ -12984,6 +12986,7 @@ function _spawnDrone(type, tx, ty) {
         _nd.angle = ang;
         playerDrones.push(_nd);
         player._launchFlash = 60; // 第20弾: 発進は光とEMが漏れる
+        matchRecEvent('launchP', _nd.x, _nd.y, '自機が' + (spec.label || type) + 'を発進'); // 第101弾: 発進を記録 (自機COMと敵のドローン運用の比較用)
         if (spec.placed) {
             // 設置物は艦を止めて据え付ける (§3-6残: 停止中=脆弱ウィンドウ)
             buildingTimer = BUILD_STOP_DUR;
@@ -14199,6 +14202,7 @@ function _eLaunchFighter(e, bel) {
     d.aiState = 'hunting'; d.huntTarget = { x: bel.x, y: bel.y }; d.huntTimer = 600; d.lurking = false; d._home = e;
     enemies.push(d); e._launchFlash = 60;
     logMessage('TACTICAL: 敵空母がファイタードローンを射出！', 'warning-msg');
+    matchRecEvent('launchE', d.x, d.y, '敵が艦載機を発進');
 }
 function _eDatalink(carrier, x, y, r, fresh) {
     carrier.playerLastKnownPos = { x, y, vx: 0, vy: 0 }; carrier.contactFreshness = Math.max(carrier.contactFreshness || 0, fresh); carrier._lkGuess = false;
