@@ -438,7 +438,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261112b';
+const SPRITE_VER = '20261112c';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -827,7 +827,7 @@ function sfxHitEnemy(type, target, byDrone) {
 // 搭載物を展開した時の音 (戦闘機・哨戒機・砲台・バリア・ブイ・デコイ・散布など)
 function _sfxDeployId(type) {
     return ({ attack: 'drone_launch_fighter', scout: 'drone_launch_scout', build: 'drone_deploy_turret', barrier: 'drone_deploy_barrier', buoy: 'drone_deploy_buoy', mech: 'item_assemble_tech_done', higgs: 'item_fogspray', decoy: 'item_lure_ship',
-        bcn_heat: 'item_beacon_heat', bcn_optic: 'item_beacon_optic', bcn_em: 'item_beacon_em', bcn_higgs: 'item_beacon_higgs', lure: 'item_lure_ship', fsos: 'item_lure_sos', repair: 'item_repair_start', flash: 'item_flash', noise: 'item_noise', smoke: 'item_smoke', fogspray: 'item_fogspray', fogblow: 'item_fogblow' })[type] || 'ui_confirm';
+        bcn_heat: 'item_beacon_heat', bcn_optic: 'item_beacon_optic', bcn_em: 'item_beacon_em', bcn_higgs: 'item_beacon_higgs', lure: 'item_lure_ship', fsos: 'item_lure_sos', repair: 'item_repair_start', flash: 'item_flash', noise: 'item_noise', smoke: 'item_smoke', fogspray: 'item_fogspray', fogblow: 'item_fogblow', fakecache: 'item_fakecache_place', linkcut: 'ew_linkcut' })[type] || 'ui_confirm';
 }
 try { if (audioCtx) sfxLoadManifest(); } catch (e) {}
 
@@ -2426,8 +2426,8 @@ function updateZoomFab() {
 (() => {
     const zc = document.getElementById('zoom-ctl'), fab = document.getElementById('zoom-fab');
     if (zc && fab) {
-        fab.addEventListener('click', (e) => { e.stopPropagation(); zc.classList.toggle('open'); sfxUI('ui_select'); });
-        document.addEventListener('pointerdown', (e) => { if (zc.classList.contains('open') && !zc.contains(e.target)) zc.classList.remove('open'); }, true); // 別の所をタップするまで開いたまま
+        fab.addEventListener('click', (e) => { e.stopPropagation(); zc.classList.toggle('open'); sfxUI(zc.classList.contains('open') ? 'ui_fab_open' : 'ui_fab_close'); });
+        document.addEventListener('pointerdown', (e) => { if (zc.classList.contains('open') && !zc.contains(e.target)) { zc.classList.remove('open'); sfx('ui_fab_close'); } }, true); // 別の所をタップするまで開いたまま
     }
     const xb = document.getElementById('xo-bar'), xh = document.getElementById('xo-history');
     if (xb && xh) {
@@ -3641,6 +3641,7 @@ function cycleLockTarget(dir) {
     let i = L.findIndex(t => (t.e && t.e === te) || (!te && t.sid && t.sid === lockedSignalId));
     i = (i + (dir || 1) + L.length * 2) % L.length;
     const t = L[i];
+    sfx('ui_lock_cycle');
     if (t.kind === 'ent') { if (player.manualTarget && player.targetEntity === t.e) return; player.manualTarget = false; lockEntity(t.e); }
     else lockSignalTarget(t.sid);
 }
@@ -6815,7 +6816,7 @@ function openLoadout(ship, fromDock, comSide) {
     document.getElementById('lo-ship').textContent = (comSide ? (comSide === 'p' ? 'COM対戦 自機: ' : 'COM対戦 敵: ') : '') + SHIP_JP[ship] + ' — 積載' + HOLD_CAP[ship] + '枠';
     _renderLoadout();
     document.getElementById('loadout-overlay').classList.remove('hidden');
-    sfxUI('ui_open');
+    sfxUI('ui_panel_open');
 }
 function _renderLoadout() {
     const e = _loEdit; if (!e) return;
@@ -7129,7 +7130,7 @@ function setGenFocus(key, quiet) {
     updateGenTotal();
     if (player) player.generatorOutput = genAlloc.engine;
     document.querySelectorAll('.gd-focus-btn, .focus-btn').forEach(b => b.classList.toggle('active', b.dataset.focus === key));
-    if (!quiet) sfxUI('ui_select');
+    if (!quiet) sfxUI('ui_focus_change');
 }
 document.querySelectorAll('.gd-focus-btn').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); setGenFocus(b.dataset.focus); }));
 
@@ -7237,7 +7238,7 @@ function cycleSonarLevel() {
         _refRing = { kind: 'sonar', f: _frameCount, level: sonarLevel, R, H: R * SONAR_HEARD * PM.sonarHeard };
         logMessage('SONAR: 出力 ' + SP.jp + ' — 全周囲 反応' + Math.round(R / 100) * 100 + 'u・聞かれる' + Math.round(R * SONAR_HEARD * PM.sonarHeard / 100) * 100 + 'u / 指向性 最大' + Math.round(sonarDirRange(sonarLevel) / 1000) + 'ku・再充電 全周囲' + Math.round(900 * SP.cd / 60) + '秒', 'system-msg');
     }
-    sfxUI('ui_level_' + ({ weak: 1, std: 2, strong: 3 })[sonarLevel]);
+    if (!sfx('ui_sonar_power')) sfxUI('ui_level_' + ({ weak: 1, std: 2, strong: 3 })[sonarLevel]);
 }
 document.getElementById('btn-sonar-power')?.addEventListener('click', (e) => { e.stopPropagation(); cycleSonarLevel(); });
 // 第72弾: ソナーの種類 (熱源・光・電磁波・ヒッグス)。選んでいる種類をもう一度押すと未選択に戻る。未選択では全周囲も指向性も打てない
@@ -7247,7 +7248,7 @@ function selectSonarBand(b) {
     const sc = document.getElementById('btn-scan'), dc = document.getElementById('btn-dir-sonar'); if (sc) sc.classList.toggle('no-band', !sonarBand); if (dc) dc.classList.toggle('no-band', !sonarBand);
     const lb = document.getElementById('sonar-band-label'); if (lb) lb.textContent = sonarBand ? SONAR_BAND_JP[sonarBand] + 'ソナー' : 'ソナーの種類を選ぶ';
     if (sonarBand) logMessage('SONAR: ' + SONAR_BAND_JP[sonarBand] + 'ソナーを選んだ — ' + SONAR_BAND_JP[sonarBand] + 'を出している物だけが映る (別の種類の信号の艦は映らない)', 'system-msg');
-    sfxUI('ui_select');
+    sfxUI('ui_sonar_band');
 }
 document.querySelectorAll('.sonar-band-btn').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); selectSonarBand(b.dataset.band); }));
 
@@ -7264,7 +7265,7 @@ document.getElementById('btn-jam-burst')?.addEventListener('click', () => {
     if (jamBurst > 0) { logMessage('JAM: 範囲ジャミングは既に発動中', 'warning-msg'); return; }
     jamBurst = JAM_BURST_DUR;
     logMessage(`JAM: 範囲ジャミング展開 — 半径内の敵センサーを${Math.round(JAM_BURST_DEGRADE*100)}%劣化 (発動中はEM放射増)`, 'system-msg');
-    playSound('ui');
+    sfxOr('ew_jam_area', 'ui');
 });
 document.getElementById('btn-jam-cont')?.addEventListener('click', () => {
     if (gameState.shipType !== 'stealth') return;
@@ -7272,7 +7273,7 @@ document.getElementById('btn-jam-cont')?.addEventListener('click', () => {
     const b = document.getElementById('btn-jam-cont');
     if (b) { b.style.borderColor = jamCont ? '#ff66cc' : '#aa66ff'; b.style.color = jamCont ? '#ff99dd' : '#cc99ff'; }
     logMessage(`JAM: 継続EMジャム ${jamCont ? 'ON — 周辺センサーを持続妨害(常時EM放射)' : 'OFF'}`, 'system-msg');
-    playSound('ui');
+    sfxUI(jamCont ? 'ui_toggle_on' : 'ui_toggle_off');
 });
 document.getElementById('btn-jam-pulse')?.addEventListener('click', () => {
     if (gameState.shipType !== 'stealth') return;
@@ -7281,7 +7282,7 @@ document.getElementById('btn-jam-pulse')?.addEventListener('click', () => {
     jamPulseCD = JAM_PULSE_CD;
     effects.push({ x: player.x, y: player.y, r: 0, maxR: JAM_PULSE_RADIUS, a: 0.5, c: '#cc99ff', type: 'circle' });
     logMessage('JAM: EMパルス発射 — 広域瞬間ブラインド！(自EM放射が最大に)', 'warning-msg');
-    playSound('ui');
+    sfxOr('ew_emp_pulse', 'ui');
 });
 // ── 搭載物の展開ボタン (第16弾: 全艦種。data-dtype の種類を展開/組み立て) ──
 document.querySelectorAll('.drone-btn').forEach(b => b.addEventListener('click', () => deployDrone(b.dataset.dtype)));
@@ -7484,6 +7485,7 @@ function toggleBand(s, quiet) {
     else if (sensorLv[s] < 3) sensorLv[s]++;
     else { sensorsOn[s] = false; sensorLv[s] = 2; sensorOrder = sensorOrder.filter(b => b !== s); currentSensor = sensorOrder[0] || currentSensor; }
     _syncBandUI(); _showRefRing(s); _bandLevelMsg(s, quiet);
+    if (!quiet) { if (sensorsOn[s] && sensorLv[s] === 1) sfxUI('ui_sensor_band_on'); else if (!sensorOrder.length) sfxUI('ui_sensor_all_off'); } // 第92弾: ONにした時・全部OFFになった時は専用の音
 }
 // COM用: 感度を指定 (lvl 0=OFF 1=弱 2=中 3=強)
 function setBandLevel(s, lvl, quiet) {
@@ -7497,7 +7499,7 @@ function _bandLevelMsg(s, quiet) {
     const leak = sensorOrder.map((b, i) => leakMult(i, sensorLv[b]) > 0 ? (BAND_JP[b] || b) : null).filter(Boolean).join('・');
     const lv = sensorLv[s];
     logMessage(`SENSOR: ${SENSOR_INFO[s].name} ${!sensorsOn[s] ? 'OFF' : '感度 ' + LV_JP[lv] + ' — 受信距離×' + LV_RANGE[lv] + (lv === 3 ? '・漏れ+1本分・雑音で方位誤差×1.3' : lv === 1 ? '・漏れ少なめ' : '')}` + (!sensorOrder.length ? ' (全帯域OFF — 何も聴こえないが漏らさない)' : leak ? ` (自艦が漏らす: ${leak})` : ' (漏れなし)'), 'system-msg');
-    sfxUI(lv ? 'ui_level_' + lv : 'ui_toggle_off');
+    if (!(sensorsOn[s] && lv === 1) && sensorOrder.length) sfxUI(sensorsOn[s] ? 'ui_level_' + lv : 'ui_toggle_off');
 }
 // 基準の艦 (巡航の攻撃型) がその帯域で聞こえる距離の円を3秒だけ出す (感度・ソナーを変えた時に半径の見当をつける)。第43弾
 let _refRing = null;
@@ -9057,7 +9059,7 @@ function updateVisualNegatives() {
         if (!m) continue;
         recordMiss(sid, m);
         const id = _sigIdent[sid]; if (id && !id.sure) id.L = Math.max(-4, (id.L || 0) - 0.5); // 居ない所を指す信号は 艦影の見込みも下がる
-        logMessage('AI: SIG-' + sigNo(sid) + ' の推定位置を目視 — 何も居ない。位置が違うか艦影ではなかった (この円を除外・' + (sa._vnN) + '回目)', 'system-msg');
+        sfx('det_visual_negative'); logMessage('AI: SIG-' + sigNo(sid) + ' の推定位置を目視 — 何も居ない。位置が違うか艦影ではなかった (この円を除外・' + (sa._vnN) + '回目)', 'system-msg');
     }
 }
 function updateSrcKnown() {
@@ -9226,7 +9228,7 @@ function fakeCacheBlast(f, victim) {
     victim.hp -= dmg;
     createExplosion(f.x, f.y, '#ffcc66', 34, true); addShake(isP ? 14 : 6);
     { const deb = []; for (let k = 0; k < 22; k++) deb.push({ a: Math.random() * Math.PI * 2, v: 0.35 + Math.random() * 0.65, len: 18 + Math.random() * 40, w: 2 + Math.random() * 3, hot: Math.random() < 0.55, sp: (Math.random() - 0.5) * 0.06 });
-      effects.push({ type: 'trapblast', x: f.x, y: f.y, R: 240, t: 0, rot: Math.random() * 6.28, deb }); } sfxOr('wpn_mine_blast', 'explosion');
+      effects.push({ type: 'trapblast', x: f.x, y: f.y, R: 240, t: 0, rot: Math.random() * 6.28, deb }); } if (!sfx('item_trap_blast')) sfxOr('wpn_mine_blast', 'explosion');
     effects.push({ x: victim.x, y: victim.y - 30, text: '偽コンテナ -' + dmg, life: 1.4, type: 'floatText', c: '#ffdd66' });
     applyDaze(victim, FAKE_DAZE, '偽コンテナの爆発');
     if (isP) {
@@ -9313,7 +9315,7 @@ function hackTakeControl(e, kind) {
     d.hp = Math.max(1, spec.hp * Math.max(0.3, e.hp / (e.maxHp || spec.hp))); d._hacked = true; if (type === 'mech') { d.vx = e._vx2 || 0; d.vy = e._vy2 || 0; }
     playerDrones.push(d);
     const i = enemies.indexOf(e); if (i >= 0) enemies.splice(i, 1);
-    createExplosion(e.x, e.y, '#66ddff', 10, false); sfxUI('pickup');
+    createExplosion(e.x, e.y, '#66ddff', 10, false); sfxUI('ew_drone_captured');
     effects.push({ x: e.x, y: e.y, r: 0, maxR: 420, a: 0.7, c: '#66ddff', type: 'circle' });
     logMessage('AI: 敵の' + (kind === 'mech' ? 'Tech' : '戦闘機') + 'の制御を奪った — こちらの護衛ドローンになった', 'system-msg');
     matchRecEvent('hack2', e.x, e.y, '敵ドローンの制御を奪った (' + (kind === 'mech' ? 'Tech' : '戦闘機') + ')');
@@ -9340,7 +9342,7 @@ function enemyHackStep(e) {
             e.contactFreshness = Math.max(e.contactFreshness || 0, 0.3);
             logMessage('WARN: ' + _droneName(d) + 'の通信を探られた — 敵に自艦の方角を知られた (敵のハック 第1段階・誤差±' + Math.round(sig * 57.3) + '°)', 'warning-msg');
             comThinkEvent('e', '自機の' + (kind === 'mech' ? 'Tech' : '戦闘機') + 'の通信をハック — 発進元の方位を得た (誤差±' + Math.round(sig * 57.3) + '°)', 'e' + e.uid);
-            matchRecEvent('hackE1', d.x, d.y, '敵が自機ドローンをハック (第1段階)');
+            sfx('alm_hack_probe'); matchRecEvent('hackE1', d.x, d.y, '敵が自機ドローンをハック (第1段階)');
         }
         if (S.s2 && dist < HACK_RANGE2 && hackLinkStrength(e, d, HACK_RANGE2) > 0 && (dist < bd || (kind === 'mech' && bk !== 'mech'))) { bd = dist; best = d; bk = kind; } // 第90弾: 濃いヒッグスの中は届かない・Techを先に (自機COMと同じ選び方)
     }
@@ -9359,7 +9361,7 @@ function enemyHackTake(e, d, kind) {
     else { f = new Ship(d.x, d.y, false, 'fighter'); f._home = e; f.aiState = 'hunting'; f.lurking = false; f._noReward = true; f._ammo = DRONE_AMMO.attack; enemies.push(f); }
     f.x = d.x; f.y = d.y; f.angle = d.angle || 0; f.maxHp = spec.hp; f.hp = Math.max(1, spec.hp * frac); f._hacked = true;
     const i = playerDrones.indexOf(d); if (i >= 0) playerDrones.splice(i, 1);
-    createExplosion(d.x, d.y, '#ff6666', 10, false); effects.push({ x: d.x, y: d.y, r: 0, maxR: 420, a: 0.7, c: '#ff6666', type: 'circle' });
+    createExplosion(d.x, d.y, '#ff6666', 10, false); sfx('alm_drone_hijacked'); effects.push({ x: d.x, y: d.y, r: 0, maxR: 420, a: 0.7, c: '#ff6666', type: 'circle' });
     logMessage('WARN: 自機の' + (kind === 'mech' ? 'Tech' : '戦闘機') + 'が敵に通信をハックされ、制御を奪われた — 敵の艦載機になった', 'warning-msg');
     comThinkEvent('e', '自機の' + (kind === 'mech' ? 'Tech' : '戦闘機') + 'の制御を奪った', 'e' + e.uid);
     matchRecEvent('hackE2', d.x, d.y, '敵が自機ドローンの制御を奪った (' + (kind === 'mech' ? 'Tech' : '戦闘機') + ')');
@@ -9391,13 +9393,14 @@ function fireHackPulse(att, angle, effect) {
     const E = HACK_EFFECTS[effect] || HACK_EFFECTS.halt, H = hackPower(isP ? 'player' : 'enemy', isP ? null : A), range = hackPulseRange(H, A), now = _frameCount;
     if (isP) { _hackPulseCD = HACK_PULSE_CD; _hackBurstUntil = now + HACK_BURST_F; hackSessP = null; } else { att._hackCD = now + HACK_PULSE_CD; att._hackBurstUntil = now + HACK_BURST_F; att._hackSess = null; }
     effects.push({ type: 'hackcone', x: A.x, y: A.y, ang: angle, R: range, t: 0, own: isP });
-    sfxUI('ui_select');
+    if (isP) sfxUI('ew_hack_wave_fire');
     const targets = isP ? enemies.filter(e => e.hp > 0 && !e._dying && e.type !== 'fighter') : (player && player.hp > 0 ? [player] : []);
     let hit = null, bd = Infinity;
     for (const t of targets) { const d = Math.hypot(t.x - A.x, t.y - A.y); if (d > range) continue; if (Math.abs(_angDiff(Math.atan2(t.y - A.y, t.x - A.x), angle)) > HACK_PULSE_HALF) continue; if (hackLinkStrength(A, t, range) <= 0) continue; if (d < bd) { bd = d; hit = t; } } // 第90弾: 濃いヒッグスの中・霧で届かない相手には当たらない
     if (isP) matchRecEvent('hackPulseP', A.x, A.y, '自艦がハック波を発射 (' + E.jp + '・届く距離' + Math.round(range) + 'u・' + (hit ? '応答あり' : '外れ') + ')');
     else matchRecEvent('hackPulseE', A.x, A.y, '敵がハック波を発射 (' + E.jp + ')');
     if (!hit) {
+        if (isP) sfx('ew_hack_miss');
         if (isP) logMessage('HACK: ハック波 — 応答なし (外れ)。大量の電磁波を出した — 敵に方向を知られる', 'warning-msg');
         else comThinkEvent('e', 'ハック波を撃ったが相手は居なかった (EMを出した)', 'e' + att.uid);
         return false;
@@ -9410,11 +9413,13 @@ function fireHackPulse(att, angle, effect) {
         _signalAnalysis[sid].ping = { x: hit.x + (Math.random() - 0.5) * err, y: hit.y + (Math.random() - 0.5) * err, r: err, f: now, src: 'hack' }; solveFix(_signalAnalysis[sid]);
     } else if (att._sa) { att._sa.ping = { x: player.x + (Math.random() - 0.5) * err, y: player.y + (Math.random() - 0.5) * err, r: err, f: now, src: 'hack' }; solveFix(att._sa); att.contactFreshness = Math.max(att.contactFreshness || 0, 0.6); }
     if (q < 1) {
+        if (isP) sfx('ew_hack_fail');
         if (isP) logMessage('HACK: 応答あり — 艦影を捉えた (方位' + compassDeg(Math.atan2(hit.y - A.y, hit.x - A.x)) + '°・約' + Math.round(bd / 100) * 100 + 'u)。だが相手のハック耐性が演算力を上回り侵入できない (演算力' + (Math.round(H * 10) / 10) + ')', 'warning-msg');
         else comThinkEvent('e', 'ハック波が当たったが耐性が高く侵入できない', 'e' + att.uid);
         return false;
     }
     if (Math.random() > hackSuccessChance(q)) { // 第89弾: 防壁に弾かれた
+        sfx(isP ? 'ew_hack_fail' : 'alm_hack_probe');
         if (isP) logMessage('HACK: 応答あり — 侵入を試みたが防壁に弾かれた (成功率' + Math.round(hackSuccessChance(q) * 100) + '%・演算力' + (Math.round(H * 10) / 10) + ' / 相手の耐性 約' + (Math.round(R * 2) / 2) + ')', 'warning-msg');
         else { comThinkEvent('e', 'ハック波が当たったが侵入に失敗 (弾かれた)', 'e' + att.uid); logMessage('WARN: ハック波を受けた — 防壁が侵入を弾いた (方位' + compassDeg(Math.atan2(att.y - player.y, att.x - player.x)) + '°から)', 'warning-msg'); }
         return false;
@@ -9430,7 +9435,7 @@ function fireHackPulse(att, angle, effect) {
 }
 function _stepHackSess(S, att) {
     const A = att === 'p' ? player : att, T = S.tgt, now = _frameCount;
-    const end = (why) => { if (att === 'p') hackSessP = null; else att._hackSess = null; if (att === 'p') logMessage('HACK: 侵入が途切れた — ' + why, 'warning-msg'); else if (T === player) logMessage('HACK: 侵入が途切れた (' + why + ')', 'system-msg'); };
+    const end = (why) => { if (att === 'p' || T === player) sfx('ew_hack_cut'); if (att === 'p') hackSessP = null; else att._hackSess = null; if (att === 'p') logMessage('HACK: 侵入が途切れた — ' + why, 'warning-msg'); else if (T === player) logMessage('HACK: 侵入が途切れた (' + why + ')', 'system-msg'); };
     if (!A || A.hp <= 0 || A._dying) { if (att !== 'p') att._hackSess = null; else hackSessP = null; return; }
     if (!T || T.hp <= 0 || T._dying) { end('相手が沈んだ'); return; }
     const H = hackPower(att === 'p' ? 'player' : 'enemy', att === 'p' ? null : att);
@@ -9441,7 +9446,7 @@ function _stepHackSess(S, att) {
     if (S.p < S.need) return;
     const E = HACK_EFFECTS[S.effect] || HACK_EFFECTS.halt, mult = Math.max(0.8, Math.min(1.8, 0.8 + 0.4 * (S.q - 1)));
     applyStatus(T, E.st, Math.round(E.dur * mult));
-    if (att === 'p') { logMessage('HACK: 成功 — 敵に' + E.jp + ' (約' + Math.round(E.dur * mult / 60) + '秒)。今が奇襲の好機', 'system-msg'); matchRecEvent('hackOkP', T.x, T.y, '敵をハック: ' + E.jp); hackSessP = null; }
+    if (att === 'p') { sfx('ew_hack_success'); logMessage('HACK: 成功 — 敵に' + E.jp + ' (約' + Math.round(E.dur * mult / 60) + '秒)。今が奇襲の好機', 'system-msg'); matchRecEvent('hackOkP', T.x, T.y, '敵をハック: ' + E.jp); hackSessP = null; }
     else { att._hackSess = null; comThinkEvent('e', 'ハック成功 — 自機に' + E.jp, 'e' + att.uid); matchRecEvent('hackOkE', T.x, T.y, '敵にハックされた: ' + E.jp); }
 }
 function updateHackSessions() {
@@ -9493,7 +9498,7 @@ function useLinkCut(who) {
         comThinkEvent('e', '断線パルス — ' + (n ? '侵入されていた回線を切った' : '回線を閉じた'), 'e' + me.uid);
         matchRecEvent('linkcutE', me.x, me.y, '敵: 断線パルス');
     }
-    sfxUI('ui_select');
+    if (isP) sfxUI('ew_linkcut');
 }
 // 第89弾: 電子戦ボタンからハック波 — 効果を選ぶ → 地図で方向をタップ (旧: 地図の長押しメニュー)
 let hackPending = null;
@@ -9515,7 +9520,7 @@ function selectDroneHack() {
     else if (c.length === 1) { droneHackPick = c[0]; droneHackMode = false; logMessage('HACK: ドローン侵入 — ' + (c[0]._kind === 'mech' ? 'Tech' : '戦闘機') + 'へ (離れる/濃い霧に入られると切れる)', 'system-msg'); }
     else { droneHackMode = true; logMessage('HACK: ドローン侵入 — 地図の候補 (' + c.length + '機・番号つき) をタップして選ぶ。もう一度押すと自動 (Tech→近い順)', 'system-msg'); }
     document.getElementById('btn-hackw-drone')?.classList.toggle('pending-fire', droneHackMode);
-    sfxUI('ui_select');
+    sfxUI(c.length && lf.s2 ? 'ew_drone_hack_omni' : 'ui_deny');
 }
 function tryPickDroneHack(wx, wy) {
     if (!droneHackMode) return false;
@@ -9659,7 +9664,7 @@ function updateFakeReveal() {
         if (_sigIdent[f.sid]) _sigIdent[f.sid].lbl = '偽コンテナ(罠)';
         const no = _contactLabels[f.sid];
         logMessage('SIGNAL: ' + (no ? 'SIG-' + String(no).padStart(2, '0') + ' は' : '') + '漂流コンテナに偽装した罠と見抜いた — 開けない (海図に載せた)', 'system-msg');
-        matchRecEvent('trapSeen', f.x, f.y, '偽コンテナを見抜いた');
+        matchRecEvent('trapSeen', f.x, f.y, '偽コンテナを見抜いた'); sfx('det_trap_revealed');
     }
 }
 function _fieldGone(i, respawnKind) {
@@ -10981,7 +10986,7 @@ function tryTapCircle(sx, sy) {
     }
     if (!best) return false;
     if (best.sid === lockedSignalId) return false; // 追跡中の円は移動のタップに譲る
-    lockSignalTarget(best.sid); // 第49弾: 推定円もロックできる (追跡+射撃の目標)
+    sfx('ui_tag_tap'); lockSignalTarget(best.sid); // 第49弾: 推定円もロックできる (追跡+射撃の目標)
     return true;
 }
 // タップ位置の近くに受信ブリップがあればその信号を追跡する。処理したら true
@@ -16386,7 +16391,7 @@ function openReplayWith(R, title) {
     { const pb = document.getElementById('rp-launch'); if (pb) { const ok = prpCanPlay(R); pb.disabled = !ok; pb.title = ok ? '同じ試合をプレイ画面でもう一度動かす (敵の席に座って見る・操作はできない)' : 'この記録はプレイ画面で再生できない (COM対戦で、種と設定を残した記録だけ — 2026-11-11 以降)'; } }
     _rpListOpen(false); _rpDraw(); _rpStartLoop();
 }
-function closeReplay() { const ov = document.getElementById('replay-overlay'); if (ov) ov.classList.add('hidden'); if (RP) RP.play = false; }
+function closeReplay() { const ov = document.getElementById('replay-overlay'); if (ov && !ov.classList.contains('hidden')) sfx('ui_panel_close'); if (ov) ov.classList.add('hidden'); if (RP) RP.play = false; }
 function _rpFmt(t) { const s2 = Math.floor(t / 60); return Math.floor(s2 / 60) + ':' + String(s2 % 60).padStart(2, '0'); }
 const _EV_COL = { lull: '#bfe9ff', traceP: '#ffcf88', convoy: '#ffcf88', convoyP: '#7dff9a', convoyE: '#ffa040', partE: '#ffcf88', fireP: '#5ff0ff', fireE: '#ffa040', hitP: '#ff5050', hitE: '#7dff9a', deathP: '#ff3030', killE: '#7dff9a', nodeP: '#50c8ff', nodeE: '#ffa040', tacE: '#ff9a40', tacP: '#5ff0ff', lureE: '#ff5ab0', feintE: '#ff3fd0', fakeE: '#ff3fd0', feintP: '#5ff0ff', fakeP: '#5ff0ff', trapP: '#ff3fd0', trapE: '#7dff9a', hackOkE: '#ff3fd0', hackOkP: '#7dff9a', spin: '#ffff66' };
 function _rpRenderInfo() {
@@ -16729,7 +16734,7 @@ function prpBuildBar() {
     const lab = document.createElement('div'); lab.id = 'prp-st'; lab.className = 'prp-st'; st.insertBefore(lab, st.firstChild);
     st.addEventListener('click', ev => {
         const b = ev.target.closest('button'); if (!b || !playReplay) return;
-        if (b.id === 'prp-seat') { playReplay.view = playReplay.view === 'e' ? 'p' : 'e'; cameraFollowPlayer = true; prpRestoreHud(); }
+        if (b.id === 'prp-seat') { sfx('ui_tab'); playReplay.view = playReplay.view === 'e' ? 'p' : 'e'; cameraFollowPlayer = true; prpRestoreHud(); }
         else if (b.id === 'prp-higgs') toggleHiggsView(!higgsViewOff);
         else if (b.id === 'prp-think') toggleThinkLog(!thinkLogOn);
         else if (b.id === 'prp-ff') prpFastForward(1800);
@@ -16983,7 +16988,7 @@ function updateCombatBar() {
             || !!(lockedSignalId && _signalAnalysis[lockedSignalId] && _signalAnalysis[lockedSignalId].fix)
             || (playerHitLog.length > 0 && _frameCount - playerHitLog[playerHitLog.length - 1].f < 480);
     }
-    if (show !== _cbVis) { _cbVis = show; bar.classList.toggle('hidden', !show); if (show) syncCombatBar(); }
+    if (show !== _cbVis) { _cbVis = show; bar.classList.toggle('hidden', !show); if (show) { syncCombatBar(); if (!comDemo && !playReplay) sfx('ui_combat_bar'); } }
     if (show) {
         const tn = document.getElementById('cb-tname'); if (tn) { const L = lockLabel(); if (tn.textContent !== L) tn.textContent = L; }
         const why = combatMode.mode === 'manual' ? '' : (_CMWHY_JP[player._cmWhy] || '');
@@ -17867,7 +17872,7 @@ function openComDemo() {
     comCfg = loadComCfg();
     _renderComCfg();
     document.getElementById('com-overlay').classList.remove('hidden');
-    sfxUI('ui_open');
+    sfxUI('ui_panel_open');
 }
 function _renderComCfg() {
     const c = comCfg;
@@ -18335,7 +18340,7 @@ function updateTacStrip() {
         if (bar) bar.className = 'xo-' + (r ? r.tone : 'idle');
         if (tx) { tx.textContent = r ? r.text : '—'; tx.title = r ? r.text : ''; }
         if (r && r.text) { const lk = _xoHist.length ? _xoHist[_xoHist.length - 1] : null, norm = r.text.replace(/[\d.±]+/g, '#'); // 第72弾: 数字だけ違う助言は履歴に積まない (最新を更新)
-            if (lk && lk.norm === norm) { lk.txt = r.text; lk.f = _frameCount; } else { _xoHist.push({ f: _frameCount, txt: r.text, tone: r.tone, norm }); if (_xoHist.length > 120) _xoHist.shift(); } }
+            if (lk && lk.norm === norm) { lk.txt = r.text; lk.f = _frameCount; } else { _xoHist.push({ f: _frameCount, txt: r.text, tone: r.tone, norm }); if (!comDemo && !playReplay && (!window._aiMsgSndF || _frameCount - window._aiMsgSndF > 240)) { window._aiMsgSndF = _frameCount; sfx(r.tone === 'warn' || r.tone === 'bad' ? 'ui_log_warn' : 'ui_ai_msg'); } if (_xoHist.length > 120) _xoHist.shift(); } }
         if (ab) ab.style.display = 'none'; // 第15弾: 副長は助言だけ。決断と操作はプレイヤーが行う
     }
     _xoAct = r && r.act ? r.act.fn : null;
@@ -18503,8 +18508,34 @@ function updateSfxLoops() {
     } else { sfxLoop('amb_drone_loop', false); sfxLoop('amb_tension_loop', false); }
     const msl = alive && THREATS.some(t => t.kind === 'msl');
     const lock = alive && THREATS.some(t => t.kind === 'lock');
-    sfxLoop('alm_missile_warn_loop', !!msl, 0.8);
-    sfxLoop('alm_fc_lock_loop', !!lock && !msl, 0.7);
+    // 第92弾: 至近のミサイル・至近の照準波は速い警報に切り替える
+    const mslClose = msl && projectiles.some(q => !q.isPlayer && q.type === 'missile' && Math.hypot(q.x - player.x, q.y - player.y) < 1000);
+    const lockClose = lock && enemies.some(e => e.hp > 0 && !e._dying && e.type !== 'fighter' && e.inVision && Math.hypot(e.x - player.x, e.y - player.y) < 2500);
+    const hasV3 = (id) => !!(_sfxMan[id]);
+    sfxLoop('alm_missile_warn_close_loop', !!mslClose, 0.85);
+    sfxLoop('alm_missile_warn_loop', !!msl && !(mslClose && hasV3('alm_missile_warn_close_loop')), 0.8);
+    sfxLoop('alm_fc_lock_fast_loop', !!lockClose && !msl, 0.7);
+    sfxLoop('alm_fc_lock_loop', !!lock && !msl && !(lockClose && hasV3('alm_fc_lock_fast_loop')), 0.7);
+    // 第92弾: 第3版で増えたループ (侵入されている・侵入している・継続ジャム・機関・組み立て・修理・補給・占有)
+    {
+        const now = _frameCount;
+        let intr = 0; if (alive) { for (const e of enemies) if (e._hackSess && e._hackSess.tgt === player) intr = Math.max(intr, e._hackSess.p / e._hackSess.need); for (const d of playerDrones) if (d._underHack && d._underHack.until > now) intr = Math.max(intr, d._underHack.u || 0.2); }
+        sfxLoop('alm_hack_intrusion_loop', alive && intr > 0, 0.35 + 0.55 * intr);
+        sfxLoop('ew_hack_intrude_loop', alive && !!(hackSessP || _hack), 0.6);
+        sfxLoop('ew_jam_cont_loop', alive && !!jamCont && gameState.shipType === 'stealth', 0.5);
+        const eng = ENGINE_TYPES[gameState.engineType] ? gameState.engineType : 'thermonuclear', spd = alive ? (player.currentSpeed || 0) : 0;
+        const run = alive && spd > 0.15 && !playerCoasting && !((player._haltTimer || 0) > 0);
+        for (const k of ['thermonuclear', 'pulse', 'higgs', 'photon']) sfxLoop('eng_hum_' + k + '_loop', run && k === eng, 0.35 + 0.65 * Math.min(1, spd / 3));
+        const asm = alive && cargo && cargo.asm;
+        sfxLoop('item_assemble_tech_loop', !!(asm && cargo.asm.type === 'mech'), 0.6);
+        sfxLoop('item_assemble_loop', !!(asm && cargo.asm.type !== 'mech'), 0.5);
+        sfxLoop('item_repair_loop', alive && (player._kitT || 0) > 0, 0.6);
+        sfxLoop('supply_loop', alive && !!_resupply, 0.5);
+        sfxLoop('cap_loop_colony', alive && !!(_capturing && _capturing.kind === 'colony'), 0.45);
+        // 濃いヒッグス (70%以上) に出入りした時 (少しの揺れで鳴り続けないよう 0.66/0.74 で切り替え)
+        if (alive) { const h = getHiggsIntensity(player.x, player.y), inD = !!window._sfxDense;
+            if (!inD && h >= 0.74) { window._sfxDense = true; sfx('env_dense_enter'); } else if (inD && h < 0.66) { window._sfxDense = false; sfx('env_dense_exit'); } }
+    }
     sfxLoopsGC();
 }
 function initSfxVolumeUI() {
@@ -19061,14 +19092,14 @@ btnDock.addEventListener('click', () => {
     dockPrompt.classList.remove('active');
     dockingMenu.classList.remove('hidden');
     player.setTarget(player.x, player.y);
-    sfxUI('ui_confirm');
+    sfxUI('ui_panel_open');
     updateDockingUI();
 });
 
 btnLeave.addEventListener('click', () => {
     dockingOpen = false;
     dockingMenu.classList.add('hidden');
-    sfxUI('ui_close');
+    sfxUI('ui_panel_close');
     if (sectorCleared && player && player.hp > 0) openDebrief(); // 作戦報告から来た場合は戻る
 });
 
@@ -19342,7 +19373,7 @@ function _dbgInfoText() {
     if (!b) return;
     b.addEventListener('click', (ev) => {
         const t = ev.target.closest('button[data-tab]');
-        if (t) { window._dbgTab = t.dataset.tab; b.querySelectorAll('.dbg-tab').forEach(q => q.classList.toggle('on', q === t)); b.querySelectorAll('.dbg-pane').forEach(q => q.classList.toggle('on', q.dataset.pane === window._dbgTab)); return; }
+        if (t) { sfx('ui_tab'); window._dbgTab = t.dataset.tab; b.querySelectorAll('.dbg-tab').forEach(q => q.classList.toggle('on', q === t)); b.querySelectorAll('.dbg-pane').forEach(q => q.classList.toggle('on', q.dataset.pane === window._dbgTab)); return; }
         const x = ev.target.closest('button[data-d]'); if (x) { _dbgAct(x.dataset.d); x.classList.add('flash'); setTimeout(() => x.classList.remove('flash'), 250); }
     });
 })();

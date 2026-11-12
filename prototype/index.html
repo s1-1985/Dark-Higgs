@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261112c">
+    <link rel="stylesheet" href="style.css?v=20261112d">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -830,7 +830,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261112c"></script>
+    <script src="game.js?v=20261112d"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -880,7 +880,7 @@
         var _open  = null;
 
         function popOpen(groupName, anchor) {
-            if (_open === groupName) { popClose(); return; }
+            if (_open === groupName) { popClose(true); return; }
             popClose();
             _open = groupName;
             (ACTION_GROUPS[groupName] || []).forEach(function(id) {
@@ -888,6 +888,7 @@
                 if (b && b.style.display !== 'none') _apop.appendChild(b);
             });
             _apop.classList.add('open');
+            if (typeof sfx === 'function') sfx('ui_open');
             // 押した親ボタンの高さに合わせて右列の左へ出す (画面外にはみ出さないようクランプ)
             var r = anchor.getBoundingClientRect();
             var h = _apop.offsetHeight;
@@ -895,8 +896,9 @@
             _apop.style.top = top + 'px';
             _right.querySelectorAll('.hud-act').forEach(function(b) { b.classList.toggle('abar-active', b === anchor); });
         }
-        function popClose() {
+        function popClose(snd) {
             if (!_open) return;
+            if (snd && typeof sfx === 'function') sfx('ui_close');
             Array.from(_apop.children).forEach(function(b) { _store.appendChild(b); });
             _apop.classList.remove('open');
             _right.querySelectorAll('.hud-act').forEach(function(b) { b.classList.remove('abar-active'); });
@@ -912,7 +914,7 @@
         document.addEventListener('pointerdown', function(e) {
             if (!_open) return;
             if (_right.contains(e.target) || _apop.contains(e.target)) return;
-            popClose();
+            popClose(true);
         }, true);
     })();
 
@@ -976,7 +978,7 @@
                 if (typeof playerHasWeapon !== 'function' || playerHasWeapon(MODES[i].w)) break;
             }
             apply(MODES[i]);
-            if (typeof playSound === 'function') playSound('ui');
+            if (typeof sfxUI === 'function') sfxUI('wpn_switch_' + MODES[i].w); else if (typeof playSound === 'function') playSound('ui');
         });
         window.syncWeaponUI();
     })();
