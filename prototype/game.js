@@ -438,7 +438,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261112j';
+const SPRITE_VER = '20261112k';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -15389,7 +15389,7 @@ function enemyItemStep(e) {
     const gone = isDer ? !!o.salvaged : o.owner === 'enemy';
     const hpF = e.hp / e.maxHp, hitAgo = now - (e._lastHitF ?? -1e9);
     const danger = e.aiState === 'combat' || e._hiding || hpF < 0.4 || hitAgo < 600 || !!incomingMissile(e, true) || !!(e._hunt && e._hunt.k);
-    if (gone || danger || now - I.f > 18000) { comThinkEvent('e', gone ? '取りに行った物を取り終えた → 次へ' : danger ? '危険 (交戦・被弾・ミサイル・耐久) → 取るのを中断' : '時間切れ → 次へ', 'e' + e.uid); e._item = null; return false; }
+    if (gone || danger || now - I.f > 18000) { comThinkEvent('e', gone ? '取りに行った物を取り終えた → 次へ' : danger ? '危険 (交戦・被弾・ミサイル・耐久) → 取るのを中断' : '時間切れ → 次へ', 'e' + e.uid); e._item = null; e._roamGoal = null; e._roam = null; return false; }
     const d = Math.hypot(o.x - e.x, o.y - e.y), near = (isNode ? NODE_CAP_R : isDer ? DERELICT_SALVAGE_R : COLONY_HACK_R) * 0.6;
     if (isNode && d < 600) { e.aiState = 'gathering'; e.gatherTarget = o; e._capT = e._capT || 0; return false; } // ノードは「収集」の状態が制圧する
     if (d > near) { const ms = e._maxSpeeds(); e._moveHeading(Math.atan2(o.y - e.y, o.x - e.x), ms ? ms.cruise : 1); e.state = 'moving'; e._roam = 'item'; }
