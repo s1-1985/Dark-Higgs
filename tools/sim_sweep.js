@@ -18,7 +18,8 @@ function pers() {
 async function worker(id, browser) {
   let n = 0;
   while (Date.now() < deadline - (+MIN) * 1000 * 6) {
-    const cfg = { ship: rnd(SHIPS), enemy: rnd(SHIPS), P: pers(), E: pers() };
+    let cfg = { ship: rnd(SHIPS), enemy: rnd(SHIPS), P: pers(), E: pers() };
+    if (process.env.MIRROR) { const [sh, pre] = process.env.MIRROR.split(','); cfg = { ship: sh, enemy: sh, P: { pre }, E: { pre } }; } // 鏡合わせ: MIRROR=assault,standard
     const p = await browser.newPage({ viewport: { width: 1000, height: 560 } }); const errs = []; p.on('pageerror', e => errs.push(e.message));
     try {
       await p.goto('http://localhost:8099/prototype/index.html?t=' + Date.now()); await p.waitForTimeout(1000);
