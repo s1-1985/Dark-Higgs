@@ -438,7 +438,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261112a';
+const SPRITE_VER = '20261112b';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -717,6 +717,12 @@ function playSound(type, vol = 1) {
 // 鳴らし方: sfx(id, vol) / ループは sfxLoop(id, on, vol)。ファイルを通すのは sbus (圧縮器・残響を通さない)。
 // ═══════════════════════════════════════════════════════════════
 var SFX_DIR = 'assets/sfx/';
+// 第91弾: SEの版を切り替えられるように (ロールバック用)。第2版 = assets/sfx/ (そのまま残す)・第3版 = assets/sfx_v3/ (届いた分だけ)。
+//   'v3' (既定) = 第3版にあるIDは第3版・無いIDは第2版で鳴らす / 'v2' = 全部第2版。メニュー「SE: 第n版」で切り替え (localStorage darkEchoSfxSet)
+var SFX_SETS = { v2: 'assets/sfx/', v3: 'assets/sfx_v3/' };
+var sfxSet = 'v3';
+try { const _s = localStorage.getItem('darkEchoSfxSet'); if (_s === 'v2' || _s === 'v3') sfxSet = _s; } catch (e) {}
+var _sfxManAll = { v2: null, v3: null };
 var _sfxMan = null;
 const _sfxBufs = {}, _sfxFetching = {}, _sfxLastAt = {}, _sfxLastIdx = {}, _sfxLoops = {};
 let _sfxActive = 0;
@@ -738,15 +744,32 @@ var SFX_PRELOAD = ['sonar_omni_weak', 'sonar_omni_mid', 'sonar_omni_strong', 'so
 function _sfxFetch(file) {
     if (_sfxBufs[file] || _sfxFetching[file] || !audioCtx) return;
     _sfxFetching[file] = true;
-    fetch(SFX_DIR + file + '?v=' + SPRITE_VER).then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+    fetch(file + '?v=' + SPRITE_VER).then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
         .then(ab => new Promise((ok, ng) => { const p = audioCtx.decodeAudioData(ab, ok, ng); if (p && p.then) p.then(ok, ng); }))
         .then(buf => { _sfxBufs[file] = buf; }).catch(() => { /* 読めない音は合成にフォールバックのまま */ });
 }
 function sfxLoadManifest() {
     if (_sfxMan !== null || !audioCtx) return;
     _sfxMan = {};
-    fetch(SFX_DIR + 'manifest.json?v=' + SPRITE_VER).then(r => r.json()).then(m => { _sfxMan = m.sounds || {}; for (const id of SFX_PRELOAD) { const e = _sfxMan[id]; if (e) for (const f of e.f) _sfxFetch(f); } }).catch(() => {});
+    // ファイル名は版のフォルダを付けた相対パスにして持つ (_sfxBufs のキーも同じ)
+    const load = (k) => fetch(SFX_SETS[k] + 'manifest.json?v=' + SPRITE_VER).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(m => { const o = {}; const S = m.sounds || {}; for (const id in S) o[id] = Object.assign({}, S[id], { f: S[id].f.map(f => SFX_SETS[k] + f) }); _sfxManAll[k] = o; })
+        .catch(() => { _sfxManAll[k] = {}; });
+    Promise.all([load('v2'), load('v3')]).then(() => { sfxApplySet(); });
 }
+// 版を合わせて _sfxMan を作り直す (v3 = 第3版を優先して第2版で埋める / v2 = 第2版だけ)
+function sfxApplySet() {
+    const v2 = _sfxManAll.v2 || {}, v3 = _sfxManAll.v3 || {};
+    _sfxMan = sfxSet === 'v2' ? Object.assign({}, v2) : Object.assign({}, v2, v3);
+    for (const id in _sfxLoops) { try { _sfxLoops[id].src.stop(); _sfxLoops[id].g.disconnect(); } catch (e) {} delete _sfxLoops[id]; }
+    for (const id of SFX_PRELOAD) { const e = _sfxMan[id]; if (e) for (const f of e.f) _sfxFetch(f); }
+    _syncSfxSetBtn();
+}
+function sfxCountSet(k) { const m = _sfxManAll[k]; return m ? Object.keys(m).length : 0; }
+function setSfxSet(k) { if (k !== 'v2' && k !== 'v3') return; sfxSet = k; try { localStorage.setItem('darkEchoSfxSet', k); } catch (e) {} if (_sfxMan !== null) sfxApplySet(); _syncSfxSetBtn(); }
+function toggleSfxSet() { setSfxSet(sfxSet === 'v3' ? 'v2' : 'v3'); sfxUI('ui_toggle_on'); }
+function _syncSfxSetBtn() { const b = document.getElementById('mm-sfxset'); if (!b) return; const n3 = sfxCountSet('v3');
+    b.textContent = sfxSet === 'v3' ? ('SE: 第3版' + (n3 ? ' (' + n3 + '音・残りは第2版)' : ' (未納品・第2版で再生)')) : 'SE: 第2版 (ロールバック中)'; }
 // 単発。鳴らせたら true (ファイルが無い・まだ読めていない時は false → 呼び出し側が合成にフォールバック)
 function sfx(id, vol, opt) {
     if (!audioCtx || !_sfxMan) return false;
@@ -18490,6 +18513,7 @@ function initSfxVolumeUI() {
         el.addEventListener('input', () => { set(el.value / 100); ids.forEach(o => { const e2 = document.getElementById(o), l2 = document.getElementById(o + '-l'); if (e2) e2.value = el.value; if (l2) l2.textContent = el.value + '%'; }); }); }); };
     wire(['sfx-vol', 'sfx-vol-m'], () => sfxVolume, setSfxVolume);
     wire(['bgm-vol', 'bgm-vol-m'], () => bgmVolume, setBgmVolume);
+    _syncSfxSetBtn();
 }
 // 2026-11-11 (オーナー「実際のプレイ画面で敵側の動きのリプレイを観たい」): 試合を種(seed)から再現する。
 //   ロジック (stepWorld と試合の生成) だけ種つきの乱数を使い、描画・音・UIは元の乱数のまま → 同じ種のCOM対戦は同じ試合になる
