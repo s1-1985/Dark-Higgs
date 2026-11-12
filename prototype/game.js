@@ -438,7 +438,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261112k';
+const SPRITE_VER = '20261112l';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -15441,7 +15441,7 @@ function enemyHunterStep(e, heard, hard) {
     // ── 任務を選ぶ ──
     if (!H) {
         const why = (w) => { if (window.__hdbg) window.__hdbg[w] = (window.__hdbg[w] || 0) + 1; return false; };
-        if (now < (e._huntCD || 0) || (now + e.uid) % 30) return false;
+        if (now < (e._huntCD || 0) || (now + e.uid) % 30 || e._item) return false; // 第99弾: 取りに行くと決めた物がある間は新しい任務(索敵行など)を始めない (自機COMの c.item と同じ)
         if (hpF < thr + 0.06 || e._hideT > 0 || e._hiding || now - (e._lastHitF ?? -1e9) < 600) return why('hp/hide/hit');
         if (!est || est.age > 2700) {
             // 索敵行: 長く気配が無ければ、相手が居そうな所 (まだ聴いていない海域・自分のものでないコロニー) へ、噴かしては漂いながら静かに向かう
