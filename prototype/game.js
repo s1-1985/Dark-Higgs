@@ -4808,7 +4808,6 @@ class Ship {
                     this.droneSpawnTimer = _engaged ? (380 + Math.floor(Math.random() * 320)) : (700 + Math.floor(Math.random() * 500));
                     logMessage('TACTICAL: 敵空母がファイタードローンを射出！', 'warning-msg');
                     matchRecEvent('launchE', this.x, this.y, '敵が艦載機を発進');
-    matchRecEvent('launchE', d.x, d.y, '敵が艦載機を発進');
                     comThinkEvent('e', '戦闘機を射出 → 推定位置 (' + _dirTxt(this.x, this.y, _bel.x, _bel.y) + ') へ向かわせる (残り' + this.droneStock + '機)', 'e' + this.uid);
                 }
             }
