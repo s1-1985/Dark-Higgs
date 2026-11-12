@@ -438,7 +438,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261112i';
+const SPRITE_VER = '20261112j';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -5314,7 +5314,10 @@ class Ship {
                             // 第23弾: コロニーを占有すれば自機の位置の手掛かり (方角・距離) が入る → 自分のでないコロニーを優先して取りに行く
                             let col = null, cd = Infinity;
                             for (const st of structures) { if (st.type !== 'colony' || st.owner === 'enemy') continue; const d = Math.hypot(st.x - this.x, st.y - this.y); if (d < cd) { cd = d; col = st; } }
-                            if (col && Math.random() < 0.4 + _pers.greed * 0.5) {
+                            let ndO = null; // 第99弾: 自機COMと同じ「最寄りの自分のものでないコロニー/ノード」・同じ条件 (貪欲−隠密×0.45 ≥ 0.25)
+                            if (_pers.greed - (_pers.stealth ?? 0.4) * 0.45 >= 0.25) for (const n of resourceNodes) { if (n.owner === 'enemy') continue; const d = Math.hypot(n.x - this.x, n.y - this.y); if (d < cd) { cd = d; ndO = n; } }
+                            if (ndO) { g = this._roamGoal = { x: ndO.x, y: ndO.y, lbl: 'ノード (制圧する)', node: ndO }; comThinkEvent('e', '気配なし・貪欲さ' + _pct(_pers.greed) + ' → ノードを制圧しに行く (' + _dirTxt(this.x, this.y, g.x, g.y) + ')', 'e' + this.uid); }
+                            else if (col && Math.random() < 0.4 + _pers.greed * 0.5) {
                                 g = this._roamGoal = { x: col.x, y: col.y, lbl: col.owner === 'player' ? '自機のコロニー (奪う)' : 'コロニー (占有する)', col };
                                 comThinkEvent('e', '気配なし → ' + g.lbl + ' (' + _dirTxt(this.x, this.y, g.x, g.y) + ')。占有すれば補給・聴音局・演算力', 'e' + this.uid);
                             }
