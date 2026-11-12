@@ -438,7 +438,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261112d';
+const SPRITE_VER = '20261112f';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -8939,6 +8939,7 @@ function updateConvoys() {
         const _iff = _signalAnalysis[cv.sid] && _signalAnalysis[cv.sid].obs.length && player && Math.hypot(cv.x - player.x, cv.y - player.y) < CONVOY_IFF_R;
         if (player && !(id && id.sure) && (inPlayerVision(cv.x, cv.y) || _iff)) {
             identSure(cv.sid, false); _sigIdent[cv.sid].lbl = '輸送船';
+            try { bgmSting('bgm_st_convoy', 0.8); } catch (e) {} // 第94弾: 輸送船を識別した合図 (BGM第2版)
             if (_contactLabels[cv.sid]) logMessage('SIGNAL: SIG-' + String(_contactLabels[cv.sid]).padStart(2, '0') + ' は輸送船' + (_iff ? ' (民間船の識別信号)' : '') + ' — 拿捕すればレア部品2つ・キット・航路の記録', 'system-msg');
         }
         // 拿捕 (500u以内に5秒・双方が居る間は進まない)
