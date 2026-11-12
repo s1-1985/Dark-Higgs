@@ -2813,3 +2813,30 @@ body.in-game #zoom-ctl #zoom-fab .ico { width: 22px; height: 22px; display: bloc
 .rp-ctl button { min-width: 40px; }
 @media (max-height: 520px) { .rp-box { height: 98vh; } #rp-think { max-height: 30%; } .rp-head button, .rp-filebtn { padding: 2px 6px; font-size: 10px; } }
 @media (max-width: 760px) { .rp-main { flex-direction: column; } .rp-side { max-width: none; min-width: 0; max-height: 40%; } }
+
+/* 2026-11-11 プレイ画面のリプレイ (敵の席) */
+.rp-play { background: #3a1010; border-color: #ff6a5a !important; color: #ffd0c8; }
+.rp-play:disabled { opacity: 0.35; }
+#prp-bar { position: fixed; top: 6px; left: 50%; transform: translateX(-50%); z-index: 60; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: center;
+  max-width: calc(100vw - 24px); padding: 6px 10px; background: rgba(20, 6, 8, 0.88); border: 1px solid #ff6a5a; border-radius: 10px; font: 12px/1.2 sans-serif; color: #ffd9d2; pointer-events: auto; }
+#prp-bar button { background: #2a0d10; color: #ffd9d2; border: 1px solid #7a2a2a; border-radius: 6px; padding: 4px 8px; font-size: 12px; cursor: pointer; }
+#prp-bar button.on { background: #ff6a5a; color: #1a0404; border-color: #ff9a8a; font-weight: bold; }
+#prp-bar .prp-seg { display: inline-flex; gap: 0; } #prp-bar .prp-seg button { border-radius: 0; } #prp-bar .prp-seg button:first-child { border-radius: 6px 0 0 6px; } #prp-bar .prp-seg button:last-child { border-radius: 0 6px 6px 0; }
+#prp-bar .prp-t { font-family: Orbitron, monospace; color: #fff; min-width: 86px; text-align: center; }
+#prp-bar .prp-st { font-size: 11px; } #prp-bar .prp-st.ok { color: #7dff9a; } #prp-bar .prp-st.warn { color: #ffd24a; } #prp-bar .prp-st.bad { color: #ff6a5a; }
+#prp-pov { position: fixed; left: 8px; top: 64px; z-index: 55; width: 290px; max-height: calc(100vh - 140px); overflow-y: auto; display: none; padding: 8px 10px; background: rgba(18, 5, 7, 0.9);
+  border: 1px solid #ff6a5a; border-radius: 10px; font: 12px/1.35 sans-serif; color: #ffd9d2; pointer-events: auto; }
+body.prp-epov #prp-pov { display: block; }
+#prp-pov .pv-h { font-weight: bold; color: #ff9a8a; margin-bottom: 4px; } #prp-pov small { color: #c99; font-weight: normal; }
+#prp-pov .pv-s { margin-top: 7px; color: #ffb39a; font-weight: bold; } #prp-pov .pv-r { margin: 2px 0; }
+#prp-pov .pv-b { display: grid; grid-template-columns: 54px 1fr 44px 40px; gap: 4px; align-items: center; margin: 3px 0; opacity: 0.55; } #prp-pov .pv-b.on { opacity: 1; }
+#prp-pov .pv-bar { position: relative; height: 9px; background: #2a1012; border-radius: 3px; overflow: hidden; } #prp-pov .pv-bar i { position: absolute; left: 0; top: 0; bottom: 0; }
+#prp-pov .pv-bar em { position: absolute; top: 0; bottom: 0; width: 1px; background: #fff; opacity: 0.5; }
+#prp-pov .pv-bv, #prp-pov .pv-out { font-size: 11px; text-align: right; } #prp-pov .pv-out { color: #9fd; }
+#prp-pov .pv-n { font-size: 10px; color: #a88; margin-top: 2px; }
+#prp-pov .ok { color: #7dff9a; } #prp-pov .bad { color: #ff6a5a; }
+body.play-replay #hud-right, body.play-replay #combat-bar { pointer-events: none; opacity: 0.55; }
+body.prp-epov #hud-left { visibility: hidden; }
+@media (max-width: 700px) { #prp-pov { width: 220px; top: 96px; } }
+body.prp-epov #think-panel { left: 308px !important; }
+body.prp-epov #xo-bar, body.prp-epov #combat-bar, body.prp-epov #status-strip { visibility: hidden; }

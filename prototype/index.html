@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261111h">
+    <link rel="stylesheet" href="style.css?v=20261111i">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -715,7 +715,7 @@
                     <div class="rp-head"><span class="rp-title">リプレイ</span><span id="rp-time">0:00</span>
                         <span id="rp-persp" class="rp-seg"><button data-p="god" title="両艦の真の位置を見る">俯瞰</button><button data-p="p" title="自機が知っていたことだけ">自機視点</button><button data-p="e" title="敵が知っていたことだけ・敵の推定と作戦">敵視点</button></span>
                         <span class="rp-tg"><button id="rp-fog" title="ON: 霧の濃さを描き、視点の艦が見えていなかった相手は隠す / OFF: 真の位置を全部描く">ヒッグス ON</button><button id="rp-thk" title="思考ログ (視点の側)">思考 ON</button><button id="rp-est" title="推定円・敵が思う自艦の位置・作戦の目標地点">推定 ON</button><button id="rp-trl">航跡 ON</button><button id="rp-fol" title="視点の艦を追う">追従 OFF</button></span>
-                        <span class="rp-right"><button id="rp-open" title="今の試合・Gitの records/ の記録">記録一覧</button><label class="rp-filebtn" title=".json.gz を開く">ファイル<input type="file" id="rp-file" accept=".gz,.json,application/gzip,application/json" hidden></label><button id="rp-save" title="この記録をファイルに保存 (解析用)">保存</button><button id="rp-close" title="閉じる (Esc)">✕</button></span></div>
+                        <span class="rp-right"><button id="rp-launch" class="rp-play" title="同じ試合をプレイ画面でもう一度動かす (敵の席に座って見る・操作はできない)">▶ プレイ画面で再生</button><button id="rp-open" title="今の試合・Gitの records/ の記録">記録一覧</button><label class="rp-filebtn" title=".json.gz を開く">ファイル<input type="file" id="rp-file" accept=".gz,.json,application/gzip,application/json" hidden></label><button id="rp-save" title="この記録をファイルに保存 (解析用)">保存</button><button id="rp-close" title="閉じる (Esc)">✕</button></span></div>
                     <div id="rp-match" style="display:none"></div>
                     <div class="rp-main">
                         <div class="rp-mapwrap"><canvas id="rp-canvas"></canvas>
@@ -824,7 +824,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261111h"></script>
+    <script src="game.js?v=20261111i"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
