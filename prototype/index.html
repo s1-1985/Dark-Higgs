@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261112a">
+    <link rel="stylesheet" href="style.css?v=20261112b">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -79,7 +79,7 @@
                     <button class="band-btn" data-band="optic" title="光学帯域 — タップで OFF → 弱 → 中 → 強 → OFF (弱=距離×0.7・漏れ小 / 強=距離×1.35・漏れ大) (2)"><span class="bt-label">OPT</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
                     <button class="band-btn" data-band="em" title="電磁波帯域 — タップで OFF → 弱 → 中 → 強 → OFF (弱=距離×0.7・漏れ小 / 強=距離×1.35・漏れ大) (3)"><span class="bt-label">EM</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
                     <button class="band-btn" data-band="higgs" title="ヒッグス帯域 — タップで OFF → 弱 → 中 → 強 → OFF (弱=距離×0.7・漏れ小 / 強=距離×1.35・漏れ大) (4)"><span class="bt-label">HGS</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
-                    <button id="btn-ai-level" class="ai-btn" title="AIの解析力 — タップで 低 → 標準 → 高 → 最大 (高いほど解析・識別・助言・命中の観測が速く正確。代わりに演算の電磁波・熱が漏れる。低いと漏れは減るが誤判断が増える)"><span class="ai-lab">AI</span><span class="ai-seg"><i></i><i></i><i></i><i></i></span><span class="ai-val">標準</span></button>
+                    <button id="btn-ai-level" class="ai-btn" title="AIの解析力 — タップで 低 → やや低 → 標準 → 高 → 最大 (高いほど解析・識別・助言・命中の観測が速く正確。代わりに演算の電磁波・熱が漏れる。低いと漏れは減るが誤判断が増える)"><span class="ai-lab">AI</span><span class="ai-seg"><i></i><i></i><i></i><i></i><i></i></span><span class="ai-val">標準</span></button>
                 </div>
                 <div id="band-legend"><span class="bl-rx">受信</span><span class="bl-tx">自艦の放射</span></div>
             </div>
@@ -168,6 +168,7 @@
                 <button class="act-icon-btn btn-warning hackw-btn" id="btn-hackw-halt" data-eff="halt" title="ハック波: 機関停止 — 選んでから地図で方向をタップ。推力が止まり惰性で減速する"><b class="fx-mark">機</b><span>機関停止</span></button>
                 <button class="act-icon-btn btn-warning hackw-btn" id="btn-hackw-sensor" data-eff="sensor" title="ハック波: センサー損傷 — 選んでから地図で方向をタップ。探知が大きく落ちる"><b class="fx-mark">探</b><span>センサー</span></button>
                 <button class="act-icon-btn btn-warning hackw-btn" id="btn-hackw-comm" data-eff="comm" title="ハック波: 通信障害 — 選んでから地図で方向をタップ。ドローンが自動制御になる・AIの助言が遅れる"><b class="fx-mark">通</b><span>通信</span></button>
+                <button class="act-icon-btn btn-warning" id="btn-hackw-drone" title="ドローン侵入 (全周囲) — 周り3000uの見えている敵の戦闘機/Techへ侵入して奪う。候補が複数なら地図でタップして選ぶ (もう一度押すと自動)"><b class="fx-mark">奪</b><span>ドローン侵入</span></button>
                 <button class="act-icon-btn btn-info drone-btn" id="btn-item-linkcut" data-dtype="linkcut" title="断線パルス (1枠) — 侵入されている回線 (艦・ドローンへのハック) を切り、30秒は回線を閉じる。使うと電磁波が1秒漏れる" style="display:none">
                     <i class="ico" style="--ico:url(assets/icons/icon_linkcut.png)"></i>
                     <span>断線</span><em class="cg-n"></em>
@@ -828,7 +829,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261112a"></script>
+    <script src="game.js?v=20261112b"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -865,7 +866,7 @@
     (function() {
         var ACTION_GROUPS = {
             scan:  ['btn-sonar-band-heat', 'btn-sonar-band-optic', 'btn-sonar-band-em', 'btn-sonar-band-higgs', 'btn-sonar-power', 'btn-scan', 'btn-dir-sonar'],
-            ew:    ['btn-hackw-fcs', 'btn-hackw-halt', 'btn-hackw-sensor', 'btn-hackw-comm', 'btn-item-linkcut', 'btn-jam-burst', 'btn-jam-cont', 'btn-jam-pulse', 'btn-drone-decoy', 'btn-drone-scout', 'btn-hack'],
+            ew:    ['btn-hackw-fcs', 'btn-hackw-halt', 'btn-hackw-sensor', 'btn-hackw-comm', 'btn-hackw-drone', 'btn-item-linkcut', 'btn-jam-burst', 'btn-jam-cont', 'btn-jam-pulse', 'btn-drone-decoy', 'btn-drone-scout', 'btn-hack'],
             nav:   ['btn-cancel', 'btn-camera-follow', 'btn-attack-toggle', 'btn-game-speed'],
             drone: ['btn-drone-recall','btn-drone-attack','btn-drone-mech','btn-drone-build','btn-drone-scout','btn-drone-decoy',
                     'btn-drone-buoy','btn-drone-barrier','btn-drone-higgs'],
