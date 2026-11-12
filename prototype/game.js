@@ -438,7 +438,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261112l';
+const SPRITE_VER = '20261112m';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -15914,7 +15914,7 @@ function enemyPlanStep(e) {
 }
 // ═══ 第58弾: 敵COMの戦略 — 自機COMと同じ考え方 (集めずに拠点で待ち伏せる・餌を置いて待つ・拠点を守る)。気配が無い間にだけ選ぶ (気配があれば従来の追跡) ═══
 function enemyStratStep(e, P) {
-    const now = _frameCount, jp = { ambush: '拠点の待ち伏せ', bait: '餌で誘う', guard: '拠点を守る', trap: '罠 (砲台を据えて誘い込む)' };
+    const now = _frameCount, jp = { ambush: '拠点の待ち伏せ', bait: '餌で誘う', guard: '拠点を守る', trap: '罠 (砲台を据えて誘い込む)', push: '圧倒して狩る' };
     let S = e._strat;
     if (S && (now > S.until || e.contactFreshness > 0.04)) { if (e.contactFreshness > 0.04 && S.ph === 'wait') e._stratEndF = now; /* 第80弾: 待ち伏せ中に気配 → 狩人の頭脳で「待ち伏せ」を続ける */ comThinkEvent('e', '戦略「' + jp[S.id] + '」終了 (' + (now > S.until ? '時間' : '気配を掴んだ') + ')', 'e' + e.uid); e._strat = null; e._stratCD = now + 1200 + Math.random() * 2400; S = null; }
     if (!S) {
@@ -15924,6 +15924,7 @@ function enemyStratStep(e, P) {
         const w = { gather: 0.6 + 1.7 * gr + (free > 0 ? 1.1 : 0.05), ambush: 0.35 + 2.1 * st + 0.9 * ca - 1.1 * ag + (free <= 0 ? 1.0 : 0),
             bait: (e.lureSOS || 0) + Math.max(0, (e.lureShip || 0) - 1) > 0 ? 0.25 + 1.5 * st + 0.7 * ca - 0.4 * ag : 0, guard: own.length ? 0.2 + 1.2 * ca + 0.5 * (1 - gr) : 0,
             trap: (e.turretStock || 0) > 0 ? 0.35 + 1.3 * st + 1.1 * ca - 0.5 * ag : 0 }; // 第66弾: 罠・拠点構築 (砲台を据え、囮で誘い込む)
+        w.push = free <= 1 && e.hp / e.maxHp > 0.7 ? 0.3 + 2.0 * ag + (free <= 0 ? 0.8 : 0) : 0; // 第100弾: 自機COMの戦略「圧倒して狩る」と同じ重み (強化が済み耐久70%超)
         if (_frameCount < COM_EARLY_GATHER && free > 0) { w.gather += 3.0; w.ambush *= 0.25; w.trap *= 0.3; } // 第66弾: 序盤は全員集める
         let tot = 0; const v = {};
         for (const k in w) { v[k] = Math.max(0, w[k]) * (0.6 + 0.8 * Math.random()) * (k === e._lastStrat ? 0.35 : 1); tot += v[k]; }
@@ -15933,6 +15934,7 @@ function enemyStratStep(e, P) {
         if (pick === 'gather') { e._stratCD = now + 1800 + Math.random() * 3600; return false; }
         S = e._strat = { id: pick, until: now + 5400 + Math.random() * 12600, ph: 'go' };
         if (pick === 'guard') S.site = own[Math.floor(Math.random() * own.length)];
+        else if (pick === 'push') { const sn = searchNext(e, e.x, e.y); if (!sn) { e._strat = null; e._stratCD = now + 1800; return false; } S.site = { x: sn.x, y: sn.y, lbl: 'まだ聴いていない海域' }; S.spot = { x: sn.x, y: sn.y }; S.until += Math.min(18000, Math.hypot(sn.x - e.x, sn.y - e.y) / 0.3); }
         else {
             const cand = [];
             for (const q of structures) { if (q.type === 'colony' && q.owner !== 'enemy') cand.push({ x: q.x, y: q.y, lbl: 'コロニー' }); else if (q.type === 'derelict' && !q.salvaged) cand.push({ x: q.x, y: q.y, lbl: '難破船' }); }
@@ -15954,6 +15956,7 @@ function enemyStratStep(e, P) {
     if (!g) { e._strat = null; return false; }
     if (S.id === 'guard' && S.site.owner !== 'enemy') { e._strat = null; return false; }
     const d = Math.hypot(g.x - e.x, g.y - e.y);
+    if (S.id === 'push' && d <= 1200) { e._strat = null; e._stratEndF = now; e._stratCD = now + 1200; return false; } // 狩りは着いたら次へ (待たない)
     if (d > 400) { if (!(e.state === 'moving' && Math.hypot(e.targetX - g.x, e.targetY - g.y) < 600)) { e.setTarget(g.x, g.y); e._roam = 'strat'; } }
     else { if (S.ph !== 'wait') { S.ph = 'wait'; comThinkEvent('e', '待ち伏せ位置に着いた → 止まって待つ', 'e' + e.uid); if (S.id === 'trap' && !S.built && (e.turretStock || 0) > 0) { S.built = true; e.turretStock--; spawnEnemyDrone(e, 'turret'); if ((e.lureSOS || 0) > 0) { e.lureSOS--; launchLure('e', 'sos', e.x, e.y, S.site.x, S.site.y); } } } if (e.state === 'moving') e.setTarget(e.x, e.y); e._roam = null; }
     return true;
