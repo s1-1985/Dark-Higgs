@@ -438,7 +438,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261112f';
+const SPRITE_VER = '20261112g';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -16450,7 +16450,7 @@ function openReplayWith(R, title) {
     { const ids = new Set(); for (const sm of R.s) for (const e of sm.E || []) ids.add(e.id); RP.eId = ids.size ? [...ids][0] : null; }
     _rpBuildHg(); _rpRenderInfo(); _rpRenderEvents(); _rpTimeline(); _rpSyncButtons();
     const sl = document.getElementById('rp-slider'); sl.max = R.s.length - 1; sl.value = RP.i;
-    { const pb = document.getElementById('rp-launch'); if (pb) { const ok = prpCanPlay(R); pb.disabled = !ok; pb.title = ok ? '同じ試合をプレイ画面でもう一度動かす (敵の席に座って見る・操作はできない)' : 'この記録はプレイ画面で再生できない (COM対戦で、種と設定を残した記録だけ — 2026-11-11 以降)'; } }
+    { const pb = document.getElementById('rp-launch'); if (pb) { const ok = prpCanPlay(R); pb.disabled = false; pb.classList.toggle('rp-off', !ok); pb.title = ok ? '同じ試合をプレイ画面でもう一度動かす (敵の席に座って見る・操作はできない)' : 'この記録はプレイ画面で再生できない'; } }
     _rpListOpen(false); _rpDraw(); _rpStartLoop();
 }
 function closeReplay() { const ov = document.getElementById('replay-overlay'); if (ov && !ov.classList.contains('hidden')) sfx('ui_panel_close'); if (ov) ov.classList.add('hidden'); if (RP) RP.play = false; }
@@ -16757,17 +16757,23 @@ const PRP_KEY = 'darkEchoReplayJob';
 const _PRP_BAND_JP = { heat: '熱', optic: '光', em: '電磁波', higgs: 'ヒッグス' };
 const _PRP_BAND_COL = { heat: '#ff8a3c', optic: '#ffe066', em: '#c78bff', higgs: '#5fc8ff' };
 function prpCanPlay(R) { const m = R && R.meta; return !!(m && m.com && m.seed !== undefined && m.cfg && m.gs); }
+// 失敗の理由は画面に出す (下部ログは廃止済みで logMessage は見えない — 以前は無反応に見えた)
+function prpNotice(msg) {
+    let d = document.getElementById('prp-notice');
+    if (!d) { d = document.createElement('div'); d.id = 'prp-notice'; d.style.cssText = 'position:fixed;left:50%;top:18%;transform:translateX(-50%);z-index:99999;max-width:80vw;padding:12px 16px;background:rgba(20,8,8,0.95);border:1px solid #ff6a5a;color:#ffd0c8;font:14px/1.5 sans-serif;border-radius:6px;pointer-events:none;text-align:center'; document.body.appendChild(d); }
+    d.textContent = msg; d.style.display = 'block'; clearTimeout(d._t); d._t = setTimeout(() => { d.style.display = 'none'; }, 6000);
+}
 function prpLaunch(R, title) {
-    if (!prpCanPlay(R)) { logMessage('記録: この記録はプレイ画面で再生できない (COM対戦で、種と設定を残した記録だけ — 2026-11-11 以降)', 'warning-msg'); return; }
+    if (!prpCanPlay(R)) { const m = R && R.meta; prpNotice(!m || !m.com ? 'この記録は通常プレイ (人の操作) の記録なので、プレイ画面では再生できません。再生できるのはCOM対戦の記録だけです。' : 'この記録は試合の種と設定が残っていない古い記録 (2026-11-11 より前) なので、プレイ画面では再生できません。新しくCOM対戦をすると再生できる記録になります。'); return; }
     const m = R.meta, tr = (R.s || []).map(q => [q.t, q.P ? q.P.x : null, q.P ? q.P.y : null, q.E && q.E[0] ? q.E[0].x : null, q.E && q.E[0] ? q.E[0].y : null]);
     const job = { seed: m.seed, cfg: m.cfg, gs: m.gs, ver: m.ver || '', dbg: !!m.dbg, tr, title: title || '', res: R.result || null, view: 'e' };
-    try { localStorage.setItem(PRP_KEY, JSON.stringify(job)); } catch (err) { logMessage('記録: 記録が大きすぎて再生の準備ができない', 'warning-msg'); return; }
+    try { localStorage.setItem(PRP_KEY, JSON.stringify(job)); } catch (err) { prpNotice('再生の準備ができませんでした (端末の保存容量が足りない可能性があります)。'); return; }
     location.href = location.pathname + '?replay=1';
 }
 function prpPov() { if (!playReplay || playReplay.view !== 'e') return null; const e = enemies.find(q => q.type !== 'fighter' && (q.hp > 0 || q._dying)); return e || null; }
 function prpStart() {
     let job = null; try { job = JSON.parse(localStorage.getItem(PRP_KEY) || 'null'); } catch (err) { job = null; }
-    if (!job) { logMessage('リプレイ: 再生する記録が見つからない', 'warning-msg'); return; }
+    if (!job) { prpNotice('再生する記録が見つかりませんでした。記録画面からもう一度「プレイ画面で再生」を押してください。'); return; }
     playReplay = { job, view: job.view || 'e', drift: null, endT: job.tr && job.tr.length ? job.tr[job.tr.length - 1][0] : 0, verOk: true };
     const sc = document.querySelector('script[src*="game.js"]'), ver = sc ? (sc.getAttribute('src').split('?v=')[1] || '') : '';
     playReplay.verOk = !job.ver || job.ver === ver; playReplay.ver = ver;

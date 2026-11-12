@@ -2816,7 +2816,7 @@ body.in-game #zoom-ctl #zoom-fab .ico { width: 22px; height: 22px; display: bloc
 
 /* 2026-11-11 プレイ画面のリプレイ (敵の席) */
 .rp-play { background: #3a1010; border-color: #ff6a5a !important; color: #ffd0c8; }
-.rp-play:disabled { opacity: 0.35; }
+.rp-play.rp-off { opacity: 0.45; }
 #prp-bar { position: fixed; top: 6px; left: 50%; transform: translateX(-50%); z-index: 60; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: center;
   max-width: calc(100vw - 24px); padding: 6px 10px; background: rgba(20, 6, 8, 0.88); border: 1px solid #ff6a5a; border-radius: 10px; font: 12px/1.2 sans-serif; color: #ffd9d2; pointer-events: auto; }
 #prp-bar button { background: #2a0d10; color: #ffd9d2; border: 1px solid #7a2a2a; border-radius: 6px; padding: 4px 8px; font-size: 12px; cursor: pointer; }
