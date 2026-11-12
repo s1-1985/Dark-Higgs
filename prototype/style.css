@@ -2836,7 +2836,58 @@ body.prp-epov #prp-pov { display: block; }
 #prp-pov .pv-n { font-size: 10px; color: #a88; margin-top: 2px; }
 #prp-pov .ok { color: #7dff9a; } #prp-pov .bad { color: #ff6a5a; }
 body.play-replay #hud-right, body.play-replay #combat-bar { pointer-events: none; opacity: 0.55; }
-body.prp-epov #hud-left { visibility: hidden; }
 @media (max-width: 700px) { #prp-pov { width: 220px; top: 96px; } }
-body.prp-epov #think-panel { left: 308px !important; }
-body.prp-epov #xo-bar, body.prp-epov #combat-bar, body.prp-epov #status-strip { visibility: hidden; }
+
+/* ═══ 第89弾 (オーナー): 地図を広く — 右列・左列を細く / 残弾・資材はラベルの下 / 受信と自艦の放射を見分ける / 状態異常は出た時だけ / 戦闘バーは1行 ═══ */
+:root { --hud-left: 104px; --hud-right: 56px; }
+@media (min-height: 460px) { :root { --hud-left: 112px; --hud-right: 60px; } }
+@media (min-height: 700px) and (min-width: 1100px) { :root { --hud-left: 146px; --hud-right: 72px; } }
+#hud-right { padding: 5px 4px 6px; gap: 4px; }
+.hud-act { padding: 3px 1px; gap: 1px; }
+.hud-act svg, .hud-act .ico, .hud-act .abar-icon { width: 20px; height: 20px; }
+.hud-act span { font-size: 9px; }
+.hud-act em, .hud-act .abar-cargo { position: static; display: block; font-size: 8px; line-height: 1; margin-top: 1px; white-space: nowrap; }
+.hud-act em:empty, .hud-act .abar-cargo:empty { display: none; }
+#hud-left { padding: 4px; gap: 4px; }
+#hud-left #band-tuner { gap: 3px; }
+#hud-left .band-btn { padding: 3px 1px 4px; gap: 3px; }
+#hud-left .bt-label { font-size: 6px; }
+#hud-left .bt-bar { max-width: 11px; }
+#hud-left .bt-fill { opacity: 0.85; }
+/* 自艦の放射: 枠つきの斜線 (塗りつぶしの受信バーと見分ける) */
+.bt-tx { width: 5px; background: transparent; border: 1px solid rgba(255,255,255,0.28); border-radius: 1px; }
+.bt-tx-fill { background: repeating-linear-gradient(135deg, #f2fff9 0 2px, transparent 2px 4px) !important; opacity: 0.9; }
+.band-btn.tx-hi .bt-tx-fill { background: repeating-linear-gradient(135deg, #ff6a5a 0 2px, transparent 2px 4px) !important; }
+.band-btn.tx-hi .bt-tx { border-color: #ff6a5a; }
+#band-legend { gap: 6px; font-size: 8px; }
+#band-legend .bl-tx::before { width: 4px; height: 8px; background: repeating-linear-gradient(135deg, #cfe3dd 0 2px, transparent 2px 4px); border: 1px solid #cfe3dd; }
+#hud-left .ai-btn { flex: 0 0 18px; }
+/* 状態異常は出た時だけ */
+#status-strip .ss-stat:empty { display: none; }
+#status-strip .ss-stat { flex: 0 1 auto; border-color: rgba(255,90,90,0.45); }
+#status-strip .ss-stat:empty::before { content: none; }
+#status-strip .ss-time b { font-size: 11px; color: #9fd8c8; }
+/* FPS は上帯のAIの助言の右端 */
+#fps-ind { margin-left: auto; padding: 0 6px; font: bold 10px monospace; flex-shrink: 0; }
+/* 戦闘バー: 1行・小さく */
+#combat-bar { flex-wrap: nowrap; gap: 4px; bottom: 60px; overflow-x: auto; justify-content: flex-start; scrollbar-width: none; }
+#combat-bar::-webkit-scrollbar { display: none; }
+#combat-bar .cb-grp { padding: 1px 2px; gap: 1px; flex-shrink: 0; }
+#combat-bar .cb-lab { font-size: 8px; margin: 0 2px; }
+#combat-bar button { font-size: 10px; padding: 2px 5px; }
+#combat-bar .cb-target #cb-tname { font-size: 10px; min-width: 60px; max-width: 110px; }
+#combat-bar #cb-state { flex-shrink: 0; font-size: 9px; }
+#cp-pop .cp-sec { margin-top: 6px; padding-top: 4px; border-top: 1px solid rgba(57,255,136,0.25); color: #cc99ff; font-weight: 700; font-size: 10px; letter-spacing: 1px; }
+#cp-pop { max-height: calc(100vh - 80px); overflow-y: auto; }
+.hackw-btn.pending-fire { border-color: #ff66cc !important; color: #ffb0ea !important; box-shadow: 0 0 8px #ff66cc; }
+
+/* 第89弾: リプレイの操作は右下の丸ボタンの中 */
+body.in-game #zoom-ctl .prp-b { font-size: 12px; font-weight: bold; color: #ffd9d2; border-color: rgba(255,106,90,0.55); }
+body.in-game #zoom-ctl .prp-b.on { background: rgba(120,30,20,0.9); color: #fff; border-color: #ff6a5a; }
+#zoom-ctl .prp-st { display: flex; flex-direction: column; align-items: center; gap: 1px; font: 9px Orbitron, sans-serif; color: #cfeee6; background: rgba(0,10,14,0.85); border: 1px solid rgba(0,255,170,0.3); border-radius: 6px; padding: 2px 3px; }
+#zoom-ctl .prp-st i { font-style: normal; font-size: 9px; } #zoom-ctl .prp-st i.ok { color: #7dff9a; } #zoom-ctl .prp-st i.warn { color: #ffd24a; } #zoom-ctl .prp-st i.bad { color: #ff6a5a; }
+body.play-replay #hud-right { pointer-events: none; opacity: 1; }
+body.prp-epov #hud-left, body.prp-epov #status-strip, body.prp-epov #hud-top { box-shadow: inset 0 0 0 1px rgba(255,90,90,0.35); }
+body.play-replay #band-tuner, body.play-replay #ss-cp { pointer-events: none; }
+body.prp-epov #combat-bar, body.prp-epov #recenter-chip { display: none !important; }
+body.play-replay #zoom-ctl #zoom-stack { flex-wrap: wrap-reverse; max-height: calc(100vh - var(--hud-top) - 80px); align-content: flex-end; flex-direction: column; }
