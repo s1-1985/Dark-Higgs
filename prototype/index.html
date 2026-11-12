@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261111i">
+    <link rel="stylesheet" href="style.css?v=20261112a">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -49,6 +49,7 @@
                     <span id="xo-dot"></span>
                     <span id="xo-label">AI</span>
                     <span id="xo-text">—</span>
+                    <span id="fps-ind" style="display:none"></span>
                     <button id="xo-act" style="display:none"></button>
                 </div>
                 <button id="btn-gen-open" title="GEN配分 (機関/武装/センサー/AI)"><b>GEN</b><span id="gen-summary">E40 W30 S30</span></button>
@@ -80,7 +81,7 @@
                     <button class="band-btn" data-band="higgs" title="ヒッグス帯域 — タップで OFF → 弱 → 中 → 強 → OFF (弱=距離×0.7・漏れ小 / 強=距離×1.35・漏れ大) (4)"><span class="bt-label">HGS</span><span class="bt-meter"><span class="bt-bar"><span class="bt-fill"></span><span class="bt-notch"></span></span><span class="bt-tx"><span class="bt-tx-fill"></span></span></span></button>
                     <button id="btn-ai-level" class="ai-btn" title="AIの解析力 — タップで 低 → 標準 → 高 → 最大 (高いほど解析・識別・助言・命中の観測が速く正確。代わりに演算の電磁波・熱が漏れる。低いと漏れは減るが誤判断が増える)"><span class="ai-lab">AI</span><span class="ai-seg"><i></i><i></i><i></i><i></i></span><span class="ai-val">標準</span></button>
                 </div>
-                <div id="band-legend"><span class="bl-rx">受信</span><span class="bl-tx">自艦</span></div>
+                <div id="band-legend"><span class="bl-rx">受信</span><span class="bl-tx">自艦の放射</span></div>
             </div>
 
             <!-- 右列: 行動 (第27弾: 航法・追跡・射撃は撤去 — 追跡=リング/推定円をタップ・射撃=地図を長押し) -->
@@ -88,8 +89,8 @@
                 <button class="hud-act" data-group="nav" title="航法 (第27弾で撤去: 停止は長押しメニュー・追従は「◎ 自艦」・自動攻撃はメニュー・倍速は右下)" style="display:none">
                     <img src="assets/icon_nav.png" alt="" class="abar-icon"><span>航法</span>
                 </button>
-                <button class="hud-act" data-group="ew" id="abar-grp-ew" title="電子戦 — ジャム / ハック / デコイ・哨戒機 (潜航型)" style="display:none">
-                    <img src="assets/icon_ew.png" alt="" class="abar-icon"><span>電子戦</span><em class="abar-cargo"></em>
+                <button class="hud-act" data-group="ew" id="abar-grp-ew" title="電子戦 — ハック波 (相手の艦に侵入して機能を止める)・断線パルス・ジャミング (潜航型)">
+                    <img src="assets/icon_ew.png" alt="" class="abar-icon"><span>電子戦</span>
                 </button>
                 <button class="hud-act" data-group="drone" id="abar-grp-drone" title="搭載 — 戦闘機・砲台・Techなど (完成品はすぐ出せる / 資材は組み立て)">
                     <img src="assets/icon_drone.png" alt="" class="abar-icon"><span>搭載</span><em class="abar-cargo"></em>
@@ -162,9 +163,18 @@
                     <i class="ico" style="--ico:url(assets/icons/icon_siglist.png)"></i>
                     <span>SIG一覧</span>
                 </button>
-                <button class="act-icon-btn btn-warning" id="btn-hack" title="電子戦 EW">
+                <!-- 第89弾: 電子戦 — ハック波 (効果を選んで、地図で方向をタップ) -->
+                <button class="act-icon-btn btn-warning hackw-btn" id="btn-hackw-fcs" data-eff="fcs" title="ハック波: 火器管制ダウン — 選んでから地図で方向をタップ。当たって侵入できれば相手は発砲できなくなる"><b class="fx-mark">火</b><span>火器管制</span></button>
+                <button class="act-icon-btn btn-warning hackw-btn" id="btn-hackw-halt" data-eff="halt" title="ハック波: 機関停止 — 選んでから地図で方向をタップ。推力が止まり惰性で減速する"><b class="fx-mark">機</b><span>機関停止</span></button>
+                <button class="act-icon-btn btn-warning hackw-btn" id="btn-hackw-sensor" data-eff="sensor" title="ハック波: センサー損傷 — 選んでから地図で方向をタップ。探知が大きく落ちる"><b class="fx-mark">探</b><span>センサー</span></button>
+                <button class="act-icon-btn btn-warning hackw-btn" id="btn-hackw-comm" data-eff="comm" title="ハック波: 通信障害 — 選んでから地図で方向をタップ。ドローンが自動制御になる・AIの助言が遅れる"><b class="fx-mark">通</b><span>通信</span></button>
+                <button class="act-icon-btn btn-info drone-btn" id="btn-item-linkcut" data-dtype="linkcut" title="断線パルス (1枠) — 侵入されている回線 (艦・ドローンへのハック) を切り、30秒は回線を閉じる。使うと電磁波が1秒漏れる" style="display:none">
+                    <i class="ico" style="--ico:url(assets/icons/icon_linkcut.png)"></i>
+                    <span>断線</span><em class="cg-n"></em>
+                </button>
+                <button class="act-icon-btn btn-warning" id="btn-hack" title="難破船へのハック (偽の熱源を出す)">
                     <i class="ico" style="--ico:url(assets/icons/icon_ew.png)"></i>
-                    <span>EW</span>
+                    <span>難破船</span>
                 </button>
                 <button class="act-icon-btn btn-danger" id="btn-cancel" title="停止">
                     <i class="ico" style="--ico:url(assets/icons/icon_stop.png)"></i>
@@ -406,6 +416,7 @@
                 <div class="ss-cell ss-hp" id="ss-hp" title="艦体耐久"><span class="ss-lab">HULL</span><span class="ss-track"><i id="ss-hp-fill"></i></span><b id="ss-hp-text">100%</b></div>
                 <button class="ss-cell ss-cp" id="ss-cp" title="演算力 — 信号の解析の速さ・精度・解析できる距離を決める。コロニーを占有すると上がる (タップで内訳)"><span class="ss-lab">演算力</span><b id="ss-cp-val">1.0</b><i id="ss-cp-bar"></i><small id="ss-cp-sub">コロニー0/3</small></button>
                 <div class="ss-cell ss-spd" id="ss-spd" title="航行速度"><span class="ss-lab">速度</span><b id="ss-spd-val">0</b><small>u/s</small></div>
+                <div class="ss-cell ss-time" id="ss-time" title="試合の経過時間"><b id="ss-time-val">0:00</b></div>
                 <div class="ss-cell ss-stat" id="ss-stat" title="状態異常 (時間で解消・AIの解析力が高いほど早い)"></div>
             </div>
             <div id="cp-pop" class="hidden"></div>
@@ -811,20 +822,13 @@
         <button onclick="lpmSelectStop()" style="display:block; width:100%; background:#140a00; border:1px solid #ffaa44; color:#ffbb66; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">■ 停止</button>
         <button onclick="lpmSelectDirSonar()" style="display:block; width:100%; background:#001418; border:1px solid #00d4ff; color:#66e6ff; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">◎ 指向ソナー</button>
         <button onclick="lpmSelectSigList()" style="display:block; width:100%; background:#0a0f14; border:1px solid #6b8aa8; color:#9ab6d0; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">≡ 信号一覧</button>
-        <div style="font-size:8px; color:#66ddff; margin:2px 0 2px; letter-spacing:1px;">⌁ ハック波 (押した方向へ)</div>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:3px; margin-bottom:4px;">
-            <button onclick="lpmSelectHack('fcs')" title="火器管制ダウン: 発砲できなくなる" style="background:#14080a; border:1px solid #ff6677; color:#ff8899; padding:5px 2px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:8px;">火器管制</button>
-            <button onclick="lpmSelectHack('halt')" title="機関停止: 推力が止まり、惰性で減速する" style="background:#14100a; border:1px solid #ffaa44; color:#ffbb66; padding:5px 2px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:8px;">機関停止</button>
-            <button onclick="lpmSelectHack('sensor')" title="センサー損傷: 探知が大きく落ちる" style="background:#0a1414; border:1px solid #44ccdd; color:#66e6ff; padding:5px 2px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:8px;">センサー</button>
-            <button onclick="lpmSelectHack('comm')" title="通信障害: ドローンが自動制御になる・AIの助言が遅れる" style="background:#100a14; border:1px solid #bb88ff; color:#cc99ff; padding:5px 2px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:8px;">通信</button>
-        </div>
         <div id="lpm-drones"></div>
         <div id="lpm-lures"></div>
         <button onclick="hideLongPressMenu()" style="display:block; width:100%; background:#0a0a0a; border:1px solid #446655; color:#668877; padding:5px 4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">× キャンセル</button>
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261111i"></script>
+    <script src="game.js?v=20261112a"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -861,10 +865,10 @@
     (function() {
         var ACTION_GROUPS = {
             scan:  ['btn-sonar-band-heat', 'btn-sonar-band-optic', 'btn-sonar-band-em', 'btn-sonar-band-higgs', 'btn-sonar-power', 'btn-scan', 'btn-dir-sonar'],
-            ew:    ['btn-jam-burst', 'btn-jam-cont', 'btn-jam-pulse', 'btn-drone-decoy', 'btn-drone-scout', 'btn-hack'],
+            ew:    ['btn-hackw-fcs', 'btn-hackw-halt', 'btn-hackw-sensor', 'btn-hackw-comm', 'btn-item-linkcut', 'btn-jam-burst', 'btn-jam-cont', 'btn-jam-pulse', 'btn-drone-decoy', 'btn-drone-scout', 'btn-hack'],
             nav:   ['btn-cancel', 'btn-camera-follow', 'btn-attack-toggle', 'btn-game-speed'],
             drone: ['btn-drone-recall','btn-drone-attack','btn-drone-mech','btn-drone-build','btn-drone-scout','btn-drone-decoy',
-                    'btn-drone-buoy','btn-drone-barrier','btn-drone-higgs', 'btn-hack'],
+                    'btn-drone-buoy','btn-drone-barrier','btn-drone-higgs'],
             engine: ['btn-eng-thermonuclear', 'btn-eng-pulse', 'btn-eng-higgs', 'btn-eng-photon', 'btn-focus-balance', 'btn-focus-engine', 'btn-focus-sensor', 'btn-focus-weapon', 'btn-focus-analysis', 'btn-focus-mt'],
             escape: ['btn-item-repair', 'btn-item-flash', 'btn-item-noise', 'btn-item-smoke', 'btn-item-fsos', 'btn-item-lure', 'btn-item-bcn_heat', 'btn-item-bcn_optic', 'btn-item-bcn_em', 'btn-item-bcn_higgs', 'btn-item-fogspray', 'btn-item-fogblow', 'btn-item-fakecache', 'btn-boost', 'btn-coast'],
         };
