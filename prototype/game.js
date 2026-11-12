@@ -438,7 +438,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261112c';
+const SPRITE_VER = '20261112d';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -838,56 +838,102 @@ try { if (audioCtx) sfxLoadManifest(); } catch (e) {}
 // ═══════════════════════════════════════════════════════════════
 let ambientOn = localStorage.getItem('darkEchoAmbient') !== '0';
 let _amb = null;
-// ═══ 第69弾: BGM (ChatGPT製・assets/bgm/*.mp3) ═══
+// ═══ 第69弾: BGM (ChatGPT製) / 第93弾: 版の切り替え・なめらかな切り替え ═══
 // 状況 (プレイヤーが観測できる兆候だけ) で曲を切り替える。2つのデッキをクロスフェード・ループの継ぎ目も重ねる (MP3の先頭/末尾の余白対策)。
-// 曲は全て D・4/4・60BPM基準 (docs/BGM_SPEC.md §0.4)。ループ周期 = 長さ−BGM_XF (4秒=1小節) → 小節の格子を保つ。
-var BGM_DIR = 'assets/bgm/', BGM_XF = 4, BGM_TRIM = 1.25;
+// 第93弾 (オーナー「状況がコロコロ変わるので、そのたびに急に曲が変わると不自然。違和感なくフェードアウト・フェードインして」):
+//   ・同じテンポ・同じ周期の曲どうし (第2版の試合中の曲は全部 120BPM・32小節) は、今の曲の小節の位置から次の曲を始める (拍と小節がずれない)
+//   ・クロスフェードは等パワー。上がる時 (交戦/発見/逃走へ) は次の拍で 2.5〜3秒、それ以外は次の小節で 新しい曲 5秒・古い曲 7秒
+//   ・一度切り替えたら 15秒は次の切り替えをしない (上がる時は除く)。兆候の上下は従来どおり (上がるのは即・下がるのは一段ずつ)
+//   ・版: 第2版 = assets/bgm_v2/ (届いた曲だけ・無い曲は第1版) / 第1版 = assets/bgm/。メニュー「BGM: 第n版」(localStorage darkEchoBgmSet)
+var BGM_SETS = { v1: 'assets/bgm/', v2: 'assets/bgm_v2/' }, BGM_TRIM = 1.25, BGM_XF = 4;
+var bgmSet = 'v2'; try { const _s = localStorage.getItem('darkEchoBgmSet'); if (_s === 'v1' || _s === 'v2') bgmSet = _s; } catch (e) {}
+var _bgmManAll = { v1: null, v2: null };
 var _bgmMan = null, _bgmBufs = {}, _bgmFetching = {}, _bgmBus = null, _bgmDeck = null, _bgmOld = [];
-var _bgmCurves = null, _bgmHoldUntil = 0, _bgmDuckUntil = 0, _bgmLvl = 0, _bgmLvlAt = 0, _bgmLastSt = {}, _bgmPlaying = '';
+var _bgmCurves = null, _bgmHoldUntil = 0, _bgmDuckUntil = 0, _bgmLvl = 0, _bgmLvlAt = 0, _bgmLastSt = {}, _bgmPlaying = '', _bgmDwellUntil = 0;
+var BGM_DWELL = 15, BGM_UP = { bgm_combat_loop: 3, bgm_alert_loop: 2, bgm_evade_loop: 2 }; // 曲の強さ (上がる切り替えは待たずに)
 var bgmVolume = (function () { try { const v = parseFloat(localStorage.getItem('darkEchoBgmVol')); return isNaN(v) ? 0.8 : Math.max(0, Math.min(1, v)); } catch (e) { return 0.8; } })();
 function setBgmVolume(v) { bgmVolume = Math.max(0, Math.min(1, v)); try { localStorage.setItem('darkEchoBgmVol', String(bgmVolume)); } catch (e) {} if (_bgmBus && audioCtx) _bgmBus.gain.setTargetAtTime(bgmVolume * BGM_TRIM, audioCtx.currentTime, 0.1); }
 function _bgmInit() {
     if (_bgmBus) return true; if (!audioCtx) return false;
     _bgmBus = audioCtx.createGain(); _bgmBus.gain.value = bgmVolume * BGM_TRIM; _bgmBus.connect(audioCtx.destination); return true;
 }
+// 台帳の曲: {f:[パス...], d:ファイルの秒, l, bpm, bars, tail}。f が複数 = 周回ごとに交互に使う別テイク
+function _bgmFiles(id) { const e = _bgmMan && _bgmMan[id]; return e ? e.f : []; }
+function _bgmReady(id) { const f = _bgmFiles(id); return f.length > 0 && f.every(x => _bgmBufs[x]); }
 function _bgmFetch(id) {
-    const e = _bgmMan && _bgmMan[id]; if (!e || _bgmBufs[id] || _bgmFetching[id] || !audioCtx) return;
-    _bgmFetching[id] = true;
-    fetch(BGM_DIR + e.f + '?v=' + SPRITE_VER).then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
-        .then(ab => new Promise((ok, ng) => { const p = audioCtx.decodeAudioData(ab, ok, ng); if (p && p.then) p.then(ok, ng); }))
-        .then(buf => { _bgmBufs[id] = buf; }).catch(() => { _bgmFetching[id] = false; });
+    if (!audioCtx) return;
+    for (const file of _bgmFiles(id)) {
+        if (_bgmBufs[file] || _bgmFetching[file]) continue;
+        _bgmFetching[file] = true;
+        fetch(file + '?v=' + SPRITE_VER).then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+            .then(ab => new Promise((ok, ng) => { const p = audioCtx.decodeAudioData(ab, ok, ng); if (p && p.then) p.then(ok, ng); }))
+            .then(buf => { _bgmBufs[file] = buf; }).catch(() => { _bgmFetching[file] = false; });
+    }
 }
 function bgmLoadManifest() {
     if (_bgmMan !== null || !audioCtx) return; _bgmMan = {};
-    fetch(BGM_DIR + 'manifest.json?v=' + SPRITE_VER).then(r => r.json()).then(m => { _bgmMan = m.tracks || {}; _bgmFetch('bgm_title_loop'); }).catch(() => { _bgmMan = null; });
+    const load = (k) => fetch(BGM_SETS[k] + 'manifest.json?v=' + SPRITE_VER).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(m => { const o = {}, T = m.tracks || {};
+            for (const id in T) { const e = T[id], f = Array.isArray(e.f) ? e.f : [e.f];
+                o[id] = { f: f.map(x => BGM_SETS[k] + x), d: e.d, l: e.l, bpm: e.bpm || (k === 'v1' ? 60 : 120), bars: e.bars || 0, tail: e.tail || 0, set: k }; }
+            _bgmManAll[k] = o; }).catch(() => { _bgmManAll[k] = {}; });
+    Promise.all([load('v1'), load('v2')]).then(() => { bgmApplySet(); });
 }
+function bgmApplySet() {
+    const a = _bgmManAll.v1 || {}, b = _bgmManAll.v2 || {};
+    _bgmMan = bgmSet === 'v1' ? Object.assign({}, a) : Object.assign({}, a, b);
+    if (_bgmDeck) { const id = _bgmDeck.id; bgmFadeOut(1.5); _bgmPlaying = ''; _bgmDwellUntil = 0; }
+    _bgmFetch('bgm_title_loop'); _syncBgmSetBtn();
+}
+function _bgmCountSet(k) { const m = _bgmManAll[k]; return m ? Object.keys(m).length : 0; }
+function setBgmSet(k) { if (k !== 'v1' && k !== 'v2') return; bgmSet = k; try { localStorage.setItem('darkEchoBgmSet', k); } catch (e) {} if (_bgmMan !== null) { bgmApplySet(); bgmPrefetchAll(); } _syncBgmSetBtn(); }
+function toggleBgmSet() { setBgmSet(bgmSet === 'v2' ? 'v1' : 'v2'); sfxUI('ui_toggle_on'); }
+function _syncBgmSetBtn() { const b = document.getElementById('mm-bgmset'); if (!b) return; const n = _bgmCountSet('v2');
+    b.textContent = bgmSet === 'v2' ? ('BGM: 第2版' + (n ? ' (' + n + '曲・残りは第1版)' : ' (未納品・第1版で再生)')) : 'BGM: 第1版 (ロールバック中)'; }
 function bgmPrefetchAll() { if (_bgmMan) for (const id in _bgmMan) _bgmFetch(id); }
-// デッキ: ループ1周ごとに src を予約。次の周は XF 秒前から重ねる
-function _bgmIter(d, t, first) {
-    const src = audioCtx.createBufferSource(); src.buffer = d.buf;
-    const g = audioCtx.createGain(), XF = BGM_XF;
-    if (!_bgmCurves) { _bgmCurves = { i: new Float32Array(32), o: new Float32Array(32) }; for (let k = 0; k < 32; k++) { _bgmCurves.i[k] = Math.sin(k / 31 * Math.PI / 2); _bgmCurves.o[k] = Math.cos(k / 31 * Math.PI / 2); } }
-    if (first) g.gain.setValueAtTime(1, t); else g.gain.setValueCurveAtTime(_bgmCurves.i, t, XF); // 等パワーで重ねる (継ぎ目の音量の凹みを避ける)
-    g.gain.setValueCurveAtTime(_bgmCurves.o, t + d.dur - XF, XF);
-    src.connect(g); g.connect(d.g); src.start(t); src.stop(t + d.dur + 0.1);
+function _bgmEqCurves() { if (!_bgmCurves) { _bgmCurves = { i: new Float32Array(64), o: new Float32Array(64) }; for (let k = 0; k < 64; k++) { _bgmCurves.i[k] = Math.sin(k / 63 * Math.PI / 2); _bgmCurves.o[k] = Math.cos(k / 63 * Math.PI / 2); } } return _bgmCurves; }
+// デッキ: ループ1周ごとに src を予約。周期 = ファイルの長さ − 重ね (第1版は1小節4秒・第2版は台帳の tail 秒)。off = 最初の周の途中から始める秒
+function _bgmIter(d, t, first, off) {
+    const src = audioCtx.createBufferSource(); src.buffer = d.bufs[d.vi % d.bufs.length]; d.vi++;
+    const g = audioCtx.createGain(), C = _bgmEqCurves(), XF = d.xf; off = off || 0;
+    if (first) g.gain.setValueAtTime(1, t); else g.gain.setValueCurveAtTime(C.i, t, XF); // 等パワーで重ねる (継ぎ目の音量の凹みを避ける)
+    const endAt = t + d.dur - off;
+    g.gain.setValueCurveAtTime(C.o, endAt - XF, XF);
+    src.connect(g); g.connect(d.g); src.start(t, off); src.stop(endAt + 0.1);
     d.srcs.push(src); if (d.srcs.length > 6) d.srcs.shift();
+    return endAt - XF; // 次の周の始まり
 }
 function _bgmSchedule(d) {
     if (!d || d.dead) return; const now = audioCtx.currentTime;
-    while (d.next < now + 2) { _bgmIter(d, d.next, d.first); d.first = false; d.next += d.dur - BGM_XF; }
+    while (d.next < now + 2) { const n = _bgmIter(d, d.next, d.first, d.first ? d.off : 0); d.first = false; d.off = 0; d.next = n; }
 }
-function bgmPlay(id, quant, xf) {
+// 今のデッキの、時刻 t における周回の中の位置 (秒)
+function _bgmPhase(d, t) { const per = d.dur - d.xf; return per > 0 ? (((t - d.t0) % per) + per) % per : 0; }
+function bgmPlay(id, mode) {
     if (!_bgmMan || !_bgmMan[id] || !_bgmInit()) return false;
     if (_bgmDeck && _bgmDeck.id === id && !_bgmDeck.dead) return true;
-    const buf = _bgmBufs[id]; if (!buf) { _bgmFetch(id); return false; }
+    if (!_bgmReady(id)) { _bgmFetch(id); return false; }
     if (audioCtx.state === 'suspended') audioCtx.resume();
-    const now = audioCtx.currentTime, old = _bgmDeck;
-    let t = now + 0.05;
-    if (old && quant) { const k = Math.ceil((now - old.t0) / BGM_XF - 0.05); t = Math.min(old.t0 + k * BGM_XF, now + BGM_XF); if (t < now + 0.05) t = now + 0.05; }
-    xf = old ? (quant ? BGM_XF : (xf || 1.5)) : 2;
-    const d = { id, buf, dur: _bgmMan[id].d || buf.duration, t0: t, next: t, first: true, g: audioCtx.createGain(), srcs: [], dead: false };
-    d.g.gain.setValueAtTime(0.0001, t); d.g.gain.linearRampToValueAtTime(1, t + xf); d.g.connect(_bgmBus);
-    if (old) { old.g.gain.cancelScheduledValues(now); old.g.gain.setValueAtTime(old.g.gain.value, now); old.g.gain.setValueAtTime(old.g.gain.value, t); old.g.gain.linearRampToValueAtTime(0, t + xf); old.dead = true; _bgmOld.push({ d: old, end: t + xf + 0.3 }); }
+    const E = _bgmMan[id], bufs = E.f.map(f => _bgmBufs[f]);
+    const now = audioCtx.currentTime, old = _bgmDeck, bpm = E.bpm || 60, beat = 60 / bpm, bar = beat * 4;
+    const xfLoop = E.tail > 0 ? E.tail : (E.set === 'v1' ? 4 : bar);
+    const dur = E.d || bufs[0].duration;
+    // 切り替えの時刻: 上がる = 次の拍 / それ以外 = 次の小節 (古い曲の拍の格子に合わせる)
+    let t = now + 0.05, off = 0;
+    if (old) {
+        const ob = old.beat || 1, unit = mode === 'up' ? ob : ob * 4, ph = (now - old.t0) / unit;
+        t = old.t0 + Math.ceil(ph + 0.02) * unit; if (t < now + 0.05) t += unit; if (t > now + unit + 0.1) t = now + 0.05;
+        // 同じテンポ・同じ周期なら、今の小節の位置から始める (拍と小節を揃えたまま入れ替わる)
+        if (Math.abs((old.bpm || 0) - bpm) < 0.5 && Math.abs((old.dur - old.xf) - (dur - xfLoop)) < 0.05) off = _bgmPhase(old, t);
+    }
+    const fin = old ? (mode === 'up' ? (BGM_UP[id] >= 3 ? 2.5 : 3) : 5) : 2;   // 新しい曲が上がるまで
+    const fout = old ? (mode === 'up' ? fin + 0.5 : 7) : 0;                     // 古い曲が消えるまで
+    const C = _bgmEqCurves();
+    const d = { id, bufs, vi: 0, dur, xf: xfLoop, bpm, beat, t0: t - off, next: t, first: true, off, off0: off, g: audioCtx.createGain(), srcs: [], dead: false };
+    d.g.gain.setValueAtTime(0.0001, now); d.g.gain.setValueAtTime(0.0001, t); d.g.gain.setValueCurveAtTime(C.i, t, fin); d.g.connect(_bgmBus);
+    if (old) { const v = old.g.gain.value; old.g.gain.cancelScheduledValues(now); old.g.gain.setValueAtTime(v, now); old.g.gain.setValueAtTime(v, t);
+        const oc = new Float32Array(64); for (let k = 0; k < 64; k++) oc[k] = Math.max(0.0001, v * C.o[k]); old.g.gain.setValueCurveAtTime(oc, t, fout);
+        old.dead = true; _bgmOld.push({ d: old, end: t + fout + 0.3 }); }
     _bgmDeck = d; _bgmPlaying = id; _bgmSchedule(d); return true;
 }
 function bgmFadeOut(sec) {
@@ -897,20 +943,22 @@ function bgmFadeOut(sec) {
 }
 function bgmSting(id, vol) {
     if (!audioCtx || !_bgmMan || !_bgmMan[id] || bgmVolume <= 0 || !_bgmInit()) return false;
-    const buf = _bgmBufs[id]; if (!buf) { _bgmFetch(id); return false; }
+    if (!_bgmReady(id)) { _bgmFetch(id); return false; }
     const now = audioCtx.currentTime; if (_bgmLastSt[id] !== undefined && now - _bgmLastSt[id] < 20) return false;
     _bgmLastSt[id] = now; if (audioCtx.state === 'suspended') audioCtx.resume();
-    const src = audioCtx.createBufferSource(); src.buffer = buf; const g = audioCtx.createGain(); g.gain.value = vol === undefined ? 1 : vol;
-    src.connect(g); g.connect(_bgmBus); src.start(now); src.onended = () => { try { g.disconnect(); } catch (e) {} };
+    // 第93弾: 今の曲の次の拍に合わせて鳴らす
+    let t = now; const d = _bgmDeck; if (d && d.beat) { t = d.t0 + Math.ceil((now - d.t0) / d.beat + 0.02) * d.beat; if (t > now + d.beat + 0.1 || t < now) t = now; }
+    const src = audioCtx.createBufferSource(); src.buffer = _bgmBufs[_bgmMan[id].f[0]]; const g = audioCtx.createGain(); g.gain.value = vol === undefined ? 1 : vol;
+    src.connect(g); g.connect(_bgmBus); src.start(t); src.onended = () => { try { g.disconnect(); } catch (e) {} };
     return true;
 }
 // SE が大事な音を鳴らす間は BGM を少し下げる
 function bgmDuck(sec) { if (audioCtx) _bgmDuckUntil = Math.max(_bgmDuckUntil, audioCtx.currentTime + sec); }
 function _bgmVisible(id) { const e = document.getElementById(id); return !!(e && !e.classList.contains('hidden')); }
-function bgmMatchStart() { _bgmLvl = 0; _bgmLvlAt = 0; _bgmHoldUntil = 0; _bgmLastSt = {}; bgmPrefetchAll(); }
+function bgmMatchStart() { _bgmLvl = 0; _bgmLvlAt = 0; _bgmHoldUntil = 0; _bgmLastSt = {}; _bgmDwellUntil = 0; window._bgmEscF = -1e9; bgmPrefetchAll(); }
 function bgmEnd(kind) { // 'victory' | 'defeat'
     if (!audioCtx || !_bgmMan) return; const id = kind === 'victory' ? 'bgm_st_victory' : 'bgm_st_defeat';
-    bgmFadeOut(1.5); const dur = (_bgmMan[id] && _bgmMan[id].d) || 10; bgmSting(id, 1);
+    bgmFadeOut(2.5); const dur = (_bgmMan[id] && _bgmMan[id].d) || 10; bgmSting(id, 1);
     _bgmHoldUntil = audioCtx.currentTime + Math.max(0, dur - 2);
 }
 // 兆候 (0静穏 1受信 2照射 3攻撃) → 曲の段階。上がるのは即・下がるのは一段ずつ (攻撃の後12秒・以後30秒ごと)
@@ -923,6 +971,12 @@ function _bgmLevel(now) {
 function _bgmOnRise(from, to) {
     if (to === 3) bgmSting('bgm_st_combat', 1); else if (to === 2) bgmSting('bgm_st_alert', 0.9); else if (to === 1 && from === 0) bgmSting('bgm_st_contact', 0.8);
 }
+// 第93弾: 逃げている (離脱の道具・緊急噴射を使った25秒・または傷が深く攻撃の兆候がある時)
+function _bgmEvading() {
+    if (!player) return false;
+    if ((typeof boostT !== 'undefined' && boostT > 0) || _frameCount - (window._bgmEscF || -1e9) < 1500) return true;
+    return player.hp / player.maxHp < 0.4 && playerExposureLevel >= 2 && (player.currentSpeed || 0) > 1.2;
+}
 function bgmTick() {
     if (!audioCtx || !_bgmMan || !_bgmInit()) return;
     const now = audioCtx.currentTime;
@@ -931,20 +985,26 @@ function bgmTick() {
     _bgmBus.gain.setTargetAtTime(bgmVolume * BGM_TRIM * (now < _bgmDuckUntil ? 0.55 : 1), now, 0.2);
     if (bgmVolume <= 0) { if (_bgmDeck) bgmFadeOut(0.5); return; }
     if (now < _bgmHoldUntil) return;
-    let want = '', quant = true;
+    let want = '', inMatch = false;
     if (_bgmVisible('replay-overlay') || _bgmVisible('debrief-overlay') || _bgmVisible('game-over-overlay')) want = 'bgm_result_loop';
     else if (_bgmVisible('ship-select-lobby')) want = 'bgm_title_loop';
     else if (_bgmVisible('docking-menu')) want = 'bgm_dock_loop';
     else if (typeof player !== 'undefined' && player && player.hp > 0 && !player._dying && gameLoopRunning) {
-        const L = _bgmLevel(now);
-        if (L >= 3) { want = 'bgm_combat_loop'; quant = false; }
+        inMatch = true;
+        const L = _bgmLevel(now), ev = _bgmEvading() && _bgmMan.bgm_evade_loop;
+        if (ev) want = 'bgm_evade_loop';
+        else if (L >= 3) want = 'bgm_combat_loop';
         else if (surgePhase === 'warn' || surgePhase === 'active') want = 'bgm_surge_loop';
         else if (lullPhase === 'warn' || lullPhase === 'active') want = 'bgm_lull_loop';
-        else if (L === 2) { want = 'bgm_alert_loop'; quant = false; }
-        else if (playerCoasting) want = 'bgm_hide_loop';
+        else if (L === 2) want = 'bgm_alert_loop';
+        else if (playerCoasting || (powerStance === 'silent' && L >= 1)) want = 'bgm_hide_loop';
         else want = L === 1 ? 'bgm_contact_loop' : 'bgm_calm_loop';
+        if (want && !_bgmMan[want]) want = L >= 3 ? 'bgm_combat_loop' : L === 2 ? 'bgm_alert_loop' : 'bgm_calm_loop';
     }
-    if (want && want !== _bgmPlaying) bgmPlay(want, quant, 1.5);
+    if (!want || want === _bgmPlaying) return;
+    const up = inMatch && (BGM_UP[want] || 0) > (BGM_UP[_bgmPlaying] || 0);
+    if (inMatch && !up && now < _bgmDwellUntil) return; // 第93弾: 切り替えたばかりなら 15秒は待つ (上がる時は待たない)
+    if (bgmPlay(want, up ? 'up' : 'down')) _bgmDwellUntil = now + BGM_DWELL;
 }
 try { if (audioCtx) { bgmLoadManifest(); setInterval(bgmTick, 250); } } catch (e) {}
 // 自動再生の制限: 最初の操作で音を出せる状態にする (タイトル曲が鳴り始める)
@@ -12906,6 +12966,7 @@ function cargoAssembling() { return !!(cargo.asm && !cargo.asm.ready); }
 // 数値はオーナー合意 (2026-10-25)。消耗品は積載の枠を使い、機関停止・緊急噴射は艦の機能 (枠を使わない)
 function useEscapeItem(type, tx, ty) {
     if (!player || player.hp <= 0) return;
+    if (type === 'flash' || type === 'noise' || type === 'smoke' || type === 'fogspray') window._bgmEscF = _frameCount; // 第93弾: 逃走のBGM
     if (type === 'flash') useFlash();
     else if (type === 'noise') useNoise(tx !== undefined ? Math.atan2(ty - player.y, tx - player.x) : undefined);
     else if (type === 'smoke') useSmoke();
@@ -18544,7 +18605,7 @@ function initSfxVolumeUI() {
         el.addEventListener('input', () => { set(el.value / 100); ids.forEach(o => { const e2 = document.getElementById(o), l2 = document.getElementById(o + '-l'); if (e2) e2.value = el.value; if (l2) l2.textContent = el.value + '%'; }); }); }); };
     wire(['sfx-vol', 'sfx-vol-m'], () => sfxVolume, setSfxVolume);
     wire(['bgm-vol', 'bgm-vol-m'], () => bgmVolume, setBgmVolume);
-    _syncSfxSetBtn();
+    _syncSfxSetBtn(); _syncBgmSetBtn();
 }
 // 2026-11-11 (オーナー「実際のプレイ画面で敵側の動きのリプレイを観たい」): 試合を種(seed)から再現する。
 //   ロジック (stepWorld と試合の生成) だけ種つきの乱数を使い、描画・音・UIは元の乱数のまま → 同じ種のCOM対戦は同じ試合になる

@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261112d">
+    <link rel="stylesheet" href="style.css?v=20261112e">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -545,7 +545,6 @@
                         <div class="lobby-sonar-ring"></div>
                         <div class="lobby-logo-sub">HIGGS FOG &nbsp;//&nbsp; SILENT HUNT &nbsp;//&nbsp; DEEP SPACE</div>
                         <h1 class="lobby-logo">DARK <span>ECHO</span></h1>
-                        <div class="lobby-tagline">ヒッグスの霧の中 — 先に見つけた者が、生き残る</div>
                     </div>
                 </div>
                 <div class="lobby-container">
@@ -777,6 +776,7 @@
                     <button class="btn btn-small com-only" id="btn-com-exit" onclick="exitComDemo()">COM対戦を終えてロビーへ</button>
                     <button class="btn btn-small" id="mm-fullscreen" onclick="toggleFullscreen()">全画面 切替</button>
                     <label class="btn btn-small" style="display:inline-flex;gap:6px;align-items:center">SE <input id="sfx-vol-m" type="range" min="0" max="100" step="5" style="width:80px"><span id="sfx-vol-m-l"></span></label>
+                    <button class="btn btn-small" id="mm-bgmset" onclick="toggleBgmSet()" title="BGMの版を切り替える (第2版が気に入らなければ第1版へ戻せる)">BGM: 第2版</button>
                     <button class="btn btn-small" id="mm-sfxset" onclick="toggleSfxSet()" title="効果音の版を切り替える (第3版が気に入らなければ第2版へ戻せる)">SE: 第3版</button>
                     <label class="btn btn-small" style="display:inline-flex;gap:6px;align-items:center">BGM <input id="bgm-vol-m" type="range" min="0" max="100" step="5" style="width:80px"><span id="bgm-vol-m-l"></span></label>
                     <button class="btn btn-small" id="mm-fps" onclick="toggleFpsDisplay()">FPS表示: OFF</button>
@@ -830,7 +830,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261112d"></script>
+    <script src="game.js?v=20261112e"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
