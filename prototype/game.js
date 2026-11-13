@@ -8544,20 +8544,39 @@ const _SRC_JP = { colony: 'コロニー', node: 'ノード', derelict: '難破�
 
 // ═══ 第124弾 (オーナー指示): 拾い物は「部品3択」＋「積み荷4択」 ═══
 // コロニー(初占有)・ノード(初制圧)・漂流コンテナ・輸送船では、部品3つから1つに加えて、積み込み用アイテム4つから1つがもらえる。
-// 4つのうち1つは必ず資材1個。残り3つは積める物 (弾の枠・ドローン・消耗品・リペアキット) からランダム。自機も敵も同じ式。
-function lootFreeSlots() { return playerHoldCap() - cargoStockSlots() - Math.ceil((cargo.mat || 0) / MAT_PER_SLOT); }
-const LOOT_ENEMY_OK = ['repair', 'flash', 'noise', 'smoke', 'fsos', 'lure', 'fakecache', 'fogspray', 'fogblow', 'linkcut'];
-function lootPick4(forEnemy) {
-    const pool = [];
-    if (forEnemy) { for (const k of LOOT_ENEMY_OK) pool.push({ k, label: DRONE_SPEC[k].label, w: DRONE_SPEC[k].w || 1 }); }
-    else {
-        const free = lootFreeSlots() + Math.ceil((cargo.mat || 0) / MAT_PER_SLOT); // 資材の枠は譲れる (拾った物の分だけ資材が減る)
-        if (free >= 1 && playerHasWeapon('kinetic')) pool.push({ k: 'ammoK', label: '実弾 ' + AMMO_PER_SLOT.kinetic + '斉射 (1枠)', w: 1 });
-        if (free >= 1 && playerHasWeapon('missile')) pool.push({ k: 'ammoM', label: 'ミサイル ' + AMMO_PER_SLOT.missile + '発 (1枠)', w: 1 });
-        for (const t of SHIP_DRONES[gameState.shipType] || []) {
-            const sp = DRONE_SPEC[t]; if (!sp || sp.buildOnly || t === 'build' || t === 'mech') continue;
-            if (free >= (sp.w || 1)) pool.push({ k: t, label: sp.label + ' (' + (sp.w || 1) + '枠)', w: sp.w || 1 });
-        }
+// 4つのうち1つは必ず資材1個。残り3つは積める物 (弾の枠・ドローン・消耗品・リペアキット) からランダム。
+// 第124弾の修正 (オーナー指摘「自機と敵で行動パターンを変えるな」): 候補の作り方・選び方・受け取り方は 自機COMも敵も同じ関数。
+//   違うのは「持ち主のアダプタ」(lootActor) だけ — 艦種・積んだ武器・空き枠・持ち物の数・耐久・性格を返し、受け取りの口を持つ。
+const LOOT_STOCK = { // 積み荷の種類 → 敵側の持ち物の名前 (自機は cargo.stock[種類])。敵が持てる物 = 候補になる物 (自機も同じ候補から)
+    attack: 'droneStock', scout: 'scoutStock', build: 'turretStock', flash: 'itemFlash', noise: 'itemNoise', smoke: 'itemSmoke', fsos: 'lureSOS', lure: 'lureShip',
+    fakecache: 'itemFake', fogspray: 'itemSpray', fogblow: 'itemBlow', linkcut: 'itemLinkcut', repair: 'itemRepair' };
+function lootActor(side, e) {
+    if (side === 'p') {
+        return { side, cls: gameState.shipType, wset: _wset, P: (comDemo && _com && _com.pp) || null,
+            hpF: () => player.hp / player.maxHp, ammoLow: () => ammoBelowPlan(), matLow: () => cargo.mat < 4,
+            used: () => cargoStockSlots() + Math.ceil((cargo.mat || 0) / MAT_PER_SLOT), cap: () => playerHoldCap(),
+            count: k => cargo.stock[k] || 0, give(k) { cargo.stock[k] = (cargo.stock[k] || 0) + 1; },
+            addAmmo(w) { if (w === 'kinetic') cargo.ammoK += AMMO_PER_SLOT.kinetic; else cargo.ammoM += AMMO_PER_SLOT.missile; },
+            addMat: n => addMaterials(n), dropMat: n => { cargo.mat = Math.max(0, (cargo.mat || 0) - n); }, mat: () => cargo.mat || 0 };
+    }
+    const cls = ENEMY_CLASS[e.type];
+    return { side, cls, wset: e.wset || ['kinetic', 'missile', 'beam'], P: _enemyPersonality(e),
+        hpF: () => e.hp / e.maxHp, ammoLow: () => (e.ammoK !== undefined && e.ammoK < 8) || (e.ammoM !== undefined && e.ammoM < 2), matLow: () => enemyMat < 4,
+        used: () => { let u = Math.ceil(enemyMat / MAT_PER_SLOT) + Math.ceil((e.ammoK || 0) / AMMO_PER_SLOT.kinetic) + Math.ceil((e.ammoM || 0) / AMMO_PER_SLOT.missile);
+            for (const k in LOOT_STOCK) u += (e[LOOT_STOCK[k]] || 0) * (DRONE_SPEC[k].w || 1); for (const b in (e.itemBcn || {})) u += e.itemBcn[b] || 0; return u; },
+        cap: () => HOLD_CAP[cls] || 10, count: k => e[LOOT_STOCK[k]] || 0,
+        give(k) { e[LOOT_STOCK[k]] = (e[LOOT_STOCK[k]] || 0) + 1; },
+        addAmmo(w) { if (w === 'kinetic') e.ammoK = (e.ammoK || 0) + AMMO_PER_SLOT.kinetic; else e.ammoM = (e.ammoM || 0) + AMMO_PER_SLOT.missile; },
+        addMat: n => { const b = enemyMat; enemyAddMat(n); return enemyMat - b; }, dropMat: n => { enemyMat = Math.max(0, enemyMat - n); }, mat: () => enemyMat };
+}
+function lootFreeSlots(A) { return A.cap() - A.used(); }
+function lootPick4(A) {
+    const pool = [], free = lootFreeSlots(A) + Math.ceil(A.mat() / MAT_PER_SLOT); // 資材の枠は譲れる
+    if (free >= 1 && A.wset.includes('kinetic')) pool.push({ k: 'ammoK', label: '実弾 ' + AMMO_PER_SLOT.kinetic + '斉射 (1枠)', w: 1 });
+    if (free >= 1 && A.wset.includes('missile')) pool.push({ k: 'ammoM', label: 'ミサイル ' + AMMO_PER_SLOT.missile + '発 (1枠)', w: 1 });
+    for (const t of SHIP_DRONES[A.cls] || []) {
+        const sp = DRONE_SPEC[t]; if (!sp || !LOOT_STOCK[t] || free < (sp.w || 1)) continue;
+        pool.push({ k: t, label: sp.label + ' (' + (sp.w || 1) + '枠)', w: sp.w || 1 });
     }
     const out = [];
     while (out.length < 3 && pool.length) out.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
@@ -8565,55 +8584,49 @@ function lootPick4(forEnemy) {
     for (let i = out.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [out[i], out[j]] = [out[j], out[i]]; }
     return out;
 }
-function takeLoot(o, src) {
-    if (!o) return;
+function lootChoose(A, c) { // 選び方は双方同じ式 (傷→リペア / 弾が減っていれば弾 / 性格 / 資材が少なければ資材)
+    const P = A.P || { aggression: 0.5, stealth: 0.5, caution: 0.5, greed: 0.5 }, hpF = A.hpF();
+    const sc = o => {
+        const need = A.count(o.k) === 0 ? 0.25 : 0; // まだ持っていない物を少し優先
+        if (o.k === 'mat') return 0.5 + P.greed * 0.4 + (A.matLow() ? 0.4 : 0);
+        if (o.k === 'ammoK' || o.k === 'ammoM') return 0.45 + (A.ammoLow() ? 1.0 : 0) + (o.k === 'ammoM' ? 0.1 : 0);
+        if (o.k === 'repair') return 0.4 + (hpF < 0.6 ? 1.2 : 0) + need;
+        if (o.k === 'flash' || o.k === 'smoke') return 0.3 + P.caution * 0.6 + need;
+        if (o.k === 'noise' || o.k === 'lure' || o.k === 'fsos' || o.k === 'fakecache') return 0.3 + P.stealth * 0.6 + need;
+        if (o.k === 'attack' || o.k === 'build') return 0.3 + P.aggression * 0.6 + need;
+        if (o.k === 'scout') return 0.3 + P.caution * 0.3 + P.stealth * 0.3 + need;
+        return 0.3 + need;
+    };
+    let best = c[0], bs = -1; for (const o of c) { const v = sc(o) + Math.random() * 0.2; if (v > bs) { bs = v; best = o; } }
+    return best;
+}
+function lootTake(A, o) { // 受け取り (双方同じ式)。返り値=ログ用の文
     let msg = '';
-    if (o.k !== 'mat') { const w = o.w || 1, over = w - lootFreeSlots(); if (over > 0) { cargo.mat = Math.max(0, (cargo.mat || 0) - over * MAT_PER_SLOT); msg = '(資材を譲って) '; } }
-    if (o.k === 'mat') { const g = addMaterials(1); msg += g ? '資材+1個' : '資材 (積む場所がなかった)'; }
-    else if (o.k === 'ammoK') { cargo.ammoK += AMMO_PER_SLOT.kinetic; msg += '実弾+' + AMMO_PER_SLOT.kinetic; }
-    else if (o.k === 'ammoM') { cargo.ammoM += AMMO_PER_SLOT.missile; msg += 'ミサイル+' + AMMO_PER_SLOT.missile; }
-    else { cargo.stock[o.k] = (cargo.stock[o.k] || 0) + 1; msg += o.label; }
+    if (o.k !== 'mat') { const over = (o.w || 1) - lootFreeSlots(A); if (over > 0) { A.dropMat(over * MAT_PER_SLOT); msg = '(資材を譲って) '; } }
+    if (o.k === 'mat') { const g = A.addMat(1); msg += g ? '資材+1個' : '資材 (積む場所がなかった)'; }
+    else if (o.k === 'ammoK') { A.addAmmo('kinetic'); msg += '実弾+' + AMMO_PER_SLOT.kinetic; }
+    else if (o.k === 'ammoM') { A.addAmmo('missile'); msg += 'ミサイル+' + AMMO_PER_SLOT.missile; }
+    else { A.give(o.k); msg += o.label; }
+    return msg;
+}
+function takeLoot(o, src) { // 自機 (人が選んだ時・自機COMが選んだ時)
+    if (!o) return;
+    const msg = lootTake(lootActor('p'), o);
     _hudCache.cargo = null; if (typeof _updateCargoBadges === 'function') _updateCargoBadges();
     logMessage('積み荷: ' + _SRC_JP[src] + 'から ' + msg + ' を受け取った', 'system-msg');
     sfxUI('loot_container');
 }
-function comPickLoot(c) { // 自機COM: 要る物を優先 (傷→リペア / 弾が減っていれば弾 / 空き枠があれば他 / 最後に資材)
-    const has = k => c.find(o => o.k === k);
-    if (player.hp < player.maxHp * 0.6 && has('repair')) return has('repair');
-    if (ammoBelowPlan()) { const a = has('ammoM') || has('ammoK'); if (a) return a; }
-    const pref = ['attack', 'scout', 'flash', 'smoke', 'noise', 'fakecache', 'lure', 'repair'];
-    for (const k of pref) if (has(k)) return has(k);
-    return has('mat') || c[0];
-}
 function offerLoot(src) {
-    const c = lootPick4(false);
-    if (comDemo) { takeLoot(comPickLoot(c), src); return; }
+    const A = lootActor('p'), c = lootPick4(A);
+    if (comDemo) { takeLoot(lootChoose(A, c), src); return; }
     if (_draft) { _draftQ.push({ src, loot: c }); return; }
     _draft = { src, loot: c };
     _openDraftUI();
 }
 function enemyOfferLoot(e, src) {
     if (!e || e.type === 'fighter' || !ENEMY_CLASS[e.type]) return;
-    const c = lootPick4(true), pp = _enemyPersonality(e), cls = ENEMY_CLASS[e.type];
-    const sc = o => { // 性格で選ぶ (傷→リペア / 慎重→閃光・煙幕 / 隠密→ノイズ・偽物 / 資材は空きがあれば並)
-        if (o.k === 'mat') return 0.5 + (pp.greed || 0) * 0.4 + (enemyMat < 4 ? 0.4 : 0);
-        if (o.k === 'repair') return 0.4 + (e.hp < e.maxHp * 0.6 ? 1.2 : 0);
-        if (o.k === 'flash' || o.k === 'smoke') return 0.3 + (pp.caution || 0) * 0.6;
-        if (o.k === 'noise' || o.k === 'lure' || o.k === 'fsos' || o.k === 'fakecache') return 0.3 + (pp.stealth || 0) * 0.6;
-        return 0.35;
-    };
-    let best = c[0], bs = -1; for (const o of c) { const v = sc(o) + Math.random() * 0.2; if (v > bs) { bs = v; best = o; } }
-    if (best.k === 'mat') enemyAddMat(1);
-    else if (best.k === 'repair') e.itemRepair = (e.itemRepair || 0) + 1;
-    else if (best.k === 'flash') e.itemFlash = (e.itemFlash || 0) + 1;
-    else if (best.k === 'noise') e.itemNoise = (e.itemNoise || 0) + 1;
-    else if (best.k === 'smoke') e.itemSmoke = (e.itemSmoke || 0) + 1;
-    else if (best.k === 'fsos') e.lureSOS = (e.lureSOS || 0) + 1;
-    else if (best.k === 'lure') e.lureShip = (e.lureShip || 0) + 1;
-    else if (best.k === 'fakecache') e.itemFake = (e.itemFake || 0) + 1;
-    else if (best.k === 'fogspray') e.itemSpray = (e.itemSpray || 0) + 1;
-    else if (best.k === 'fogblow') e.itemBlow = (e.itemBlow || 0) + 1;
-    else if (best.k === 'linkcut') e.itemLinkcut = (e.itemLinkcut || 0) + 1;
+    const A = lootActor('e', e), c = lootPick4(A), best = lootChoose(A, c);
+    lootTake(A, best);
     comThinkEvent('e', _SRC_JP[src] + 'で積み荷 → 「' + best.label + '」を選んだ (' + c.map(o => o.label).join('/') + 'から)', 'e' + e.uid);
 }
 function offerDraft(src) {
@@ -9158,7 +9171,7 @@ function _openDraftUI() {
     const ov = document.getElementById('draft-overlay'); if (!ov || !_draft) return;
     if (_draft.loot) { // 第124弾: 積み荷4択
         document.getElementById('draft-title').textContent = '積み荷を拾った — ' + _SRC_JP[_draft.src];
-        document.getElementById('draft-sub').textContent = '4つから1つ選ぶ (空き枠 ' + Math.max(0, lootFreeSlots()) + ')。積み込み用のアイテム。見送ることもできる';
+        document.getElementById('draft-sub').textContent = '4つから1つ選ぶ (空き枠 ' + Math.max(0, lootFreeSlots(lootActor('p'))) + ')。積み込み用のアイテム。見送ることもできる';
         const bx = document.getElementById('draft-cards'); bx.innerHTML = '';
         for (const o of _draft.loot) { const b = document.createElement('button'); b.className = 'btn'; b.style.cssText = 'min-width:130px;min-height:64px;margin:4px;font-size:14px'; b.textContent = o.label;
             b.addEventListener('click', () => { const d = _draft; _closeDraftUI(); takeLoot(o, d.src); _nextDraft(); }); bx.appendChild(b); }
