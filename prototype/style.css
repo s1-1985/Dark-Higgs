@@ -2914,3 +2914,15 @@ body.play-replay #zoom-ctl #zoom-stack { flex-wrap: wrap-reverse; max-height: ca
 .hackw-btn.on .fx-mark { background: var(--hc) !important; color: #02130e !important; }
 #btn-hackw-fire.no-band { opacity: 0.45; }
 #btn-hackw-fire.pending-fire { border-color: #ff66cc !important; color: #ffb0ea !important; box-shadow: 0 0 8px #ff66cc; }
+
+/* 第142弾: COMスキルのオン・オフ */
+.com-sk-head{display:flex;gap:6px;align-items:center;margin-top:8px}
+.com-sk-g{margin:8px 0 3px;font-size:11px;color:#7fd8bb;letter-spacing:.08em;display:flex;gap:4px;align-items:center}
+.com-chip.sm{padding:1px 6px;font-size:10px}
+.com-sk{display:flex;flex-direction:column;align-items:flex-start;width:100%;text-align:left;margin:2px 0;padding:4px 8px 4px 22px;border:1px solid #2b4a45;background:rgba(10,24,22,.7);color:#6c8a85;border-radius:3px;position:relative;cursor:pointer}
+.com-sk::before{content:'';position:absolute;left:7px;top:8px;width:8px;height:8px;border:1px solid #4a6d66;border-radius:2px}
+.com-sk b{font-size:12px;font-weight:600}
+.com-sk span{font-size:10px;opacity:.8;line-height:1.35}
+.com-sk.on{color:#d6fff0;border-color:#3fbf9a;background:rgba(20,70,58,.55)}
+.com-sk.on::before{background:#3fe0b0;border-color:#3fe0b0;box-shadow:0 0 6px #3fe0b0}
+.com-box .com-side{max-height:none}
