@@ -16973,6 +16973,7 @@ function prpEnemyHud() {
     const now = _frameCount, lv = e._rxLv || {}, on = e._rxOn || [];
     prpSeatSounds(e);
     // 左: 帯域バー (太=敵が受けた自艦の信号 / 斜線=敵が出している信号)
+    _ensureBandEls();
     for (const b of BANDS) {
         const el = _bandEls[b]; if (!el) continue;
         const w = Math.round(Math.min(1, lv[b] || 0) * 100), tw = Math.round(Math.min(1, (sigPeak(e, b) || 0) * 0.5 / sensorConfig[b].threshold) * 100);
@@ -18501,6 +18502,15 @@ function xoInfoSource() {
 // ── 戦術ストリップ(XOバー+バンドチューナー)の描画同期 — DOM更新は値が変わった時だけ (GC/レイアウト抑制) ──
 let _xoState = null, _xoAct = null;
 const _bandEls = {};
+// 帯域バーの要素は、これまで updateTacStrip が最初に呼ばれた時に作っていた。リプレイの敵の席は updateTacStrip を止める (敵の値を prpEnemyHud が入れる) ので、
+// 敵の席から始めると要素が作られず、受信バーが一度も動かなかった (オーナー報告「何のシグネチャも受信していない」) → 作る処理を分け、敵の席でも呼ぶ
+function _ensureBandEls() {
+    for (const b of BANDS) {
+        if (_bandEls[b]) continue;
+        const btn = document.querySelector(`.band-btn[data-band="${b}"]`); if (!btn) continue;
+        _bandEls[b] = { btn, fill: btn.querySelector('.bt-fill'), tx: btn.querySelector('.bt-tx-fill'), nz: btn.querySelector('.bt-noise'), w: -1, t: -1, n: -1, hot: null, txHi: null };
+    }
+}
 // 被探知状態 (上帯チップ)。静粛/デブリ擬態は同じチップに併記 (旧: フィールド上の文字列)
 function _updateExpoChip() {
     const exL = playerExposureLevel;
