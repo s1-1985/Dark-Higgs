@@ -3468,6 +3468,7 @@ class Projectile {
             const _fall = this.type === 'kinetic' && !this._noFall && !(this.isPlayer && PM.kinNoFall) && !(!this.isPlayer && this.owner && epm(this.owner).kinNoFall) ? 1 - KINETIC_FALLOFF * Math.min(1, this.distTraveled / WEAPON_RANGE.kinetic) : 1;
             const _hitDmg = Math.floor(this.dmg * dmgMult * _fall);
             hitTarget.hp -= _hitDmg;
+            if (this.isPlayer && hitTarget !== player && hitTarget.type !== 'fighter' && typeof _hitAng === 'number') { const hd = hitTarget._hitDirs || (hitTarget._hitDirs = []); hd.push({ ang: _hitAng, f: _frameCount }); if (hd.length > 6) hd.shift(); } // 敵の席: 撃たれた方位 (リングの被弾の弧)
             if (this.emp) applyDaze(hitTarget, 480, 'EMP弾頭'); // 第32弾 (第33弾: 敵のEMPも)
             applyHitStatus(this.isPlayer, this.owner, this.type, hitTarget); // 第60弾: 状態異常の弾
             if (this.isPlayer && hitTarget !== player && hitTarget.type !== 'fighter' && hitTarget.maxHp) matchRecEvent('hitE', hitTarget.x, hitTarget.y, '敵に命中: ' + (_HIT_JP[this.type] || this.type) + ' −' + _hitDmg + (preemptive ? '・奇襲' : ''));
@@ -5310,33 +5311,27 @@ class Ship {
                         this.setTarget(_amb.x, _amb.y); this._roam = 'patrol';
                         comThinkEvent('e', '気配なし → 偽SOSを ' + _dirTxt(this.x, this.y, _sp.x, _sp.y) + ' に出し、その近くの霧で待ち伏せる', 'e' + this.uid);
                     } else if (this.type !== 'fighter' && !_hasScent && ((_frameCount - (this._lastScentF || 0) > ENEMY_ROAM_QUIET * (1.4 - _pers.aggression) * (0.7 + 0.8 * (_pers.stealth ?? 0.4)) && Math.random() < 0.02)
-                               || (this._partHunt = enemySlotsUsed(this) < enemySlotsMax(this) && _frameCount - (this._lastScentF || 0) > (_frameCount < COM_EARLY_GATHER ? 120 : ENEMY_PART_QUIET) && (comDoctrine(_pers).partHunt || _frameCount < COM_EARLY_GATHER) && Math.random() < (_frameCount < COM_EARLY_GATHER ? 1 : 0.15 + _pers.greed * 0.3)))) { // 第41弾: 寄り道は自機COMと同じ方針 (隠密は寄り道しない)
+                               || ((this._gw = gatherWants(_pers, enemySlotsUsed(this), enemySlotsMax(this), _frameCount)) && _frameCount - (this._lastScentF || 0) > 120 && ((this._partHunt = this._gw.part) || this._gw.greed))) ) { // 第41弾: 寄り道は自機COMと同じ方針 (隠密は寄り道しない)
                         // 第33弾: 部品の枠が空いていれば、20秒気配が無いだけで部品を取りに出る (長い静けさを待たない)
                         // 第20弾: 長く何も聞こえない → 隠れ場所伝いに区間ごとに哨戒へ (行き先: 自分のものでないノード / コロニー / マップ中央)
                         let g = this._roamGoal;
                         if (g && g.der && g.der.salvaged) g = this._roamGoal = null; // 第33弾: 難破船は取られたら次へ
                         // 第33弾: 部品の枠が空いていれば、部品の取れる所 (まだ回収されていない難破船 / 部品をまだ取っていないノード・コロニー) を優先する
-                        if (!g && enemySlotsUsed(this) < enemySlotsMax(this) && (this._partHunt || Math.random() < 0.35 + _pers.greed * 0.5)) {
-                            let ps = null, pd = Infinity;
-                            for (const st of structures) {
-                                const ok = st.type === 'derelict' ? !st.salvaged : st.type === 'colony' ? !st._partE && st.owner !== 'enemy' : false;
-                                if (!ok) continue; const d = Math.hypot(st.x - this.x, st.y - this.y); if (d < pd) { pd = d; ps = st; }
-                            }
-                            for (const n of resourceNodes) { if (n._partE || n.owner === 'enemy') continue; const d = Math.hypot(n.x - this.x, n.y - this.y); if (d < pd) { pd = d; ps = n; } }
+                        if (!g) { // 第107弾: 自機COMと同じ関数で 最寄りを選ぶ (部品の枠が空いていれば部品の取れる所 / 貪欲なら最寄りの拠点)
+                            const gw = this._gw || gatherWants(_pers, enemySlotsUsed(this), enemySlotsMax(this), _frameCount);
+                            let ps = gw.part ? gatherPick('e', this.x, this.y, 'part', gw.range) : null, why = '気配なし・部品の枠が空いている';
+                            if (!ps && gw.greed) { ps = gatherPick('e', this.x, this.y, 'any', COM_GOAL_RANGE); why = '気配なし・貪欲さ' + _pct(_pers.greed); }
                             if (ps) {
                                 const isDer = ps.type === 'derelict', isCol = ps.type === 'colony';
-                                g = this._roamGoal = { x: ps.x, y: ps.y, lbl: isDer ? '難破船 (部品)' : isCol ? 'コロニー (部品)' : 'ノード (部品)', der: isDer ? ps : null, col: isCol ? ps : null, node: !isDer && !isCol ? ps : null };
-                                comThinkEvent('e', '気配なし・部品の枠が空いている → ' + g.lbl + ' (' + _dirTxt(this.x, this.y, g.x, g.y) + ')', 'e' + this.uid);
+                                g = this._roamGoal = { x: ps.x, y: ps.y, lbl: isDer ? '難破船 (部品)' : isCol ? 'コロニー (占有する)' : 'ノード (制圧する)', der: isDer ? ps : null, col: isCol ? ps : null, node: !isDer && !isCol ? ps : null };
+                                comThinkEvent('e', why + ' → ' + g.lbl + ' (' + _dirTxt(this.x, this.y, g.x, g.y) + ')', 'e' + this.uid);
                             }
                         }
                         if (!g || (g.col ? g.col.owner === 'enemy' : g.node ? g.node.owner === 'enemy' : g.der ? g.der.salvaged : Math.hypot(g.x - this.x, g.y - this.y) < 2500)) {
                             // 第23弾: コロニーを占有すれば自機の位置の手掛かり (方角・距離) が入る → 自分のでないコロニーを優先して取りに行く
                             let col = null, cd = Infinity;
                             for (const st of structures) { if (st.type !== 'colony' || st.owner === 'enemy') continue; const d = Math.hypot(st.x - this.x, st.y - this.y); if (d < cd) { cd = d; col = st; } }
-                            let ndO = null; // 第99弾: 自機COMと同じ「最寄りの自分のものでないコロニー/ノード」・同じ条件 (貪欲−隠密×0.45 ≥ 0.25)
-                            if (_pers.greed - (_pers.stealth ?? 0.4) * 0.45 >= 0.25) for (const n of resourceNodes) { if (n.owner === 'enemy') continue; const d = Math.hypot(n.x - this.x, n.y - this.y); if (d < cd) { cd = d; ndO = n; } }
-                            if (ndO) { g = this._roamGoal = { x: ndO.x, y: ndO.y, lbl: 'ノード (制圧する)', node: ndO }; comThinkEvent('e', '気配なし・貪欲さ' + _pct(_pers.greed) + ' → ノードを制圧しに行く (' + _dirTxt(this.x, this.y, g.x, g.y) + ')', 'e' + this.uid); }
-                            else if (col && Math.random() < 0.4 + _pers.greed * 0.5) {
+                            if (col && Math.random() < 0.4 + _pers.greed * 0.5) {
                                 g = this._roamGoal = { x: col.x, y: col.y, lbl: col.owner === 'player' ? '自機のコロニー (奪う)' : 'コロニー (占有する)', col };
                                 comThinkEvent('e', '気配なし → ' + g.lbl + ' (' + _dirTxt(this.x, this.y, g.x, g.y) + ')。占有すれば補給・聴音局・演算力', 'e' + this.uid);
                             }
@@ -9530,14 +9525,14 @@ function fireHackPulse(att, angle, effect) {
     const E = HACK_EFFECTS[effect] || HACK_EFFECTS.halt, H = hackPower(isP ? 'player' : 'enemy', isP ? null : A), range = hackPulseRange(H, A), now = _frameCount;
     if (isP) { _hackPulseCD = HACK_PULSE_CD; _hackBurstUntil = now + HACK_BURST_F; hackSessP = null; } else { att._hackCD = now + HACK_PULSE_CD; att._hackBurstUntil = now + HACK_BURST_F; att._hackSess = null; }
     effects.push({ type: 'hackcone', x: A.x, y: A.y, ang: angle, R: range, t: 0, own: isP });
-    if (isP) sfxUI('ew_hack_wave_fire');
+    if (isP) sfxUI('ew_hack_wave_fire'); else seatSfx('ew_hack_wave_fire', 0.9);
     const targets = isP ? enemies.filter(e => e.hp > 0 && !e._dying && e.type !== 'fighter') : (player && player.hp > 0 ? [player] : []);
     let hit = null, bd = Infinity;
     for (const t of targets) { const d = Math.hypot(t.x - A.x, t.y - A.y); if (d > range) continue; if (Math.abs(_angDiff(Math.atan2(t.y - A.y, t.x - A.x), angle)) > HACK_PULSE_HALF) continue; if (hackLinkStrength(A, t, range) <= 0) continue; if (d < bd) { bd = d; hit = t; } } // 第90弾: 濃いヒッグスの中・霧で届かない相手には当たらない
     if (isP) matchRecEvent('hackPulseP', A.x, A.y, '自艦がハック波を発射 (' + E.jp + '・届く距離' + Math.round(range) + 'u・' + (hit ? '応答あり' : '外れ') + ')');
     else matchRecEvent('hackPulseE', A.x, A.y, '敵がハック波を発射 (' + E.jp + ')');
     if (!hit) {
-        if (isP) sfx('ew_hack_miss');
+        if (isP) sfx('ew_hack_miss'); else seatSfx('ew_hack_miss', 0.8);
         if (isP) logMessage('HACK: ハック波 — 応答なし (外れ)。大量の電磁波を出した — 敵に方向を知られる', 'warning-msg');
         else comThinkEvent('e', 'ハック波を撃ったが相手は居なかった (EMを出した)', 'e' + att.uid);
         return false;
@@ -9549,14 +9544,15 @@ function fireHackPulse(att, angle, effect) {
         const sid = 'e-' + hit.uid; if (!_signalAnalysis[sid]) _signalAnalysis[sid] = _newSignalAnalysis(); if (!_contactLabels[sid]) _contactLabels[sid] = _contactLabelNext++;
         _signalAnalysis[sid].ping = { x: hit.x + (Math.random() - 0.5) * err, y: hit.y + (Math.random() - 0.5) * err, r: err, f: now, src: 'hack' }; solveFix(_signalAnalysis[sid]);
     } else if (att._sa) { att._sa.ping = { x: player.x + (Math.random() - 0.5) * err, y: player.y + (Math.random() - 0.5) * err, r: err, f: now, src: 'hack' }; solveFix(att._sa); att.contactFreshness = Math.max(att.contactFreshness || 0, 0.6); }
+    if (isP && hit === prpPov()) seatSfx('alm_hack_probe', 0.9); // 敵の席: 自機のハック波が当たった = 探られた
     if (q < 1) {
-        if (isP) sfx('ew_hack_fail');
+        if (isP) sfx('ew_hack_fail'); else seatSfx('ew_hack_fail', 0.8);
         if (isP) logMessage('HACK: 応答あり — 艦影を捉えた (方位' + compassDeg(Math.atan2(hit.y - A.y, hit.x - A.x)) + '°・約' + Math.round(bd / 100) * 100 + 'u)。だが相手のハック耐性が演算力を上回り侵入できない (演算力' + (Math.round(H * 10) / 10) + ')', 'warning-msg');
         else comThinkEvent('e', 'ハック波が当たったが耐性が高く侵入できない', 'e' + att.uid);
         return false;
     }
     if (Math.random() > hackSuccessChance(q)) { // 第89弾: 防壁に弾かれた
-        sfx(isP ? 'ew_hack_fail' : 'alm_hack_probe');
+        sfx(isP ? 'ew_hack_fail' : 'alm_hack_probe'); if (!isP) seatSfx('ew_hack_fail', 0.8);
         if (isP) logMessage('HACK: 応答あり — 侵入を試みたが防壁に弾かれた (成功率' + Math.round(hackSuccessChance(q) * 100) + '%・演算力' + (Math.round(H * 10) / 10) + ' / 相手の耐性 約' + (Math.round(R * 2) / 2) + ')', 'warning-msg');
         else { comThinkEvent('e', 'ハック波が当たったが侵入に失敗 (弾かれた)', 'e' + att.uid); logMessage('WARN: ハック波を受けた — 防壁が侵入を弾いた (方位' + compassDeg(Math.atan2(att.y - player.y, att.x - player.x)) + '°から)', 'warning-msg'); }
         return false;
@@ -9572,7 +9568,7 @@ function fireHackPulse(att, angle, effect) {
 }
 function _stepHackSess(S, att) {
     const A = att === 'p' ? player : att, T = S.tgt, now = _frameCount;
-    const end = (why) => { if (att === 'p' || T === player) sfx('ew_hack_cut'); if (att === 'p') hackSessP = null; else att._hackSess = null; if (att === 'p') logMessage('HACK: 侵入が途切れた — ' + why, 'warning-msg'); else if (T === player) logMessage('HACK: 侵入が途切れた (' + why + ')', 'system-msg'); };
+    const end = (why) => { if (att === 'p' || T === player) sfx('ew_hack_cut'); if (_seatOn() && (T === prpPov() || A === prpPov())) seatSfx('ew_hack_cut', 0.8); if (att === 'p') hackSessP = null; else att._hackSess = null; if (att === 'p') logMessage('HACK: 侵入が途切れた — ' + why, 'warning-msg'); else if (T === player) logMessage('HACK: 侵入が途切れた (' + why + ')', 'system-msg'); };
     if (!A || A.hp <= 0 || A._dying) { if (att !== 'p') att._hackSess = null; else hackSessP = null; return; }
     if (!T || T.hp <= 0 || T._dying) { end('相手が沈んだ'); return; }
     const H = hackPower(att === 'p' ? 'player' : 'enemy', att === 'p' ? null : att);
@@ -9583,8 +9579,8 @@ function _stepHackSess(S, att) {
     if (S.p < S.need) return;
     const E = HACK_EFFECTS[S.effect] || HACK_EFFECTS.halt, mult = Math.max(0.8, Math.min(1.8, 0.8 + 0.4 * (S.q - 1)));
     applyStatus(T, E.st, Math.round(E.dur * mult));
-    if (att === 'p') { sfx('ew_hack_success'); logMessage('HACK: 成功 — 敵に' + E.jp + ' (約' + Math.round(E.dur * mult / 60) + '秒)。今が奇襲の好機', 'system-msg'); matchRecEvent('hackOkP', T.x, T.y, '敵をハック: ' + E.jp); hackSessP = null; }
-    else { att._hackSess = null; comThinkEvent('e', 'ハック成功 — 自機に' + E.jp, 'e' + att.uid); matchRecEvent('hackOkE', T.x, T.y, '敵にハックされた: ' + E.jp); }
+    if (att === 'p') { sfx('ew_hack_success'); if (T === prpPov()) seatSfx('alm_hack_probe', 1); logMessage('HACK: 成功 — 敵に' + E.jp + ' (約' + Math.round(E.dur * mult / 60) + '秒)。今が奇襲の好機', 'system-msg'); matchRecEvent('hackOkP', T.x, T.y, '敵をハック: ' + E.jp); hackSessP = null; }
+    else { seatSfx('ew_hack_success', 0.9); att._hackSess = null; comThinkEvent('e', 'ハック成功 — 自機に' + E.jp, 'e' + att.uid); matchRecEvent('hackOkE', T.x, T.y, '敵にハックされた: ' + E.jp); }
 }
 function updateHackSessions() {
     if (_hackPulseCD > 0) _hackPulseCD -= gameSpeedFactor;
@@ -9696,7 +9692,7 @@ function drawAlertFx(ctx) {
     const L = ins.left, T = ins.top, Rr = W - ins.right, B = Hh;
     ctx.save();
     // ── 侵入されている: 走査線・横ずれの帯・色の欠片。進むほど強く ──
-    const S = (enemies.find(e => e._hackSess && e._hackSess.tgt === player) || {})._hackSess;
+    const S = (_hackAttackers().find(e => e._hackSess && e._hackSess.tgt === player) || {})._hackSess;
     if (S) {
         const u = Math.min(1, S.p / S.need), k = 0.25 + 0.6 * u;
         ctx.globalAlpha = 0.08 + 0.1 * k; ctx.fillStyle = '#ff2a6a';
@@ -12375,6 +12371,7 @@ function updateEnvInfo() {
 // ============================================================
 // 第22弾: 撃沈の瞬間に何が起きたかを画面中央に出す (崩壊の演出の間)
 function showDeathBanner(cause) {
+    if (_seatOn()) return; // 敵の席: 自機 (相手) が沈んだ表示は出さない (敵の席の「被弾・船体崩壊」ではない)
     let el = document.getElementById('death-banner');
     if (!el) { el = document.createElement('div'); el.id = 'death-banner'; document.body.appendChild(el); }
     el.innerHTML = '';
@@ -14324,6 +14321,7 @@ function enemyTurretStep(f) {
 }
 function spawnEnemyDrone(carrier, kind) {
     const f = new Ship(carrier.x + (Math.random() - 0.5) * 240, carrier.y + (Math.random() - 0.5) * 240, false, 'fighter');
+    seatSfx(kind === 'mech' ? 'item_assemble_tech_done' : kind === 'scout' ? 'drone_launch_scout' : kind === 'turret' ? 'drone_deploy_turret' : 'drone_launch_fighter', 0.8);
     f._home = carrier; f._kind = kind; f._ammo = DRONE_AMMO.mech; f.msl = TECH_MSL_MAX; f._saberN = TECH_SABER_N; f.maxHp = f.hp = DRONE_SPEC[kind === 'turret' ? 'build' : kind].hp; f.radius = kind === 'mech' ? 9 : 7;
     if (kind === 'turret') { f.x = carrier.x + Math.cos(carrier.angle || 0) * 120; f.y = carrier.y + Math.sin(carrier.angle || 0) * 120; f._life = DRONE_SPEC.build.life; }
     f.angle = carrier.angle || 0; f.aiState = 'lurking'; f.lurking = false; f._vx2 = 0; f._vy2 = 0; f._v = 0.5;
@@ -14400,9 +14398,9 @@ function enemyResupTick(f, kind) {
     if (!(f._rsNeed > 0)) {
         if (!enemySpendMat(DRONE_RESUP_COST[kind])) return false;
         const miss = mech ? Math.max(1 - f._ammo / mx, 1 - (f.msl || 0) / TECH_MSL_MAX, 1 - (f._saberN || 0) / TECH_SABER_N) : 1 - f._ammo / mx;
-        f._rsNeed = Math.max(0.25, miss) * DRONE_RESUP_SEC[kind] * 60; f._rsT = 0;
+        f._rsNeed = Math.max(0.25, miss) * DRONE_RESUP_SEC[kind] * 60; f._rsT = 0; seatSfx('supply_start', 0.6);
     }
-    if (++f._rsT >= f._rsNeed) { f._ammo = mx; if (mech) { f.msl = TECH_MSL_MAX; f._saberN = TECH_SABER_N; } f._rsNeed = 0; f._rsT = 0; }
+    if (++f._rsT >= f._rsNeed) { seatSfx('supply_done', 0.7); f._ammo = mx; if (mech) { f.msl = TECH_MSL_MAX; f._saberN = TECH_SABER_N; } f._rsNeed = 0; f._rsT = 0; }
     return true;
 }
 function enemyTechStep(f) {
@@ -16967,6 +16965,9 @@ function prpSeatSounds(e) {
     for (const [k, id] of _PRP_STATUS_SFX) { const on = (e[k] || 0) > 0; any = any || on; if (on && !S.st[k]) seatSfx(id, 0.8); S.st[k] = on; }
     if (S.any && !any) seatSfx('alm_status_recover', 0.7); S.any = any;
     { const dn = getHiggsIntensity(e.x, e.y); if (!S.dense && dn >= 0.74) { S.dense = true; seatSfx('env_dense_enter', 0.7); } else if (S.dense && dn < 0.66) { S.dense = false; seatSfx('env_dense_exit', 0.7); } } // 濃いヒッグスに入った/出た
+    { const ds = prpSeatDrones(e), n = ds.length, linked = ds.filter(d => d._q >= DRONE_LINK_WEAK).length; // 自分のドローンが落ちた/通信が切れた・戻った
+      if (S.nd !== undefined) { if (n < S.nd) seatSfx('drone_lost_own', 0.8); else if (linked < S.nl && n >= S.nd) seatSfx('alm_drone_link_lost', 0.8); else if (linked > S.nl && n === S.nd) seatSfx('alm_drone_link_restore', 0.7); } S.nd = n; S.nl = linked; }
+    if (e._dying && !S.dead) { S.dead = 1; seatSfx('ship_death_player_start', 1); }
     const hf = e.hp / e.maxHp; if (S.hull > 0.5 && hf <= 0.5) seatSfx('alm_hull_50', 0.8); if (S.hull > 0.25 && hf <= 0.25) seatSfx('alm_hull_25', 0.9); S.hull = hf;
     const ex = P.ex || 0; if (ex > S.ex) seatSfx('alm_exposure_' + Math.min(3, ex), 0.8); S.ex = ex;
 }
@@ -17069,6 +17070,19 @@ function prpSeatThreats(e) { // 敵が観測できる脅威 (自艦のミサイ�
     if (e.inVision && (player.targetEntity === e)) put('l', 'lock', Math.atan2(player.y - e.y, player.x - e.x), 0.05, 1, 'ロック');
     return TH;
 }
+// 敵の席: 敵のドローン (艦載機・Tech・哨戒機) の有視界を 自機のドローンと同じ形 (24本の視線・通信の質) にして渡す → 自機の画面と同じ 霧の抜け・点線の輪 が描かれる
+function prpSeatDrones(e) {
+    const out = [], now = _frameCount;
+    for (const f of enemies) {
+        if (f.type !== 'fighter' || f.hp <= 0 || f._dying || f._home !== e || f._kind === 'turret') continue;
+        const kind = f._kind === 'mech' ? 'mech' : f._kind === 'scout' ? 'scout' : 'attack', R = DRONE_VIS[kind] || 900;
+        if (!f._vpts || now - f._vptsF >= 6) { f._vptsF = now; const pts = f._vpts || (f._vpts = new Float32Array(24)), h0 = getHiggsIntensity(f.x, f.y); for (let k = 0; k < 24; k++) pts[k] = losReach(f.x, f.y, k / 24 * Math.PI * 2, R, h0); }
+        out.push({ x: f.x, y: f.y, hp: f.hp, type: kind, _visPts: f._vpts, _q: f._auto ? 0.1 : 1, _auto: !!f._auto });
+    }
+    return out;
+}
+var _prpSeatAtk = null; // 敵の席: 自機が敵へ仕掛けているハック (敵から見れば「侵入されている」)
+function _hackAttackers() { return _prpSeatBusy && _prpSeatAtk ? enemies.concat([_prpSeatAtk]) : enemies; }
 function prpSeatWeapon(e) { let w = e.weaponType || 'missile'; if (e.wset && !e.wset.includes(w)) w = ['missile', 'beam', 'kinetic'].find(x => e.wset.includes(x)) || w; return w; }
 function prpSeat(e, fn) {
     if (_prpSeatBusy || !e) return fn();
@@ -17076,24 +17090,26 @@ function prpSeat(e, fn) {
     _prpSeatBusy = true;
     const sv = { player, pb: passiveBearings, lk: lockedSignalId, sa: _signalAnalysis, hd: playerHitDirs, ex: playerExposureLevel, rm: _ringMarks, cg: cargo, th: THREATS.splice(0),
         so: sensorsOn, sl: sensorLv, sor: sensorOrder, cs: currentSensor, pd: playerDrones, vr: _visRays, vf: _visRaysF, pvr: playerVisionRadius, nm: nearMissActive, cp: _capturing, rs: _resupply, co: playerCoasting,
-        hp: hackPending, id: _sigIdent['E-view'] };
+        hp: hackPending, hs: hackSessP, id: _sigIdent['E-view'] };
     try {
         for (const t of prpSeatThreats(e)) THREATS.push(t);
         const sa = e._sa, on = e._rxOn || [], lv = e._lv || {};
         player = e; passiveBearings = []; _signalAnalysis = sa ? { 'E-view': sa } : {}; lockedSignalId = sa && (sa.fix || sa.ping || (sa.obs && sa.obs.length)) ? 'E-view' : null;
         if (sa) { const p = sa.fix ? Math.min(0.97, 0.62 + 0.35 * Math.min(1, anaPct(sa.ana || 0) / 100)) : 0.5; _sigIdent['E-view'] = { L: Math.log(p / (1 - p)), n: IDENT_MIN_N, why: {}, sure: false }; }
-        playerHitDirs = _prpHitDirs; playerExposureLevel = playReplay && playReplay.ex !== undefined ? playReplay.ex : 0; _ringMarks = _prpRingMarks; cargo = _prpEmptyCargo;
+        playerHitDirs = (e._hitDirs || []).filter(h => _frameCount - h.f < HIT_DIR_LIFE).map(h => ({ ang: h.ang, life: HIT_DIR_LIFE - (_frameCount - h.f) })); playerExposureLevel = playReplay && playReplay.ex !== undefined ? playReplay.ex : 0; _ringMarks = _prpRingMarks; cargo = _prpEmptyCargo;
         sensorsOn = { heat: on.includes('heat'), optic: on.includes('optic'), em: on.includes('em'), higgs: on.includes('higgs') };
         sensorLv = { heat: lv.heat || 2, optic: lv.optic || 2, em: lv.em || 2, higgs: lv.higgs || 2 }; sensorOrder = on.slice(); currentSensor = on[0] || 'heat';
-        playerDrones = []; _visRays = prpEnemyRays(e); _visRaysF = _frameCount; playerVisionRadius = Math.max(VIS_CLOSE, e._myDetR || _visAt(e.x, e.y));
-        nearMissActive = false; _capturing = null; _resupply = null; playerCoasting = !!e._coast; hackPending = null;
+        playerDrones = prpSeatDrones(e); _visRays = prpEnemyRays(e); _visRaysF = _frameCount; playerVisionRadius = Math.max(VIS_CLOSE, e._myDetR || _visAt(e.x, e.y));
+        nearMissActive = false; _capturing = null; _resupply = null; playerCoasting = !!e._coast; hackPending = null; hackSessP = e._hackSess || null;
+        _prpSeatAtk = sv.hs && sv.hs.tgt === e ? { _hackSess: Object.assign({}, sv.hs, { att: sv.player }), hp: 1, type: 'x', inVision: false, x: sv.player.x, y: sv.player.y } : null;
+        cargo = e._techT > 0 ? { stock: {}, mat: 0, matScrap: 0, asm: { type: 'mech', t: DRONE_SPEC.mech.build - e._techT, total: DRONE_SPEC.mech.build, ready: false }, ammoK: 0, ammoM: 0 } : _prpEmptyCargo; // 敵のTech建造 = 自艦の組み立て
         _curWeapon = prpSeatWeapon(e); weaponRange = w => _rg[w] || 800;
         fn();
     } catch (err) { if (!window.__prpErr) { window.__prpErr = err; console.error('prpSeat', err); } /* 描画の失敗で試合を止めない */ }
     finally {
         player = sv.player; passiveBearings = sv.pb; lockedSignalId = sv.lk; _signalAnalysis = sv.sa; playerHitDirs = sv.hd; playerExposureLevel = sv.ex; _ringMarks = sv.rm; cargo = sv.cg;
         sensorsOn = sv.so; sensorLv = sv.sl; sensorOrder = sv.sor; currentSensor = sv.cs; playerDrones = sv.pd; _visRays = sv.vr; _visRaysF = sv.vf; playerVisionRadius = sv.pvr;
-        nearMissActive = sv.nm; _capturing = sv.cp; _resupply = sv.rs; playerCoasting = sv.co; hackPending = sv.hp;
+        nearMissActive = sv.nm; _capturing = sv.cp; _resupply = sv.rs; playerCoasting = sv.co; hackPending = sv.hp; hackSessP = sv.hs; _prpSeatAtk = null;
         weaponRange = _wrOrig; _curWeapon = _cw;
         if (sv.id) _sigIdent['E-view'] = sv.id; else delete _sigIdent['E-view'];
         THREATS.length = 0; for (const t of sv.th) THREATS.push(t);
@@ -17116,7 +17132,7 @@ function prpMinimap(pv) {
 // 敵の席の重ね描き (霧の上): 自機の画面と同じ関数で 方位線・推定円 (名札つき) を描く。作戦の行き先は「思」をオンにしている時だけ (敵の頭の中なので自機の画面には無い)
 function prpDrawPovOverlay(ctx, e) {
     prpSeat(e, () => {
-        drawPassiveBearings(ctx); drawTriangulationCircle(ctx);
+        drawDroneVision(ctx); drawPassiveBearings(ctx); drawTriangulationCircle(ctx);
         const est = _huntEst(e), R = weaponRange(currentWeapon()); // 射程と射角 (敵が推定を掴んで射程の1.5倍以内か、交戦中だけ。自機の画面と同じ条件)
         if (e.aiState === 'combat' || (est && Math.hypot(est.x - e.x, est.y - e.y) < R * 1.5)) drawWeaponRange(ctx);
     });
@@ -17255,6 +17271,24 @@ const COM_STRATS = {
 const COM_STRAT_MIN = 5400, COM_STRAT_VAR = 12600; // 90〜300秒
 // 第66弾 (オーナー): 序盤は性格によらず部品を集める (人間も序盤は集める。集めないと艦が強化されない) — 最初の10分は、枠が2つ埋まるまで全員が部品を取りに行く
 const COM_EARLY_GATHER = 36000;
+// 第107弾 (段1・オーナー「人が操作する時も、最初は一番近い物を目指す」): 取りに行く物の「始める条件」と「選び方」を 自機COMも敵も同じ関数で (旧: 敵は確率と別の距離の条件で、自機COMは毎判断)
+function gatherWants(P, used, max, now) {
+    const D = comDoctrine(P), early = comEarlyGather(used, max, now);
+    return { part: used < max && (D.partHunt || early), early, greed: (P.greed ?? 0.4) - (P.stealth ?? 0.4) * 0.45 >= 0.25, range: Math.max(D.partRange, early ? 12000 : 0) };
+}
+// 最寄りの拠点 (コロニー・ノード) と難破船。side 'p'|'e'。mode 'part' = 部品をまだ取っていない物 (難破船も) / 'any' = 自分のものでない拠点。難破船は自分が見つけた物だけ (自機は discovered・敵は 2500u 以内に入った物)
+function gatherPick(side, x, y, mode, range) {
+    const me = side === 'p' ? 'player' : 'enemy', pk = side === 'p' ? '_partP' : '_partE';
+    let best = null, bd = range === undefined ? Infinity : range;
+    for (const st of structures) {
+        let ok = false;
+        if (st.type === 'derelict') { if (mode === 'part' && !st.salvaged) { if (side === 'e' && !st._discE && Math.hypot(st.x - x, st.y - y) < 2500) st._discE = true; ok = side === 'p' ? !!st.discovered : !!(st.discovered || st._discE); } }
+        else if (st.type === 'colony') ok = st.owner !== me && (mode === 'any' || !st[pk]);
+        if (!ok) continue; const d = Math.hypot(st.x - x, st.y - y); if (d < bd) { bd = d; best = st; }
+    }
+    for (const n of resourceNodes) { if (n.owner === me || (mode === 'part' && n[pk])) continue; const d = Math.hypot(n.x - x, n.y - y); if (d < bd) { bd = d; best = n; } }
+    return best;
+}
 function comEarlyGather(used, max, now) { return now < COM_EARLY_GATHER && used < Math.min(2, max); }
 // 第66弾 (オーナー「逃げ回るだけでは勝つ気がない・双方が隠密/慎重だと試合が終わらない」): 長く (10分) 相手の気配が無ければ痺れを切らし、性格が攻め寄りに傾く (20分で最大: 攻撃性+0.5・隠密性×0.3・慎重さ×0.6)
 function comStallPers(c, base, now, lastF) {
@@ -17778,12 +17812,8 @@ function comPilotStep() {
     }
     const _early = comEarlyGather(partSlotsUsed(), partSlotsMax(), now);
     if (!contact && (D.partHunt || _early) && partSlotsUsed() < partSlotsMax()) { // 第41弾: 寄り道は 貪欲さ − 隠密性×0.45 ≥ 0.05 の時だけ・距離も方針で (第66弾: 序盤は全員)
-        let ps = null, pd = Math.max(D.partRange, _early ? 12000 : 0);
-        for (const st of structures) {
-            const ok = st.type === 'derelict' ? !st.salvaged && st.discovered : st.type === 'colony' ? !st._partP && !st.hacked : false; // 第44弾: 見つけた難破船だけ
-            if (!ok) continue; const d = Math.hypot(st.x - player.x, st.y - player.y); if (d < pd) { pd = d; ps = st; }
-        }
-        for (const n of resourceNodes) { if (n._partP || n.owner === 'player') continue; const d = Math.hypot(n.x - player.x, n.y - player.y); if (d < pd) { pd = d; ps = n; } }
+        let pd = Math.max(D.partRange, _early ? 12000 : 0), ps = gatherPick('p', player.x, player.y, 'part', pd); // 第107弾: 最寄りを選ぶ関数は敵と共通
+        if (ps) pd = Math.hypot(ps.x - player.x, ps.y - player.y);
         for (const sid in _srcKnown) { const k = _srcKnown[sid]; if (k.kind !== 'cache') continue; const f = fieldSignals.find(q => q.sid === sid); if (!f) continue; const q = srcDrawPos(sid, f); const d = Math.hypot(q.x - player.x, q.y - player.y); if (d < pd) { pd = d; ps = { kind: 'cache', x: q.x, y: q.y, sid }; } } // 第40弾: 目視か解析で分かったコンテナ (位置は分かっている所)
         if (ps) {
             const kind = ps.kind === 'cache' ? '漂流コンテナ' : ps.type === 'derelict' ? '難破船' : ps.type === 'colony' ? 'コロニー' : 'ノード';
@@ -17795,7 +17825,7 @@ function comPilotStep() {
         }
     }
     if (!contact && P.greed - P.stealth * 0.45 >= 0.25) { // 第41弾: 隠密は取りに行かない
-        const g = _comNearest(true, true);
+        const g = gatherPick('p', player.x, player.y, 'any', COM_GOAL_RANGE); // 第107弾: 最寄りを選ぶ関数は敵と共通
         if (g) {
             const isNode = !g.type;
             _comGoTo(g, (isNode ? NODE_CAP_R : COLONY_HACK_R) * 0.6, c); c.item = { o: g, near: (isNode ? NODE_CAP_R : COLONY_HACK_R) * 0.6, f: now }; // 第66弾: 取り終えるまで続ける
@@ -18714,7 +18744,7 @@ function updateSfxLoops() {
     // 第92弾: 第3版で増えたループ (侵入されている・侵入している・継続ジャム・機関・組み立て・修理・補給・占有)
     {
         const now = _frameCount;
-        let intr = 0; if (alive) { for (const e of enemies) if (e._hackSess && e._hackSess.tgt === player) intr = Math.max(intr, e._hackSess.p / e._hackSess.need); for (const d of playerDrones) if (d._underHack && d._underHack.until > now) intr = Math.max(intr, d._underHack.u || 0.2); }
+        let intr = 0; if (alive) { for (const e of _hackAttackers()) if (e._hackSess && e._hackSess.tgt === player) intr = Math.max(intr, e._hackSess.p / e._hackSess.need); for (const d of playerDrones) if (d._underHack && d._underHack.until > now) intr = Math.max(intr, d._underHack.u || 0.2); }
         sfxLoop('alm_hack_intrusion_loop', alive && intr > 0, 0.35 + 0.55 * intr);
         sfxLoop('ew_hack_intrude_loop', alive && !!(hackSessP || _hack), 0.6);
         sfxLoop('ew_jam_cont_loop', alive && !!jamCont && gameState.shipType === 'stealth', 0.5);
