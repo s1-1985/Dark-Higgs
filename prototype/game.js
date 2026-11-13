@@ -5329,13 +5329,13 @@ class Ship {
                         // 第33弾: 部品の枠が空いていれば、20秒気配が無いだけで部品を取りに出る (長い静けさを待たない)
                         // 第20弾: 長く何も聞こえない → 隠れ場所伝いに区間ごとに哨戒へ (行き先: 自分のものでないノード / コロニー / マップ中央)
                         let g = this._roamGoal;
-                        if (g && !(g.col || g.der || g.node)) { const _g2 = gatherWants(_pers, enemySlotsUsed(this), enemySlotsMax(this), _frameCount); if ((_g2.part && gatherPick('e', this.x, this.y, 'part', _g2.range)) || (_g2.greed && gatherPick('e', this.x, this.y, 'any', COM_GOAL_RANGE))) g = this._roamGoal = null; } // 第108弾: 取りに行く物があるなら 古い「聴いていない海域」の行き先は捨てる
+                        if (g && !(g.col || g.der || g.node)) { const _g2 = gatherWants(_pers, enemySlotsUsed(this), enemySlotsMax(this), _frameCount); if ((_g2.part && gatherPick('e', this.x, this.y, 'part', _g2.range)) || (_g2.greed && gatherPick('e', this.x, this.y, 'any', CAP_RANGE))) g = this._roamGoal = null; } // 第108弾: 取りに行く物があるなら 古い「聴いていない海域」の行き先は捨てる
                         if (g && g.der && g.der.salvaged) g = this._roamGoal = null; // 第33弾: 難破船は取られたら次へ
                         // 第33弾: 部品の枠が空いていれば、部品の取れる所 (まだ回収されていない難破船 / 部品をまだ取っていないノード・コロニー) を優先する
                         if (!g) { // 第107弾: 自機COMと同じ関数で 最寄りを選ぶ (部品の枠が空いていれば部品の取れる所 / 貪欲なら最寄りの拠点)
                             const gw = this._gw || gatherWants(_pers, enemySlotsUsed(this), enemySlotsMax(this), _frameCount);
                             let ps = gw.part ? gatherPick('e', this.x, this.y, 'part', gw.range) : null, why = '気配なし・部品の枠が空いている';
-                            if (!ps && gw.greed) { ps = gatherPick('e', this.x, this.y, 'any', COM_GOAL_RANGE); why = '気配なし・貪欲さ' + _pct(_pers.greed); }
+                            if (!ps && gw.greed) { ps = gatherPick('e', this.x, this.y, 'any', CAP_RANGE); why = '気配なし・拠点の占拠は報酬'; }
                             if (ps) {
                                 const isDer = ps.type === 'derelict', isCol = ps.type === 'colony';
                                 g = this._roamGoal = { x: ps.x, y: ps.y, lbl: isDer ? '難破船 (部品)' : isCol ? 'コロニー (占有する)' : 'ノード (制圧する)', der: isDer ? ps : null, col: isCol ? ps : null, node: !isDer && !isCol ? ps : null };
@@ -17609,9 +17609,12 @@ const COM_STRAT_MIN = 5400, COM_STRAT_VAR = 12600; // 90〜300秒
 // 第66弾 (オーナー): 序盤は性格によらず部品を集める (人間も序盤は集める。集めないと艦が強化されない) — 最初の10分は、枠が2つ埋まるまで全員が部品を取りに行く
 const COM_EARLY_GATHER = 36000;
 // 第107弾 (段1・オーナー「人が操作する時も、最初は一番近い物を目指す」): 取りに行く物の「始める条件」と「選び方」を 自機COMも敵も同じ関数で (旧: 敵は確率と別の距離の条件で、自機COMは毎判断)
+// 第141弾 (オーナー「コロニー・ノードの占拠が受ける恩恵は報酬のはず」): 拠点の占拠は 演算力・中継・補給・聴音局・部品 の報酬なので、性格を問わず取りに行く。貪欲は報酬を大きく見る度合い、隠密は少し控える (0.35未満にはならない)。自機COMも敵も同じ
+function capWants(P) { return 0.5 + 0.5 * (P.greed ?? 0.4) - 0.15 * (P.stealth ?? 0.4) >= 0.25; }
+const CAP_RANGE = 16000;
 function gatherWants(P, used, max, now) {
     const D = comDoctrine(P), early = comEarlyGather(used, max, now);
-    return { part: used < max && (D.partHunt || early), early, greed: (P.greed ?? 0.4) - (P.stealth ?? 0.4) * 0.45 >= 0.25, range: Math.max(D.partRange, early ? 12000 : 0) };
+    return { part: used < max && (D.partHunt || early), early, greed: capWants(P), range: Math.max(D.partRange, early ? 12000 : 0) };
 }
 // 最寄りの拠点 (コロニー・ノード) と難破船。side 'p'|'e'。mode 'part' = 部品をまだ取っていない物 (難破船も) / 'any' = 自分のものでない拠点。難破船は自分が見つけた物だけ (自機は discovered・敵は 2500u 以内に入った物)
 function gatherPick(side, x, y, mode, range) {
@@ -18036,8 +18039,8 @@ function comPilotStep() {
             return;
         }
     }
-    if (!contact && P.greed - P.stealth * 0.45 >= 0.25) { // 第41弾: 隠密は取りに行かない
-        const g = gatherPick('p', player.x, player.y, 'any', COM_GOAL_RANGE); // 第107弾: 最寄りを選ぶ関数は敵と共通
+    if (!c.shipLike && capWants(P)) { // 第141弾: 拠点の占拠は報酬 — 性格を問わず取りに行く (旧: 貪欲−隠密×0.45≥0.25 かつ 何か信号が聞こえていない時だけ)
+        const g = gatherPick('p', player.x, player.y, 'any', CAP_RANGE); // 第107弾: 最寄りを選ぶ関数は敵と共通
         if (g) {
             const isNode = !g.type;
             _comGoTo(g, (isNode ? NODE_CAP_R : COLONY_HACK_R) * 0.6, c); c.item = { o: g, near: (isNode ? NODE_CAP_R : COLONY_HACK_R) * 0.6, f: now }; // 第66弾: 取り終えるまで続ける
