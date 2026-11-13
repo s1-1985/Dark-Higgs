@@ -6700,11 +6700,10 @@ function generateSector() {
     // 第48弾: 敵の武器の種類も艦種の上限 (攻撃型3・潜航型2・空母1)。COM対戦は積み込みの設定どおり。通常の敵は性格で選ぶ (潜航型: 隠密/慎重ならビーム+ミサイル・他は実弾+ミサイル)
     { const _es2 = { destroyer: 'assault', corvette: 'stealth', carrier: 'carrier' }[boss.type] || 'assault';
       const _cl2 = comDemo && comCfg && comCfg.lo && comCfg.lo.e && comCfg.lo.e[_es2];
-      let _w2 = _cl2 && _cl2.w ? normalizeWset(_es2, _cl2.w) : DEFAULT_LOADOUT[_es2].w.slice();
-      if (!_cl2 && _es2 === 'stealth' && boss.personality && ((boss.personality.stealth ?? 0) >= 0.6 || (boss.personality.caution ?? 0) >= 0.6)) _w2 = ['missile', 'beam'];
+      let _w2 = _cl2 && _cl2.w ? normalizeWset(_es2, _cl2.w) : normalizeWset(_es2, personaWset(_es2, boss.personality || {}, Math.random)); // 第145弾: 編集していなければ 性格7割・ランダム3割
       boss.wset = _w2;
-      if (!_w2.includes('kinetic')) { boss._fullK = 0; boss.ammoK = 0; }
-      if (!_w2.includes('missile')) { boss._fullM = 0; boss.ammoM = 0; } }
+      { const _s2 = _cl2 || DEFAULT_LOADOUT[_es2], [_rk, _rm] = rebalanceAmmo(_w2, _s2.ammoK || 0, _s2.ammoM || 0);
+        boss._fullK = _rk * AMMO_PER_SLOT.kinetic; boss._fullM = _rm * AMMO_PER_SLOT.missile; boss.ammoK = boss._fullK; boss.ammoM = boss._fullM; } }
     // 第21弾: 敵のエンジン (性格で選ぶ。速さはエンジンの倍率) / 自機のエンジン切替をリセット
     { const _env0 = comEnvAt(boss.x, boss.y), _ev0 = comEngineEval(boss.personality || {}, 'search', _env0); // 第42弾: 出現した所の環境と性格で (自機COMと同じ)
       boss.engine = _ev0.engine; boss._engSwT = 0; boss._engM = { engRevF: _frameCount, engSit: 'search' };
@@ -8497,14 +8496,7 @@ function variantInfo(w, id) {
 function normalizeVariants(v) { const o = {}; const WV = WEAPON_VARIANTS; /* 初期化前 (ロビーの積み込み表示) は var の巻き上げで undefined */ for (const w of ALL_WEAPONS) o[w] = WV && v && v[w] && WV[w][v[w]] ? v[w] : 'std'; return o; }
 function applyVariants(m, v, wset) { const nv = normalizeVariants(v); for (const w of ALL_WEAPONS) if (!wset || wset.includes(w)) variantInfo(w, nv[w]).f(m); }
 // 敵: 性格で選ぶ (攻撃的=重・速射・焼夷 / 慎重=遠距離・追尾 / 隠密=静音・妨害 / 貪欲=焼夷・機関破壊・イオン)。積んでいる種類の分だけ
-function enemyPickVariants(e) {
-    const P = e.personality || { aggression: 0.5, stealth: 0.3, greed: 0.4, caution: 0.4 }, out = {};
-    const w = { kinetic: { std: 1, heavy: 0.4 + P.aggression, rapid: 0.3 + 0.6 * P.aggression, incend: 0.3 + 0.6 * P.greed, shock: 0.2 + 0.4 * P.caution },
-        missile: { std: 1, fast: 0.3 + 0.7 * P.aggression, heavy: 0.3 + 0.8 * P.caution, seek: 0.3 + 0.5 * P.caution + 0.3 * P.greed, quiet: 0.2 + 0.9 * P.stealth, jam: 0.2 + 0.6 * P.stealth, disrupt: 0.2 + 0.6 * P.greed },
-        beam: { std: 1, focus: 0.3 + 0.6 * P.aggression, wide: 0.2 + 0.4 * P.aggression, rapid: 0.2 + 0.4 * P.greed, ion: 0.2 + 0.7 * P.greed } };
-    for (const k of ALL_WEAPONS) { let tot = 0; for (const id in w[k]) tot += w[k][id] * (0.6 + 0.8 * Math.random()); let r = Math.random() * tot, pick = 'std'; for (const id in w[k]) { r -= w[k][id] * (0.6 + 0.8 * Math.random()); if (r <= 0) { pick = id; break; } } out[k] = pick; }
-    return out;
-}
+function enemyPickVariants(e) { return personaVariants(e.personality || { aggression: 0.5, stealth: 0.3, greed: 0.4, caution: 0.4 }, Math.random); } // 第145弾: 自機COMと同じ関数
 // ═══ 状態異常 (後遺症) — 時間がたてば解消する。AIの解析力 (右下のトグル) が高いほど診断が早く、解消までの時間が短くなる (最大 ×0.55)。電磁シールド・ダメコン班の部品でも短くなる ═══
 const STATUS_DEF = {
     sensor: { jp: 'センサー損傷', dur: 900 }, engine: { jp: '機関損傷', dur: 900 }, fcs: { jp: '火器管制ダウン', dur: 600 },
@@ -13389,6 +13381,40 @@ function enemyUseFlash(e) {
 }
 // 第51弾 (オーナー): 敵COMの搭載品は試合開始時に性格に合わせて選ぶ。艦種の積載枠のうち 弾と艦載機を除いた残りに、性格で重みをつけて1個ずつ (多くて同種2個) 積む
 // 第121弾: 艦載機・設置物などの運用は 空母だけ (敵COMは戦艦から出せる物が空母の戦闘機・哨戒機だけ) — 自機COMの積み込みも同じ規則に (旧: 自機COMの攻撃型だけ戦闘機を積み、敵の攻撃型は積まなかった = 鏡合わせの非対称)
+// 第145弾 (オーナー): COM対戦の積荷と武器は「性格7割・ランダム3割」— 毎回同じにならないように。自機COMも敵も同じ関数
+const PERSONA_RANDOM_SHARE = 0.3;
+function blendPers(P, rnd) { // 各軸を 性格×0.7 + 乱数×0.3 に (積荷・武器の選び方にだけ使う。立ち回りの性格そのものは変えない)
+    const f = v => Math.max(0, Math.min(1, v * (1 - PERSONA_RANDOM_SHARE) + rnd() * PERSONA_RANDOM_SHARE));
+    return { aggression: f(P.aggression ?? 0.5), stealth: f(P.stealth ?? 0.4), greed: f(P.greed ?? 0.4), caution: f(P.caution ?? 0.4) };
+}
+function personaWset(ship, P, rnd) { // 武器の種類: 7割は性格どおり (潜航型は隠密/慎重ならミサイル+ビーム・他は既定) / 3割は無作為に 1〜上限 種類
+    const cap = WEAPON_TYPE_CAP[ship] || 3;
+    if (rnd() < PERSONA_RANDOM_SHARE) { const pool = ALL_WEAPONS.slice().sort(() => rnd() - 0.5); return pool.slice(0, 1 + Math.floor(rnd() * cap)); }
+    if (ship === 'stealth' && ((P.stealth ?? 0) >= 0.6 || (P.caution ?? 0) >= 0.6)) return ['missile', 'beam'];
+    return DEFAULT_LOADOUT[ship].w.slice();
+}
+function rebalanceAmmo(w, k, m) { // 積まなくなった武器の弾の枠は 積んでいる弾を使う武器へ移す (枠は同じ数)
+    const hasK = w.includes('kinetic'), hasM = w.includes('missile');
+    if (hasK && hasM) return [k, m];
+    if (hasK) return [k + m, 0];
+    if (hasM) return [0, k + m];
+    return [0, 0];
+}
+function personaWeaponsFor(ship, P, rnd) { return { w: normalizeWset(ship, personaWset(ship, P, rnd)), v: personaVariants(P, rnd) }; }
+function personaVariants(P0, rnd) { // 武器の種類違い: 性格で重みをつけ (blendPers 済み)、3割は一様ランダム
+    const P = blendPers(P0, rnd), out = {};
+    const w = { kinetic: { std: 1, heavy: 0.4 + P.aggression, rapid: 0.3 + 0.6 * P.aggression, incend: 0.3 + 0.6 * P.greed, shock: 0.2 + 0.4 * P.caution },
+        missile: { std: 1, fast: 0.3 + 0.7 * P.aggression, heavy: 0.3 + 0.8 * P.caution, seek: 0.3 + 0.5 * P.caution + 0.3 * P.greed, quiet: 0.2 + 0.9 * P.stealth, jam: 0.2 + 0.6 * P.stealth, disrupt: 0.2 + 0.6 * P.greed },
+        beam: { std: 1, focus: 0.3 + 0.6 * P.aggression, wide: 0.2 + 0.4 * P.aggression, rapid: 0.2 + 0.4 * P.greed, ion: 0.2 + 0.7 * P.greed } };
+    for (const k of ALL_WEAPONS) {
+        const ids = Object.keys(w[k]);
+        if (rnd() < PERSONA_RANDOM_SHARE) { out[k] = ids[Math.floor(rnd() * ids.length)]; continue; }
+        let tot = 0; for (const id of ids) tot += w[k][id]; let r = rnd() * tot, pick = 'std';
+        for (const id of ids) { r -= w[k][id]; if (r <= 0) { pick = id; break; } }
+        out[k] = pick;
+    }
+    return out;
+}
 function personaStrip(base, ship) {
     const keep = ship === 'carrier' ? ['attack', 'scout', 'repair'] : ['repair'];
     for (const t of SHIP_DRONES[ship] || []) if (!keep.includes(t)) base[t] = 0;
@@ -13402,7 +13428,8 @@ function enemyPersonaLoadout(ship, P) {
 }
 // 第112弾 (段3.5): 消耗品の積み方は 自機COMも敵も同じ関数 (性格で重みをつけて枠が尽きるまで)。rnd は揺らぎ用の乱数 (自機COMは性格から決めた固定の種 → 同じ試合を再現できる)
 const LO_CONSUMABLES = ['flash', 'noise', 'smoke', 'lure', 'fsos', 'bcn_heat', 'bcn_optic', 'bcn_em', 'bcn_higgs', 'fogspray', 'fogblow', 'fakecache', 'linkcut'];
-function personaFill(base, ship, P, rnd) {
+function personaFill(base, ship, P0, rnd) {
+    const P = blendPers(P0, rnd); // 第145弾: 性格7割・ランダム3割
     let budget = (HOLD_CAP[ship] || 0) - loadoutSlots(base, ship);
     const st = P.stealth ?? 0.4, ca = P.caution ?? 0.4, ag = P.aggression ?? 0.5, gr = P.greed ?? 0.4;
     const bandBy = st >= 0.6 ? 'bcn_em' : ag >= 0.6 ? 'bcn_optic' : gr >= 0.6 ? 'bcn_higgs' : 'bcn_heat';
@@ -13422,12 +13449,14 @@ function personaFill(base, ship, P, rnd) {
     if (budget > 0 && st >= 0.6) { base.smoke = (base.smoke || 0) + 1; budget--; }
     return base;
 }
-function personaLoadoutP(ship, P) { // 自機COM: 消耗品を全部外し(完成品・弾・資材は既定のまま)、敵と同じ関数で性格どおりに積み直す
+function personaLoadoutP(ship, P) { // 自機COM: 消耗品を全部外し、敵と同じ関数で性格7割・ランダム3割で積み直す (第145弾: 毎試合変わる)
     const base = Object.assign({ mat: 0 }, DEFAULT_LOADOUT[ship]);
     for (const k of LO_CONSUMABLES) if (base[k]) base[k] = 0;
-    if (ship !== 'carrier') personaStrip(base, ship); // 第121弾: 敵と同じ規則 (空母の運用は 空母の既定のまま — 資材でTechも組み立てる)
-    const h = Math.floor(((P.aggression ?? 0.5) * 1000 + (P.stealth ?? 0.4) * 100000 + (P.greed ?? 0.4) * 10000000 + (P.caution ?? 0.4) * 1000000000)) >>> 0;
-    return personaFill(base, ship, P, _mulberry(h));
+    if (ship !== 'carrier') personaStrip(base, ship); // 第121弾
+    const pw = personaWeaponsFor(ship, P, Math.random);
+    const [k, m] = rebalanceAmmo(pw.w, base.ammoK || 0, base.ammoM || 0);
+    base.w = pw.w; base.v = pw.v; base.ammoK = k; base.ammoM = m;
+    return personaFill(base, ship, P, Math.random);
 }
 // 散布弾 (潜む時に自分の周りを濃くする) / 吹き飛ばし弾 (推定が近いのに見えない・自分が濃い霧の中) / ビーコン (作戦で使う) — 敵COM
 function enemyUseSpray(e) {
@@ -13546,6 +13575,34 @@ function comboStep(F, A, X) {
         if (F.n('lure') > 2) X.doI({ k: 'mirror', why: '飽和: 偽艦影を相手の左右へ', ex: F.estX, ey: F.estY, ang: eA });
         return true;
     }
+    // 煙幕の陰の回り込み: 煙幕で自分の姿を隠し、戦闘機を相手の推定の裏側へ回して挟む。自分は煙の中で動かない
+    if (on('cb_smoke_flank') && F.n('smoke') > 0 && eA !== null && F.estD < 8000 && F.exposure >= 2 && hit < 1500 && hasFtr() && F.cd('cbSmokeF', 120)) {
+        F.mark('cbSmokeF'); F.mark('smokeF');
+        if (A.have('attack')) A.launch('attack');
+        X.doI({ k: 'smoke', why: '煙幕の陰の回り込み — 煙幕で姿を隠し、戦闘機を相手の裏側へ回す' });
+        A.order(['attack', 'mech'], 'attack', F.estX + Math.cos(eA) * 1800, F.estY + Math.sin(eA) * 1800); return true;
+    }
+    // Tech建造の護り: Techを組み立てている間は動けず信号も大きい — 偽信号を両脇へ置いて、見つけた相手の足を迷わせる
+    if (on('cb_tech_guard') && A.techBuilding() && (F.n('sos') > 0 || F.n('lure') > 1) && F.cd('cbGuardF', 150)) {
+        F.mark('cbGuardF'); const a0 = (eA !== null ? eA : Math.random() * Math.PI * 2);
+        for (const sd of [1, -1]) { const tp = clampToMapCircle(A.x + Math.cos(a0 + sd * Math.PI / 2) * 5500, A.y + Math.sin(a0 + sd * Math.PI / 2) * 5500, 1500); X.bait(F.n('sos') > 0 ? 'sos' : 'lure', tp.x, tp.y); }
+        say('Tech建造の護り — 建造中の大きな信号の両脇に偽の信号を置いて、見つけた相手の足を迷わせる'); return true;
+    }
+    // 呼び込み砲台: 砲台の射程の向こう側へ偽SOSを置き、哨戒機をその先に立てる。誘われた相手が砲台の射程に入る
+    { const tur2 = X.turret(); if (on('cb_scout_turret') && tur2 && (F.n('sos') > 0 || F.n('lure') > 1) && (A.have('scout') || A.mobile('scout')) && F.exposure <= 1 && F.cd('cbScTuF', 200)) {
+        F.mark('cbScTuF'); const ang = eA !== null ? eA : Math.random() * Math.PI * 2, bx = tur2.x + Math.cos(ang) * 1700, by = tur2.y + Math.sin(ang) * 1700;
+        X.bait(F.n('sos') > 0 ? 'sos' : 'lure', bx, by);
+        if (A.have('scout')) A.launch('scout');
+        A.order(['scout'], 'patrol', tur2.x + Math.cos(ang) * 3200, tur2.y + Math.sin(ang) * 3200);
+        say('呼び込み砲台 — 砲台の射程の向こうに偽の信号を置き、哨戒機を先へ立てた。誘われた相手を砲台が迎え撃つ'); return true;
+    } }
+    // 鹵獲機の特攻: ハックで奪った戦闘機/Techは 失っても惜しくない — 相手の推定の脇へ突っ込ませて撃ち合いに引き込み、自分は離れる
+    if (on('cb_captured') && A.captured() && eA !== null && F.estD < 12000 && F.cd('cbCapF', 90)) {
+        F.mark('cbCapF'); const sd = rr();
+        A.order(['attack', 'mech'], 'attack', F.estX + Math.cos(eA + sd * Math.PI / 2) * 1500, F.estY + Math.sin(eA + sd * Math.PI / 2) * 1500);
+        say('鹵獲機の特攻 — 奪った機を相手の推定の脇へ突っ込ませ、相手の注意を引く'); if (F.exposure >= 1) X.slip(eA + Math.PI + sd * 0.6); return true;
+    }
+    return false;
     return false;
 }
 function itemDoE(e, a) {
@@ -15682,6 +15739,10 @@ var SKILL_EXTRA = [
     { id: 'cb_decoy_drone', g: '複合', jp: 'ドローン陽動', desc: '追われたら戦闘機を横へ飛ばして耳を引きつけ、自分は反対へ静かに離れる' },
     { id: 'cb_watch_bait', g: '複合', jp: '見張り付きの餌', desc: '偽SOS/偽艦影を遠くへ置き、哨戒機をその周りに張り付けて、誘われてくる相手を先に見つける' },
     { id: 'cb_nest', g: '複合', jp: '罠の巣', desc: '砲台のそばに偽コンテナを置く。取りに来た相手が爆発を受け、砲台に撃たれる' },
+    { id: 'cb_smoke_flank', g: '複合', jp: '煙幕の陰の回り込み', desc: '撃たれたら煙幕で姿を隠し、戦闘機を相手の裏側へ回して挟む' },
+    { id: 'cb_tech_guard', g: '複合', jp: 'Tech建造の護り', desc: 'Techを組み立てている間、両脇に偽の信号を置いて見つけた相手の足を迷わせる' },
+    { id: 'cb_scout_turret', g: '複合', jp: '呼び込み砲台', desc: '砲台の射程の向こうに偽SOSを置き、哨戒機を先へ立てて、誘われた相手を砲台で迎え撃つ' },
+    { id: 'cb_captured', g: '複合', jp: '鹵獲機の特攻', desc: 'ハックで奪った戦闘機/Techを相手の推定の脇へ突っ込ませて注意を引く' },
     { id: 'cb_saturate', g: '複合', jp: '信号の飽和', desc: '撃たれたら ノイズ・ビーコン・偽艦影を一度に出して本物の信号を埋もれさせる' },
     { id: 'so_nudge', g: '動き方', jp: 'あえて弱いソナー', desc: '長く気配が無い時、弱いソナーを打って相手を誘い出す・探る' },
 ];
@@ -16635,7 +16696,7 @@ function stratActorP(c, hpF, te, lk) {
             if (stance === 'silent') { if (powerStance !== 'silent') setStance('silent', true); } else if (stance === 'flank') { if (powerStance !== 'flank') setStance('flank', true); } else if (stance === 'cruise' && powerStance === 'silent' && (c.pp ? c.pp.stealth : 0.4) < 0.5) setStance('cruise', true); },
         hold: (coast) => { _comHold(c); if (coast && !playerCoasting) toggleCoast(true); },
         can: (k) => stock(itemK[k]), use: (k) => deployDrone(itemK[k]),
-        have: (t) => drOK('p', t) && stock(stockK[t]) && !playerDrones.some(d => d.type === t && d.hp > 0), mobile: (t) => playerDrones.some(d => d.type === t && d.hp > 0),
+        have: (t) => drOK('p', t) && stock(stockK[t]) && !playerDrones.some(d => d.type === t && d.hp > 0), mobile: (t) => playerDrones.some(d => d.type === t && d.hp > 0), captured: () => playerDrones.some(d => d._hacked && d.hp > 0),
         launch: (t) => { if (activeDeployCount() < cap()) deployDrone(t); },
         techBuilding: () => techBuilding(), mat: () => cargo.mat, canBuild: () => !cargo.asm && activeDeployCount() < cap(), buildTech: () => deployDrone('mech'),
         makeRoom: (need) => { if (cargoMatCap() < need) for (const k of ['scout', 'attack']) if ((SHIP_DRONES[gameState.shipType] || []).includes(k) && (cargo.stock[k] || 0) > 0 && !playerDrones.some(d => d.type === k && d.hp > 0) && activeDeployCount() < cap()) { deployDrone(k); comThinkEvent('p', 'Tech建造の準備: ' + DRONE_SPEC[k].label + 'を出して積載の枠を空ける (資材の上限 ' + cargoMatCap() + '個 → 必要' + need + '個)'); break; } },
@@ -16655,6 +16716,7 @@ function stratActorE(e) {
         use: (k) => { if (k === 'noise') enemyUseNoise(e, e.angle + (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2); else if (k === 'spray') enemyUseSpray(e); else if (k === 'repair') { e.itemRepair--; e._kitT = REPAIR_KIT_TIME; matchRecEvent('repairE', e.x, e.y, '敵: リペアキットを使う'); } else { e.itemBlow--; useFogBlow('e', e.x, e.y); } },
         have: (t) => !drOK('e', t) ? false : t === 'build' ? (e.turretStock || 0) > 0 && !liveK('turret') : t === 'scout' ? (e.scoutStock || 0) > 0 && !liveK('scout') : (e.droneStock || 0) > 0 && enemies.filter(f => f.type === 'fighter' && !f._kind && f.hp > 0).length < 2,
         mobile: (t) => t === 'scout' ? liveK('scout') : t === 'attack' ? liveF() : t === 'build' ? liveK('turret') : liveK('mech'),
+        captured: () => enemies.some(f => f.type === 'fighter' && f._hacked && f.hp > 0 && !f._dying),
         techBuilding: () => e._techT > 0, mat: () => enemyMat, canBuild: () => !(e._techT > 0),
         makeRoom: (need) => { if (enemyMatCap() < need) for (const k of ['scout', 'attack']) { const ok = k === 'scout' ? (e.scoutStock || 0) > 0 && !liveK('scout') : (e.droneStock || 0) > 0 && !liveF(); if (ok) { if (k === 'scout') { e.scoutStock--; spawnEnemyDrone(e, 'scout'); } else { e.droneStock--; _eLaunchFighter(e, { x: e.x, y: e.y }); } comThinkEvent('e', 'Tech建造の準備: ' + (k === 'scout' ? '哨戒機' : '戦闘機') + 'を出して積載の枠を空ける (資材の上限 ' + enemyMatCap() + '個 → 必要' + need + '個)', 'e' + e.uid); break; } } },
         buildTech: () => { enemyMat -= DRONE_SPEC.mech.mat; e._techT = DRONE_SPEC.mech.build; e._techBuilt = true; logMessage('TACTICAL: 敵空母が停止して何かを組み立てている — 大きな電磁波・熱が出ている', 'warning-msg'); },
