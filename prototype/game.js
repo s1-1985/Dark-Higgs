@@ -13632,7 +13632,7 @@ function _tacSonarP(c, pw) { if (omniSonarCooldown > 0) return false; fireOmniSo
 function _tacFocusP(c, k, sec) { c.tacFocusUntil = _frameCount + sec * 60; c.focus = k; c.focusF = _frameCount; setGenFocus(k, true); }
 function tacticStep(F, A, X) {
     const on = (id) => skillOn(F.side, id), eA = F.estAng, now = _frameCount, hit = F.hitAgo, say = (t) => A.say(t), P = F.P || {}, rr = () => (Math.random() < 0.5 ? 1 : -1);
-    const wideEst = eA !== null && F.estR < 1e8 && F.estR / Math.max(1, F.estD) > 0.3, tightEst = eA !== null && F.estR < 1e8 && F.estR / Math.max(1, F.estD) <= 0.15;
+    const wideEst = eA !== null && F.estR < 1e8 && F.estR / Math.max(1, F.estD) > 0.3, tightEst = eA !== null && F.estR < 1e8 && F.estR / Math.max(1, F.estD) <= 0.25;
     // 聴き耳: 気配を見失った直後、止まって静かに20秒聴く (動くと自分の音で聞こえない)
     if ((F.get('tacHold') || 0) > now) { if (F.seen || hit < 900 || F.exposure >= 3) F.set('tacHold', 0); else { A.hold(true); return true; } }
     if (on('tc_listen') && F.estD < 1e8 && F.quietF > 600 && F.quietF < 3000 && F.exposure <= 1 && F.hpF > 0.5 && !F.seen && F.cd('tcListenF', 90)) {
@@ -13643,7 +13643,7 @@ function tacticStep(F, A, X) {
         F.mark('tcFixF'); if (X.sonar('std')) { say('ソナーで点にする — 推定が広い (幅' + Math.round(F.estR) + 'u) が近い → 全周囲ソナーで位置を確定する'); return true; }
     }
     // ピン&ステップ: 長く気配が無い時、弱いソナーを一度だけ打ち、返事が来る前に横へ離れる (打った所に来た相手の裏をかく)
-    if (on('tc_ping_step') && F.quietF > 5400 && F.exposure === 0 && F.hpF > 0.5 && F.cd('tcPingF', 300)) {
+    if (on('tc_ping_step') && F.quietF > 5400 && F.exposure === 0 && F.hpF > 0.5 && F.cd('tcPingF', 480)) {
         F.mark('tcPingF'); if (X.sonar('weak')) { say('ピン&ステップ — 弱いソナーを打ってすぐ横へ離れる'); X.slip(Math.random() * Math.PI * 2); return true; }
     }
     // 航行モードの切替: 推定が広い=解析 / 推定が絞れて近い=兵装 / 静かに待っている=探知。20〜40秒は自動の選び直しを止める
