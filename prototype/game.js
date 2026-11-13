@@ -5315,6 +5315,7 @@ class Ship {
                         // 第33弾: 部品の枠が空いていれば、20秒気配が無いだけで部品を取りに出る (長い静けさを待たない)
                         // 第20弾: 長く何も聞こえない → 隠れ場所伝いに区間ごとに哨戒へ (行き先: 自分のものでないノード / コロニー / マップ中央)
                         let g = this._roamGoal;
+                        if (g && !(g.col || g.der || g.node)) { const _g2 = gatherWants(_pers, enemySlotsUsed(this), enemySlotsMax(this), _frameCount); if ((_g2.part && gatherPick('e', this.x, this.y, 'part', _g2.range)) || (_g2.greed && gatherPick('e', this.x, this.y, 'any', COM_GOAL_RANGE))) g = this._roamGoal = null; } // 第108弾: 取りに行く物があるなら 古い「聴いていない海域」の行き先は捨てる
                         if (g && g.der && g.der.salvaged) g = this._roamGoal = null; // 第33弾: 難破船は取られたら次へ
                         // 第33弾: 部品の枠が空いていれば、部品の取れる所 (まだ回収されていない難破船 / 部品をまだ取っていないノード・コロニー) を優先する
                         if (!g) { // 第107弾: 自機COMと同じ関数で 最寄りを選ぶ (部品の枠が空いていれば部品の取れる所 / 貪欲なら最寄りの拠点)
@@ -5347,11 +5348,7 @@ class Ship {
                         if ((g.col || g.der || g.node) && dG < 3000) { this.setTarget(g.x + Math.cos(aG + Math.PI) * 150, g.y + Math.sin(aG + Math.PI) * 150); if (g.node && dG < 600) this.aiState = 'gathering'; } // 最後は直接 (コロニー600u/8秒・難破船500u/3秒・ノードは収集へ)
                         else { const spot = findHidingSpot(this.x + Math.cos(aG) * leg, this.y + Math.sin(aG) * leg, 1500); this.setTarget(spot.x, spot.y); }
                         this._roam = 'patrol';
-                    } else if (activeNodes.length > 0 && Math.random() < (0.0012 + _pers.greed * 0.012)) {
-                        // 貪欲な個体ほど積極的にノードを奪取しに行く (性格による行動分岐)
-                        this.aiState = 'gathering';
-                        logMessage('SENSOR: 敵艦がリソース収集パターンに移行。', 'system-msg');
-                        if (comDemo && this.type !== 'fighter') comThinkEvent('e', '気配なし・貪欲さ' + _pct(_pers.greed) + ' → ノードを取りに行く', 'e' + this.uid);
+                    // 第108弾: 旧「確率で収集の状態へ移り最寄りのノードだけを追う」は廃止 — 取りに行く物は 自機COMと同じ共通の判断 (gatherWants/gatherPick) だけで決める
                     } else if (this.predictedBehavior === 'silent' && Math.random() < 0.014) {
                         // silent推定（接触喪失）: 最終既知位置周辺のヒッグス濃密域を集中捜索
                         const _lkp = this.playerLastKnownPos;
