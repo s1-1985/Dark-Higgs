@@ -1516,7 +1516,7 @@ const DRONE_SPEC = {
 // 1個で耐久+700を6秒かけて (攻撃型3500が5個で全回復 — オーナーの目安)。量は艦種によらず同じ (実装で決めた値)
 const REPAIR_KIT_HP = 700, REPAIR_KIT_TIME = 360;
 // 第26弾 (オーナー指示): コロニーの補給は1つのコロニーで1回だけ — 弾は積み込み計画まで満タン・資材は+3個まで・完成品とキットは補給できない
-const COLONY_SUPPLY_MAT = 3;
+const COLONY_SUPPLY_MAT = 2; // 第124弾: 補給は弾 + 資材2個 (完成品・キットは補給できない)
 const SHIP_DRONES = {
     carrier: ['attack', 'mech', 'build', 'scout', 'decoy', 'buoy', 'barrier', 'higgs', 'flash', 'noise', 'smoke', 'fsos', 'lure', 'bcn_heat', 'bcn_optic', 'bcn_em', 'bcn_higgs', 'fogspray', 'fogblow', 'fakecache', 'linkcut', 'repair'],
     assault: ['attack', 'build', 'flash', 'noise', 'smoke', 'fsos', 'lure', 'bcn_heat', 'bcn_optic', 'bcn_em', 'bcn_higgs', 'fogspray', 'fogblow', 'fakecache', 'linkcut', 'repair'],
@@ -8251,7 +8251,7 @@ function captureNodeByPlayer(n) {
     if (n.owner === 'enemy') enemyClueAt(n.x, n.y, 'ノード');
     n.owner = 'player'; n.capP = 0; n.emFlashTimer = 180; n.knownLost = false;
     matchRecEvent('nodeP', n.x, n.y, '自艦がノードを制圧');
-    if (!n._partP) { n._partP = true; offerDraft('node'); addLootTrace(n.x, n.y, 'p', 'node'); } // 第32弾: 初めて制圧したノードで部品 (探知・電子戦が出やすい)
+    if (!n._partP) { n._partP = true; offerDraft('node'); offerLoot('node'); addLootTrace(n.x, n.y, 'p', 'node'); } // 第32弾: 初めて制圧したノードで部品 (探知・電子戦が出やすい)
     gameState.credits += NODE_SCR;
     updateTopUI();
     const got = addMaterials(NODE_MAT_GAIN);
@@ -8264,7 +8264,7 @@ function hackColonyByPlayer(st) {
     if (was === 'enemy') enemyClueAt(st.x, st.y, 'コロニー');
     st.hacked = true; st.owner = 'player'; st.hackP = 0; st.eHackP = 0;
     matchRecEvent('colonyP', st.x, st.y, '自艦がコロニーを占有' + (was === 'enemy' ? ' (敵から奪還)' : ''));
-    if (!st._partP) { st._partP = true; offerDraft('colony'); addLootTrace(st.x, st.y, 'p', 'colony'); } // 第32弾: 初めて占有したコロニーで部品 (機関・船体が出やすい)
+    if (!st._partP) { st._partP = true; offerDraft('colony'); offerLoot('colony'); addLootTrace(st.x, st.y, 'p', 'colony'); } // 第32弾: 初めて占有したコロニーで部品 (機関・船体が出やすい)
     createClickEffect(st.x, st.y, '#00aaff');
     sfxUI('cap_done_colony');
     const n = coloniesOwned('player');
@@ -8329,7 +8329,7 @@ function updateEnemyColonyCapture() {
             const was = st.owner;
             seatSfx('cap_done_colony', 0.9); st.owner = 'enemy'; st.hacked = false; st.eHackP = 0; st.hackP = 0;
             if (!st._matE) { st._matE = true; enemyAddMat(COLONY_SUPPLY_MAT); } // 第50弾B (第66弾: 上限つき)
-            if (!st._partE) { st._partE = true; enemyOfferDraft(near, 'colony', st.x, st.y); } // 第33弾: 敵も初めて占有したコロニーで部品
+            if (!st._partE) { st._partE = true; enemyOfferDraft(near, 'colony', st.x, st.y); enemyOfferLoot(near, 'colony'); } // 第33弾: 敵も初めて占有したコロニーで部品
             // 第26弾: 占有しただけでは回復も補給もしない (補給は _supply の流れで1つのコロニーにつき1回)
             matchRecEvent('colonyE', st.x, st.y, '敵がコロニーを占有' + (was === 'player' ? ' (自艦のを奪った)' : ''));
             if (was === 'player') { st._pObs = 'enemy'; logMessage('COLONY: コロニーとの通信途絶 — 敵に奪われた (占有' + coloniesOwned('player') + 'つ)', 'warning-msg'); sfxOr('alm_colony_lost', 'alert'); updateColonyIntel(true); comClueLost(st.x, st.y, COLONY_HACK_R, 'コロニー'); }
@@ -8541,6 +8541,81 @@ function draftPick3(src) {
     return out;
 }
 const _SRC_JP = { colony: 'コロニー', node: 'ノード', derelict: '難破船', cache: '漂流コンテナ', convoy: '輸送船' };
+
+// ═══ 第124弾 (オーナー指示): 拾い物は「部品3択」＋「積み荷4択」 ═══
+// コロニー(初占有)・ノード(初制圧)・漂流コンテナ・輸送船では、部品3つから1つに加えて、積み込み用アイテム4つから1つがもらえる。
+// 4つのうち1つは必ず資材1個。残り3つは積める物 (弾の枠・ドローン・消耗品・リペアキット) からランダム。自機も敵も同じ式。
+function lootFreeSlots() { return playerHoldCap() - cargoStockSlots() - Math.ceil((cargo.mat || 0) / MAT_PER_SLOT); }
+const LOOT_ENEMY_OK = ['repair', 'flash', 'noise', 'smoke', 'fsos', 'lure', 'fakecache', 'fogspray', 'fogblow', 'linkcut'];
+function lootPick4(forEnemy) {
+    const pool = [];
+    if (forEnemy) { for (const k of LOOT_ENEMY_OK) pool.push({ k, label: DRONE_SPEC[k].label, w: DRONE_SPEC[k].w || 1 }); }
+    else {
+        const free = lootFreeSlots() + Math.ceil((cargo.mat || 0) / MAT_PER_SLOT); // 資材の枠は譲れる (拾った物の分だけ資材が減る)
+        if (free >= 1 && playerHasWeapon('kinetic')) pool.push({ k: 'ammoK', label: '実弾 ' + AMMO_PER_SLOT.kinetic + '斉射 (1枠)', w: 1 });
+        if (free >= 1 && playerHasWeapon('missile')) pool.push({ k: 'ammoM', label: 'ミサイル ' + AMMO_PER_SLOT.missile + '発 (1枠)', w: 1 });
+        for (const t of SHIP_DRONES[gameState.shipType] || []) {
+            const sp = DRONE_SPEC[t]; if (!sp || sp.buildOnly || t === 'build' || t === 'mech') continue;
+            if (free >= (sp.w || 1)) pool.push({ k: t, label: sp.label + ' (' + (sp.w || 1) + '枠)', w: sp.w || 1 });
+        }
+    }
+    const out = [];
+    while (out.length < 3 && pool.length) out.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+    out.push({ k: 'mat', label: '資材 1個', w: 0 });
+    for (let i = out.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [out[i], out[j]] = [out[j], out[i]]; }
+    return out;
+}
+function takeLoot(o, src) {
+    if (!o) return;
+    let msg = '';
+    if (o.k !== 'mat') { const w = o.w || 1, over = w - lootFreeSlots(); if (over > 0) { cargo.mat = Math.max(0, (cargo.mat || 0) - over * MAT_PER_SLOT); msg = '(資材を譲って) '; } }
+    if (o.k === 'mat') { const g = addMaterials(1); msg += g ? '資材+1個' : '資材 (積む場所がなかった)'; }
+    else if (o.k === 'ammoK') { cargo.ammoK += AMMO_PER_SLOT.kinetic; msg += '実弾+' + AMMO_PER_SLOT.kinetic; }
+    else if (o.k === 'ammoM') { cargo.ammoM += AMMO_PER_SLOT.missile; msg += 'ミサイル+' + AMMO_PER_SLOT.missile; }
+    else { cargo.stock[o.k] = (cargo.stock[o.k] || 0) + 1; msg += o.label; }
+    _hudCache.cargo = null; if (typeof _updateCargoBadges === 'function') _updateCargoBadges();
+    logMessage('積み荷: ' + _SRC_JP[src] + 'から ' + msg + ' を受け取った', 'system-msg');
+    sfxUI('loot_container');
+}
+function comPickLoot(c) { // 自機COM: 要る物を優先 (傷→リペア / 弾が減っていれば弾 / 空き枠があれば他 / 最後に資材)
+    const has = k => c.find(o => o.k === k);
+    if (player.hp < player.maxHp * 0.6 && has('repair')) return has('repair');
+    if (ammoBelowPlan()) { const a = has('ammoM') || has('ammoK'); if (a) return a; }
+    const pref = ['attack', 'scout', 'flash', 'smoke', 'noise', 'fakecache', 'lure', 'repair'];
+    for (const k of pref) if (has(k)) return has(k);
+    return has('mat') || c[0];
+}
+function offerLoot(src) {
+    const c = lootPick4(false);
+    if (comDemo) { takeLoot(comPickLoot(c), src); return; }
+    if (_draft) { _draftQ.push({ src, loot: c }); return; }
+    _draft = { src, loot: c };
+    _openDraftUI();
+}
+function enemyOfferLoot(e, src) {
+    if (!e || e.type === 'fighter' || !ENEMY_CLASS[e.type]) return;
+    const c = lootPick4(true), pp = _enemyPersonality(e), cls = ENEMY_CLASS[e.type];
+    const sc = o => { // 性格で選ぶ (傷→リペア / 慎重→閃光・煙幕 / 隠密→ノイズ・偽物 / 資材は空きがあれば並)
+        if (o.k === 'mat') return 0.5 + (pp.greed || 0) * 0.4 + (enemyMat < 4 ? 0.4 : 0);
+        if (o.k === 'repair') return 0.4 + (e.hp < e.maxHp * 0.6 ? 1.2 : 0);
+        if (o.k === 'flash' || o.k === 'smoke') return 0.3 + (pp.caution || 0) * 0.6;
+        if (o.k === 'noise' || o.k === 'lure' || o.k === 'fsos' || o.k === 'fakecache') return 0.3 + (pp.stealth || 0) * 0.6;
+        return 0.35;
+    };
+    let best = c[0], bs = -1; for (const o of c) { const v = sc(o) + Math.random() * 0.2; if (v > bs) { bs = v; best = o; } }
+    if (best.k === 'mat') enemyAddMat(1);
+    else if (best.k === 'repair') e.itemRepair = (e.itemRepair || 0) + 1;
+    else if (best.k === 'flash') e.itemFlash = (e.itemFlash || 0) + 1;
+    else if (best.k === 'noise') e.itemNoise = (e.itemNoise || 0) + 1;
+    else if (best.k === 'smoke') e.itemSmoke = (e.itemSmoke || 0) + 1;
+    else if (best.k === 'fsos') e.lureSOS = (e.lureSOS || 0) + 1;
+    else if (best.k === 'lure') e.lureShip = (e.lureShip || 0) + 1;
+    else if (best.k === 'fakecache') e.itemFake = (e.itemFake || 0) + 1;
+    else if (best.k === 'fogspray') e.itemSpray = (e.itemSpray || 0) + 1;
+    else if (best.k === 'fogblow') e.itemBlow = (e.itemBlow || 0) + 1;
+    else if (best.k === 'linkcut') e.itemLinkcut = (e.itemLinkcut || 0) + 1;
+    comThinkEvent('e', _SRC_JP[src] + 'で積み荷 → 「' + best.label + '」を選んだ (' + c.map(o => o.label).join('/') + 'から)', 'e' + e.uid);
+}
 function offerDraft(src) {
     const c = draftPick3(src);
     if (!c.length) { logMessage('部品: ' + _SRC_JP[src] + ' — 新しい部品は無かった (全部持っている)', 'system-msg'); return; }
@@ -8911,21 +8986,16 @@ function convoyReward(cv, enemy, how) {
     const picks = CONVOY_RARE_PICKS[how] || 1;
     if (enemy) { // 敵が拿捕: レア部品・キット・自艦の記録が敵に渡る
         for (let k = 0; k < picks; k++) enemyOfferDraft(enemy, 'convoy', cv.x, cv.y);
-        enemy.itemRepair = (enemy.itemRepair || 0) + 1;
+        enemyOfferLoot(enemy, 'convoy');
         const lp = cv.logP && cv.logP[cv.logP.length - 1];
         if (lp && _frameCount - lp.f < 3600 && !(enemy.contactFreshness > 0.6)) { enemy.playerLastKnownPos = { x: lp.x, y: lp.y, vx: 0, vy: 0 }; enemy.contactFreshness = Math.max(enemy.contactFreshness || 0, 0.5); comThinkEvent('e', '輸送船の航路の記録 → 自機は ' + _dirTxt(enemy.x, enemy.y, lp.x, lp.y) + ' に居た', 'e' + enemy.uid); }
         return;
     }
     for (let k = 0; k < picks; k++) offerDraft('convoy');
+    offerLoot('convoy'); // 第124弾: 積み荷4択 (旧: リペアキット+完成品を固定で)
     if (how !== 'board') return;
-    // リペアキット1個 + 完成品1機 (積める物・空き枠があれば)
-    const freeSlots = () => playerHoldCap() - cargoStockSlots() - Math.ceil((cargo.mat || 0) / MAT_PER_SLOT);
-    const got = [];
-    if (freeSlots() >= 1) { cargo.stock.repair = (cargo.stock.repair || 0) + 1; got.push('リペアキット'); }
-    const can = (SHIP_DRONES[gameState.shipType] || []).filter(t => ['attack', 'scout', 'decoy', 'mech'].includes(t) && freeSlots() >= DRONE_SPEC[t].w);
-    if (can.length) { const t = can[0]; cargo.stock[t] = (cargo.stock[t] || 0) + 1; got.push(DRONE_SPEC[t].label); }
+    let nObs = 0; const got = [];
     // 航路の記録: 輸送船が聞いた敵の方位を自艦の記録に入れる (推定円が絞れる)
-    let nObs = 0;
     for (const L of cv.log || []) {
         if (_frameCount - L.f > TMA_KEEP) continue;
         if (!_contactLabels[L.sid]) _contactLabels[L.sid] = _contactLabelNext++;
@@ -9086,6 +9156,14 @@ function _partCard(id, btnLabel, onClick, disabled) {
 function _slotGauge() { let h = ''; const used = partSlotsUsed(), max = partSlotsMax(); for (let i = 0; i < max; i++) h += '<i class="' + (i < used ? 'on' : '') + '"></i>'; return '<span class="slot-gauge">' + h + '</span>'; }
 function _openDraftUI() {
     const ov = document.getElementById('draft-overlay'); if (!ov || !_draft) return;
+    if (_draft.loot) { // 第124弾: 積み荷4択
+        document.getElementById('draft-title').textContent = '積み荷を拾った — ' + _SRC_JP[_draft.src];
+        document.getElementById('draft-sub').textContent = '4つから1つ選ぶ (空き枠 ' + Math.max(0, lootFreeSlots()) + ')。積み込み用のアイテム。見送ることもできる';
+        const bx = document.getElementById('draft-cards'); bx.innerHTML = '';
+        for (const o of _draft.loot) { const b = document.createElement('button'); b.className = 'btn'; b.style.cssText = 'min-width:130px;min-height:64px;margin:4px;font-size:14px'; b.textContent = o.label;
+            b.addEventListener('click', () => { const d = _draft; _closeDraftUI(); takeLoot(o, d.src); _nextDraft(); }); bx.appendChild(b); }
+        ov.classList.remove('hidden'); return;
+    }
     document.getElementById('draft-title').textContent = '部品を拾った — ' + _SRC_JP[_draft.src];
     document.getElementById('draft-sub').textContent = '3つから1つ選ぶ (取り付け枠 ' + partSlotsUsed() + '/' + partSlotsMax() + (partsSpare.length ? '・予備' + partsSpare.length : '') + ')。枠が満杯なら予備に入り、自分のコロニーのドックで付け替えられる';
     const box = document.getElementById('draft-cards'); box.innerHTML = '';
@@ -9306,7 +9384,7 @@ function collectCacheByPlayer(f) {
     // 第32弾: 漂流コンテナの中身は部品 (3つから1つ・全種類から)
     matchRecEvent('salvP', f.x, f.y, '自艦が漂流コンテナを回収');
     logMessage('SALVAGE: 漂流コンテナを回収 — 部品が入っていた', 'system-msg');
-    offerDraft('cache'); addLootTrace(f.x, f.y, 'p', 'cache');
+    offerDraft('cache'); offerLoot('cache'); addLootTrace(f.x, f.y, 'p', 'cache');
     _hudCache.cargo = null; sfxUI('loot_container');
     return true;
 }
@@ -9325,7 +9403,7 @@ function _collectCacheAmmoOld(f) { // 第31弾の中身 (弾・資材)。部品�
 }
 function collectCacheByEnemy(e, f) { // 第33弾: 敵も中身は部品 (自機と同じ)
     matchRecEvent('salvE', f.x, f.y, '敵が漂流コンテナを回収');
-    enemyOfferDraft(e, 'cache', f.x, f.y);
+    enemyOfferDraft(e, 'cache', f.x, f.y); enemyOfferLoot(e, 'cache');
 }
 
 // ═══ 偽コンテナ (2026-11-11 オーナー案「アイテムで偽コンテナ。開けると爆発してダメージ。演算力がある程度だと見抜ける」・値は実装で決めた値) ═══
@@ -10157,7 +10235,7 @@ function enemyCaptureNode(e, n) {
     const wasMine = n.owner === 'player';
     n.owner = 'enemy'; n.capP = 0; n.emFlashTimer = 120;
     if (!n._matE) { n._matE = true; enemyAddMat(4); } // 第50弾B
-    if (!n._partE) { n._partE = true; enemyOfferDraft(e, 'node', n.x, n.y); } // 第33弾: 敵も初めて制圧したノードで部品
+    if (!n._partE) { n._partE = true; enemyOfferDraft(e, 'node', n.x, n.y); enemyOfferLoot(e, 'node'); } // 第33弾: 敵も初めて制圧したノードで部品
     matchRecEvent('nodeE', n.x, n.y, '敵がノードを制圧');
     if (wasMine) { n.knownLost = true; logMessage('聴音局: ノードとの通信途絶 — 敵に制圧された。敵の耳になる', 'warning-msg'); comClueLost(n.x, n.y, NODE_CAP_R, 'ノード'); }
 }
