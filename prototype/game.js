@@ -5065,10 +5065,12 @@ class Ship {
                     // 攻撃型は3連装、それ以外は単発。kinetic時のみ弾幕、ミサイル/ビームは単発。
                     enemyArmAmbush(this); // 第80弾
                     const shots = (wType === 'kinetic') ? (ENEMY_CLASS[this.type] ? (ENEMY_CLASS[this.type] === 'assault' ? 3 : 1) : prof.burst) : 1; // 第98弾: 攻撃型だけ3連装 (自機と同じ)
-                    const baseRange = Math.max(1, Math.hypot(aimX - this.x, aimY - this.y));
+                    const _lp = (wType === 'kinetic' || wType === 'missile') ? enemyLeadPoint(this, lk, wType) : null; // 第120弾
+                    const _ax = _lp ? _lp.x : aimX, _ay = _lp ? _lp.y : aimY, taL = _lp ? Math.atan2(_ay - this.y, _ax - this.x) : ta;
+                    const baseRange = Math.max(1, Math.hypot(_ax - this.x, _ay - this.y));
                     for (let s = 0; s < shots; s++) {
                         const spread = shots > 1 ? (s - (shots - 1) / 2) * KINETIC_SPREAD * shipFx(this).spread : 0; // 第20弾: 自機と同じ散布 (第39弾: 兵装重視は×0.7)
-                        const sa = ta + spread;
+                        const sa = taL + spread;
                         const tgX = this.x + Math.cos(sa) * baseRange;
                         const tgY = this.y + Math.sin(sa) * baseRange;
                         const aimTarget = { x: tgX, y: tgY, hp: 1 };
@@ -8128,6 +8130,14 @@ function trackEstimate(sa, ahead = 0) {
 function _fmtR(r) { return '±' + (r >= 1000 ? (Math.round(r / 100) / 10) + 'k' : Math.round(r / 10) * 10); }
 // 弾が届くまでのフレーム数 (ビームは即着)
 function weaponFlightFrames(w, d) { return w === 'beam' ? 0 : w === 'missile' ? d / (missileMode === 'smart' ? 7.5 : 6) : d / 12; }
+// 第120弾: 敵の見越し射撃 — 自機の visibleLeadPoint と同じ考え方 (弾が届く時刻の位置を2回の反復で求める)。旧: 鮮度×40フレームの固定の外挿で、実弾 (700uで約58フレーム) は動く相手に外れ続けた (命中率 自機90% / 敵33%)
+function enemyLeadPoint(e, lk, w) {
+    if (!lk) return null;
+    const k = 0.4 + 0.6 * Math.min(1, e.contactFreshness || 0); // 古い信念ほど外挿を控えめに
+    let x = lk.x, y = lk.y;
+    for (let i = 0; i < 2; i++) { const T = weaponFlightFrames(w, Math.hypot(x - e.x, y - e.y)) * k; x = lk.x + (lk.vx || 0) * T; y = lk.y + (lk.vy || 0) * T; }
+    return { x, y };
+}
 // 第20弾: 見えている相手の見越し点 (見えている動き=前フレームからの移動量を使う)
 function visibleLeadPoint(t, w) {
     let x = t.x, y = t.y;
