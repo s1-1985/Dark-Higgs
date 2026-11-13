@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261113z">
+    <link rel="stylesheet" href="style.css?v=20261113ab">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -164,10 +164,11 @@
                     <span>SIG一覧</span>
                 </button>
                 <!-- 第89弾: 電子戦 — ハック波 (効果を選んで、地図で方向をタップ) -->
-                <button class="act-icon-btn btn-warning hackw-btn" id="btn-hackw-fcs" data-eff="fcs" title="ハック波: 火器管制ダウン — 選んでから地図で方向をタップ。当たって侵入できれば相手は発砲できなくなる"><b class="fx-mark">火</b><span>火器管制</span></button>
-                <button class="act-icon-btn btn-warning hackw-btn" id="btn-hackw-halt" data-eff="halt" title="ハック波: 機関停止 — 選んでから地図で方向をタップ。推力が止まり惰性で減速する"><b class="fx-mark">機</b><span>機関停止</span></button>
-                <button class="act-icon-btn btn-warning hackw-btn" id="btn-hackw-sensor" data-eff="sensor" title="ハック波: センサー損傷 — 選んでから地図で方向をタップ。探知が大きく落ちる"><b class="fx-mark">探</b><span>センサー</span></button>
-                <button class="act-icon-btn btn-warning hackw-btn" id="btn-hackw-comm" data-eff="comm" title="ハック波: 通信障害 — 選んでから地図で方向をタップ。ドローンが自動制御になる・AIの助言が遅れる"><b class="fx-mark">通</b><span>通信</span></button>
+                <button class="act-icon-btn btn-warning hackw-btn" data-keepopen="1" id="btn-hackw-fcs" data-eff="fcs" title="ハック波: 火器管制ダウン — 選ぶだけ。次に「ハック」を押して地図で方向をタップ。当たって侵入できれば相手は発砲できなくなる"><b class="fx-mark">火</b><span>火器管制</span></button>
+                <button class="act-icon-btn btn-warning hackw-btn" data-keepopen="1" id="btn-hackw-halt" data-eff="halt" title="ハック波: 機関停止 — 選ぶだけ。次に「ハック」を押して地図で方向をタップ。推力が止まり惰性で減速する"><b class="fx-mark">機</b><span>機関停止</span></button>
+                <button class="act-icon-btn btn-warning hackw-btn" data-keepopen="1" id="btn-hackw-sensor" data-eff="sensor" title="ハック波: センサー損傷 — 選ぶだけ。次に「ハック」を押して地図で方向をタップ。探知が大きく落ちる"><b class="fx-mark">探</b><span>センサー</span></button>
+                <button class="act-icon-btn btn-warning hackw-btn" data-keepopen="1" id="btn-hackw-comm" data-eff="comm" title="ハック波: 通信障害 — 選ぶだけ。次に「ハック」を押して地図で方向をタップ。ドローンが自動制御になる・AIの助言が遅れる"><b class="fx-mark">通</b><span>通信</span></button>
+                <button class="act-icon-btn btn-warning no-band" id="btn-hackw-fire" title="ハック — 選んだ項目の電波を、次にタップした方向へ飛ばす (もう一度押すとキャンセル。項目を選んでいないと打てない)"><b class="fx-mark">波</b><span>ハック</span></button>
                 <button class="act-icon-btn btn-warning" id="btn-hackw-drone" title="ドローン侵入 (全周囲) — 周り3000uの見えている敵の戦闘機/Techへ侵入して奪う。候補が複数なら地図でタップして選ぶ (もう一度押すと自動)"><b class="fx-mark">奪</b><span>ドローン侵入</span></button>
                 <button class="act-icon-btn btn-info drone-btn" id="btn-item-linkcut" data-dtype="linkcut" title="断線パルス (1枠) — 侵入されている回線 (艦・ドローンへのハック) を切り、30秒は回線を閉じる。使うと電磁波が1秒漏れる" style="display:none">
                     <i class="ico" style="--ico:url(assets/icons/icon_linkcut.png)"></i>
@@ -830,7 +831,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261113z"></script>
+    <script src="game.js?v=20261113ab"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -867,7 +868,7 @@
     (function() {
         var ACTION_GROUPS = {
             scan:  ['btn-sonar-band-heat', 'btn-sonar-band-optic', 'btn-sonar-band-em', 'btn-sonar-band-higgs', 'btn-sonar-power', 'btn-scan', 'btn-dir-sonar'],
-            ew:    ['btn-hackw-fcs', 'btn-hackw-halt', 'btn-hackw-sensor', 'btn-hackw-comm', 'btn-hackw-drone', 'btn-item-linkcut', 'btn-jam-burst', 'btn-jam-cont', 'btn-jam-pulse', 'btn-drone-decoy', 'btn-drone-scout', 'btn-hack'],
+            ew:    ['btn-hackw-fcs', 'btn-hackw-halt', 'btn-hackw-sensor', 'btn-hackw-comm', 'btn-hackw-fire', 'btn-hackw-drone', 'btn-item-linkcut', 'btn-jam-burst', 'btn-jam-cont', 'btn-jam-pulse', 'btn-drone-decoy', 'btn-drone-scout', 'btn-hack'],
             nav:   ['btn-cancel', 'btn-camera-follow', 'btn-attack-toggle', 'btn-game-speed'],
             drone: ['btn-drone-recall','btn-drone-attack','btn-drone-mech','btn-drone-build','btn-drone-scout','btn-drone-decoy',
                     'btn-drone-buoy','btn-drone-barrier','btn-drone-higgs'],
