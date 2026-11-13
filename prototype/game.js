@@ -15681,6 +15681,91 @@ function huntScreen(HA, H, X) {
     if (now - (H.goLog || 0) > 1200) { H.goLog = now; say('【' + H.jp + '】艦載機が推定の周りを探している — 母艦は' + (dS > 500 ? '霧へ移動中' : '霧で待機') + ' (推定まで' + Math.round(D / 100) * 100 + 'u・±' + Math.round(est.r) + 'u)'); }
     return true;
 }
+// 第119弾 (段5後半の5): 忍び寄り・肉薄・狙撃の「近づいて撃つ」本体 (approach) — 自機COMも敵も同じ関数 (敵の実装を土台に)
+//   X.hard=相手を目視している / X.plan(est,force)=射撃解 / X.mslReach()=ミサイルを挟み撃ちで撃つ時の射程 / X.dlRecent()=艦載機の目が新しいか / X.icptSpeed=先回りの速さ / X.cruise・X.silent=基準の速さ
+//   X.fails=焦れ(撃てずに終わった回数) / X.myVis()=自分の見通し / X.transit(why)
+function huntApproach(HA, H, X) {
+    let { est } = X; const { D, now, ag, st, say } = X;
+    if (!est || est.age > 3600) { if (now - (H.lostF || (H.lostF = now)) > 60 * 75) return X.end('見失った', false); HA.drift(null); return true; }
+    H.lostF = 0;
+    if (est.age > 1500 && !X.hard) { // 推定が古い (25秒以上聞こえない): 古い点へ寄っても居ない — 最後の動きから今いそうな所 (推測航法) へ巡航で向かい、着いたら聴く
+        const hv0 = H.vh && H.vh.length >= 2 ? X.vel(est) : null;
+        const px = est.x + (hv0 ? hv0.vx * est.age : 0), py = est.y + (hv0 ? hv0.vy * est.age : 0);
+        const dP = Math.hypot(px - HA.x, py - HA.y);
+        if (!H.drLog || now - H.drLog > 1200) { H.drLog = now; say('【' + H.jp + '】' + Math.round(est.age / 60) + '秒 聞こえない → ' + (hv0 ? '最後の針路から今いそうな所' : '最後に聞いた所') + ' (' + _dirTxt(HA.x, HA.y, px, py) + ') へ寄って聴く'); }
+        if (dP > 900) HA.go(px, py, 'cruise'); else HA.drift(null);
+        if (est.age > 60 * 50) return X.end('見失った', false);
+        return true;
+    }
+    const sp = X.plan(est, H.force); if (!sp) return X.end('撃てる兵装が無い', false);
+    H.w = sp.w; H.R = sp.R;
+    if (H.anvil && H.w === 'missile' && X.dlRecent()) H.R = Math.max(H.R, X.mslReach()); // 挟み撃ち: 艦載機が見ている間は射程いっぱいから撃つ (終末シーカーが拾う)
+    // 先回り: 相手が動いていて遠いなら、進む先 (合流点) の脇へ回って待つ (後ろから追いかけても追いつけない)
+    const meA = Math.atan2(HA.y - est.y, HA.x - est.x);
+    const hv = X.vel(est), evs = hv ? Math.hypot(hv.vx, hv.vy) : 0;
+    if (hv && evs > 0.3 && D > H.R + 1500 && est.r < Math.max(2500, D * 0.5)) {
+        const hd = Math.atan2(hv.vy, hv.vx);
+        if (!H.ip || now - H.ipF > 600 || Math.abs(_angDiff(hd, H.ipHd)) > 1.0) {
+            const ip = interceptPoint(HA.x, HA.y, X.icptSpeed, est.x, est.y, hv.vx, hv.vy);
+            const sideA = hd + (_angDiff(meA, hd) > 0 ? 1 : -1) * Math.PI / 2; // 相手の航路のこちら側
+            const off = Math.min(H.R * 0.8, 1500), cv = findCoverSpot(ip.x + Math.cos(sideA) * off, ip.y + Math.sin(sideA) * off, 800);
+            H.ip = cv ? { x: cv.x, y: cv.y } : clampToMapCircle(ip.x + Math.cos(sideA) * off, ip.y + Math.sin(sideA) * off, 1200); H.ipF = now; H.ipHd = hd;
+            if (!H.ipLog || now - H.ipLog > 1800) { H.ipLog = now; say('【' + H.jp + '】' + X.who + 'は針路' + Math.round(((hd * 180 / Math.PI) + 450) % 360) + '°で動いている → 先回りして進む先の脇 (' + _dirTxt(HA.x, HA.y, H.ip.x, H.ip.y) + ') で待ち伏せる'); }
+        }
+        const dI = Math.hypot(H.ip.x - HA.x, H.ip.y - HA.y);
+        if (dI > 4000) X.transit('先回りの移動');
+        if (dI < 500) { H.ph = 'wait'; H.waitF = now; H.k = 'hold'; H.jp = '先回りの待ち伏せ'; say('【' + H.jp + '】進む先の脇に着いた → 機関を止めて待つ'); return true; }
+        HA.go(H.ip.x, H.ip.y, dI > 3000 ? 'cruise' : 'silent');
+        return true;
+    }
+    H.ip = null;
+    // 狙う向き: 相手が動いていれば背後 (進む向きの反対・少し横)、止まっていれば最初に決めた側の側面
+    if (H.flankA === undefined || (now - (H.flankF || 0) > 600 && !(now < (H.flankLock || 0)))) { // 挟み撃ちの向きは艦載機が釘付けにしている間は保つ
+        H.flankF = now;
+        H.flankA = hv && evs > 0.2 ? Math.atan2(-hv.vy, -hv.vx) + H.side * 0.45 : (H.flankA === undefined ? meA + H.side * 1.2 : H.flankA);
+    }
+    const sx = est.x + Math.cos(H.flankA) * H.R, sy = est.y + Math.sin(H.flankA) * H.R;
+    const dS = Math.hypot(sx - HA.x, sy - HA.y);
+    // 撃つ: 射程に入って推定が十分に小さい (攻撃的ほど甘い基準)
+    if (D <= H.R + 250 && X.tryFire(H.force === 'kinetic' ? Math.max(0.2, 0.5 - 0.3 * ag) : Math.max(0.35, 0.72 + 0.15 * st - 0.35 * ag - 0.08 * (X.fails || 0) - (H.receding ? 0.15 : 0) - (H.anvil ? 0.15 : 0)))) { // 離れていく相手は好機が短い — 少し甘く
+        H.strikes++;
+        if (H.force === 'kinetic' && X.hpF > 0.45) { say('【' + H.jp + '】' + Math.round(D / 100) * 100 + 'uの至近から実弾を叩き込んだ → 装甲を頼りにそのまま殴り合う'); return X.end('肉薄して撃った → 交戦', true, 900); } // 攻撃型は離れない (耐久で押し切る)
+        H.ph = 'egress'; H.eg = null;
+        say('【' + H.jp + '】' + Math.round(D / 100) * 100 + 'u (' + (Math.abs(_angDiff(meA, H.flankA)) < 0.8 ? (est.moving ? '背後' : '側面') : '斜め') + ') から' + _WPN_JP[H.w] + 'を撃った (命中見込み' + _pct(H.hc || 0) + '・' + H.strikes + '撃目) → すぐ離れて霧へ');
+        return true;
+    }
+    if (D <= H.R + 250) { // 射程の内: 艦首を向けている/装填を待つ間はそのまま。推定が粗ければ止まって聴く (相手が動けば記録が増える) — 少しずつ横へにじる
+        if (H.why === 'lowhc') { // 推定が粗い: 相手の視界のぎりぎりまでにじり寄る (近いほど推定は細かくなる)。それ以上は横へにじって基線を作る
+            const vr = X.visAt(est.x, est.y), mv = X.myVis(), lim = mv > vr + 150 ? Math.max(VIS_CLOSE, mv - 100) : vr + 250;
+            const pa = D > lim ? Math.atan2(est.y - HA.y, est.x - HA.x) + H.side * 0.35 : meA + Math.PI / 2 * H.side;
+            if (HA.v > 0.35) HA.drift(pa); else HA.go(HA.x + Math.cos(pa) * 500, HA.y + Math.sin(pa) * 500, 'speed', Math.min(X.silent * 0.6, 0.35));
+        }
+        else if (H.why !== 'turn' && H.why !== 'charge') HA.drift(Math.atan2(est.y - HA.y, est.x - HA.x));
+        if (now - (H.holdLog || 0) > 900) { H.holdLog = now; say('【' + H.jp + '】撃てる距離 (' + Math.round(D / 100) * 100 + 'u) — ' + (H.why === 'lowhc' ? '推定±' + Math.round(est.r) + 'uでは当たらない (見込み' + _pct(H.hc || 0) + ') → 息を殺して聴き直す' : H.why === 'reload' ? '装填を待つ (息を殺して)' : H.why === 'charge' ? 'ビームを溜める' : '艦首を向ける')); }
+        if (now - (H.inRangeF || (H.inRangeF = now)) > 60 * 50) return X.end('推定が絞れない', false);
+        return true;
+    }
+    H.inRangeF = 0;
+    // 経路: まっすぐ行くと相手の正面を横切るなら、外側の円を回る
+    const dA = _angDiff(H.flankA, meA);
+    let gx = sx, gy = sy;
+    if (Math.abs(dA) > 0.5 && D < H.R + 6000) {
+        const rr = Math.max(H.R + 1600, Math.min(D, H.R + 3500)), na = meA + Math.sign(dA) * Math.min(Math.abs(dA), 0.7);
+        gx = est.x + Math.cos(na) * rr; gy = est.y + Math.sin(na) * rr;
+    }
+    if (H.lastD !== undefined && now - (H.lastDF || 0) >= 300) { H.receding = D > H.lastD + 150; H.lastD = D; H.lastDF = now; } else if (H.lastD === undefined) { H.lastD = D; H.lastDF = now; }
+    const near = D < H.R + (H.force === 'kinetic' ? 1500 : 3200) && !H.receding; // 離れていく相手は惰性では追いつけない — 巡航で追う (肉薄は至近まで巡航で詰め、最後だけ漂う)
+    if (!near && D > H.R + 5000) X.transit('忍び寄りの移動');
+    const ga = Math.atan2(gy - HA.y, gx - HA.x);
+    if (near) { // 近くでは「噴かして惰性」: 機関を噴かしては止めて漂う (推進の信号を断続にして方位を取らせない)
+        const cyc = (now - H.f0) % (60 * (20 + 8 * st)), burn = 60 * (11 + 4 * ag - 3 * st);
+        const offCourse = Math.abs(_angDiff(ga, HA.driftAng())) > 0.6;
+        if (cyc < burn || (offCourse && HA.v < 0.3) || HA.v < 0.12) HA.go(gx, gy, 'speed', Math.max(0.35, X.cruise * (0.75 - 0.25 * st)));
+        else HA.drift(ga);
+    } else HA.go(gx, gy, 'speed', Math.max(0.25, X.cruise * (H.receding ? 1 : 0.85 - 0.2 * st)));
+    if (now - (H.goLog || 0) > 1200) { H.goLog = now; say('【' + H.jp + '】静粛で回り込み中 — ' + X.who + 'の推定まで' + Math.round(D / 100) * 100 + 'u・撃つ位置まで' + Math.round(dS / 100) * 100 + 'u (' + (near ? '忍び足' : '巡航') + ')'); }
+    return true;
+}
 // 第114弾 (段5・前半): 狩人の任務の重みは 自機COMも敵も同じ関数。F は行為者が知っていること
 //   P, D(推定までの距離), cls, stc(潜航型×1.5), fails(焦れ), hpF, closing, moving(動いている), hasLure, hasNoise, hasFake, hitOrPing(直近に撃たれた/探信された), strike(出せる艦載機/Tech), kOk, bOk, holdRecent(待ち伏せの最中に気配を掴んだ)
 function huntWeights(F) {
@@ -15850,7 +15935,7 @@ function enemyHunterStep(e, heard, hard) {
     }
     const HAx = { x: e.x, y: e.y, ang: e.angle, v: e._v || 0, driftAng: () => e._driftA ?? e.angle, drift: (a) => e._drift(a),
         go: (x, y, k, spd) => e._moveHeading(Math.atan2(y - e.y, x - e.x), k === 'flank' ? ms.flank : k === 'cruise' ? ms.cruise : k === 'cruise8' ? ms.cruise * 0.8 : k === 'creep' ? Math.min(ms.silent * 0.7, 0.5) : k === 'silent' ? ms.silent : k === 'speed' ? spd : 0.3) };
-    const HXx = { est, D: est ? Math.hypot(est.x - e.x, est.y - e.y) : null, now, ag, st, ca, say, end, tryFire: (thr) => huntTryFire(e, H, est, thr), canStrike: (es) => !!huntStrikePlan(e, es || e), plan: (es) => huntStrikePlan(e, es), vel: (es) => H.vh ? _huntVel(H, es) : null,
+    const HXx = { est, D: est ? Math.hypot(est.x - e.x, est.y - e.y) : null, now, ag, st, ca, say, end, tryFire: (thr) => huntTryFire(e, H, est, thr), canStrike: (es) => !!huntStrikePlan(e, es || e), plan: (es, f) => huntStrikePlan(e, es, f), vel: (es) => H.vh ? _huntVel(H, es) : null,
         who: '自機', cruise: ms.cruise, visAt: _visAt, lureOk: () => (e.lureShip || 0) > 0, lure: (x, y) => { e.lureShip--; launchLure('e', 'ship', e.x, e.y, x, y); },
         mine: 'enemy', noise: (ang) => { if (!((e.itemNoise || 0) > 0)) return false; enemyUseNoise(e, ang); return true; }, smokeOk: () => (e.itemSmoke || 0) > 0, smoke: () => enemyUseSmoke(e),
         chain: (nx) => { e._hunt = null; e._huntCD = 0; e._forceNext = nx; e._lastScentF = now; }, event: (k, t) => matchRecEvent(k + 'E', e.x, e.y, '敵: ' + t),
@@ -15858,6 +15943,7 @@ function enemyHunterStep(e, heard, hard) {
         trapped: (h) => !!(e._sa && e._sa.ping && e._sa.ping.f >= (h.placedF || 0) && e._sa.ping.f > now - 120 && Math.hypot(e._sa.ping.x - h.B.x, e._sa.ping.y - h.B.y) < 900),
         onTrap: (h) => { e._hunt = null; e._huntCD = 0; e._forceNext = 'hold'; e._lastScentF = now; e.contactFreshness = 1; matchRecEvent('tacE', e.x, e.y, '敵の作戦「偽コンテナの罠」が成功 — 爆発で位置が割れた所を撃ちに行く'); },
         lastMove: () => (e._lastMove && now - e._lastMove.f < 60 * 120 ? e._lastMove : null), transit: (why) => huntTransitEngine(e, why),
+        hard, hpF, fails: e._huntFails, silent: ms.silent, icptSpeed: ms.cruise * 0.95, dlRecent: () => !!(e._dlF && now - e._dlF < 600), mslReach: () => ENEMY_MISSILE_ENGAGE * epm(e).mslRange * 0.95, myVis: () => _visAt(e.x, e.y),
         whoSeen: '自機', sendTo: (es) => { e._sendTo = es ? { x: es.x, y: es.y, until: now + 60 * 20 } : null; },
         launch: (es) => { let n = 0; const live = enemies.filter(f => f.type === 'fighter' && f.hp > 0 && !f._dying && f._kind === undefined).length;
             while ((e.droneStock || 0) > 0 && live + n < CARGO_CAP.carrier && n < 2) { e.droneStock--; _eLaunchFighter(e, es); n++; }
@@ -15867,88 +15953,7 @@ function enemyHunterStep(e, heard, hard) {
     if (H.k === 'fakebox') return huntFakebox(HAx, H, HXx);
     if (H.ph === 'wait' || H.ph === 'creep' || H.ph === 'egress' || H.ph === 'lurk') return huntPostStrike(HAx, H, HXx); // 第116弾: 一撃のあとの動きは 自機COMと共通
     switch (H.ph) {
-        case 'approach': { // 忍び寄り: 弧を描いて回り込む
-            if (!est || est.age > 3600) { if (now - (H.lostF || (H.lostF = now)) > 60 * 75) return end('見失った', false); e._drift(null); return true; }
-            H.lostF = 0;
-            if (est.age > 1500 && !hard) { // 推定が古い (25秒以上聞こえない): 古い点へ寄っても居ない — 最後の動きから今いそうな所 (推測航法) へ巡航で向かい、着いたら聴く
-                const hv0 = H.vh && H.vh.length >= 2 ? _huntVel(H, est) : null;
-                const px = est.x + (hv0 ? hv0.vx * est.age : 0), py = est.y + (hv0 ? hv0.vy * est.age : 0);
-                const dP = Math.hypot(px - e.x, py - e.y);
-                if (!H.drLog || now - H.drLog > 1200) { H.drLog = now; say('【' + H.jp + '】' + Math.round(est.age / 60) + '秒 聞こえない → ' + (hv0 ? '最後の針路から今いそうな所' : '最後に聞いた所') + ' (' + _dirTxt(e.x, e.y, px, py) + ') へ寄って聴く'); }
-                if (dP > 900) e._moveHeading(Math.atan2(py - e.y, px - e.x), ms.cruise); else e._drift(null);
-                if (est.age > 60 * 50) return end('見失った', false);
-                return true;
-            }
-            const sp = huntStrikePlan(e, est, H.force); if (!sp) return end('撃てる兵装が無い', false);
-            H.w = sp.w; H.R = sp.R;
-            if (H.anvil && H.w === 'missile' && e._dlF && now - e._dlF < 600) H.R = Math.max(H.R, ENEMY_MISSILE_ENGAGE * epm(e).mslRange * 0.95); // 挟み撃ち: 艦載機が見ている間は射程いっぱいから撃つ (終末シーカーが拾う)
-            // 先回り: 相手が動いていて遠いなら、進む先 (合流点) の脇へ回って待つ (後ろから追いかけても追いつけない)
-            const meA = Math.atan2(e.y - est.y, e.x - est.x);
-            const hv = _huntVel(H, est), evs = hv ? Math.hypot(hv.vx, hv.vy) : 0;
-            if (hv && evs > 0.3 && D > H.R + 1500 && est.r < Math.max(2500, D * 0.5)) {
-                const hd = Math.atan2(hv.vy, hv.vx);
-                if (!H.ip || now - H.ipF > 600 || Math.abs(_angDiff(hd, H.ipHd)) > 1.0) {
-                    const ip = interceptPoint(e.x, e.y, ms.cruise * 0.95, est.x, est.y, hv.vx, hv.vy);
-                    const sideA = hd + (_angDiff(meA, hd) > 0 ? 1 : -1) * Math.PI / 2; // 相手の航路のこちら側
-                    const off = Math.min(H.R * 0.8, 1500), cv = findCoverSpot(ip.x + Math.cos(sideA) * off, ip.y + Math.sin(sideA) * off, 800);
-                    H.ip = cv ? { x: cv.x, y: cv.y } : clampToMapCircle(ip.x + Math.cos(sideA) * off, ip.y + Math.sin(sideA) * off, 1200); H.ipF = now; H.ipHd = hd;
-                    if (!H.ipLog || now - H.ipLog > 1800) { H.ipLog = now; say('【' + H.jp + '】自機は針路' + Math.round(((hd * 180 / Math.PI) + 450) % 360) + '°で動いている → 先回りして進む先の脇 (' + _dirTxt(e.x, e.y, H.ip.x, H.ip.y) + ') で待ち伏せる'); }
-                }
-                const dI = Math.hypot(H.ip.x - e.x, H.ip.y - e.y);
-                if (dI > 4000) huntTransitEngine(e, '先回りの移動');
-                if (dI < 500) { H.ph = 'wait'; H.waitF = now; H.k = 'hold'; H.jp = '先回りの待ち伏せ'; say('【' + H.jp + '】進む先の脇に着いた → 機関を止めて待つ'); return true; }
-                e._moveHeading(Math.atan2(H.ip.y - e.y, H.ip.x - e.x), dI > 3000 ? ms.cruise : ms.silent);
-                return true;
-            }
-            H.ip = null;
-            // 狙う向き: 相手が動いていれば背後 (進む向きの反対・少し横)、止まっていれば最初に決めた側の側面
-            if (H.flankA === undefined || (now - (H.flankF || 0) > 600 && !(now < (H.flankLock || 0)))) { // 第81弾: 挟み撃ちの向きは艦載機が釘付けにしている間は保つ
-                H.flankF = now;
-                H.flankA = hv && evs > 0.2 ? Math.atan2(-hv.vy, -hv.vx) + H.side * 0.45 : (H.flankA === undefined ? meA + H.side * 1.2 : H.flankA);
-            }
-            const sx = est.x + Math.cos(H.flankA) * H.R, sy = est.y + Math.sin(H.flankA) * H.R;
-            const dS = Math.hypot(sx - e.x, sy - e.y);
-            // 撃つ: 射程に入って推定が十分に小さい (攻撃的ほど甘い基準)
-            if (D <= H.R + 250 && huntTryFire(e, H, est, H.force === 'kinetic' ? Math.max(0.2, 0.5 - 0.3 * ag) : Math.max(0.35, 0.72 + 0.15 * st - 0.35 * ag - 0.08 * (e._huntFails || 0) - (H.receding ? 0.15 : 0) - (H.anvil ? 0.15 : 0)))) { // 離れていく相手は好機が短い — 少し甘く // 忍び寄りは辛抱強い — 隠密ほど確かな推定を待つ (肉薄は至近で散布するので甘く・挟み撃ちは艦載機の目で推定が新しいので甘く)
-                H.strikes++;
-                if (H.force === 'kinetic' && hpF > 0.45) { say('【' + H.jp + '】' + Math.round(D / 100) * 100 + 'uの至近から実弾を叩き込んだ → 装甲を頼りにそのまま殴り合う'); return end('肉薄して撃った → 交戦', true, 900); } // 攻撃型は離れない (耐久で押し切る)
-                H.ph = 'egress'; H.eg = null;
-                say('【' + H.jp + '】' + Math.round(D / 100) * 100 + 'u (' + (Math.abs(_angDiff(meA, H.flankA)) < 0.8 ? (est.moving ? '背後' : '側面') : '斜め') + ') から' + _WPN_JP[H.w] + 'を撃った (命中見込み' + _pct(H.hc || 0) + '・' + H.strikes + '撃目) → すぐ離れて霧へ');
-                return true;
-            }
-            if (D <= H.R + 250) { // 射程の内: 艦首を向けている/装填を待つ間はそのまま。推定が粗ければ止まって聴く (相手が動けば記録が増える) — 少しずつ横へにじる
-                if (H.why === 'lowhc') { // 推定が粗い: 相手の視界のぎりぎりまでにじり寄る (近いほど推定は細かくなる)。それ以上は横へにじって基線を作る
-                    // 自分の視界が相手の視界より広ければ、目視できる所までにじり寄る (先に見つけて撃つ)。狭ければ相手の視界の外で横へ
-                    const vr = _visAt(est.x, est.y), mv = _visAt(e.x, e.y), lim = mv > vr + 150 ? Math.max(VIS_CLOSE, mv - 100) : vr + 250;
-                    const pa = D > lim ? Math.atan2(est.y - e.y, est.x - e.x) + H.side * 0.35 : meA + Math.PI / 2 * H.side;
-                    if ((e._v || 0) > 0.35) e._drift(pa); else e._moveHeading(pa, Math.min(ms.silent * 0.6, 0.35));
-                }
-                else if (H.why !== 'turn' && H.why !== 'charge') e._drift(Math.atan2(est.y - e.y, est.x - e.x));
-                if (now - (H.holdLog || 0) > 900) { H.holdLog = now; say('【' + H.jp + '】撃てる距離 (' + Math.round(D / 100) * 100 + 'u) — ' + (H.why === 'lowhc' ? '推定±' + Math.round(est.r) + 'uでは当たらない (見込み' + _pct(H.hc || 0) + ') → 息を殺して聴き直す' : H.why === 'reload' ? '装填を待つ (息を殺して)' : H.why === 'charge' ? 'ビームを溜める' : '艦首を向ける')); }
-                if (now - (H.inRangeF || (H.inRangeF = now)) > 60 * 50) return end('推定が絞れない', false);
-                return true;
-            }
-            H.inRangeF = 0;
-            // 経路: まっすぐ行くと相手の正面を横切るなら、外側の円を回る
-            const dA = _angDiff(H.flankA, meA);
-            let gx = sx, gy = sy;
-            if (Math.abs(dA) > 0.5 && D < H.R + 6000) {
-                const rr = Math.max(H.R + 1600, Math.min(D, H.R + 3500)), na = meA + Math.sign(dA) * Math.min(Math.abs(dA), 0.7);
-                gx = est.x + Math.cos(na) * rr; gy = est.y + Math.sin(na) * rr;
-            }
-            if (H.lastD !== undefined && now - (H.lastDF || 0) >= 300) { H.receding = D > H.lastD + 150; H.lastD = D; H.lastDF = now; } else if (H.lastD === undefined) { H.lastD = D; H.lastDF = now; }
-            const near = D < H.R + (H.force === 'kinetic' ? 1500 : 3200) && !H.receding; // 離れていく相手は惰性では追いつけない — 巡航で追う (肉薄は至近まで巡航で詰め、最後だけ漂う)
-            if (!near && D > H.R + 5000) huntTransitEngine(e, '忍び寄りの移動');
-            const ga = Math.atan2(gy - e.y, gx - e.x);
-            if (near) { // 近くでは「噴かして惰性」: 機関を噴かしては止めて漂う (推進の信号を断続にして方位を取らせない)
-                const cyc = (now - H.f0) % (60 * (20 + 8 * st)), burn = 60 * (11 + 4 * ag - 3 * st);
-                const offCourse = Math.abs(_angDiff(ga, e._driftA ?? e.angle)) > 0.6;
-                if (cyc < burn || (offCourse && (e._v || 0) < 0.3) || (e._v || 0) < 0.12) e._moveHeading(ga, Math.max(0.35, ms.cruise * (0.75 - 0.25 * st)));
-                else e._drift(ga);
-            } else e._moveHeading(ga, Math.max(0.25, ms.cruise * (H.receding ? 1 : 0.85 - 0.2 * st)));
-            if (now - (H.goLog || 0) > 1200) { H.goLog = now; say('【' + H.jp + '】静粛で回り込み中 — 自機の推定まで' + Math.round(D / 100) * 100 + 'u・撃つ位置まで' + Math.round(dS / 100) * 100 + 'u (' + (near ? '忍び足' : '巡航') + ')'); }
-            return true;
-        }
+        case 'approach': return huntApproach(HAx, H, HXx); // 第119弾: 自機COMと共通
         case 'screen': return huntScreen(HAx, H, HXx); // 第118弾: 自機COMと共通
         case 'shadow': return huntShadow(HAx, H, HXx); // 第116弾: 自機COMと共通
         case 'set': { // 偽装の罠: 待ち伏せ位置へ → 囮を置く
@@ -16212,16 +16217,17 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
     };
     // 2026-11-11 (オーナー「戦術・戦略は自機COMも敵COMも同じレベル」): 偽装退却・偽コンテナの罠 — 敵 (enemyHunterStep) と同じ手順
     const HAx = { x: player.x, y: player.y, ang: player.angle, v: player.currentSpeed || 0, driftAng: () => player.angle,
-        go: (x, y, k, spd) => { if (k === 'flank') _comHGo(c, x, y, 'flank'); else if (k === 'cruise' || k === 'cruise8' || (k === 'speed' && spd > 0.5)) _comHGo(c, x, y, 'cruise'); else if (k === 'creep' || k === 'speed' || k === 'silent') _comHGo(c, x, y, 'silent'); else { if (!playerCoasting && player.currentSpeed > 0.1) toggleCoast(true); } },
+        go: (x, y, k, spd) => { if (k === 'flank') _comHGo(c, x, y, 'flank'); else if (k === 'cruise' || k === 'cruise8' || (k === 'speed' && spd >= shipCruiseSpeed(gameState.shipType, genAlloc.engine, 1) * 0.8)) _comHGo(c, x, y, 'cruise'); else if (k === 'creep' || k === 'speed' || k === 'silent') _comHGo(c, x, y, 'silent'); else { if (!playerCoasting && player.currentSpeed > 0.1) toggleCoast(true); } },
         drift: (a) => { if (powerStance !== 'silent') setStance('silent', true); if (!playerCoasting && player.currentSpeed > 0.1) toggleCoast(true); else if (player.state === 'moving' && player.currentSpeed <= 0.1) player.setTarget(player.x, player.y); } };
-    const HXx = { est, D: est ? Math.hypot(est.x - player.x, est.y - player.y) : null, now, ag, st, ca, say, end: (why) => end(why), tryFire, canStrike: (es) => !!(es && comStrikePlan(es)), plan: (es) => comStrikePlan(es), vel: (es) => H.vh ? _huntVel(H, es) : null,
-        who: 'SIG-' + sigNo(H.sid), cruise: 0.8, visAt: _visAt, lureOk: () => (cargo.stock.lure || 0) > 0, lure: (x, y) => deployDrone('lure', x, y),
+    const HXx = { est, D: est ? Math.hypot(est.x - player.x, est.y - player.y) : null, now, ag, st, ca, say, end: (why, combat, cd) => end(why, cd), tryFire, canStrike: (es) => !!(es && comStrikePlan(es)), plan: (es, f) => comStrikePlan(es, f), vel: (es) => H.vh ? _huntVel(H, es) : null,
+        who: 'SIG-' + sigNo(H.sid), cruise: shipCruiseSpeed(gameState.shipType, genAlloc.engine, 1), visAt: _visAt, lureOk: () => (cargo.stock.lure || 0) > 0, lure: (x, y) => deployDrone('lure', x, y),
         mine: 'player', noise: (ang) => { if (!_comUseItem('noise', player.x + Math.cos(ang) * 3000, player.y + Math.sin(ang) * 3000)) return false; c.noiseF = now; return true; }, smokeOk: () => (cargo.stock.smoke || 0) > 0, smoke: () => _comUseItem('smoke'),
         chain: (nx) => { c.hunt = null; c.huntCD = 0; c.forceNext = nx; }, event: (k, t) => matchRecEvent(k + 'P', player.x, player.y, '自機COM: ' + t),
         placeFake: (x, y) => _comUseItem('fakecache', x, y),
         trapped: (h) => { for (const sid in _signalAnalysis) { const pg = _signalAnalysis[sid] && _signalAnalysis[sid].ping; if (pg && pg.f >= (h.placedF || 0) && pg.f > now - 120 && Math.hypot(pg.x - h.B.x, pg.y - h.B.y) < 900) { h._trapSid = sid; return true; } } return false; },
         onTrap: (h) => { c.hunt = null; c.huntCD = 0; c.forceNext = 'hold'; if (h._trapSid) window._lockSignal(h._trapSid); matchRecEvent('tacP', player.x, player.y, '自機COMの作戦「偽コンテナの罠」が成功 — 爆発で位置が割れた所を撃ちに行く'); },
         lastMove: (es) => H.vh ? _huntVel(H, es) : null, transit: () => {},
+        hard: false, who: 'SIG-' + sigNo(H.sid), hpF, fails: c.huntFails, silent: shipCruiseSpeed(gameState.shipType, genAlloc.engine, 1) * 0.5, icptSpeed: shipCruiseSpeed(gameState.shipType, genAlloc.engine, 1) * 0.9, dlRecent: () => !!(H.dlF && now - H.dlF < 600), mslReach: () => weaponRange('missile') * 0.95, myVis: () => _visAt(player.x, player.y),
         whoSeen: 'SIG-' + sigNo(H.sid), sendTo: (es) => { if (es && now - (H.pSendF || 0) > 900) { H.pSendF = now; droneOrder('attack', 'attack', es.x, es.y); if (playerDrones.some(d => d.hp > 0 && d.type === 'mech')) droneOrder('mech', 'attack', es.x, es.y); } },
         launch: (es) => { H.sent = now; return { n: 0, tech: playerDrones.some(d => d.hp > 0 && d.type === 'mech') }; },
         seen: (es) => { const sa = _signalAnalysis[H.sid], dp = sa && sa.ping && /^d/.test(sa.ping.src || '') && now - sa.ping.f < 240 ? sa.ping : null; if (!dp) return null; return { ref: { x: dp.x, y: dp.y }, drones: playerDrones.filter(d => d.hp > 0 && (d.type === 'attack' || d.type === 'mech') && Math.hypot(d.x - dp.x, d.y - dp.y) < 3000) }; } };
@@ -16229,48 +16235,7 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
     if (H.k === 'fakebox') return huntFakebox(HAx, H, HXx);
     if (H.ph === 'wait' || H.ph === 'creep' || H.ph === 'egress' || H.ph === 'lurk') return huntPostStrike(HAx, H, HXx); // 第116弾: 一撃のあとの動きは 敵と共通
     switch (H.ph) {
-        case 'approach': {
-            if (!est || est.age > 3600) { if (now - (H.lostF || (H.lostF = now)) > 60 * 75) return end('見失った'); if (!playerCoasting && player.currentSpeed > 0.2) toggleCoast(true); return true; }
-            H.lostF = 0;
-            const meA = Math.atan2(player.y - est.y, player.x - est.x);
-            { const hv = _huntVel(H, est), evs = hv ? Math.hypot(hv.vx, hv.vy) : 0, spn = comStrikePlan(est);
-              if (spn && hv && evs > 0.3 && D > spn.R + 1500 && est.r < Math.max(2500, D * 0.5)) { // 先回り: 進む先の脇で待つ
-                const hd = Math.atan2(hv.vy, hv.vx);
-                if (!H.ip || now - H.ipF > 600 || Math.abs(_angDiff(hd, H.ipHd)) > 1.0) {
-                    const ip = interceptPoint(player.x, player.y, shipCruiseSpeed(gameState.shipType, genAlloc.engine, 1) * 0.9, est.x, est.y, hv.vx, hv.vy);
-                    const sideA = hd + (_angDiff(meA, hd) > 0 ? 1 : -1) * Math.PI / 2, off = Math.min(spn.R * 0.8, 1500), cv = findCoverSpot(ip.x + Math.cos(sideA) * off, ip.y + Math.sin(sideA) * off, 800);
-                    H.ip = cv ? { x: cv.x, y: cv.y } : clampToMapCircle(ip.x + Math.cos(sideA) * off, ip.y + Math.sin(sideA) * off, 1200); H.ipF = now; H.ipHd = hd;
-                    if (!H.ipLog || now - H.ipLog > 1800) { H.ipLog = now; say('【' + H.jp + '】SIG-' + sigNo(H.sid) + 'は針路' + Math.round(((hd * 180 / Math.PI) + 450) % 360) + '°で動いている → 先回りして進む先の脇 (' + _dirTxt(player.x, player.y, H.ip.x, H.ip.y) + ') で待ち伏せる'); }
-                }
-                const dI = Math.hypot(H.ip.x - player.x, H.ip.y - player.y);
-                if (dI < 500) { H.ph = 'wait'; H.waitF = now; H.k = 'hold'; H.jp = '先回りの待ち伏せ'; say('【' + H.jp + '】進む先の脇に着いた → 機関を止めて待つ'); return true; }
-                _comHGo(c, H.ip.x, H.ip.y, dI > 3500 ? 'cruise' : 'silent');
-                return true;
-              }
-              H.ip = null; }
-            if (H.flankA === undefined || (now - (H.flankF || 0) > 600 && !(now < (H.flankLock || 0)))) { H.flankF = now; const hv2 = _huntVel(H, est); H.flankA = hv2 && Math.hypot(hv2.vx, hv2.vy) > 0.2 ? Math.atan2(-hv2.vy, -hv2.vx) + H.side * 0.45 : (H.flankA === undefined ? meA + H.side * 1.2 : H.flankA); }
-            const sp = comStrikePlan(est, H.force); if (!sp) return end('撃てる兵装が無い'); H.R = sp.R;
-            if (H.anvil && sp.w === 'missile' && H.dlF && now - H.dlF < 600) H.R = Math.max(H.R, weaponRange('missile') * 0.95);
-            if (D <= H.R + 250 && tryFire(H.force === 'kinetic' ? Math.max(0.2, 0.5 - 0.3 * ag) : Math.max(0.35, 0.72 + 0.15 * st - 0.35 * ag - 0.08 * (c.huntFails || 0) - (H.anvil ? 0.15 : 0)))) { H.strikes++;
-                if (H.force === 'kinetic' && hpF > 0.45) { say('【' + H.jp + '】' + Math.round(D / 100) * 100 + 'uの至近から実弾を叩き込んだ → 装甲を頼りにそのまま殴り合う'); return end('肉薄して撃った → 交戦', 900); }
-                H.ph = 'egress'; H.eg = null; say('【' + H.jp + '】' + Math.round(D / 100) * 100 + 'uから' + _WPN_JP[H.w] + 'を撃った (命中見込み' + _pct(H.hc) + '・' + H.strikes + '撃目) → すぐ離れて霧へ'); return true; }
-            if (D <= H.R + 250) {
-                if (H.why === 'lowhc') { const vr = _visAt(est.x, est.y), mv = _visAt(player.x, player.y), lim = mv > vr + 150 ? Math.max(VIS_CLOSE, mv - 100) : vr + 250, pa = D > lim ? Math.atan2(est.y - player.y, est.x - player.x) + H.side * 0.35 : meA + Math.PI / 2 * H.side; _comHGo(c, player.x + Math.cos(pa) * 500, player.y + Math.sin(pa) * 500, 'silent'); }
-                else if (H.why !== 'turn' && !playerCoasting && player.currentSpeed > 0.15) toggleCoast(true);
-                comThink('p', 'hunt-in', '【' + H.jp + '】撃てる距離 (' + Math.round(D / 100) * 100 + 'u) — ' + (H.why === 'lowhc' ? '推定±' + Math.round(est.r) + 'u・見込み' + _pct(H.hc || 0) + ' → 息を殺して聴き直す' : H.why === 'reload' ? '装填を待つ' : '艦首を向ける'));
-                if (now - (H.inRangeF || (H.inRangeF = now)) > 60 * 50) return end('推定が絞れない');
-                return true;
-            }
-            H.inRangeF = 0;
-            const sx = est.x + Math.cos(H.flankA) * H.R, sy = est.y + Math.sin(H.flankA) * H.R, dA = _angDiff(H.flankA, meA);
-            let gx = sx, gy = sy;
-            if (Math.abs(dA) > 0.5 && D < H.R + 6000) { const rr = Math.max(H.R + 1600, Math.min(D, H.R + 3500)), na = meA + Math.sign(dA) * Math.min(Math.abs(dA), 0.7); gx = est.x + Math.cos(na) * rr; gy = est.y + Math.sin(na) * rr; }
-            const near = D < H.R + (H.force === 'kinetic' ? 1500 : 3200);
-            if (near) { const cyc = (now - H.f0) % (60 * (20 + 8 * st)), burn = 60 * (11 + 4 * ag - 3 * st); if (cyc < burn || player.currentSpeed < 0.15) _comHGo(c, gx, gy, 'silent'); else if (!playerCoasting) toggleCoast(true); }
-            else _comHGo(c, gx, gy, 'cruise');
-            comThink('p', 'hunt-go', '【' + H.jp + '】' + (near ? '噴かしては機関を止めて漂い' : '潜航で') + '回り込み中 — SIG-' + sigNo(H.sid) + 'の推定まで' + Math.round(D / 100) * 100 + 'u');
-            return true;
-        }
+        case 'approach': return huntApproach(HAx, H, HXx); // 第119弾: 敵と共通
         case 'screen': return huntScreen(HAx, H, HXx); // 第118弾: 敵と共通
         case 'shadow': return huntShadow(HAx, H, HXx); // 第116弾: 敵と共通
         case 'set': {
