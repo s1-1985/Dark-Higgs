@@ -17661,6 +17661,9 @@ function comPilotStep() {
     c.mode = '';
     const D = c.D = comDoctrine(P); // 第41弾: 性格から立ち回りの方針
     if (contact) c.lastContactF = now;
+    // 第127弾: 索敵行の「気配が無い時間」は 艦影らしい信号だけで数える (敵の _lastScentF = 相手の残り香 と同じ意味)。旧: 識別前の自然・コンテナ・輸送船の信号も気配に数え、自機COMの気配なしの時間が (計測) 秒の55〜70%で止まって索敵行・あえて弱いソナーがほとんど出なかった
+    c.shipLike = enemies.some(q => q.hp > 0 && !q._dying && q.inVision) || Object.keys(sigs).some(k => { if (dud(k)) return false; const d = identInfo(k); return d.known ? d.p >= 0.6 : k === lockedSignalId; });
+    if (c.shipLike) c.lastShipF = now;
     comExtrasStep(c, P, D, hpF, contact);
     comReactItems(c, P, hpF, hpF < retreat); // 第58弾: かく乱 (閃光・ノイズ・煙幕・偽装)
     { const why = comEngaged(); if (why && now - (c.recallF || -1e9) > 600) { if (comDroneRecall(c, why)) c.recallF = now; } } // 第73弾: 会敵したら呼び戻す
@@ -18007,8 +18010,8 @@ function enemyClueAt(x, y, lbl) {
 //   旧: 待ち伏せと捜索を繰り返すだけで、30分間どちらも相手を聞かない試合があった。拠点を取り合えば「通信途絶」の手掛かりが出る
 function comStallTour(c, P, D, hpF, contact) { // 第125弾: 敵の索敵行と同じ関数 (prowlQuietT / prowlPickGoal / huntProwlRun)
     const now = _frameCount;
-    if (contact || c.datum) { c.prowl = null; return false; }
-    const quiet = now - Math.max(c.lastContactF || 0, c.prowlEndF || 0, (huntStats && huntStats.startFrame) || 0);
+    if (c.shipLike || c.datum) { c.prowl = null; return false; }
+    const quiet = now - Math.max(c.lastShipF || 0, c.prowlEndF || 0, (huntStats && huntStats.startFrame) || 0);
     if (!c.prowl && (quiet < prowlQuietT(P) || c.item || now < (c.prowlCD || 0))) return false;
     // 第72弾 (オーナー「隠れ合うだけで接触しない」): 長く気配が無ければ、ごく弱いソナーを時々打つ = 「あえて少しだけ音を出す」(敵も firePingFromEnemy で同じ式)。
     if (prowlNudgeWants({ quiet, P, now, nudgeF: c.nudgeF, ready: omniSonarCooldown <= 0, exposed: playerExposureLevel >= 2 })) {
