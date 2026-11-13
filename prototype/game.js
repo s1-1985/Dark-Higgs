@@ -15645,6 +15645,42 @@ function huntFakebox(HA, H, X) {
     }
     return false;
 }
+// 第118弾 (段5後半の4): 艦載機の網 (空母) — 自機COMも敵も同じ関数。艦載機を推定へ送り、母艦は通信の届く範囲の霧で待つ。艦載機が目で捉えたら反対側から挟み撃ち
+//   X.launch(est)=最初に艦載機を出して送る → {n,tech} / X.sendTo(est)=行き先を保つ / X.seen(est,D)=艦載機の目が相手を捉えたか {drones:[{x,y}],ref:{x,y}}|null / X.ag/ca は性格
+function huntScreen(HA, H, X) {
+    const { est, D, now, say } = X;
+    if (!est || est.age > 3600) { if (now - (H.lostF || (H.lostF = now)) > 60 * 60) return X.end('見失った', false); HA.drift(null); return true; }
+    H.lostF = 0;
+    if (!H.sent) { H.sent = now; const r = X.launch(est); say('【' + H.jp + '】' + (r.n ? '戦闘機を' + r.n + '機射出し、' : '') + (r.tech ? 'Techと共に' : '') + '推定 (' + _dirTxt(HA.x, HA.y, est.x, est.y) + ') へ送り出す — 母艦は後ろの霧で機関を止めて待つ'); }
+    if (!H.sendF || now - H.sendF > 120) { H.sendF = now; X.sendTo(est); }
+    const sp = X.plan(est); if (!sp) return X.end('撃てる兵装が無い', false);
+    H.w = sp.w; H.R = sp.R;
+    const sn = X.seen(est, D); // 艦載機が自機を目で捉えた (データリンクで推定が新しく小さい) → 艦載機の反対側から挟み撃ち
+    if (sn) {
+        let sx = 0, sy = 0, nD = 0;
+        for (const f of sn.drones) { sx += f.x - sn.ref.x; sy += f.y - sn.ref.y; nD++; }
+        const meA = Math.atan2(HA.y - sn.ref.y, HA.x - sn.ref.x); let fa = meA;
+        if (nD) { const ad = Math.atan2(sy, sx), dd = _angDiff(meA, ad); if (Math.abs(dd) < 1.4) fa = ad + (dd >= 0 ? 1 : -1) * 1.4; }
+        H.k = 'stalk'; H.ph = 'approach'; H.flankA = fa; H.flankF = now; H.flankLock = now + 60 * 45; H.anvil = true; H.dlF = now; H.jp = '艦載機の網→挟み撃ち';
+        say('【' + H.jp + '】艦載機が' + X.whoSeen + 'を目視 (推定±' + Math.round(est.r) + 'u) → 艦載機の反対側 (' + _dirTxt(HA.x, HA.y, est.x + Math.cos(fa) * H.R, est.y + Math.sin(fa) * H.R) + ') から' + _WPN_JP[H.w] + 'で撃つ');
+        X.event('tac', '作戦「挟み撃ち」— 艦載機が捉えた相手を、母艦が別の向きから撃つ');
+        return true;
+    }
+    if (!H.S || now - (H.SF || 0) > 60 * 30) {
+        H.SF = now; const a = Math.atan2(HA.y - est.y, HA.x - est.x), hb = Math.min(DRONE_AUTO_DIST * 0.75, Math.max(H.R + 1500, 3800)); // 艦載機との通信が届く所 (6000u以内) で待つ — 遠すぎると艦載機が自動制御になり、見た相手を知らせてこない
+        const px = est.x + Math.cos(a) * hb, py = est.y + Math.sin(a) * hb;
+        const cv = findCoverSpot(px, py, 1500); H.S = cv ? { x: cv.x, y: cv.y } : clampToMapCircle(px, py, 1200);
+    }
+    const dS = Math.hypot(H.S.x - HA.x, H.S.y - HA.y);
+    if (dS > 500) { const ga = Math.atan2(H.S.y - HA.y, H.S.x - HA.x); if (HA.v < 0.2 || Math.abs(_angDiff(ga, HA.driftAng())) > 0.5 || (now - H.f0) % 1200 < 700) HA.go(H.S.x, H.S.y, dS > 2500 ? 'cruise' : 'silent'); else HA.drift(ga); }
+    else HA.drift(Math.atan2(est.y - HA.y, est.x - HA.x));
+    if (now - H.sent > 60 * 150) {
+        if (est.age < 1200) { H.k = 'stalk'; H.jp = '忍び寄り'; H.ph = 'approach'; H.flankA = undefined; X.sendTo(null); say('【艦載機の網→忍び寄り】艦載機が捉えられない — 母艦が自分で回り込む'); return true; }
+        return X.end('艦載機が捉えられなかった', false);
+    }
+    if (now - (H.goLog || 0) > 1200) { H.goLog = now; say('【' + H.jp + '】艦載機が推定の周りを探している — 母艦は' + (dS > 500 ? '霧へ移動中' : '霧で待機') + ' (推定まで' + Math.round(D / 100) * 100 + 'u・±' + Math.round(est.r) + 'u)'); }
+    return true;
+}
 // 第114弾 (段5・前半): 狩人の任務の重みは 自機COMも敵も同じ関数。F は行為者が知っていること
 //   P, D(推定までの距離), cls, stc(潜航型×1.5), fails(焦れ), hpF, closing, moving(動いている), hasLure, hasNoise, hasFake, hitOrPing(直近に撃たれた/探信された), strike(出せる艦載機/Tech), kOk, bOk, holdRecent(待ち伏せの最中に気配を掴んだ)
 function huntWeights(F) {
@@ -15821,7 +15857,12 @@ function enemyHunterStep(e, heard, hard) {
         placeFake: (x, y) => { if (!((e.itemFake || 0) > 0)) return false; e.itemFake--; placeFakeCache('e', x, y); return true; },
         trapped: (h) => !!(e._sa && e._sa.ping && e._sa.ping.f >= (h.placedF || 0) && e._sa.ping.f > now - 120 && Math.hypot(e._sa.ping.x - h.B.x, e._sa.ping.y - h.B.y) < 900),
         onTrap: (h) => { e._hunt = null; e._huntCD = 0; e._forceNext = 'hold'; e._lastScentF = now; e.contactFreshness = 1; matchRecEvent('tacE', e.x, e.y, '敵の作戦「偽コンテナの罠」が成功 — 爆発で位置が割れた所を撃ちに行く'); },
-        lastMove: () => (e._lastMove && now - e._lastMove.f < 60 * 120 ? e._lastMove : null), transit: (why) => huntTransitEngine(e, why) };
+        lastMove: () => (e._lastMove && now - e._lastMove.f < 60 * 120 ? e._lastMove : null), transit: (why) => huntTransitEngine(e, why),
+        whoSeen: '自機', sendTo: (es) => { e._sendTo = es ? { x: es.x, y: es.y, until: now + 60 * 20 } : null; },
+        launch: (es) => { let n = 0; const live = enemies.filter(f => f.type === 'fighter' && f.hp > 0 && !f._dying && f._kind === undefined).length;
+            while ((e.droneStock || 0) > 0 && live + n < CARGO_CAP.carrier && n < 2) { e.droneStock--; _eLaunchFighter(e, es); n++; }
+            return { n, tech: enemies.some(f => f.type === 'fighter' && f._kind === 'mech' && f._home === e && f.hp > 0) }; },
+        seen: (es, Dd) => { if (!(e._dlF && now - e._dlF < 240 && es.r < Math.max(1500, Dd * 0.35))) return null; return { ref: { x: es.x, y: es.y }, drones: enemies.filter(f => f.type === 'fighter' && f._home === e && f.hp > 0 && !f._dying && f._kind !== 'scout' && f._kind !== 'turret' && Math.hypot(f.x - es.x, f.y - es.y) < 3000) }; } };
     if (H.k === 'feint') return huntFeint(HAx, H, HXx); // 第117弾: 偽装退却・偽コンテナの罠は 自機COMと共通
     if (H.k === 'fakebox') return huntFakebox(HAx, H, HXx);
     if (H.ph === 'wait' || H.ph === 'creep' || H.ph === 'egress' || H.ph === 'lurk') return huntPostStrike(HAx, H, HXx); // 第116弾: 一撃のあとの動きは 自機COMと共通
@@ -15908,45 +15949,7 @@ function enemyHunterStep(e, heard, hard) {
             if (now - (H.goLog || 0) > 1200) { H.goLog = now; say('【' + H.jp + '】静粛で回り込み中 — 自機の推定まで' + Math.round(D / 100) * 100 + 'u・撃つ位置まで' + Math.round(dS / 100) * 100 + 'u (' + (near ? '忍び足' : '巡航') + ')'); }
             return true;
         }
-        case 'screen': { // 第81弾 空母: 艦載機の網 — 艦載機を推定へ送り、母艦は後ろの霧で待つ。艦載機が目で捉えたら反対側から挟み撃ち
-            if (!est || est.age > 3600) { if (now - (H.lostF || (H.lostF = now)) > 60 * 60) return end('見失った', false); e._drift(null); return true; }
-            H.lostF = 0;
-            if (!H.sent) {
-                H.sent = now; let n = 0;
-                const live = enemies.filter(f => f.type === 'fighter' && f.hp > 0 && !f._dying && f._kind === undefined).length;
-                while ((e.droneStock || 0) > 0 && live + n < CARGO_CAP.carrier && n < 2) { e.droneStock--; _eLaunchFighter(e, est); n++; }
-                const tech = enemies.some(f => f.type === 'fighter' && f._kind === 'mech' && f._home === e && f.hp > 0);
-                say('【' + H.jp + '】' + (n ? '戦闘機を' + n + '機射出し、' : '') + (tech ? 'Techと共に' : '') + '推定 (' + _dirTxt(e.x, e.y, est.x, est.y) + ') へ送り出す — 母艦は後ろの霧で機関を止めて待つ');
-            }
-            if (!H.sendF || now - H.sendF > 120) { H.sendF = now; e._sendTo = { x: est.x, y: est.y, until: now + 60 * 20 }; }
-            const sp = huntStrikePlan(e, est); if (!sp) return end('撃てる兵装が無い', false);
-            H.w = sp.w; H.R = sp.R;
-            // 艦載機が自機を目で捉えた (データリンクで推定が新しく小さい) → 艦載機の反対側から挟み撃ち
-            if (e._dlF && now - e._dlF < 240 && est.r < Math.max(1500, D * 0.35)) { // 艦載機の目は点の観測 — 推定の幅がまだ広くても、報告が新しいうちに動く (艦載機は長くはもたない)
-                let sx = 0, sy = 0, nD = 0;
-                for (const f of enemies) if (f.type === 'fighter' && f._home === e && f.hp > 0 && !f._dying && f._kind !== 'scout' && f._kind !== 'turret' && Math.hypot(f.x - est.x, f.y - est.y) < 3000) { sx += f.x - est.x; sy += f.y - est.y; nD++; }
-                const meA = Math.atan2(e.y - est.y, e.x - est.x); let fa = meA;
-                if (nD) { const ad = Math.atan2(sy, sx), dd = _angDiff(meA, ad); if (Math.abs(dd) < 1.4) fa = ad + (dd >= 0 ? 1 : -1) * 1.4; }
-                H.k = 'stalk'; H.ph = 'approach'; H.flankA = fa; H.flankF = now; H.flankLock = now + 60 * 45; H.anvil = true; H.jp = '艦載機の網→挟み撃ち';
-                say('【' + H.jp + '】艦載機が自機を目視 (推定±' + Math.round(est.r) + 'u) → 艦載機の反対側 (' + _dirTxt(e.x, e.y, est.x + Math.cos(fa) * H.R, est.y + Math.sin(fa) * H.R) + ') から' + _WPN_JP[H.w] + 'で撃つ');
-                matchRecEvent('tacE', e.x, e.y, '敵の作戦「挟み撃ち」— 艦載機が捉えた相手を、母艦が別の向きから撃つ');
-                return true;
-            }
-            if (!H.S || now - (H.SF || 0) > 60 * 30) {
-                H.SF = now; const a = Math.atan2(e.y - est.y, e.x - est.x), hb = Math.min(DRONE_AUTO_DIST * 0.75, Math.max(H.R + 1500, 3800)); // 艦載機との通信が届く所 (6000u以内) で待つ — 遠すぎると艦載機が自動制御になり、見た相手を知らせてこない
-                const px = est.x + Math.cos(a) * hb, py = est.y + Math.sin(a) * hb;
-                const cv = findCoverSpot(px, py, 1500); H.S = cv ? { x: cv.x, y: cv.y } : clampToMapCircle(px, py, 1200);
-            }
-            const dS = Math.hypot(H.S.x - e.x, H.S.y - e.y);
-            if (dS > 500) { const ga = Math.atan2(H.S.y - e.y, H.S.x - e.x); if ((e._v || 0) < 0.2 || Math.abs(_angDiff(ga, e._driftA ?? e.angle)) > 0.5 || (now - H.f0) % 1200 < 700) e._moveHeading(ga, dS > 2500 ? ms.cruise : ms.silent); else e._drift(ga); }
-            else e._drift(Math.atan2(est.y - e.y, est.x - e.x));
-            if (now - H.sent > 60 * 150) {
-                if (est.age < 1200) { H.k = 'stalk'; H.jp = '忍び寄り'; H.ph = 'approach'; H.flankA = undefined; e._sendTo = null; say('【艦載機の網→忍び寄り】艦載機が捉えられない — 母艦が自分で回り込む'); return true; }
-                return end('艦載機が捉えられなかった', false);
-            }
-            if (now - (H.goLog || 0) > 1200) { H.goLog = now; say('【' + H.jp + '】艦載機が推定の周りを探している — 母艦は' + (dS > 500 ? '霧へ移動中' : '霧で待機') + ' (推定まで' + Math.round(D / 100) * 100 + 'u・±' + Math.round(est.r) + 'u' + (e._dlF ? '・艦載機の報告' + Math.round((now - e._dlF) / 60) + '秒前' : '') + ')'); }
-            return true;
-        }
+        case 'screen': return huntScreen(HAx, H, HXx); // 第118弾: 自機COMと共通
         case 'shadow': return huntShadow(HAx, H, HXx); // 第116弾: 自機COMと共通
         case 'set': { // 偽装の罠: 待ち伏せ位置へ → 囮を置く
             const dH = Math.hypot(H.S.x - e.x, H.S.y - e.y);
@@ -16218,7 +16221,10 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
         placeFake: (x, y) => _comUseItem('fakecache', x, y),
         trapped: (h) => { for (const sid in _signalAnalysis) { const pg = _signalAnalysis[sid] && _signalAnalysis[sid].ping; if (pg && pg.f >= (h.placedF || 0) && pg.f > now - 120 && Math.hypot(pg.x - h.B.x, pg.y - h.B.y) < 900) { h._trapSid = sid; return true; } } return false; },
         onTrap: (h) => { c.hunt = null; c.huntCD = 0; c.forceNext = 'hold'; if (h._trapSid) window._lockSignal(h._trapSid); matchRecEvent('tacP', player.x, player.y, '自機COMの作戦「偽コンテナの罠」が成功 — 爆発で位置が割れた所を撃ちに行く'); },
-        lastMove: (es) => H.vh ? _huntVel(H, es) : null, transit: () => {} };
+        lastMove: (es) => H.vh ? _huntVel(H, es) : null, transit: () => {},
+        whoSeen: 'SIG-' + sigNo(H.sid), sendTo: (es) => { if (es && now - (H.pSendF || 0) > 900) { H.pSendF = now; droneOrder('attack', 'attack', es.x, es.y); if (playerDrones.some(d => d.hp > 0 && d.type === 'mech')) droneOrder('mech', 'attack', es.x, es.y); } },
+        launch: (es) => { H.sent = now; return { n: 0, tech: playerDrones.some(d => d.hp > 0 && d.type === 'mech') }; },
+        seen: (es) => { const sa = _signalAnalysis[H.sid], dp = sa && sa.ping && /^d/.test(sa.ping.src || '') && now - sa.ping.f < 240 ? sa.ping : null; if (!dp) return null; return { ref: { x: dp.x, y: dp.y }, drones: playerDrones.filter(d => d.hp > 0 && (d.type === 'attack' || d.type === 'mech') && Math.hypot(d.x - dp.x, d.y - dp.y) < 3000) }; } };
     if (H.k === 'feint') return huntFeint(HAx, H, HXx); // 第117弾: 偽装退却・偽コンテナの罠は 敵と共通
     if (H.k === 'fakebox') return huntFakebox(HAx, H, HXx);
     if (H.ph === 'wait' || H.ph === 'creep' || H.ph === 'egress' || H.ph === 'lurk') return huntPostStrike(HAx, H, HXx); // 第116弾: 一撃のあとの動きは 敵と共通
@@ -16265,29 +16271,7 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
             comThink('p', 'hunt-go', '【' + H.jp + '】' + (near ? '噴かしては機関を止めて漂い' : '潜航で') + '回り込み中 — SIG-' + sigNo(H.sid) + 'の推定まで' + Math.round(D / 100) * 100 + 'u');
             return true;
         }
-        case 'screen': { // 第81弾 空母: 艦載機の網 (敵と同じ考え方)
-            if (!est || est.age > 3600) { if (now - (H.lostF || (H.lostF = now)) > 60 * 60) return end('見失った'); return true; }
-            H.lostF = 0;
-            if (now - (H.sendF || 0) > 60 * 15) { H.sendF = now; droneOrder('attack', 'attack', est.x, est.y); if (playerDrones.some(d => d.hp > 0 && d.type === 'mech')) droneOrder('mech', 'attack', est.x, est.y); }
-            const sp = comStrikePlan(est); if (!sp) return end('撃てる兵装が無い'); H.w = sp.w; H.R = sp.R;
-            const sa = _signalAnalysis[H.sid], dp = sa && sa.ping && /^d/.test(sa.ping.src || '') && now - sa.ping.f < 240 ? sa.ping : null; // 自分のドローンが目で捉えた (点の観測)
-            if (dp) {
-                let sx = 0, sy = 0, nD = 0;
-                for (const d of playerDrones) if (d.hp > 0 && (d.type === 'attack' || d.type === 'mech') && Math.hypot(d.x - dp.x, d.y - dp.y) < 3000) { sx += d.x - dp.x; sy += d.y - dp.y; nD++; }
-                const meA = Math.atan2(player.y - dp.y, player.x - dp.x); let fa = meA;
-                if (nD) { const ad = Math.atan2(sy, sx), dd = _angDiff(meA, ad); if (Math.abs(dd) < 1.4) fa = ad + (dd >= 0 ? 1 : -1) * 1.4; }
-                H.k = 'stalk'; H.ph = 'approach'; H.flankA = fa; H.flankF = now; H.flankLock = now + 60 * 45; H.anvil = true; H.dlF = now; H.jp = '艦載機の網→挟み撃ち';
-                say('【' + H.jp + '】ドローンがSIG-' + sigNo(H.sid) + 'を目視 → ドローンの反対側から' + _WPN_JP[H.w] + 'で撃つ');
-                matchRecEvent('tacP', player.x, player.y, '自機COMの作戦「挟み撃ち」');
-                return true;
-            }
-            if (!H.S || now - (H.SF || 0) > 60 * 30) { H.SF = now; const a = Math.atan2(player.y - est.y, player.x - est.x), hb = Math.min(DRONE_AUTO_DIST * 0.75, Math.max(H.R + 1500, 3800)), px = est.x + Math.cos(a) * hb, py = est.y + Math.sin(a) * hb, cv = findCoverSpot(px, py, 1500); H.S = cv ? { x: cv.x, y: cv.y } : clampToMapCircle(px, py, 1200); }
-            const dS = Math.hypot(H.S.x - player.x, H.S.y - player.y);
-            if (dS > 500) _comHGo(c, H.S.x, H.S.y, dS > 2500 ? 'cruise' : 'silent'); else { if (player.state === 'moving') player.setTarget(player.x, player.y); if (powerStance !== 'silent') setStance('silent', true); }
-            if (now - H.sent > 60 * 150) { if (est.age < 1200) { H.k = 'stalk'; H.jp = '忍び寄り'; H.ph = 'approach'; H.flankA = undefined; say('【艦載機の網→忍び寄り】ドローンが捉えられない — 母艦が自分で回り込む'); return true; } return end('ドローンが捉えられなかった'); }
-            comThink('p', 'hunt-scr', '【' + H.jp + '】ドローンが推定の周りを探している — 母艦は' + (dS > 500 ? '霧へ移動中' : '霧で待機'));
-            return true;
-        }
+        case 'screen': return huntScreen(HAx, H, HXx); // 第118弾: 敵と共通
         case 'shadow': return huntShadow(HAx, H, HXx); // 第116弾: 敵と共通
         case 'set': {
             const dH = Math.hypot(H.S.x - player.x, H.S.y - player.y);
