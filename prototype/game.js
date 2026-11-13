@@ -1662,6 +1662,7 @@ function drawDroneIcon(ctx, kind, r, col) {
     else { ctx.arc(0, 0, r * 0.55, 0, Math.PI * 2); ctx.fill(); }
 }
 const FTR_BIG_PASS = 150, FTR_BIG_SEP = 1100; // 第57弾: 戦艦への航過 — 近づく限界・離れる距離
+const DRONE_RELAY_R = 3000, DRONE_RELAY_CAP = 4, DRONE_RELAY_EM = 0.05, DRONE_RELAY_CONTEST = 0.3; // 第132弾: 占有したノード・コロニーはドローンの通信中継局 (半径・1局が受け持てる機数・中継の電磁波・奪われかけの境)
 const DRONE_AUTO_DIST = 6000, DRONE_AUTO_FOG = 0.75;           // 通信が切れる距離 / 切れる霧の濃さ (ドローン側・母艦側のどちらか)
 const DRONE_AUTO_HIT = 0.6, DRONE_AUTO_EVADE = 0.6;            // 自動制御中: 与えるダメージ×0.6・敵弾を避ける確率×0.6
 const DRONE_AMMO = { attack: 50, mech: 50 };       // 第52弾: 戦闘機は実弾50発・Techは小銃50発 (+ミサイル3発・サーベル5回)
@@ -5431,7 +5432,7 @@ class Ship {
             }
             if (this._kind) { // 第50弾B: 敵のTech・哨戒機のシグネチャは自機のドローンと同じ値 (Drone.sigOf・通信途絶で増える)
                 const bs = { mech: [0.30, 0.26], scout: [0.14, 0.16], turret: [0.05, 0.14] }[this._kind], au = this._auto ? 1 : 0;
-                this.heatSig = bs[0] * (1 + 1.2 * au); this.emSig = bs[1] * (1 + 1.2 * au) + 0.1 * au;
+                this.heatSig = bs[0] * (1 + 1.2 * au); this.emSig = bs[1] * (1 + 1.2 * au) + 0.1 * au + (this._relay ? DRONE_RELAY_EM : 0);
                 this.opticalSig = this.fireFlashTimer > 0 ? 0.35 : 0.02; this.higgsSig = this._kind === 'scout' ? 0.03 : 0.05;
             }
             // 第89弾 (オーナー「敵だけ/自機だけの戦術はない・両方平等」): 敵の潜航型もジャミングを使う — 発動中はEMが増える (自艦と同じ値)
@@ -10162,6 +10163,11 @@ function drawDroneVision(ctx) {
     const inv = 1 / camera.zoom;
     ctx.save();
     ctx.lineWidth = 1.2 * inv; ctx.setLineDash([6 * inv, 7 * inv]);
+    for (const d of playerDrones) { // 第132弾: 中継中のドローンは中継局へ細い点線 (局には輪)
+        if (d.hp <= 0 || !d._relay) continue;
+        ctx.globalAlpha = 0.35; ctx.strokeStyle = '#7fe8ff'; ctx.beginPath(); ctx.moveTo(d.x, d.y); ctx.lineTo(d._relay.x, d._relay.y); ctx.stroke();
+        ctx.globalAlpha = 0.22; ctx.beginPath(); ctx.arc(d._relay.x, d._relay.y, DRONE_RELAY_R, 0, Math.PI * 2); ctx.stroke();
+    }
     for (const d of playerDrones) {
         const pts = d.hp > 0 && d._visPts; if (!pts) continue;
         const linked = d._q >= DRONE_LINK_WEAK, col = DRONE_VIS_COL[d.type] || '200,220,255';
@@ -13842,13 +13848,17 @@ class Drone {
             for (let k = 1; k <= 8; k++) hs += getHiggsIntensity(player.x + dx * k / 9, player.y + dy * k / 9);
             q = Math.max(0, q - (hs / 8) * DRONE_LINK_FOG);
         }
-        // 第50弾: 距離が離れすぎる・どちらかが濃い霧の中 → 通信途絶 = 内部AIの自動制御 (見えた敵の共有も母艦のAI支援も切れる。指示は第46弾のとおり届き続ける)
-        { const fogD = getHiggsIntensity(this.x, this.y), fogP = getHiggsIntensity(player.x, player.y);
-          const au = dist > DRONE_AUTO_DIST || fogD >= DRONE_AUTO_FOG || fogP >= DRONE_AUTO_FOG || player._commJam > 0; // 第60弾: 通信障害
+        // 第50弾: 距離が離れすぎる・どちらかが濃い霧の中 → 通信途絶 = 内部AIの自動制御 / 第132弾: 占有したノード・コロニーの中継で制御下に戻る (敵のドローンと同じ droneLinkState)
+        { const st = droneLinkState('player', this, player, playerDrones), au = st.auto;
           if (au !== this._auto && (this.type === 'attack' || this.type === 'mech' || this.type === 'scout')) {
               logMessage('DRONE: ' + _droneName(this) + (au ? ' 通信途絶 — 内部AIの自動制御 (熱・EMが増え、命中と回避が落ちる)' : ' 通信回復 — 母艦のAIに戻る'), au ? 'warning-msg' : 'system-msg');
           }
-          this._auto = au; if (au) q = 0; }
+          if (st.relay !== this._relay && (this.type === 'attack' || this.type === 'mech' || this.type === 'scout')) {
+              if (st.relay) logMessage('DRONE: ' + _droneName(this) + ' ' + (st.relay.type === 'colony' ? 'コロニー' : 'ノード') + 'の中継で制御下 (電磁波が少し漏れる)', 'system-msg');
+              else if (this._relay && !au) logMessage('DRONE: ' + _droneName(this) + ' 中継圏を出て母艦と直接つながった', 'system-msg');
+          }
+          this._relay = st.relay; this._auto = au;
+          if (au) q = 0; else if (st.relay) q = Math.max(q, 0.8); }
         this._q = q;
         this._order = this._own || droneOrders[this.type] || null; // 第46弾: 指示は通信圏外でも届く (第50弾: 個別の指示を優先)
         const base = DRONE_VIS[this.type] || 0;
@@ -13903,7 +13913,7 @@ class Drone {
         if (!base) return 0;
         const au = this._auto ? 1 : 0;
         if (b === 'heat') return base.heat * (1 + 1.2 * au);
-        if (b === 'em') return base.em * (1 + 1.2 * au) + 0.1 * au;
+        if (b === 'em') return base.em * (1 + 1.2 * au) + 0.1 * au + (this._relay ? DRONE_RELAY_EM : 0);
         if (b === 'optic') return _frameCount - (this._fireF || -1e9) < 30 ? 0.35 : 0.02;
         return this.type === 'scout' ? 0.03 : 0.05; // higgs: 小さな航跡
     }
@@ -14421,6 +14431,7 @@ function enemyFighterStep(f) {
     let tgt = null, td = Infinity;
     if (f._ammo === undefined) f._ammo = DRONE_AMMO.attack;
     if (f._home === undefined) f._home = carrier || null;
+    { const _hc = f._home && f._home.hp > 0 && !f._home._dying ? f._home : carrier; if (_hc) { const _ls = droneLinkState('enemy', f, _hc, enemies); f._relay = _ls.relay; f._auto = _ls.auto; } } // 第132弾: 敵の戦闘機も通信途絶 (内部AIの自動制御) と中継を自機の戦闘機と同じに受ける (旧: 敵の戦闘機は常に制御下だった)
     const _rtbF = f._ammo <= 0 || (f._ammo <= DRONE_AMMO.attack * 0.3 && _frameCount > (f._rtbBlock || 0)); // 第52弾: 弾切れ → 母艦へ戻って補給 (資材0.25個) / 第74弾: 残弾3割以下でも戻る (資材が無ければ諦めて戦う)
     if ((_frameCount + f.uid) % 6 === 0 || !f._seeT) {
         f._seeT = null;
@@ -14519,8 +14530,8 @@ function enemyScoutStep(f) {
     const carrier = f._home && f._home.hp > 0 && !f._home._dying ? f._home : null; // 第51弾: 出した母艦 (デバッグで艦種が空母以外でも出せる)
     if (!carrier) { f.hp = 0; f._dying = 1; f._noReward = true; return; } // 母艦を失ったら燃え尽きる
     const dC = Math.hypot(carrier.x - f.x, carrier.y - f.y);
-    const au = dC > DRONE_AUTO_DIST || getHiggsIntensity(f.x, f.y) >= DRONE_AUTO_FOG || getHiggsIntensity(carrier.x, carrier.y) >= DRONE_AUTO_FOG || carrier._commJam > 0;
-    f._auto = au;
+    const _ls = droneLinkState('enemy', f, carrier, enemies), au = _ls.auto; // 第132弾: 自機のドローンと同じ通信の状態 (中継つき)
+    f._relay = _ls.relay; f._auto = au;
     if ((_frameCount + f.uid) % 6 === 0) {
         const { tgt } = _enemyDroneSees(f, DRONE_VIS.scout);
         f._seeT = tgt;
@@ -14579,7 +14590,7 @@ function enemyTechStep(f) {
     const carrier = f._home && f._home.hp > 0 && !f._home._dying ? f._home : null; // 第51弾: 出した母艦 (デバッグで艦種が空母以外でも出せる)
     if (!carrier) { f.hp = 0; f._dying = 1; f._noReward = true; return; }
     const dC = Math.hypot(carrier.x - f.x, carrier.y - f.y);
-    f._auto = dC > DRONE_AUTO_DIST || getHiggsIntensity(f.x, f.y) >= DRONE_AUTO_FOG || getHiggsIntensity(carrier.x, carrier.y) >= DRONE_AUTO_FOG || carrier._commJam > 0;
+    { const _ls = droneLinkState('enemy', f, carrier, enemies); f._relay = _ls.relay; f._auto = _ls.auto; } // 第132弾
     if ((_frameCount + f.uid) % 6 === 0 || f._seeT === undefined) {
         const { tgt } = _enemyDroneSees(f, DRONE_VIS.mech);
         f._seeT = tgt;
@@ -14667,6 +14678,33 @@ function drawSaberFx(ctx) {
     }
 }
 // 第21弾: ドローンが強い通信で見ている敵 (自艦の有視界と同じ扱い)
+// ═══ 第132弾 (オーナー「ノードにドローンとの通信中継の役割を」): ドローンの通信の状態を 自機も敵も同じ関数で決める ═══
+// 直接 = 母艦から DRONE_AUTO_DIST 以内で、ドローン側・母艦側とも霧が DRONE_AUTO_FOG 未満・通信障害なし。
+// 中継 = 直接が切れていても、自分の占有したノード/コロニー (奪われかけでない・その場所の霧が DRONE_AUTO_FOG 未満) の半径 DRONE_RELAY_R 以内なら制御下 (1局に DRONE_RELAY_CAP 機まで)。
+//   中継中のドローンは電磁波が DRONE_RELAY_EM 増える (中継は無料ではない)。通信障害 (_commJam) は中継でも防げない。
+function droneRelayFor(side, d, drones) {
+    const owner = side === 'player' ? 'player' : 'enemy', foe = side === 'player' ? 'capE' : 'capP';
+    let best = null, bd = DRONE_RELAY_R;
+    const tryR = (o, contested) => {
+        if (o.owner !== owner || contested) return;
+        const dd = Math.hypot(o.x - d.x, o.y - d.y); if (dd >= bd) return;
+        if (getHiggsIntensity(o.x, o.y) >= DRONE_AUTO_FOG) return;
+        let load = 0; for (const q of drones) if (q !== d && q.hp > 0 && q._relay === o) load++;
+        if (load >= DRONE_RELAY_CAP) return;
+        bd = dd; best = o;
+    };
+    for (const n of resourceNodes) tryR(n, (n[foe] || 0) > DRONE_RELAY_CONTEST);
+    for (const st of structures) if (st.type === 'colony') tryR(st, false);
+    return best;
+}
+function droneLinkState(side, d, carrier, drones) {
+    const fogD = getHiggsIntensity(d.x, d.y), fogC = getHiggsIntensity(carrier.x, carrier.y), dist = Math.hypot(d.x - carrier.x, d.y - carrier.y);
+    const jam = carrier._commJam > 0;
+    const direct = dist <= DRONE_AUTO_DIST && fogD < DRONE_AUTO_FOG && fogC < DRONE_AUTO_FOG && !jam;
+    if (direct) return { auto: false, relay: null, dist };
+    if (!jam && fogD < DRONE_AUTO_FOG) { const r = droneRelayFor(side, d, drones); if (r) return { auto: false, relay: r, dist }; }
+    return { auto: true, relay: null, dist };
+}
 function droneSeesStrong(e) { return (e._dSeenF || -99) >= _frameCount - 7; }
 function drawPlayerDrones(ctx) {
     // 第21弾: ドローンの有視界 (薄く) と、弱い/途切れた通信
