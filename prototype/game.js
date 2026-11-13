@@ -16172,6 +16172,14 @@ function stratFactsE(e) {
         hasScout: (e.scoutStock || 0) > 0 || liveK('scout'), hasFtr: (e.droneStock || 0) > 0 || liveK('attack'), hasTech: liveK('mech'), hasBuild: (e.turretStock || 0) > 0,
         canTech: cls === 'carrier' && !liveK('mech') && !e._techBuilt && !(e._techT > 0) };
 }
+// 第125弾 (共通化・段5後半の7): 戦略「待ち伏せ/餌/罠」の待機位置の決め方を自機COMと敵で同じ関数に
+//   拠点の外側 (罠は砲台の射程に入る近さ) の 近くの霧/岩礁帯 へ。時間切れの延長は遅い艦でも着く前に切れない値 (双方 0.2u/f で割る)
+function stratSpotFor(id, ox, oy, site) {
+    const a0 = Math.atan2(oy - site.y, ox - site.x) + (Math.random() - 0.5) * 1.6, off = id === 'trap' ? 500 + Math.random() * 700 : 1200 + Math.random() * 1400;
+    const sx = site.x + Math.cos(a0) * off, sy = site.y + Math.sin(a0) * off, cv = findCoverSpot(sx, sy, 3000);
+    const spot = cv ? { x: cv.x, y: cv.y } : clampToMapCircle(sx, sy, 800);
+    return { spot, kindFog: cv ? cv.kind : null, extra: Math.min(18000, Math.hypot(spot.x - ox, spot.y - oy) / 0.2) };
+}
 function enemyStratStep(e, P) {
     const now = _frameCount, jp = { ambush: '拠点の待ち伏せ', bait: '餌で誘う', guard: '拠点を守る', trap: '罠 (砲台を据えて誘い込む)', push: '圧倒して狩る', screen: 'ドローンで探る', fogHide: '霧に潜む', tech: 'Tech建造 (資材集め)' };
     let S = e._strat;
@@ -16199,10 +16207,7 @@ function enemyStratStep(e, P) {
         } else {
             S.site = stratPickSite('e', e.x, e.y, e._siteUsed || (e._siteUsed = {}));
             if (!S.site) { e._strat = null; e._stratCD = now + 1800; return false; }
-            const a0 = Math.atan2(e.y - S.site.y, e.x - S.site.x) + (Math.random() - 0.5) * 1.6, off = pick === 'trap' ? 500 + Math.random() * 700 : 1200 + Math.random() * 1400;
-            const sx = S.site.x + Math.cos(a0) * off, sy = S.site.y + Math.sin(a0) * off, cv = findCoverSpot(sx, sy, 3000);
-            S.spot = cv ? { x: cv.x, y: cv.y } : clampToMapCircle(sx, sy, 800);
-            S.until += Math.min(18000, Math.hypot(S.spot.x - e.x, S.spot.y - e.y) / 0.15); // 第66弾: 潜伏中の敵は約0.2u/f (12u/s)・着く前に時間切れにならない
+            { const sp = stratSpotFor(pick, e.x, e.y, S.site); S.spot = sp.spot; S.kindFog = sp.kindFog; S.until += sp.extra; }
             if (pick === 'bait') {
                 const k = x.lures[Math.floor(Math.random() * Math.min(2, x.lures.length))] || x.lures[0];
                 if (k === 'fsos') { e.lureSOS--; launchLure('e', 'sos', e.x, e.y, S.site.x, S.site.y); } else if (k === 'lure') { e.lureShip--; launchLure('e', 'ship', e.x, e.y, S.site.x, S.site.y); }
@@ -17403,20 +17408,16 @@ function comStratStep(c, P, D, hpF, contact, te, lk, r) {
             const site = _comPickSite(c, P);
             if (!site) { c.st = null; S = null; c.stratCD = now + 1800; return false; }
             S.site = site;
-            const a0 = Math.atan2(player.y - site.y, player.x - site.x) + (Math.random() - 0.5) * 1.6, off = S.id === 'trap' ? 500 + Math.random() * 700 : 1200 + Math.random() * 1400; // 罠は砲台の射程に入る近さ
-            const sx = site.x + Math.cos(a0) * off, sy = site.y + Math.sin(a0) * off, cv = findCoverSpot(sx, sy, 3000);
-            S.spot = cv ? { x: cv.x, y: cv.y } : clampToMapCircle(sx, sy, 800);
-            S.kindFog = cv ? cv.kind : null;
-            S.until += Math.min(18000, Math.hypot(S.spot.x - player.x, S.spot.y - player.y) / 0.4); // 第66弾: 遅い艦 (空母は約24u/s) でも着く前に時間切れにならない
+            { const sp = stratSpotFor(S.id, player.x, player.y, site); S.spot = sp.spot; S.kindFog = sp.kindFog; S.until += sp.extra; }
             if (S.id === 'trap') {
                 const pref = ['fsos', 'lure', 'bcn_heat', 'bcn_optic', 'bcn_em', 'bcn_higgs'].filter(k => x.has(k));
                 S.item = pref.length ? pref[Math.floor(Math.random() * pref.length)] : null;
-                comThinkEvent('p', site.lbl + 'の近く (' + _dirTxt(player.x, player.y, S.spot.x, S.spot.y) + ') に砲台を据え' + (S.item ? '、' + DRONE_SPEC[S.item].label + 'で誘い込む' : '') + ' → その近くの' + (cv ? '霧/岩礁帯' : '外れ') + 'で待つ');
+                comThinkEvent('p', site.lbl + 'の近く (' + _dirTxt(player.x, player.y, S.spot.x, S.spot.y) + ') に砲台を据え' + (S.item ? '、' + DRONE_SPEC[S.item].label + 'で誘い込む' : '') + ' → その近くの' + (S.kindFog ? '霧/岩礁帯' : '外れ') + 'で待つ');
             } else if (S.id === 'bait') {
                 const pref = ['fsos', 'lure', 'bcn_heat', 'bcn_optic', 'bcn_em', 'bcn_higgs'].filter(k => x.has(k)); const k = pref[Math.floor(Math.random() * Math.min(2, pref.length))] || pref[0];
                 if (!k || !_comUseItem(k, site.x, site.y)) { c.st = null; S = null; return false; }
-                S.item = k; comThinkEvent('p', DRONE_SPEC[k].label + 'を' + site.lbl + 'の方 (' + _dirTxt(player.x, player.y, site.x, site.y) + ') へ置く → その近くの' + (cv ? '霧/岩礁帯' : '外れ') + 'で待つ');
-            } else comThinkEvent('p', site.lbl + 'の近く (' + _dirTxt(player.x, player.y, S.spot.x, S.spot.y) + ') の' + (cv ? '霧/岩礁帯' : '外れ') + 'で、取りに来る相手を待つ');
+                S.item = k; comThinkEvent('p', DRONE_SPEC[k].label + 'を' + site.lbl + 'の方 (' + _dirTxt(player.x, player.y, site.x, site.y) + ') へ置く → その近くの' + (S.kindFog ? '霧/岩礁帯' : '外れ') + 'で待つ');
+            } else comThinkEvent('p', site.lbl + 'の近く (' + _dirTxt(player.x, player.y, S.spot.x, S.spot.y) + ') の' + (S.kindFog ? '霧/岩礁帯' : '外れ') + 'で、取りに来る相手を待つ');
         } else if (S.id === 'guard') { S.site = x.owned[Math.floor(Math.random() * x.owned.length)]; }
     }
     // ── 共通の中止条件 ──
