@@ -5257,6 +5257,7 @@ class Ship {
                 const _stalking = _hasScent || !!this.intelPos || !!this._roam;
                 if (_hasScent) this._lastScentF = _frameCount;
                 this.speed = (_stalking ? ENEMY_STALK_SPEED * (0.6 + _pers.aggression * 0.6) * (1 - _pers.stealth * 0.4) : 0.08) * MOVE_SPEED_MULT;
+                if (this._roam && this._roam !== 'convoy' && !_hasScent) this.speed = 9; // 第115弾: 取りに行く/哨戒/戦略の移動は 自機COMと同じ「巡航(隠密0.5以上は潜航)」で走る (旧: 忍び足の速さ×攻撃性・隠密性で、攻撃性0.5の敵は巡航の7割しか出ず、ノードを取る回数が自機COMの半分だった)。実際の速さは下の min(.., 巡航/潜航)
                 if (this._roam === 'convoy' && convoys.some(c => c.sid === this._cvT)) this.speed = Math.max(this.speed, CONVOY_SPEED * 1.6); // 第34弾: 輸送船に追いつける速さ (忍び足0.75u/fでは追いつけなかった)
                 const activeNodes = resourceNodes.filter(n => n.owner !== 'enemy');
                 // 第21弾: 潜伏中のゆっくりした移動 (隠れ場所へ0.08u/f) の途中でも4秒ごとに考え直す。
