@@ -6477,6 +6477,7 @@ function generateSector() {
     dirSonarCooldown = 0;
     dirSonarVisual = null;
     dirSonarPendingFire = false;
+    hackPending = null; hackSel = null; // 第126弾
     passiveBearings = [];
     for (const k in _ringSm) delete _ringSm[k];
     lockedSignalId = null; _contactLabels = {}; _contactLabelNext = 1; _signalAnalysis = {}; for (const k in _srcKnown) delete _srcKnown[k]; // 第40弾
@@ -9732,17 +9733,41 @@ function useLinkCut(who) {
     if (isP) sfxUI('ew_linkcut');
 }
 // 第89弾: 電子戦ボタンからハック波 — 効果を選ぶ → 地図で方向をタップ (旧: 地図の長押しメニュー)
-let hackPending = null;
-function selectHackWave(effect) {
+let hackPending = null; // 撃つ構え (地図で方向をタップすると撃つ)
+let hackSel = null;     // 第126弾 (オーナー): 選んだハックの項目 — 索敵ソナーの「種類」と同じ。選んだだけでは撃つ構えにならない
+const HACK_SEL_COL = { fcs: '#ff7a5a', halt: '#ffd24a', sensor: '#5fd0ff', comm: '#c48bff' };
+function _hackSelUi() {
+    document.querySelectorAll('.hackw-btn').forEach(b => b.classList.toggle('on', b.dataset.eff === hackSel));
+    const fb = document.getElementById('btn-hackw-fire'); if (fb) { fb.classList.toggle('no-band', !hackSel); fb.classList.toggle('pending-fire', !!hackPending); }
+}
+function hackCancelPending(silent) {
+    if (!hackPending) return;
+    hackPending = null; canvas.style.cursor = 'default'; _hackSelUi();
+    if (!silent) logMessage('HACK: ハック波 — キャンセル。', 'system-msg');
+}
+function selectHackWave(effect) { // 項目を選ぶ (もう一度押すと外す)
     if (!player || player.hp <= 0 || comDemo || playReplay) return;
-    if (_hackPulseCD > 0) { logMessage('HACK: ハック波は再使用まで' + Math.ceil(_hackPulseCD / 60) + '秒', 'warning-msg'); return; }
-    hackPending = hackPending === effect ? null : effect;
-    document.querySelectorAll('.hackw-btn').forEach(b => b.classList.toggle('pending-fire', b.dataset.eff === hackPending));
-    if (hackPending) { const H = hackPower('player'); logMessage('HACK: ハック波 (' + HACK_EFFECTS[effect].jp + ') — 地図で方向をタップ (届く距離' + Math.round(hackPulseRange(H)) + 'u・半角±8°・外れても電磁波が出る)', 'system-msg'); }
+    hackSel = hackSel === effect ? null : effect;
+    if (hackPending) hackCancelPending(true);
+    _hackSelUi();
+    if (hackSel) { const H = hackPower('player'); logMessage('HACK: ' + HACK_EFFECTS[hackSel].jp + ' を選んだ — 「ハック」を押して、地図で電波を飛ばす方向をタップ (届く距離' + Math.round(hackPulseRange(H, player)) + 'u・半角±8°・外れても電磁波が出る)', 'system-msg'); }
     sfxUI('ui_select');
 }
+function hackNeedSel() { logMessage('HACK: ハックする項目 (火器管制・機関停止・センサー・通信) を選んでから「ハック」を押す — 電子戦のポップオーバーで選ぶ', 'warning-msg'); const g = document.getElementById('action-popover'); if (g) { g.classList.add('shake'); setTimeout(() => g.classList.remove('shake'), 500); } sfxUI('ui_error'); }
+function armHackWave() { // 「ハック」ボタン: 撃つ構え (もう一度でキャンセル) — 索敵の指向性ソナーボタンと同じ
+    if (!player || player.hp <= 0 || comDemo || playReplay) return;
+    if (hackPending) { hackCancelPending(); return; }
+    if (_hackPulseCD > 0) { logMessage('HACK: ハック波は再使用まで' + Math.ceil(_hackPulseCD / 60) + '秒', 'warning-msg'); sfxUI('ui_error'); return; }
+    if (!hackSel) { hackNeedSel(); return; }
+    droneHackMode = false; document.getElementById('btn-hackw-drone')?.classList.remove('pending-fire');
+    hackPending = hackSel; canvas.style.cursor = 'crosshair'; _hackSelUi();
+    logMessage('HACK: ハック波 (' + HACK_EFFECTS[hackSel].jp + ') 待機中 — 電波を飛ばす方向を地図でタップ/クリックしてください。', 'system-msg');
+    sfxUI('ui_select');
+}
+document.getElementById('btn-hackw-fire')?.addEventListener('click', (e) => { e.stopPropagation(); armHackWave(); });
 function selectDroneHack() {
     if (!player || player.hp <= 0 || comDemo || playReplay) return;
+    if (hackPending) hackCancelPending(true);
     const lf = hackLevel('fighter');
     if (!lf.s2) { logMessage('HACK: ドローンへ侵入するには演算力' + HACK_THR.fighter.s2 + '以上が要る (今' + (Math.round(lf.H * 10) / 10) + ')。下の「演算力」をタップで内訳', 'warning-msg'); return; }
     const c = _droneHackCands;
@@ -9766,8 +9791,7 @@ document.getElementById('btn-hackw-drone')?.addEventListener('click', (e) => { e
 function tryFireHackPending(wx, wy) {
     if (tryPickDroneHack(wx, wy)) return true;
     if (!hackPending || !player || player.hp <= 0) return false;
-    const eff = hackPending; hackPending = null;
-    document.querySelectorAll('.hackw-btn').forEach(b => b.classList.remove('pending-fire'));
+    const eff = hackPending; hackPending = null; canvas.style.cursor = 'default'; _hackSelUi();
     if (_hackPulseCD > 0) { logMessage('HACK: ハック波は再使用まで' + Math.ceil(_hackPulseCD / 60) + '秒', 'warning-msg'); return true; }
     const H = hackPower('player'), ang = Math.atan2(wy - player.y, wx - player.x);
     logMessage('HACK: ハック波を発射 — 方位' + compassDeg(ang) + '° (' + HACK_EFFECTS[eff].jp + '・演算力' + (Math.round(H * 10) / 10) + '・届く距離' + Math.round(hackPulseRange(H)) + 'u)', 'system-msg');
@@ -9838,7 +9862,7 @@ function drawAlertFx(ctx) {
 function drawHackFx(ctx) {
     const inv = 1 / camera.zoom;
     // 第90弾: 撃つ側は「どこまで届くか」を見て撃つ — ハック波を選んでいる間は届く距離の円 (霧の向こう・濃いヒッグスの中には届かない)
-    if (hackPending && player && player.hp > 0) {
+    if ((hackPending || hackSel) && player && player.hp > 0 && !comDemo && !playReplay) {
         const R = hackPulseRange(hackPower('player'), player);
         ctx.save(); ctx.strokeStyle = '#ff66cc'; ctx.globalAlpha = 0.75; ctx.lineWidth = 1.6 * inv; ctx.setLineDash([12 * inv, 10 * inv]);
         ctx.beginPath(); ctx.arc(player.x, player.y, R, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); ctx.restore();
@@ -14934,15 +14958,15 @@ function comSonarPower(P) {
     return 'std';
 }
 function enemyPingRange(e, pw) { return OMNI_SONAR_RANGE[1] * SONAR_FRAC * shipFx(e).sonar * (1 - getStormIntensity(e.x, e.y) * STORM_SONAR_DEGRADE) * (SONAR_POWER[pw || 'std'].r); }
-function firePingFromEnemy(e) {
+function firePingFromEnemy(e, opt) { // opt={omni:true,power:'weak'}: 第126弾 — 索敵行の「あえて弱いソナー」(全周囲・弱で固定)
     if (!player || player.hp <= 0) return;
     seatSfx('sonar_omni_mid', 0.9);
-    const _pw = comSonarPower(e.personality || {});
+    const _pw = (opt && opt.power) || comSonarPower(e.personality || {});
     // 第72弾: 敵も種類を選んで打つ — 自艦を最近聞いた帯域 / 無ければ順に回す (真の発信は読まない)
     const _eBand = (e._heardBand && e._heardBandF !== undefined && _frameCount - e._heardBandF < 3600) ? e._heardBand : SONAR_BANDS[(e._pingRot = ((e._pingRot || 0) + 1) % 4)];
     // 第50弾: 接触を失った直後 (最後の推定がある) は、その方向へ指向性ソナーを打つ。無ければ全周囲
     let _dir = null;
-    if (e.playerLastKnownPos && (e.contactFreshness || 0) > 0.15 && (e.uid + Math.floor(_frameCount / 900)) % 2 === 0) {
+    if (!(opt && opt.omni) && e.playerLastKnownPos && (e.contactFreshness || 0) > 0.15 && (e.uid + Math.floor(_frameCount / 900)) % 2 === 0) {
         _dir = { ang: Math.atan2(e.playerLastKnownPos.y - e.y, e.playerLastKnownPos.x - e.x), half: DIR_SONAR_HALF_ANGLE[1] };
     }
     const ENEMY_PING_RANGE = _dir ? DIR_SONAR_MAX_RANGE * SONAR_FRAC * shipFx(e).sonar * (1 - getStormIntensity(e.x, e.y) * STORM_SONAR_DEGRADE) * SONAR_POWER[_pw].r : enemyPingRange(e, _pw);
@@ -15896,6 +15920,9 @@ function huntLureSet(HA, H, X) {
 // 第125弾 (共通化・段5後半の8): 索敵行 — 長く気配が無い時の巡回と見張り。自機COM (旧 comStallTour: 最寄りのコロニー/ノードへ行くだけ・敵と待ち時間も違った) も敵も同じ関数
 //   A = {x,y,mine:'enemy'|'player',seen,lm,who,now}: 持ち主のアダプタ。相手が来そうな所 (自分のものでないコロニー・回収されていない難破船・ノード) の脇へ、噴かしては漂いながら静かに向かう。
 function prowlQuietT(P) { return 60 * (70 + 90 * P.caution + 40 * P.stealth - 50 * P.aggression); } // 気配が無い時間がこれを超えたら出る
+// 第126弾 (共通化): 索敵行の「あえて弱いソナーを打つ」— 長く気配が無い時に、ごく弱い全周囲ソナーを時々打つ (聞かれる距離は短い・近くに居れば相手が寄ってくる)。自機COMも敵も同じ判断
+//   A = {quiet(気配が無い時間f), P, now, nudgeF(前回), ready(全周囲ソナーが使える), exposed(照射以上を受けている)}
+function prowlNudgeWants(A) { return A.quiet > prowlQuietT(A.P) * 1.15 && A.now - (A.nudgeF || -1e9) > 10800 && A.ready && !A.exposed; }
 function prowlPickGoal(A) {
     const now = A.now, vis = A.seen, sites = [];
     for (const q of structures) if ((q.type === 'colony' && q.owner !== A.mine) || (q.type === 'derelict' && !q.salvaged)) sites.push({ o: q, lbl: q.type === 'colony' ? 'コロニー' : '難破船', w: q.type === 'colony' ? 1.4 : 1 });
@@ -15972,6 +15999,10 @@ function enemyHunterStep(e, heard, hard) {
             //   (旧: 待ち伏せの拠点で何分も止まり・忍び足 約12u/s でしか動かず、双方が離れたまま試合が終わった)
             { const gw = gatherWants(P, enemySlotsUsed(e), enemySlotsMax(e), now); if (gw.part && gatherPick('e', e.x, e.y, 'part', gw.range)) return why('部品が先'); } // 第122弾: 部品の枠が空いていて取れる所があるうちは 索敵行に出ない (自機COMは取りに行くのが戦略・詰めより先。旧: 敵は序盤10分の約63%を索敵行に使い、自機COMの約半分しか拠点・部品を取らなかった)
             const quietFor = now - Math.max(e._lastScentF || 0, e._huntEndF || 0, e._hpLossF || 0);
+            if (prowlNudgeWants({ quiet: quietFor, P, now, nudgeF: e._nudgeF, ready: true, exposed: e.aiState === 'combat' || now - (e._lastHitF ?? -1e9) < 900 || now - (e._pingHeardF ?? -1e9) < 900 })) { // 第126弾: 自機COMと共通の「あえて弱いソナー」
+                e._nudgeF = now; firePingFromEnemy(e, { omni: true, power: 'weak' });
+                comThinkEvent('e', Math.round(quietFor / 3600) + '分 気配が無い → あえて弱い' + SONAR_BAND_JP[e._pingBandUsed || 'heat'] + 'ソナーを打つ (聞かれる距離は短い・近くに居れば相手が寄ってくる)', 'e' + e.uid);
+            }
             if (quietFor > prowlQuietT(P) && !e._supplyGo && (e.ammoM === undefined || e.ammoM > 0 || e.ammoK > 0 || _eHas(e, 'beam'))) {
                 const goal = prowlPickGoal({ x: e.x, y: e.y, mine: 'enemy', seen: e._prowlSeen || (e._prowlSeen = {}), lm: e._lastMove && now - e._lastMove.f < 60 * 240 ? e._lastMove : null, who: e, now }); // 第125弾: 自機COMと共通
                 if (goal && Math.hypot(goal.x - e.x, goal.y - e.y) > 2500) {
@@ -17980,7 +18011,7 @@ function comStallTour(c, P, D, hpF, contact) { // 第125弾: 敵の索敵行と�
     const quiet = now - Math.max(c.lastContactF || 0, c.prowlEndF || 0, (huntStats && huntStats.startFrame) || 0);
     if (!c.prowl && (quiet < prowlQuietT(P) || c.item || now < (c.prowlCD || 0))) return false;
     // 第72弾 (オーナー「隠れ合うだけで接触しない」): 長く気配が無ければ、ごく弱いソナーを時々打つ = 「あえて少しだけ音を出す」(敵も firePingFromEnemy で同じ式)。
-    if (quiet > prowlQuietT(P) * 1.15 && now - (c.nudgeF || -1e9) > 10800 && omniSonarCooldown <= 0 && playerExposureLevel < 2) {
+    if (prowlNudgeWants({ quiet, P, now, nudgeF: c.nudgeF, ready: omniSonarCooldown <= 0, exposed: playerExposureLevel >= 2 })) {
         c.nudgeF = now; const nb = comSonarBand(c); fireOmniSonar('weak', nb);
         comThinkEvent('p', Math.round(quiet / 3600) + '分 気配が無い → あえて弱い' + SONAR_BAND_JP[nb] + 'ソナーを打つ (聞かれる距離は短い・近くに居れば相手が寄ってくる)');
     }

@@ -2907,3 +2907,10 @@ body.play-replay #zoom-ctl #zoom-stack { flex-wrap: wrap-reverse; max-height: ca
 .focus-btn.active { color: #021428 !important; background: linear-gradient(#a8dcff, #5fb0ff) !important; border-color: #cfeaff !important; box-shadow: 0 0 8px rgba(90,170,255,0.6); }
 .focus-btn.active .fx-mark { border-color: #021428; }
 #action-popover .eng-btn + .focus-btn, #action-popover #btn-focus-balance { margin-top: 0; }
+
+/* 第126弾: ハックの項目は索敵ソナーの種類と同じ「選ぶ」ボタン / 「ハック」は指向性ソナーボタンと同じ撃つ構え */
+.hackw-btn[data-eff="fcs"] { --hc: #ff7a5a; } .hackw-btn[data-eff="halt"] { --hc: #ffd24a; } .hackw-btn[data-eff="sensor"] { --hc: #5fd0ff; } .hackw-btn[data-eff="comm"] { --hc: #c48bff; }
+.hackw-btn.on { background: rgba(255,255,255,0.12) !important; box-shadow: 0 0 10px var(--hc), inset 0 0 8px rgba(255,255,255,0.15); border-color: var(--hc) !important; color: var(--hc) !important; }
+.hackw-btn.on .fx-mark { background: var(--hc) !important; color: #02130e !important; }
+#btn-hackw-fire.no-band { opacity: 0.45; }
+#btn-hackw-fire.pending-fire { border-color: #ff66cc !important; color: #ffb0ea !important; box-shadow: 0 0 8px #ff66cc; }
