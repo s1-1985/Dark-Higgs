@@ -4404,7 +4404,15 @@ class Ship {
             } else if (this.state === 'moving' && !playerCoasting) {
                 const _wpDist = Math.hypot(this.targetX - this.x, this.targetY - this.y);
                 if (_wpDist > Math.max(20, this.currentSpeed * 2)) {
-                    _steer(Math.atan2(this.targetY - this.y, this.targetX - this.x), _baseTargetSpeed);
+                    // 第140弾: 目標が旋回円の内側にあると、全速のまま目標の周りを回り続けた (到着直前に踵を返して周回する動き)。艦首が目標を向くまで、旋回円に収まる速さまで落とす (人間の操縦と同じ)
+                    const _wa = Math.atan2(this.targetY - this.y, this.targetX - this.x), _ea = Math.abs(_angDiff(_wa, this.angle));
+                    let _ts = _baseTargetSpeed;
+                    if (_ea > 0.3) {
+                        const _tr = (PLAYER_TURN_RATES[gameState.shipType] || PLAYER_TURN_RATE) * gameSpeedFactor * PM.turn * engineAgility(gameState.engineType).turn;
+                        const _vMax = _wpDist * _tr / Math.max(0.5, Math.sin(Math.min(_ea, Math.PI / 2)) * 2); // この速さなら半径 _wpDist/(2 sin) の旋回円に収まる
+                        _ts = Math.min(_ts, Math.max(_baseTargetSpeed * 0.12, _vMax));
+                    }
+                    _steer(_wa, _ts);
                 } else {
                     this.state = 'idle';
                     _coast();
