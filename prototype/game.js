@@ -14462,7 +14462,7 @@ function enemyFighterStep(f) {
     } else {
         f._st = 'run';
         // 母艦が掴んでいる自艦の推定位置 → 無ければ射出時の推定 → 母艦の周りを周回
-        const lk = f.huntTimer > 0 && f.huntTarget ? f.huntTarget : (carrier && carrier._sendTo && _frameCount < carrier._sendTo.until ? carrier._sendTo : carrier && carrier.playerLastKnownPos && (carrier.contactFreshness || 0) > 0.15 ? carrier.playerLastKnownPos : null);
+        const lk = f.huntTimer > 0 && f.huntTarget ? f.huntTarget : (carrier && carrier._sendTo && _frameCount < carrier._sendTo.until ? carrier._sendTo : carrier && carrier._outpost && _frameCount < carrier._outpost.until && !(carrier.playerLastKnownPos && (carrier.contactFreshness || 0) > 0.15) ? carrier._outpost : carrier && carrier.playerLastKnownPos && (carrier.contactFreshness || 0) > 0.15 ? carrier.playerLastKnownPos : null);
         if (f.huntTimer > 0) f.huntTimer--;
         let cx, cy, Rr;
         if (_rtbF && carrier) { cx = carrier.x; cy = carrier.y; Rr = 500; f.aiState = 'lurking'; }
@@ -14544,9 +14544,9 @@ function enemyScoutStep(f) {
     // 捜索先: 母艦の推定があればその周り・無ければ母艦から前方 (母艦から6000u以内に収める)
     let cx, cy;
     const lk = carrier.playerLastKnownPos && (carrier.contactFreshness || 0) > 0.1 ? carrier.playerLastKnownPos : null;
-    if (lk) { cx = lk.x; cy = lk.y; } else { cx = carrier.x + Math.cos(f._sa0 = (f._sa0 ?? Math.random() * 6.28) + 0.0006) * 3800; cy = carrier.y + Math.sin(f._sa0) * 3800; }
+    if (lk) { cx = lk.x; cy = lk.y; } else if (carrier._outpost && _frameCount < carrier._outpost.until) { cx = carrier._outpost.x; cy = carrier._outpost.y; } else { cx = carrier.x + Math.cos(f._sa0 = (f._sa0 ?? Math.random() * 6.28) + 0.0006) * 3800; cy = carrier.y + Math.sin(f._sa0) * 3800; }
     const dd = Math.hypot(cx - carrier.x, cy - carrier.y);
-    if (dd > DRONE_AUTO_DIST * 0.9) { cx = carrier.x + (cx - carrier.x) / dd * DRONE_AUTO_DIST * 0.9; cy = carrier.y + (cy - carrier.y) / dd * DRONE_AUTO_DIST * 0.9; }
+    if (dd > DRONE_AUTO_DIST * 0.9 && !(carrier._outpost && _frameCount < carrier._outpost.until && cx === carrier._outpost.x)) { cx = carrier.x + (cx - carrier.x) / dd * DRONE_AUTO_DIST * 0.9; cy = carrier.y + (cy - carrier.y) / dd * DRONE_AUTO_DIST * 0.9; }
     const Rr = 1500, a = Math.atan2(f.y - cy, f.x - cx), d = Math.hypot(f.x - cx, f.y - cy);
     const p = d > Rr * 1.6 ? { x: cx + Math.cos(a) * Rr, y: cy + Math.sin(a) * Rr } : { x: cx + Math.cos(a + 0.45) * Rr, y: cy + Math.sin(a + 0.45) * Rr };
     const da = _angDiff(Math.atan2(p.y - f.y, p.x - f.x), f.angle);
@@ -16250,7 +16250,7 @@ function stratFactsE(e) {
     if (e.itemBcn) for (const b in e.itemBcn) if (e.itemBcn[b] > 0) lures.push('bcn_' + b);
     const lk = e.playerLastKnownPos, near = !!(e.inVision || (lk && (e.contactFreshness || 0) > 0.25 && Math.hypot(lk.x - e.x, lk.y - e.y) < 6500));
     const hitAgo = e._lastHitF ? now - e._lastHitF : 1e9, pingAgo = now - (e._pingHeardF ?? -1e9);
-    return { cls, slotsFree: enemySlotsMax(e) - enemySlotsUsed(e), lures, owned: structures.filter(q => q.type === 'colony' && q.owner === 'enemy'), near,
+    return { cls, relays: ownRelaySites('enemy').length, slotsFree: enemySlotsMax(e) - enemySlotsUsed(e), lures, owned: structures.filter(q => q.type === 'colony' && q.owner === 'enemy'), near,
         expo: hitAgo < 480 ? 3 : (pingAgo < 900 || (e.detectionTimer || 0) > 60) ? 2 : 0, strong: (e.parts || []).length >= 3, early: comEarlyGather(enemySlotsUsed(e), enemySlotsMax(e), now), hpF: e.hp / e.maxHp,
         hasScout: (e.scoutStock || 0) > 0 || liveK('scout'), hasFtr: (e.droneStock || 0) > 0 || liveK('attack'), hasTech: liveK('mech'), hasBuild: (e.turretStock || 0) > 0,
         canTech: cls === 'carrier' && !liveK('mech') && !e._techBuilt && !(e._techT > 0) };
@@ -16272,7 +16272,7 @@ function stratGoWait(A) {
     A.hold(); return 'wait';
 }
 function enemyStratStep(e, P) {
-    const now = _frameCount, jp = { ambush: '拠点の待ち伏せ', bait: '餌で誘う', guard: '拠点を守る', trap: '罠 (砲台を据えて誘い込む)', push: '圧倒して狩る', screen: 'ドローンで探る', fogHide: '霧に潜む', tech: 'Tech建造 (資材集め)' };
+    const now = _frameCount, jp = new Proxy({}, { get: (_, id) => (STRAT_REG[id] || {}).jp || id }); // 第133弾: 名前は戦略の登録簿から
     let S = e._strat;
     if (S && (now > S.until || (stratNearE(e) && S.id !== 'fogHide' && S.id !== 'screen'))) { if (stratNearE(e) && S.ph === 'wait') e._stratEndF = now; /* 第80弾: 待ち伏せ中に気配 → 狩人の頭脳で「待ち伏せ」を続ける */ comThinkEvent('e', '戦略「' + jp[S.id] + '」終了 (' + (now > S.until ? '時間' : '気配を掴んだ') + ')', 'e' + e.uid); if (S.id === 'tech') e._techPush = 0; e._strat = null; e._stratCD = now + 1200 + Math.random() * 2400; S = null; }
     if (!S) {
@@ -16281,6 +16281,16 @@ function enemyStratStep(e, P) {
         e._lastStrat = pick;
         if (pick === 'gather') { e._stratCD = now + 1800 + Math.random() * 3600; return false; }
         S = e._strat = { id: pick, until: now + 5400 + Math.random() * 12600, ph: 'go' };
+        if (pick === 'outpost') { // 第133弾: 占有した拠点の中継圏に艦載機・哨戒機を置いて見張らせる (自分は巡回を続ける)
+            const site = outpostPick('enemy', e.x, e.y, e._siteUsed || (e._siteUsed = {}));
+            if (!site) { e._strat = null; e._stratCD = now + 1800; return false; }
+            S.site = site; S.until = now + 7200 + Math.random() * 7200;
+            if ((e.scoutStock || 0) > 0 && !enemies.some(f => f.type === 'fighter' && f._kind === 'scout' && f.hp > 0)) { e.scoutStock--; spawnEnemyDrone(e, 'scout'); }
+            if ((e.droneStock || 0) > 0 && enemies.filter(f => f.type === 'fighter' && !f._kind && f.hp > 0).length < 2) { e.droneStock--; _eLaunchFighter(e, { x: site.x, y: site.y }); }
+            e._outpost = { x: site.x, y: site.y, until: S.until };
+            comThinkEvent('e', '戦略「前哨」(約' + Math.round((S.until - now) / 60) + '秒): ' + (site.type === 'colony' ? 'コロニー' : 'ノード') + 'の中継圏 (' + _dirTxt(e.x, e.y, site.x, site.y) + ') に艦載機・哨戒機を置いて見張らせる — 自分は別の仕事を続ける', 'e' + e.uid);
+            return false;
+        }
         if (pick === 'guard') S.site = x.owned[Math.floor(Math.random() * x.owned.length)];
         else if (pick === 'tech') { e._techPush = now + 36000; S.until = now + 36000; e._strat = null; e._stratCD = now + 36000; comThinkEvent('e', '戦略「Tech建造」— 資材を集めて空母を止められる場所で組み立てる', 'e' + e.uid); return false; } // 集める動きは従来の収集 (資材14個・気配なしで組み立て開始)
         else if (pick === 'push' || pick === 'screen') {
@@ -16306,6 +16316,11 @@ function enemyStratStep(e, P) {
             }
         }
         comThinkEvent('e', '戦略「' + jp[S.id] + '」(約' + Math.round((S.until - now) / 60) + '秒)' + (S.site ? ': ' + (S.site.lbl || 'コロニー') + 'の近く (' + _dirTxt(e.x, e.y, (S.spot || S.site).x, (S.spot || S.site).y) + ') ' + (S.id === 'bait' ? 'へ餌を置き、近くで待つ' : S.id === 'guard' ? 'を守る' : 'の霧/岩礁帯で待ち伏せる') : ''), 'e' + e.uid);
+    }
+    if (S.id === 'outpost') { // 奪われかけたら見張りをやめて呼び戻す (_outpost を消す＝母艦の周りに戻る)
+        const st = S.site, lost = !st || (st.type === 'colony' ? st.owner !== 'enemy' : (st.owner !== 'enemy' || (st.capP || 0) > DRONE_RELAY_CONTEST));
+        if (lost) { e._outpost = null; e._strat = null; e._stratCD = now + 1200; comThinkEvent('e', '前哨の拠点が奪われかけ → 艦載機・哨戒機を呼び戻す', 'e' + e.uid); }
+        return false;
     }
     const g = S.id === 'guard' ? S.site : S.spot;
     if (!g) { e._strat = null; return false; }
@@ -17388,17 +17403,35 @@ function comExtrasStep(c, P, D, hpF, contact) {
 // ═══ 第58弾 (オーナー): COMの戦略テンプレート — 性格1つにつき戦略1つでは単調 → 状況と性格で重みをつけた乱択で、人が考えそうな立ち回りを切り替える ═══
 // 「動いてアイテムを集めて強化 → 相手を圧倒」の骨子を生かし切る: 集めない待ち伏せ・餌で誘う・ドローンで探って攻める・霧に潜む・強化したら狩りに出る・拠点を守る。
 // 戦略は一定時間続き (90〜300秒)、終わったら重みつきの乱数で次を選ぶ (直前の戦略は選ばれにくい)。退く・迫るミサイル・補給・撃つ は戦略より優先 (従来どおり)。
-const COM_STRATS = {
-    gather: '収集優先 (部品・資材・コロニーを集めて強くなる)',
-    ambush: '拠点の待ち伏せ (集めずに、取りに来る相手を霧で待つ)',
-    bait:   '餌で誘う (偽SOS・偽艦影・ビーコンを置き、その近くで待つ)',
-    screen: 'ドローンで探る/攻める (哨戒機・戦闘機・Techに指示を出し、後ろから詰める)',
-    fogHide:'霧に潜む (濃い霧で止まって傷を癒し、見失わせる)',
-    push:   '圧倒して狩る (強化が済んだら全速で相手の推定へ詰める)',
-    guard:  '拠点を守る (占有したコロニーの近くで待ち、ドローンを周りに置く)',
-    tech:   'Tech建造 (資材を集めて枠を空け、隠れ場所で組み立てる — 建造中は動けないので砲台で守る)',
-    trap:   '罠 (砲台を据え、囮で誘い込んでその近くの霧で待つ)',
+// ═══ 第133弾 (段6・登録簿方式): 戦略の登録簿 — 戦略は「id・名前・説明・重みの式」を1か所に登録する。自機COMも敵も stratWeights がこの登録簿を回して選ぶ。
+//   新しい戦略 = ここに1行足し、実行を comStratStep (自機)・enemyStratStep (敵) か 共通の実行 (outpostRun など) に足す。艦種に縛らず、必要な持ち物・状態 (x の事実) を重みの式の中で見る。
+//   k = 性格と状況の係数 {st 隠密, ca 慎重, ag 攻撃, gr 貪欲, early 序盤}・x = 行為者が知っていること・near = 相手が近い間は始めない
+const STRAT_REG = {
+    gather: { jp: '収集', desc: '収集優先 (部品・資材・コロニーを集めて強くなる)', w: (k, x) => 0.6 + 1.7 * k.gr + (x.slotsFree > 0 ? 1.1 : 0.05) + (k.early ? 3.0 : 0) },
+    ambush: { jp: '拠点の待ち伏せ', desc: '拠点の待ち伏せ (集めずに、取りに来る相手を霧で待つ)', near: true, w: (k, x) => (0.35 + 2.1 * k.st + 0.9 * k.ca - 1.1 * k.ag + (x.slotsFree <= 0 ? 1.0 : 0)) * (k.early ? 0.25 : 1) },
+    bait:   { jp: '餌で誘う', desc: '餌で誘う (偽SOS・偽艦影・ビーコンを置き、その近くで待つ)', near: true, w: (k, x) => x.lures.length ? 0.25 + 1.5 * k.st + 0.7 * k.ca - 0.4 * k.ag : 0 },
+    screen: { jp: 'ドローンで探る', desc: 'ドローンで探る/攻める (哨戒機・戦闘機・Techに指示を出し、後ろから詰める)', w: (k, x) => (x.hasScout || x.hasFtr || x.hasTech) ? 0.4 + 1.3 * k.ag + 0.7 * k.ca : 0 },
+    fogHide:{ jp: '霧に潜む', desc: '霧に潜む (濃い霧で止まって傷を癒し、見失わせる)', w: (k, x) => x.hpF < 0.75 || x.expo >= 2 ? 0.4 + 1.6 * k.ca + 0.8 * k.st : 0.1 },
+    push:   { jp: '圧倒して狩る', desc: '圧倒して狩る (強化が済んだら全速で相手の推定へ詰める)', w: (k, x) => (x.slotsFree <= 1 || x.strong) && x.hpF > 0.7 ? 0.3 + 2.0 * k.ag + (x.slotsFree <= 0 ? 0.8 : 0) : 0.1 },
+    guard:  { jp: '拠点を守る', desc: '拠点を守る (占有したコロニーの近くで待ち、ドローンを周りに置く)', w: (k, x) => x.owned.length ? 0.2 + 1.2 * k.ca + 0.5 * (1 - k.gr) : 0 },
+    tech:   { jp: 'Tech建造', desc: 'Tech建造 (資材を集めて枠を空け、隠れ場所で組み立てる — 建造中は動けないので砲台で守る)', near: true, w: (k, x) => x.canTech ? (0.5 + 0.9 * k.gr + 0.8 * k.st + 0.3 * k.ca) * (k.early ? 0.3 : 1) : 0 },
+    trap:   { jp: '罠', desc: '罠 (砲台を据え、囮で誘い込んでその近くの霧で待つ)', near: true, w: (k, x) => x.hasBuild ? (0.35 + 1.4 * k.st + 1.1 * k.ca - 0.5 * k.ag) * (k.early ? 0.3 : 1) : 0 },
+    // 第133弾 (オーナー「COMがノードを中継として使う」): 占有したノード/コロニーの周りにドローンを置いて見張らせ (通信の中継圏 DRONE_RELAY_R の内)、自分は別の仕事を続ける。奪われかけたら呼び戻す
+    outpost:{ jp: '前哨', desc: '前哨 (占有したノード/コロニーの中継圏にドローンを置いて見張らせ、自分は別の仕事を続ける)', w: (k, x) => (x.relays || 0) > 0 && (x.hasScout || x.hasFtr) ? (0.3 + 0.9 * k.ca + 0.4 * k.gr + 0.3 * (1 - k.ag)) * (k.early ? 0.3 : 1) : 0 },
 };
+const COM_STRATS = {}; for (const id in STRAT_REG) COM_STRATS[id] = STRAT_REG[id].desc;
+// 占有したノード・コロニーのうち中継として使える所 (奪われかけでない)。side 'player'|'enemy'
+function ownRelaySites(side) {
+    const foe = side === 'player' ? 'capE' : 'capP', out = [];
+    for (const n of resourceNodes) if (n.owner === side && !((n[foe] || 0) > DRONE_RELAY_CONTEST)) out.push(n);
+    for (const st of structures) if (st.type === 'colony' && st.owner === side) out.push(st);
+    return out;
+}
+function outpostPick(side, x, y, memo) { // 見張る拠点: 近い順に、直近に選んだ所は避ける
+    const sites = ownRelaySites(side); if (!sites.length) return null;
+    const sc = sites.map(o => ({ o, k: (1 / (1 + Math.hypot(o.x - x, o.y - y) / 9000)) * (_frameCount - (memo[Math.round(o.x) + ',' + Math.round(o.y)] || -1e9) < 21600 ? 0.3 : 1) * (0.7 + 0.6 * Math.random()) })).sort((a, b) => b.k - a.k);
+    const best = sc[0].o; memo[Math.round(best.x) + ',' + Math.round(best.y)] = _frameCount; return best;
+}
 const COM_STRAT_MIN = 5400, COM_STRAT_VAR = 12600; // 90〜300秒
 // 第66弾 (オーナー): 序盤は性格によらず部品を集める (人間も序盤は集める。集めないと艦が強化されない) — 最初の10分は、枠が2つ埋まるまで全員が部品を取りに行く
 const COM_EARLY_GATHER = 36000;
@@ -17442,23 +17475,13 @@ function comStratCtx(c, P) {
     const slotsFree = partSlotsMax() - partSlotsUsed();
     const _sa0 = lockedSignalId && _signalAnalysis[lockedSignalId], _est0 = _sa0 && _sa0.fix ? trackEstimate(_sa0, 0) : null;
     const near = !!(_est0 && Math.hypot(_est0.x - player.x, _est0.y - player.y) < 6500) || enemies.some(q => q.hp > 0 && !q._dying && q.inVision); // 第66弾: 相手が近い間は待ち伏せ・罠・Tech建造を始めない (選んでもすぐ中断していた)
-    return { cls, has, lures, mobile, owned, slotsFree, near, expo: playerExposureLevel, strong: playerSlotsStrong(), early: comEarlyGather(partSlotsUsed(), partSlotsMax(), _frameCount), hasBuild: has('build') && !playerDrones.some(d => d.type === 'build' && d.hp > 0), canTech: cls === 'carrier' && !mobile('mech') && !techBuilding(), hasScout: has('scout') || mobile('scout'), hasFtr: has('attack') || mobile('attack'), hasTech: mobile('mech'),
+    return { cls, has, lures, mobile, owned, slotsFree, near, relays: ownRelaySites('player').length, expo: playerExposureLevel, strong: playerSlotsStrong(), early: comEarlyGather(partSlotsUsed(), partSlotsMax(), _frameCount), hasBuild: has('build') && !playerDrones.some(d => d.type === 'build' && d.hp > 0), canTech: cls === 'carrier' && !mobile('mech') && !techBuilding(), hasScout: has('scout') || mobile('scout'), hasFtr: has('attack') || mobile('attack'), hasTech: mobile('mech'),
         flash: has('flash'), noise: has('noise'), smoke: has('smoke'), spray: has('fogspray'), blow: has('fogblow'), hHere: getHiggsIntensity(player.x, player.y) };
 }
 // 第113弾 (段4): 戦略の重みと選び方は 自機COMも敵も同じ関数。x は行為者が「知っていること」: cls, slotsFree, lures[], owned[], near, hasScout/hasFtr/hasTech, hasBuild(砲台を持つ), canTech(空母でTechを作れる), strong(部品3つ以上), hpF, expo(兆候の段階), early(序盤)
 function stratWeights(P, x) {
-    const st = P.stealth ?? 0.4, ca = P.caution ?? 0.4, ag = P.aggression ?? 0.5, gr = P.greed ?? 0.4;
-    const w = {}, early = x.early;
-    w.gather = 0.6 + 1.7 * gr + (x.slotsFree > 0 ? 1.1 : 0.05) + (early ? 3.0 : 0);
-    w.ambush = (0.35 + 2.1 * st + 0.9 * ca - 1.1 * ag + (x.slotsFree <= 0 ? 1.0 : 0)) * (early ? 0.25 : 1);
-    w.bait = x.lures.length ? 0.25 + 1.5 * st + 0.7 * ca - 0.4 * ag : 0;
-    w.screen = (x.hasScout || x.hasFtr || x.hasTech) ? 0.4 + 1.3 * ag + 0.7 * ca : 0;
-    w.fogHide = x.hpF < 0.75 || x.expo >= 2 ? 0.4 + 1.6 * ca + 0.8 * st : 0.1;
-    w.push = (x.slotsFree <= 1 || x.strong) && x.hpF > 0.7 ? 0.3 + 2.0 * ag + (x.slotsFree <= 0 ? 0.8 : 0) : 0.1;
-    w.guard = x.owned.length ? 0.2 + 1.2 * ca + 0.5 * (1 - gr) : 0;
-    w.tech = x.canTech ? (0.5 + 0.9 * gr + 0.8 * st + 0.3 * ca) * (early ? 0.3 : 1) : 0;
-    w.trap = x.hasBuild ? (0.35 + 1.4 * st + 1.1 * ca - 0.5 * ag) * (early ? 0.3 : 1) : 0;
-    if (x.near) for (const k of ['ambush', 'bait', 'trap', 'tech']) w[k] = 0; // 相手が近い間は 待ち伏せ・餌・罠・Tech建造を始めない
+    const k = { st: P.stealth ?? 0.4, ca: P.caution ?? 0.4, ag: P.aggression ?? 0.5, gr: P.greed ?? 0.4, early: x.early }, w = {};
+    for (const id in STRAT_REG) { const R = STRAT_REG[id]; w[id] = R.w(k, x); if (x.near && R.near) w[id] = 0; } // 相手が近い間は 待ち伏せ・餌・罠・Tech建造を始めない
     return w;
 }
 function stratPick(P, x, lastId, force) {
@@ -17643,6 +17666,25 @@ function comStratStep(c, P, D, hpF, contact, te, lk, r) {
             if (x.has('build') && !playerDrones.some(d => d.type === 'build' && d.hp > 0) && activeDeployCount() < (CARGO_CAP[gameState.shipType] || 0)) { deployDrone('build'); comThinkEvent('p', 'Techの組み立て前に砲台を据える (建造中は5分動けない)'); return true; }
             if (!cargo.asm && activeDeployCount() < (CARGO_CAP[gameState.shipType] || 0)) { deployDrone('mech'); comThinkEvent('p', 'Techを組み立て開始 (資材' + needMat + '個・' + Math.round(DRONE_SPEC.mech.build / 60) + '秒・停止して大量のシグネチャ)'); }
             return true;
+        }
+        case 'outpost': { // 第133弾: 占有したノード/コロニーの中継圏に戦闘機・哨戒機を置いて見張らせる。自分は別の仕事を続ける (false を返す)
+            const x = comStratCtx(c, P);
+            if (!S.site) { S.site = outpostPick('player', player.x, player.y, c.siteUsed || (c.siteUsed = {})); if (!S.site) return end('中継にできる拠点が無い'); }
+            const st = S.site;
+            if (st.type !== 'colony' && (st.owner !== 'player' || (st.capE || 0) > DRONE_RELAY_CONTEST)) { comDroneRecall(c, '前哨の拠点が奪われかけ'); return end('前哨の拠点が奪われかけ → ドローンを呼び戻す'); }
+            if (st.type === 'colony' && st.owner !== 'player') { comDroneRecall(c, '前哨のコロニーを失った'); return end('前哨のコロニーを失った'); }
+            if (comEngaged()) return false;
+            if (!S.ordF || now - S.ordF > 3600) {
+                S.ordF = now;
+                const cap = CARGO_CAP[gameState.shipType] || 0;
+                if (x.has('scout') && !x.mobile('scout') && activeDeployCount() < cap) deployDrone('scout');
+                if (x.has('attack') && !x.mobile('attack') && activeDeployCount() < cap) deployDrone('attack');
+                let sent = 0;
+                for (const t of ['scout', 'attack']) if (playerDrones.some(d => d.type === t && d.hp > 0)) { droneOrder(t, 'patrol', st.x + (Math.random() - 0.5) * 900, st.y + (Math.random() - 0.5) * 900); sent++; }
+                if (!S.said) { S.said = true; comThinkEvent('p', (st.type === 'colony' ? 'コロニー' : 'ノード') + 'の中継圏 (' + _dirTxt(player.x, player.y, st.x, st.y) + '・' + Math.round(Math.hypot(st.x - player.x, st.y - player.y) / 100) * 100 + 'u) にドローン' + sent + '種を置いて見張らせる — 自分は別の仕事を続ける'); }
+                if (!sent) return end('置けるドローンが無い');
+            }
+            return false;
         }
         case 'guard': {
             const col = S.site; if (!col || col.owner !== 'player') return end('拠点を失った');
