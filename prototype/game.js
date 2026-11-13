@@ -438,7 +438,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261112o';
+const SPRITE_VER = '20261112p';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -4761,7 +4761,7 @@ class Ship {
                         if (!this.alertLogged) { this.alertLogged = true; logMessage(`WARN: 敵艦(${personalityTag(this.personality || {})}個体)があなたのシグネチャを捕捉。迎撃態勢に入ります。`, 'warning-msg'); }
                         if (comDemo && this.type !== 'fighter') comThinkEvent('e', (_hardDetect ? '至近で直接掴んだ' : _noiseSrc ? '強い音を捕捉 (実はノイズメーカー)' : _relayPost ? '聴音局が自機の音を拾った' : '自機の' + ({ heat: '熱', optic: '光', em: 'EM', higgs: '航跡' }[domSig] || '') + 'を捕捉') + ' (推定' + Math.round(_distBelief / 100) * 100 + 'u) → 交戦', 'e' + this.uid);
                     }
-                } else if (this.aiState === 'lurking' || this.aiState === 'gathering') {
+                } else if ((this.aiState === 'lurking' || this.aiState === 'gathering') && !(this._item && this._item.o && _frameCount - this._item.f < 18000)) { // 第103弾: 取りに行くと決めた物がある間は、微かな反応で索敵へ移らない (自機COMの c.item と同じ: 信号を受信しても航路を変えない)
                     this.aiState = 'hunting';
                     this.gatherTarget = null;
                     this.lurking = false;
