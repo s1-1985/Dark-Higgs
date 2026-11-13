@@ -14526,7 +14526,7 @@ function enemyScoutStep(f) {
         f._seeT = tgt;
         if (tgt && !au) { // 通信が生きている間だけ母艦へ知らせる
             const e0 = 150 + dC * 0.02;
-            if (tgt === player) _eDatalink(carrier, player.x + _gauss() * e0, player.y + _gauss() * e0, e0 + 100, 0.65);
+            if (tgt === player) _eDatalink(carrier, player.x, player.y, 120, 0.7); // 第131弾: 戦闘機と同じ (見えた=ドローンの有視界は艦の有視界と同じ扱い・第130弾)。旧: 距離に比例する誤差を足していた
             else { carrier.playerLastKnownPos = { x: tgt.x + _gauss() * e0, y: tgt.y + _gauss() * e0, vx: 0, vy: 0 }; carrier.contactFreshness = Math.max(carrier.contactFreshness || 0, 0.45); }
         }
     }
