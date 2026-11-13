@@ -15820,6 +15820,7 @@ function enemyHunterStep(e, heard, hard) {
         if (!est || est.age > 2700) {
             // 索敵行: 長く気配が無ければ、相手が居そうな所 (まだ聴いていない海域・自分のものでないコロニー) へ、噴かしては漂いながら静かに向かう
             //   (旧: 待ち伏せの拠点で何分も止まり・忍び足 約12u/s でしか動かず、双方が離れたまま試合が終わった)
+            { const gw = gatherWants(P, enemySlotsUsed(e), enemySlotsMax(e), now); if (gw.part && gatherPick('e', e.x, e.y, 'part', gw.range)) return why('部品が先'); } // 第122弾: 部品の枠が空いていて取れる所があるうちは 索敵行に出ない (自機COMは取りに行くのが戦略・詰めより先。旧: 敵は序盤10分の約63%を索敵行に使い、自機COMの約半分しか拠点・部品を取らなかった)
             const quietFor = now - Math.max(e._lastScentF || 0, e._huntEndF || 0, e._hpLossF || 0);
             if (quietFor > 60 * (70 + 90 * ca + 40 * st - 50 * ag) && !e._supplyGo && (e.ammoM === undefined || e.ammoM > 0 || e.ammoK > 0 || _eHas(e, 'beam'))) {
                 let goal = null;
