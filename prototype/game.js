@@ -6902,13 +6902,7 @@ function comLoadout(side, ship) {
     const st = comCfg && comCfg.lo && comCfg.lo[side] && comCfg.lo[side][ship];
     const lo = Object.assign({ mat: 0 }, st || DEFAULT_LOADOUT[ship]);
     fixLoadoutWeapons(lo, ship); // 第48弾
-    if (side === 'p' && !st && comCfg && comCfg.pp && (SHIP_DRONES[ship] || []).includes('fakecache')) { // 偽コンテナ: 積み込みを編集していない自機COMは、隠密/貪欲な性格なら枠に余裕があれば1個積む
-        const pp = comCfg.pp;
-        if ((pp.stealth ?? 0.4) >= 0.35 || (pp.greed ?? 0.4) >= 0.5) {
-            if (loadoutSlots(lo, ship) >= (HOLD_CAP[ship] || 0)) { const drop = ['mat', 'smoke', 'flash', 'noise'].find(k => (lo[k] || 0) >= 1); if (drop) lo[drop]--; } // 既定の積み込みは満杯 → 資材・煙幕・閃光・ノイズのどれか1枠と入れ替える
-            if (loadoutSlots(lo, ship) < (HOLD_CAP[ship] || 0)) lo.fakecache = 1;
-        }
-    }
+    if (side === 'p' && !st && comCfg && comCfg.pp) { const pl = personaLoadoutP(ship, comCfg.pp); fixLoadoutWeapons(pl, ship); return pl; } // 第112弾: 積み込みを編集していない自機COMは、敵と同じ関数で性格どおりに積む
     if (side === 'e') { // 敵が使わない物 (資材・設置物・人型など) は外す — 枠を空けて弾や消耗品に回せるように
         lo.mat = 0;
         for (const t of SHIP_DRONES[ship] || []) if (!(ENEMY_USES.includes(t) || (t === 'attack' && ship === 'carrier'))) lo[t] = 0;
@@ -13175,17 +13169,22 @@ function enemyPersonaLoadout(ship, P) {
     for (const t of SHIP_DRONES[ship] || []) if (!keep.includes(t)) base[t] = 0;
     base.mat = 0;
     if (ship === 'carrier') base.mech = 0;
+    return personaFill(base, ship, P, Math.random);
+}
+// 第112弾 (段3.5): 消耗品の積み方は 自機COMも敵も同じ関数 (性格で重みをつけて枠が尽きるまで)。rnd は揺らぎ用の乱数 (自機COMは性格から決めた固定の種 → 同じ試合を再現できる)
+const LO_CONSUMABLES = ['flash', 'noise', 'smoke', 'lure', 'fsos', 'bcn_heat', 'bcn_optic', 'bcn_em', 'bcn_higgs', 'fogspray', 'fogblow', 'fakecache', 'linkcut'];
+function personaFill(base, ship, P, rnd) {
     let budget = (HOLD_CAP[ship] || 0) - loadoutSlots(base, ship);
     const st = P.stealth ?? 0.4, ca = P.caution ?? 0.4, ag = P.aggression ?? 0.5, gr = P.greed ?? 0.4;
     const bandBy = st >= 0.6 ? 'bcn_em' : ag >= 0.6 ? 'bcn_optic' : gr >= 0.6 ? 'bcn_higgs' : 'bcn_heat';
     const cand = [['flash', 0.35 + 0.5 * ca], ['noise', 0.3 + 0.5 * st], ['smoke', 0.3 + 0.35 * ca + 0.25 * st], ['lure', 0.2 + 0.6 * st], ['fsos', 0.1 + 0.4 * st + 0.2 * ca],
         [bandBy, 0.15 + 0.5 * st + 0.2 * gr], ['fogspray', 0.1 + 0.55 * st + 0.3 * ca], ['fogblow', 0.05 + 0.65 * ag - 0.2 * st], ['fakecache', 0.1 + 0.45 * st + 0.35 * gr], ['linkcut', 0.1 + 0.4 * ca + 0.3 * st]]
-        .map(([k, v]) => [k, v + (Math.random() - 0.5) * 0.3]).sort((a, b) => b[1] - a[1]);
+        .map(([k, v]) => [k, v + (rnd() - 0.5) * 0.3]).sort((a, b) => b[1] - a[1]);
     for (const [k, v] of cand) { if (budget <= 0) break; if (v < 0.25) continue; base[k] = 1; budget--; }
     // 2026-11-11 (記録の解析: 慎重な潜航型が騙しの道具を1つも積まず、だまし討ちの作戦を選べなかった): 隠密+慎重が0.8以上なら、
     //   騙しの道具 (偽艦影・偽コンテナ・ノイズ) を最低1つ — 枠が無ければ散布弾→煙幕→閃光の順で1つ入れ替える
     if (st + ca >= 0.8 && !base.lure && !base.fakecache && !base.noise) {
-        const dk = st >= ca ? 'lure' : (Math.random() < 0.5 ? 'fakecache' : 'noise');
+        const dk = st >= ca ? 'lure' : (rnd() < 0.5 ? 'fakecache' : 'noise');
         if (budget > 0) { base[dk] = 1; budget--; }
         else { const drop = ['fogspray', 'smoke', 'flash', 'fogblow', 'fsos'].find(k => base[k] > 0); if (drop) { base[drop]--; base[dk] = 1; } }
     }
@@ -13193,6 +13192,12 @@ function enemyPersonaLoadout(ship, P) {
     if (budget > 0 && ca >= 0.6) { base.flash = (base.flash || 0) + 1; budget--; }
     if (budget > 0 && st >= 0.6) { base.smoke = (base.smoke || 0) + 1; budget--; }
     return base;
+}
+function personaLoadoutP(ship, P) { // 自機COM: 消耗品を全部外し(完成品・弾・資材は既定のまま)、敵と同じ関数で性格どおりに積み直す
+    const base = Object.assign({ mat: 0 }, DEFAULT_LOADOUT[ship]);
+    for (const k of LO_CONSUMABLES) if (base[k]) base[k] = 0;
+    const h = Math.floor(((P.aggression ?? 0.5) * 1000 + (P.stealth ?? 0.4) * 100000 + (P.greed ?? 0.4) * 10000000 + (P.caution ?? 0.4) * 1000000000)) >>> 0;
+    return personaFill(base, ship, P, _mulberry(h));
 }
 // 散布弾 (潜む時に自分の周りを濃くする) / 吹き飛ばし弾 (推定が近いのに見えない・自分が濃い霧の中) / ビーコン (作戦で使う) — 敵COM
 function enemyUseSpray(e) {
@@ -18153,7 +18158,7 @@ function startComDemo() {
     gameState.mode = comCfg.mode;
     // 第22弾: 自機COMの積み込み (デモは保存しないので、この試合の間だけ使う)
     if (comCfg.lo && comCfg.lo.p && comCfg.lo.p[comCfg.ship]) gameState.loadout = Object.assign({}, gameState.loadout, { [comCfg.ship]: Object.assign({}, comCfg.lo.p[comCfg.ship]) });
-    else { const _lp = comLoadout('p', comCfg.ship); if (_lp.fakecache) gameState.loadout = Object.assign({}, gameState.loadout, { [comCfg.ship]: _lp }); } // 偽コンテナ: 隠密/貪欲な自機COMは既定の積み込みに1個足す
+    else { const _lp = comLoadout('p', comCfg.ship); gameState.loadout = Object.assign({}, gameState.loadout, { [comCfg.ship]: _lp }); } // 偽コンテナ: 隠密/貪欲な自機COMは既定の積み込みに1個足す
     toggleThinkLog(comCfg.think);
     window._comCfgSnap = JSON.parse(JSON.stringify(comCfg)); window._gsSnap = JSON.parse(JSON.stringify(gameState)); // プレイ画面のリプレイ: 同じ設定で同じ試合を作り直す
     _frameCount = 0; _simSeed = (window.__rpSeed !== undefined ? window.__rpSeed : (_nativeRandom() * 4294967296)) >>> 0; _simRng = _mulberry(_simSeed); // 試合の種 (記録に残す → 同じ試合を再生できる)
