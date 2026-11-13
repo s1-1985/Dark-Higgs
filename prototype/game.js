@@ -15587,6 +15587,64 @@ function huntShadow(HA, H, X) {
     if (now - (H.goLog || 0) > 1200) { H.goLog = now; say('【' + H.jp + '】' + X.who + 'の後ろ' + Math.round(Rsh / 100) * 100 + 'uについて聴いている — 推定±' + Math.round(est.r) + 'u・針路' + Math.round(((hd * 180 / Math.PI) + 450) % 360) + '°'); }
     return true;
 }
+// 第117弾 (段5後半の3): 偽装退却 / 偽コンテナの罠 — 自機COMも敵も同じ関数
+//   X.noise(ang)=ノイズメーカーを走らせる(無ければ false) / X.smokeOk()・X.smoke() / X.chain(next)=この任務を終えて次の任務へ / X.event(kind,text) / X.placeFake(x,y)=偽コンテナを置く(無ければ false)
+//   X.trapped(H)=置いた後に爆発の点が B の近くに入ったか / X.onTrap(H) / X.lastMove(est)=相手の最後の動き / X.mine=自分の側('player'|'enemy') / X.transit(why)=遠い移動の前にエンジンを見直す
+function huntFeint(HA, H, X) {
+    const { est, D, now, st, say } = X;
+    if (H.ph === 'decoy') {
+        const away = est ? Math.atan2(HA.y - est.y, HA.x - est.x) : HA.ang, na = away + (Math.random() - 0.5) * 0.4; // 相手から遠ざかる向き (逃げたように見せる)
+        if (!X.noise(na)) return X.end('ノイズメーカーが無い', false);
+        H.qa = away + H.side * Math.PI / 2; H.ph = 'quiet'; H.qf = now; H.tq = now + 60 * (14 + 10 * Math.random() + 8 * st);
+        H.qp = clampToMapCircle(HA.x + Math.cos(H.qa) * 2500, HA.y + Math.sin(H.qa) * 2500, 1500);
+        if (X.smokeOk() && est && D < 3500) X.smoke();
+        say('【偽装退却】ノイズメーカーを ' + compassDeg(na) + '° へ全速で走らせた — 自分は機関を止めて ' + compassDeg(H.qa) + '° へ滑る (' + Math.round((H.tq - now) / 60) + '秒 息を潜める)');
+        X.event('feint', '偽装退却 (ノイズメーカーで逃げたふり)');
+        return true;
+    }
+    if (H.ph === 'quiet') { // 最初の3秒だけ横へ噴かし、あとは機関を止めて漂う
+        if (now - H.qf < 180 || HA.v < 0.15) HA.go(H.qp.x, H.qp.y, 'silent'); else HA.drift(H.qa);
+        if (now > H.tq) { X.chain('stalk'); say('【偽装退却】相手がノイズを追ったはず → 背後へ回り込む (忍び寄りへ)'); }
+        return true;
+    }
+    return false;
+}
+function huntFakebox(HA, H, X) {
+    const { est, now, say } = X;
+    if (H.ph === 'place') {
+        if (!H.B) {
+            if (!est) return X.end('相手を見失った', false);
+            // 置く所: 相手の針路の先 (動いていれば70秒先・最大4500u) / 動いていなければ 相手が次に向かいそうな拠点 / それも無ければ推定とこちらの間
+            const mv = est.moving ? { vx: est.vx, vy: est.vy } : X.lastMove(est);
+            let bx, by;
+            if (mv && Math.hypot(mv.vx, mv.vy) > 0.2) { const sp0 = Math.hypot(mv.vx, mv.vy), t = Math.min(4500, sp0 * 60 * 70) / sp0; bx = est.x + mv.vx * t; by = est.y + mv.vy * t; }
+            else {
+                let best = null, bd = 14000;
+                for (const q of structures) if ((q.type === 'colony' && q.owner !== X.mine) || (q.type === 'derelict' && !q.salvaged)) { const d = Math.hypot(q.x - est.x, q.y - est.y); if (d < bd) { bd = d; best = q; } }
+                if (best) { const a = Math.atan2(est.y - best.y, est.x - best.x); bx = best.x + Math.cos(a) * 700; by = best.y + Math.sin(a) * 700; } else { bx = (est.x + HA.x) / 2; by = (est.y + HA.y) / 2; }
+            }
+            H.B = clampToMapCircle(bx, by, 1500);
+            const ha = Math.atan2(HA.y - H.B.y, HA.x - H.B.x) + H.side * 0.8, cv = findCoverSpot(H.B.x + Math.cos(ha) * 1500, H.B.y + Math.sin(ha) * 1500, 900);
+            H.S = cv ? { x: cv.x, y: cv.y } : clampToMapCircle(H.B.x + Math.cos(ha) * 1500, H.B.y + Math.sin(ha) * 1500, 1200);
+        }
+        const dB = Math.hypot(H.B.x - HA.x, H.B.y - HA.y);
+        if (dB > 700) { if (now - H.t0 > 60 * 150) return X.end('置き場所に着けない', false); if (dB > 5000) X.transit('偽コンテナを置きに行く'); HA.go(H.B.x, H.B.y, dB > 3500 ? 'cruise' : 'silent'); return true; }
+        if (!X.placeFake(H.B.x, H.B.y)) return X.end('偽コンテナが無い', false);
+        H.ph = 'go'; H.placedF = now;
+        say('【偽コンテナの罠】' + _dirTxt(HA.x, HA.y, H.B.x, H.B.y) + ' に偽コンテナを置いた — 横の霧 (' + _dirTxt(HA.x, HA.y, H.S.x, H.S.y) + ') で待つ');
+        X.event('fake', '偽コンテナの罠を置く');
+        return true;
+    }
+    if (H.ph === 'go' || H.ph === 'wait') {
+        if (X.trapped(H)) { X.onTrap(H); say('【偽コンテナの罠】掛かった — 開けた所 (' + _dirTxt(HA.x, HA.y, H.B.x, H.B.y) + ') に居る。撃つ'); return true; } // 爆発した (相手が開けた) → 位置が割れた。待ち伏せとして撃つ
+        const dS = Math.hypot(H.S.x - HA.x, H.S.y - HA.y);
+        if (H.ph === 'go') { if (dS > 400) { HA.go(H.S.x, H.S.y, dS > 2500 ? 'cruise8' : 'silent'); return true; } H.ph = 'wait'; H.waitF = now; }
+        HA.drift(Math.atan2(H.B.y - HA.y, H.B.x - HA.x));
+        if (now - H.waitF > 60 * 180) return X.end('掛からなかった', false);
+        return true;
+    }
+    return false;
+}
 // 第114弾 (段5・前半): 狩人の任務の重みは 自機COMも敵も同じ関数。F は行為者が知っていること
 //   P, D(推定までの距離), cls, stc(潜航型×1.5), fails(焦れ), hpF, closing, moving(動いている), hasLure, hasNoise, hasFake, hitOrPing(直近に撃たれた/探信された), strike(出せる艦載機/Tech), kOk, bOk, holdRecent(待ち伏せの最中に気配を掴んだ)
 function huntWeights(F) {
@@ -15737,61 +15795,6 @@ function enemyHunterStep(e, heard, hard) {
         if (now - H.sawF > 60 * 8) return end('目視したが撃てない → 交戦', true, 900);
         return true;
     } else H.sawF = 0;
-    if (H.k === 'feint') { // 偽装退却
-        if (H.ph === 'decoy') {
-            const away = est ? Math.atan2(e.y - est.y, e.x - est.x) : e.angle; // 相手から遠ざかる向き (逃げたように見せる)
-            enemyUseNoise(e, away + (Math.random() - 0.5) * 0.4);
-            H.qa = away + H.side * Math.PI / 2; H.ph = 'quiet'; H.tq = now + 60 * (14 + 10 * Math.random() + 8 * st);
-            if (e.itemSmoke > 0 && est && D < 3500) enemyUseSmoke(e);
-            say('【偽装退却】ノイズメーカーを ' + compassDeg(away) + '° へ全速で走らせた — 自分は機関を止めて ' + compassDeg(H.qa) + '° へ滑る (' + Math.round((H.tq - now) / 60) + '秒 息を潜める)');
-            matchRecEvent('feintE', e.x, e.y, '敵: ノイズメーカーで逃げたふり (偽装退却)');
-            return true;
-        }
-        if (H.ph === 'quiet') {
-            e._drift(H.qa); e._quietRun = true;
-            if (now > H.tq) { e._hunt = null; e._huntCD = 0; e._forceNext = 'stalk'; e._lastScentF = now; say('【偽装退却】相手がノイズを追ったはず → 背後へ回り込む (忍び寄りへ)'); }
-            return true;
-        }
-    }
-    if (H.k === 'fakebox') { // 偽コンテナの罠
-        if (H.ph === 'place') {
-            if (!H.B) {
-                if (!est) return end('相手を見失った', false);
-                // 置く所: 相手の針路の先 (動いていれば70秒先・最大4500u) / 動いていなければ 相手が次に向かいそうな拠点 (自分のものでないコロニー・回収されていない難破船) / それも無ければ推定とこちらの間
-                const mv = est.moving ? { vx: est.vx, vy: est.vy } : (e._lastMove && now - e._lastMove.f < 60 * 120 ? e._lastMove : null);
-                let bx, by;
-                if (mv && Math.hypot(mv.vx, mv.vy) > 0.2) { const t = Math.min(4500, Math.hypot(mv.vx, mv.vy) * 60 * 70) / Math.hypot(mv.vx, mv.vy); bx = est.x + mv.vx * t; by = est.y + mv.vy * t; }
-                else {
-                    let best = null, bd = 14000;
-                    for (const q of structures) if ((q.type === 'colony' && q.owner !== 'enemy') || (q.type === 'derelict' && !q.salvaged)) { const d = Math.hypot(q.x - est.x, q.y - est.y); if (d < bd) { bd = d; best = q; } }
-                    if (best) { const a = Math.atan2(est.y - best.y, est.x - best.x); bx = best.x + Math.cos(a) * 700; by = best.y + Math.sin(a) * 700; } else { bx = (est.x + e.x) / 2; by = (est.y + e.y) / 2; }
-                }
-                H.B = clampToMapCircle(bx, by, 1500);
-                const ha = Math.atan2(e.y - H.B.y, e.x - H.B.x) + H.side * 0.8, cv = findCoverSpot(H.B.x + Math.cos(ha) * 1500, H.B.y + Math.sin(ha) * 1500, 900);
-                H.S = cv ? { x: cv.x, y: cv.y } : clampToMapCircle(H.B.x + Math.cos(ha) * 1500, H.B.y + Math.sin(ha) * 1500, 1200);
-            }
-            const dB = Math.hypot(H.B.x - e.x, H.B.y - e.y);
-            if (dB > 700) { if (now - H.t0 > 60 * 150) return end('置き場所に着けない', false); if (dB > 5000) huntTransitEngine(e, '偽コンテナを置きに行く'); e._moveHeading(Math.atan2(H.B.y - e.y, H.B.x - e.x), ms.cruise); return true; }
-            e.itemFake--; placeFakeCache('e', H.B.x, H.B.y); H.ph = 'go'; H.placedF = now;
-            say('【偽コンテナの罠】' + _dirTxt(e.x, e.y, H.B.x, H.B.y) + ' に偽コンテナを置いた — 横の霧 (' + _dirTxt(e.x, e.y, H.S.x, H.S.y) + ') で待つ');
-            matchRecEvent('fakeE', H.B.x, H.B.y, '敵: 偽コンテナの罠を置く');
-            return true;
-        }
-        if (H.ph === 'go' || H.ph === 'wait') {
-            // 爆発した (相手が開けた) → 位置が割れた。待ち伏せとして撃つ
-            if (e._sa && e._sa.ping && e._sa.ping.f >= (H.placedF || 0) && e._sa.ping.f > now - 120 && Math.hypot(e._sa.ping.x - H.B.x, e._sa.ping.y - H.B.y) < 900) {
-                e._hunt = null; e._huntCD = 0; e._forceNext = 'hold'; e._lastScentF = now; e.contactFreshness = 1;
-                say('【偽コンテナの罠】掛かった — 開けた所 (' + _dirTxt(e.x, e.y, H.B.x, H.B.y) + ') に居る。撃つ');
-                matchRecEvent('tacE', e.x, e.y, '敵の作戦「偽コンテナの罠」が成功 — 爆発で位置が割れた所を撃ちに行く');
-                return true;
-            }
-            const dS = Math.hypot(H.S.x - e.x, H.S.y - e.y);
-            if (H.ph === 'go') { if (dS > 400) { e._moveHeading(Math.atan2(H.S.y - e.y, H.S.x - e.x), ms.cruise * 0.8); return true; } H.ph = 'wait'; H.waitF = now; }
-            e._drift(Math.atan2(H.B.y - e.y, H.B.x - e.x));
-            if (now - H.waitF > 60 * 180) return end('掛からなかった', false);
-            return true;
-        }
-    }
     if (H.k === 'prowl' && (H.ph === 'prowl' || H.ph === 'watch')) {
         if (enemyGrabStep(e)) return true; // 道中・見張り中でも目の前の拾い物は拾う
         if (est && est.age < 600 && (!H.probe || est.r <= Math.max(2500, D * 0.6) || D < 3500)) { e._hunt = null; e._huntCD = 0; e._lastScentF = now; if (H.ph === 'watch') e._stratEndF = now; say('【索敵行】気配を掴んだ (推定' + Math.round(D / 100) * 100 + 'u) → どう仕掛けるか考える' + (H.ph === 'watch' ? ' (見張っていた所 — 待ち伏せが有利)' : '')); return false; }
@@ -15810,9 +15813,17 @@ function enemyHunterStep(e, heard, hard) {
         return true;
     }
     const HAx = { x: e.x, y: e.y, ang: e.angle, v: e._v || 0, driftAng: () => e._driftA ?? e.angle, drift: (a) => e._drift(a),
-        go: (x, y, k, spd) => e._moveHeading(Math.atan2(y - e.y, x - e.x), k === 'flank' ? ms.flank : k === 'cruise' ? ms.cruise : k === 'cruise8' ? ms.cruise * 0.8 : k === 'creep' ? Math.min(ms.silent * 0.7, 0.5) : k === 'speed' ? spd : 0.3) };
+        go: (x, y, k, spd) => e._moveHeading(Math.atan2(y - e.y, x - e.x), k === 'flank' ? ms.flank : k === 'cruise' ? ms.cruise : k === 'cruise8' ? ms.cruise * 0.8 : k === 'creep' ? Math.min(ms.silent * 0.7, 0.5) : k === 'silent' ? ms.silent : k === 'speed' ? spd : 0.3) };
     const HXx = { est, D: est ? Math.hypot(est.x - e.x, est.y - e.y) : null, now, ag, st, ca, say, end, tryFire: (thr) => huntTryFire(e, H, est, thr), canStrike: (es) => !!huntStrikePlan(e, es || e), plan: (es) => huntStrikePlan(e, es), vel: (es) => H.vh ? _huntVel(H, es) : null,
-        who: '自機', cruise: ms.cruise, visAt: _visAt, lureOk: () => (e.lureShip || 0) > 0, lure: (x, y) => { e.lureShip--; launchLure('e', 'ship', e.x, e.y, x, y); } };
+        who: '自機', cruise: ms.cruise, visAt: _visAt, lureOk: () => (e.lureShip || 0) > 0, lure: (x, y) => { e.lureShip--; launchLure('e', 'ship', e.x, e.y, x, y); },
+        mine: 'enemy', noise: (ang) => { if (!((e.itemNoise || 0) > 0)) return false; enemyUseNoise(e, ang); return true; }, smokeOk: () => (e.itemSmoke || 0) > 0, smoke: () => enemyUseSmoke(e),
+        chain: (nx) => { e._hunt = null; e._huntCD = 0; e._forceNext = nx; e._lastScentF = now; }, event: (k, t) => matchRecEvent(k + 'E', e.x, e.y, '敵: ' + t),
+        placeFake: (x, y) => { if (!((e.itemFake || 0) > 0)) return false; e.itemFake--; placeFakeCache('e', x, y); return true; },
+        trapped: (h) => !!(e._sa && e._sa.ping && e._sa.ping.f >= (h.placedF || 0) && e._sa.ping.f > now - 120 && Math.hypot(e._sa.ping.x - h.B.x, e._sa.ping.y - h.B.y) < 900),
+        onTrap: (h) => { e._hunt = null; e._huntCD = 0; e._forceNext = 'hold'; e._lastScentF = now; e.contactFreshness = 1; matchRecEvent('tacE', e.x, e.y, '敵の作戦「偽コンテナの罠」が成功 — 爆発で位置が割れた所を撃ちに行く'); },
+        lastMove: () => (e._lastMove && now - e._lastMove.f < 60 * 120 ? e._lastMove : null), transit: (why) => huntTransitEngine(e, why) };
+    if (H.k === 'feint') return huntFeint(HAx, H, HXx); // 第117弾: 偽装退却・偽コンテナの罠は 自機COMと共通
+    if (H.k === 'fakebox') return huntFakebox(HAx, H, HXx);
     if (H.ph === 'wait' || H.ph === 'creep' || H.ph === 'egress' || H.ph === 'lurk') return huntPostStrike(HAx, H, HXx); // 第116弾: 一撃のあとの動きは 自機COMと共通
     switch (H.ph) {
         case 'approach': { // 忍び寄り: 弧を描いて回り込む
@@ -16197,69 +16208,19 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
         return true;
     };
     // 2026-11-11 (オーナー「戦術・戦略は自機COMも敵COMも同じレベル」): 偽装退却・偽コンテナの罠 — 敵 (enemyHunterStep) と同じ手順
-    if (H.k === 'feint') { // 偽装退却
-        if (H.ph === 'decoy') {
-            const away = est ? Math.atan2(player.y - est.y, player.x - est.x) : player.angle, na = away + (Math.random() - 0.5) * 0.4; // 相手から遠ざかる向き (逃げたように見せる)
-            if (!_comUseItem('noise', player.x + Math.cos(na) * 3000, player.y + Math.sin(na) * 3000)) return end('ノイズメーカーが無い', 0);
-            c.noiseF = now;
-            H.qa = away + H.side * Math.PI / 2; H.ph = 'quiet'; H.qf = now; H.tq = now + 60 * (14 + 10 * Math.random() + 8 * st);
-            H.qp = clampToMapCircle(player.x + Math.cos(H.qa) * 2500, player.y + Math.sin(H.qa) * 2500, 1500);
-            if ((cargo.stock.smoke || 0) > 0 && est && D < 3500) _comUseItem('smoke');
-            say('【偽装退却】ノイズメーカーを ' + compassDeg(na) + '° へ全速で走らせた — 自分は機関を止めて ' + compassDeg(H.qa) + '° へ滑る (' + Math.round((H.tq - now) / 60) + '秒 息を潜める)');
-            matchRecEvent('feintP', player.x, player.y, '自機COM: ノイズメーカーで逃げたふり (偽装退却)');
-            return true;
-        }
-        if (H.ph === 'quiet') { // 最初の3秒だけ横へ噴かし、あとは機関を止めて漂う
-            if (now - H.qf < 180 || player.currentSpeed < 0.15) _comHGo(c, H.qp.x, H.qp.y, 'silent'); else if (!playerCoasting) toggleCoast(true);
-            if (now > H.tq) { c.hunt = null; c.huntCD = 0; c.forceNext = 'stalk'; say('【偽装退却】相手がノイズを追ったはず → 背後へ回り込む (忍び寄りへ)'); }
-            return true;
-        }
-    }
-    if (H.k === 'fakebox') { // 偽コンテナの罠
-        if (H.ph === 'place') {
-            if (!H.B) {
-                if (!est) return end('見失った');
-                // 置く所: 相手の針路の先 (動いていれば70秒先・最大4500u) / 動いていなければ相手が次に向かいそうな拠点 (自分のものでないコロニー・回収されていない難破船) / それも無ければ推定とこちらの間
-                const hv = _huntVel(H, est), mv = est.moving ? { vx: est.vx, vy: est.vy } : hv;
-                let bx, by;
-                if (mv && Math.hypot(mv.vx, mv.vy) > 0.2) { const sp0 = Math.hypot(mv.vx, mv.vy), t = Math.min(4500, sp0 * 60 * 70) / sp0; bx = est.x + mv.vx * t; by = est.y + mv.vy * t; }
-                else {
-                    let best = null, bd = 14000;
-                    for (const q of structures) if ((q.type === 'colony' && q.owner !== 'player') || (q.type === 'derelict' && !q.salvaged)) { const d = Math.hypot(q.x - est.x, q.y - est.y); if (d < bd) { bd = d; best = q; } }
-                    if (best) { const a = Math.atan2(est.y - best.y, est.x - best.x); bx = best.x + Math.cos(a) * 700; by = best.y + Math.sin(a) * 700; } else { bx = (est.x + player.x) / 2; by = (est.y + player.y) / 2; }
-                }
-                H.B = clampToMapCircle(bx, by, 1500);
-                const ha = Math.atan2(player.y - H.B.y, player.x - H.B.x) + H.side * 0.8, cv = findCoverSpot(H.B.x + Math.cos(ha) * 1500, H.B.y + Math.sin(ha) * 1500, 900);
-                H.S = cv ? { x: cv.x, y: cv.y } : clampToMapCircle(H.B.x + Math.cos(ha) * 1500, H.B.y + Math.sin(ha) * 1500, 1200);
-            }
-            const dB = Math.hypot(H.B.x - player.x, H.B.y - player.y);
-            if (dB > 700) { if (now - H.t0 > 60 * 150) return end('置き場所に着けない'); _comHGo(c, H.B.x, H.B.y, dB > 3500 ? 'cruise' : 'silent'); return true; }
-            if (!_comUseItem('fakecache', H.B.x, H.B.y)) return end('偽コンテナが無い', 0);
-            H.ph = 'go'; H.placedF = now;
-            say('【偽コンテナの罠】' + _dirTxt(player.x, player.y, H.B.x, H.B.y) + ' に偽コンテナを置いた — 横の霧 (' + _dirTxt(player.x, player.y, H.S.x, H.S.y) + ') で待つ');
-            return true;
-        }
-        if (H.ph === 'go' || H.ph === 'wait') {
-            for (const sid in _signalAnalysis) { const sa = _signalAnalysis[sid], pg = sa && sa.ping; // 爆発した (相手が開けた) → 位置が割れた。待ち伏せとして撃つ
-                if (pg && pg.f >= (H.placedF || 0) && pg.f > now - 120 && Math.hypot(pg.x - H.B.x, pg.y - H.B.y) < 900) {
-                    c.hunt = null; c.huntCD = 0; c.forceNext = 'hold'; window._lockSignal(sid);
-                    say('【偽コンテナの罠】掛かった — 開けた所 (' + _dirTxt(player.x, player.y, H.B.x, H.B.y) + ') に居る。撃つ');
-                    matchRecEvent('tacP', player.x, player.y, '自機COMの作戦「偽コンテナの罠」が成功 — 爆発で位置が割れた所を撃ちに行く');
-                    return true;
-                }
-            }
-            const dS = Math.hypot(H.S.x - player.x, H.S.y - player.y);
-            if (H.ph === 'go') { if (dS > 400) { _comHGo(c, H.S.x, H.S.y, 'silent'); return true; } H.ph = 'wait'; H.waitF = now; }
-            if (!playerCoasting && player.currentSpeed > 0.1) toggleCoast(true);
-            if (now - H.waitF > 60 * 180) return end('掛からなかった');
-            return true;
-        }
-    }
     const HAx = { x: player.x, y: player.y, ang: player.angle, v: player.currentSpeed || 0, driftAng: () => player.angle,
-        go: (x, y, k, spd) => { if (k === 'flank') _comHGo(c, x, y, 'flank'); else if (k === 'cruise' || k === 'cruise8' || (k === 'speed' && spd > 0.5)) _comHGo(c, x, y, 'cruise'); else if (k === 'creep' || k === 'speed') _comHGo(c, x, y, 'silent'); else { if (!playerCoasting && player.currentSpeed > 0.1) toggleCoast(true); } },
+        go: (x, y, k, spd) => { if (k === 'flank') _comHGo(c, x, y, 'flank'); else if (k === 'cruise' || k === 'cruise8' || (k === 'speed' && spd > 0.5)) _comHGo(c, x, y, 'cruise'); else if (k === 'creep' || k === 'speed' || k === 'silent') _comHGo(c, x, y, 'silent'); else { if (!playerCoasting && player.currentSpeed > 0.1) toggleCoast(true); } },
         drift: (a) => { if (powerStance !== 'silent') setStance('silent', true); if (!playerCoasting && player.currentSpeed > 0.1) toggleCoast(true); else if (player.state === 'moving' && player.currentSpeed <= 0.1) player.setTarget(player.x, player.y); } };
     const HXx = { est, D: est ? Math.hypot(est.x - player.x, est.y - player.y) : null, now, ag, st, ca, say, end: (why) => end(why), tryFire, canStrike: (es) => !!(es && comStrikePlan(es)), plan: (es) => comStrikePlan(es), vel: (es) => H.vh ? _huntVel(H, es) : null,
-        who: 'SIG-' + sigNo(H.sid), cruise: 0.8, visAt: _visAt, lureOk: () => (cargo.stock.lure || 0) > 0, lure: (x, y) => deployDrone('lure', x, y) };
+        who: 'SIG-' + sigNo(H.sid), cruise: 0.8, visAt: _visAt, lureOk: () => (cargo.stock.lure || 0) > 0, lure: (x, y) => deployDrone('lure', x, y),
+        mine: 'player', noise: (ang) => { if (!_comUseItem('noise', player.x + Math.cos(ang) * 3000, player.y + Math.sin(ang) * 3000)) return false; c.noiseF = now; return true; }, smokeOk: () => (cargo.stock.smoke || 0) > 0, smoke: () => _comUseItem('smoke'),
+        chain: (nx) => { c.hunt = null; c.huntCD = 0; c.forceNext = nx; }, event: (k, t) => matchRecEvent(k + 'P', player.x, player.y, '自機COM: ' + t),
+        placeFake: (x, y) => _comUseItem('fakecache', x, y),
+        trapped: (h) => { for (const sid in _signalAnalysis) { const pg = _signalAnalysis[sid] && _signalAnalysis[sid].ping; if (pg && pg.f >= (h.placedF || 0) && pg.f > now - 120 && Math.hypot(pg.x - h.B.x, pg.y - h.B.y) < 900) { h._trapSid = sid; return true; } } return false; },
+        onTrap: (h) => { c.hunt = null; c.huntCD = 0; c.forceNext = 'hold'; if (h._trapSid) window._lockSignal(h._trapSid); matchRecEvent('tacP', player.x, player.y, '自機COMの作戦「偽コンテナの罠」が成功 — 爆発で位置が割れた所を撃ちに行く'); },
+        lastMove: (es) => H.vh ? _huntVel(H, es) : null, transit: () => {} };
+    if (H.k === 'feint') return huntFeint(HAx, H, HXx); // 第117弾: 偽装退却・偽コンテナの罠は 敵と共通
+    if (H.k === 'fakebox') return huntFakebox(HAx, H, HXx);
     if (H.ph === 'wait' || H.ph === 'creep' || H.ph === 'egress' || H.ph === 'lurk') return huntPostStrike(HAx, H, HXx); // 第116弾: 一撃のあとの動きは 敵と共通
     switch (H.ph) {
         case 'approach': {
