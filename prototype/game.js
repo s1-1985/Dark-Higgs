@@ -17864,16 +17864,15 @@ function comPilotStep() {
             deployDrone('repair');
             comThinkEvent('p', '耐久' + _pct(hpF) + ' < 退き際' + _pct(retreat) + '・振り切った → リペアキットで修理 (残り' + (cargo.stock.repair || 0) + '個)');
         }
-        if (!c.hideUntil) c.hideUntil = now + COM_HIDE_TIME;
+        if (!c.hideUntil) { c.hideUntil = now + COM_HIDE_TIME; c.retreatS = null; }
         if (now < c.hideUntil) {
             c.mode = 'hide';
-            if (playerCoasting) toggleCoast(false);
-            player.setTarget(player.x, player.y);
-            if (powerStance !== 'silent') setStance('silent', true);
-            comThink('p', 'hide', '耐久' + _pct(hpF) + '・振り切った → 止まって潜む (残り' + Math.ceil((c.hideUntil - now) / 60) + '秒)');
-            return;
-        }
-        comThink('p', 'hide-end', '潜伏を終える — 耐久' + _pct(hpF) + 'のまま狩りへ戻る (また追われたら退く)');
+            // 第138弾 (操縦の総括の統合): 退いた後の潜伏は 敵と同じ「近くの濃い霧/岩礁帯へ行って止まる」(戦略 fogHide の実行 stratRun と同じ関数)。旧: その場で止まるだけ (敵は隠れ場所まで走っていた)
+            const RS = c.retreatS || (c.retreatS = { id: 'fogHide', t0: now - 3600, until: c.hideUntil, ph: 'go' });
+            const rr = stratRun(stratActorP(c, hpF, null, null), RS, now);
+            if (typeof rr === 'string') { c.hideUntil = now; comThinkEvent('p', '潜伏を終える (' + rr.slice(4) + ')'); }
+            else { comThink('p', 'hide', '耐久' + _pct(hpF) + '・振り切った → 隠れ場所で潜む (残り' + Math.ceil((c.hideUntil - now) / 60) + '秒)'); return; }
+        } else comThink('p', 'hide-end', '潜伏を終える — 耐久' + _pct(hpF) + 'のまま狩りへ戻る (また追われたら退く)');
     }
     if (playerCoasting) toggleCoast(false);
     // 2) 迫るミサイル (副長の回避・デコイ)
