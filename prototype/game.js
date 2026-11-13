@@ -13865,8 +13865,7 @@ class Drone {
             if (!close && d > R) continue;
             if (!close && losReach(this.x, this.y, Math.atan2(e.y - this.y, e.x - this.x), R, h0) < d) continue;
             seen.add(e);
-            if (q >= DRONE_LINK_STRONG) e._dSeenF = _frameCount;              // 自艦も「見える」
-            else if (q >= DRONE_LINK_WEAK) applyContact(e, 0.25 + 0.5 * q, 40); // 誤差つきの反応だけ
+            if (q >= DRONE_LINK_WEAK) e._dSeenF = _frameCount;              // 第130弾 (オーナー): 通信のあるドローンの有視界は艦の有視界と同じ扱い — 艦からもロックオンして攻撃できる (敵艦・敵のドローン両方。旧: 通信が強い時 (0.6以上) だけ・弱い時は誤差つきの反応だけ)
         }
         // 描画用の縁 (24本の視線)
         const pts = this._visPts || (this._visPts = new Float32Array(24));
