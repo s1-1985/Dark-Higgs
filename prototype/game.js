@@ -5026,6 +5026,7 @@ class Ship {
                     _ct.mode = desperate ? 'retreat' : man.why;
                 }
                 const _wantFire = distToBelief < engageRange && this.fireCooldown <= 0 && this._weaponJamTimer <= 0 && player && player.hp > 0 && (!desperate || Math.random() < 0.25);
+                if (window.__fdbg) { const k = !(distToBelief < engageRange) ? 'range' : this.fireCooldown > 0 ? 'cd' : this._weaponJamTimer > 0 ? 'jam' : desperate ? 'desp' : 'ok'; window.__fdbg[k] = (window.__fdbg[k] || 0) + 1; } // 開発用: 敵が撃てない理由の集計
                 if (_wantFire) {
                     const ta = Math.atan2(aimY - this.y, aimX - this.x);
                     if (!ENEMY_CLASS[this.type]) { // 艦載機は撃つ時に向きを変える (小回り)
@@ -5048,7 +5049,7 @@ class Ship {
                     if (wType && this.type !== 'fighter' && !(this.detectionTimer > 60)) {
                         const _te = this._sa && (this._sa.fix || this._sa.motion || this._sa.ping) ? trackEstimate(this._sa, 0) : null;
                         const _hc = this._lkGuess || !_te ? 0 : hitChanceR(wType, huntHonestR(_te.r, saAge(this._sa)), epm(this).seeker ? 1300 : 900);
-                        if (_hc < 0.65 - 0.35 * (pers.aggression ?? 0.5)) { wType = null; this.fireCooldown = Math.max(this.fireCooldown, 60); }
+                        if (_hc < 0.65 - 0.35 * (pers.aggression ?? 0.5)) { if (window.__fdbg) window.__fdbg.hc = (window.__fdbg.hc || 0) + 1; wType = null; this.fireCooldown = Math.max(this.fireCooldown, 60); }
                     }
                     // 第22弾: 自機と同じく射角に入っていなければ撃たない (旧: 艦首の向きに関係なく撃てた)。ビームのチャージは射角の外でもできる
                     if (wType && wType !== 'beam' && Math.abs(diff) > (WEAPON_FIRE_ARC[wType] || Math.PI / 4)) { wType = wType === 'missile' && this._usableWeapon('kinetic', distToBelief) === 'kinetic' && Math.abs(diff) < WEAPON_FIRE_ARC.kinetic ? 'kinetic' : null; if (!wType) this.fireCooldown = 10; }
