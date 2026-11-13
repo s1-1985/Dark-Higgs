@@ -16226,6 +16226,14 @@ function stratSpotFor(id, ox, oy, site) {
     const spot = cv ? { x: cv.x, y: cv.y } : clampToMapCircle(sx, sy, 800);
     return { spot, kindFog: cv ? cv.kind : null, extra: Math.min(18000, Math.hypot(spot.x - ox, spot.y - oy) / 0.2) };
 }
+// 第128弾: 戦略 (待ち伏せ・餌・罠) の「待機位置へ向かい、着いたら止まって待つ」を 自機COMと敵で同じ関数に
+//   A = { S, spot, px, py, go(d), hold(), say(t), arrive() }。着く距離は双方 350u (旧: 敵 400u・自機COM 350u)
+function stratGoWait(A) {
+    const S = A.S, d = Math.hypot(A.spot.x - A.px, A.spot.y - A.py);
+    if (d > 350) { A.go(d); return 'go'; }
+    if (S.ph !== 'wait') { S.ph = 'wait'; A.say('待ち伏せ位置に着いた (' + (S.kindFog === 'fog' ? '濃い霧' : S.kindFog === 'debris' ? '岩礁帯' : '外れ') + ') → 止まって待つ'); if (A.arrive) A.arrive(); }
+    A.hold(); return 'wait';
+}
 function enemyStratStep(e, P) {
     const now = _frameCount, jp = { ambush: '拠点の待ち伏せ', bait: '餌で誘う', guard: '拠点を守る', trap: '罠 (砲台を据えて誘い込む)', push: '圧倒して狩る', screen: 'ドローンで探る', fogHide: '霧に潜む', tech: 'Tech建造 (資材集め)' };
     let S = e._strat;
@@ -16268,8 +16276,10 @@ function enemyStratStep(e, P) {
     const d = Math.hypot(g.x - e.x, g.y - e.y);
     if (S.id === 'push' && d <= 1200) { e._strat = null; e._stratEndF = now; e._stratCD = now + 1200; return false; } // 狩りは着いたら次へ (待たない)
     if (S.id === 'screen' && (now % 300 === 0) && e._sendTo) e._sendTo.until = now + 60 * 40; // 艦載機への行き先を保つ
-    if (d > 400) { if (!(e.state === 'moving' && Math.hypot(e.targetX - g.x, e.targetY - g.y) < 600)) { e.setTarget(g.x, g.y); e._roam = 'strat'; } }
-    else { if (S.ph !== 'wait') { S.ph = 'wait'; comThinkEvent('e', '待ち伏せ位置に着いた → 止まって待つ', 'e' + e.uid); if (S.id === 'trap' && !S.built && (e.turretStock || 0) > 0) { S.built = true; e.turretStock--; spawnEnemyDrone(e, 'turret'); if ((e.lureSOS || 0) > 0) { e.lureSOS--; launchLure('e', 'sos', e.x, e.y, S.site.x, S.site.y); } } } if (e.state === 'moving') e.setTarget(e.x, e.y); e._roam = null; }
+    stratGoWait({ S, spot: g, px: e.x, py: e.y, say: (t) => comThinkEvent('e', t, 'e' + e.uid),
+        go: () => { if (!(e.state === 'moving' && Math.hypot(e.targetX - g.x, e.targetY - g.y) < 600)) { e.setTarget(g.x, g.y); e._roam = 'strat'; } },
+        arrive: () => { if (S.id === 'trap' && !S.built && (e.turretStock || 0) > 0) { S.built = true; e.turretStock--; spawnEnemyDrone(e, 'turret'); if ((e.lureSOS || 0) > 0) { e.lureSOS--; launchLure('e', 'sos', e.x, e.y, S.site.x, S.site.y); } } },
+        hold: () => { if (e.state === 'moving') e.setTarget(e.x, e.y); e._roam = null; } });
     return true;
 }
 // 第80弾: 狩人の頭脳 (自機COM) — 敵COMと同じ考え方。使うのは追跡中の信号の推定 (方位の記録から解いた位置) だけ (艦か囮かは区別しない)
@@ -17482,15 +17492,15 @@ function comStratStep(c, P, D, hpF, contact, te, lk, r) {
             if (te && lk && lk.full) return end('相手が見えた → 交戦');
             if (est && dEst < 5200 && est.r < 2600 && now - S.t0 > 300) { c.flankUntil = now + 1800; c.stratEndF = now; return end('相手が近づいてきた (' + _dirTxt(player.x, player.y, est.x, est.y) + ') → 先に撃つ構え'); }
             c.mode = 'strat'; _comCMOff();
-            const dS = Math.hypot(S.spot.x - player.x, S.spot.y - player.y);
-            if (dS > 350) {
-                if (powerStance === 'silent' && dS > 2500) setStance('cruise', true); else if (powerStance !== 'silent' && dS <= 2500) setStance('silent', true); // 遠くは巡航で急ぎ、近づいたら潜航で静かに入る
-                _comGoTo(S.spot, 350, c);
-                comThink('p', 'strat', '戦略「' + (S.id === 'bait' ? '餌' : '待ち伏せ') + '」: ' + S.site.lbl + 'の近くへ移動中 (' + _dirTxt(player.x, player.y, S.spot.x, S.spot.y) + '・' + Math.round(dS / 100) * 100 + 'u)');
-            } else {
-                if (S.ph !== 'wait') { S.ph = 'wait'; comThinkEvent('p', '待ち伏せ位置に着いた (' + (S.kindFog === 'fog' ? '濃い霧' : S.kindFog === 'debris' ? '岩礁帯' : '外れ') + ') → 止まって聴く'); }
-                _comHold(c);
-                if (!playerCoasting && S.kindFog) toggleCoast(true); // 機関停止: 推力由来の信号を消す (動くと解除される)
+            const jpS = S.id === 'bait' ? '餌' : '待ち伏せ';
+            const gw = stratGoWait({ S, spot: S.spot, px: player.x, py: player.y, say: (t) => comThinkEvent('p', t),
+                go: (dS) => {
+                    if (powerStance === 'silent' && dS > 2500) setStance('cruise', true); else if (powerStance !== 'silent' && dS <= 2500) setStance('silent', true); // 遠くは巡航で急ぎ、近づいたら潜航で静かに入る
+                    _comGoTo(S.spot, 350, c);
+                    comThink('p', 'strat', '戦略「' + jpS + '」: ' + S.site.lbl + 'の近くへ移動中 (' + _dirTxt(player.x, player.y, S.spot.x, S.spot.y) + '・' + Math.round(dS / 100) * 100 + 'u)');
+                },
+                hold: () => { _comHold(c); if (!playerCoasting && S.kindFog) toggleCoast(true); } }); // 機関停止: 推力由来の信号を消す (動くと解除される)
+            if (gw === 'wait') {
                 const x = comStratCtx(c, P);
                 if (S.id === 'trap' && !S.turret) { // 第66弾: 罠 — 砲台を据え、囮を拠点の方へ置く
                     S.turret = true;
