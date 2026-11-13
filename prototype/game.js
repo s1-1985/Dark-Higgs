@@ -17659,7 +17659,7 @@ function comPilotStep() {
     // 第23弾: 内部IDで艦か囮かを見分けない (旧: 'e-' で始まる信号=敵艦と分かっていた)。囮と識別した信号だけ除く
     // 第41弾: 艦でないと分かった信号 (海図に載せた発信元・識別で艦影25%未満・正体を確認した囮/輸送船) は「相手の気配」に数えない
     //   (旧: 輸送船や艦影1%の信号も気配に数え、その測量に走り続けた・2つの囮の間で2秒ごとに追跡を往復した)
-    const dud = (sid) => { if (_srcKnown[sid]) return true; const d = identInfo(sid); return d.known && (d.p < 0.25 || (d.low && d.txt.includes('確認'))); };
+    const dud = (sid) => { if (_srcKnown[sid]) return true; { const tr = _identTruth(sid); if (tr === 'nature' || tr === 'cache' || /^C-/.test(sid)) return true; } /* 第129弾: 敵と同じ — 自然・コンテナ・輸送船は気配に数えない (COM対戦の自機COMは正体を直接知る。人が操作する試合では使わない) */ const d = identInfo(sid); return d.known && (d.p < 0.25 || (d.low && d.txt.includes('確認'))); };
     const contact = Object.keys(sigs).some(k => !dud(k)) || enemies.some(e => e.hp > 0 && !e._dying && e.inVision);
     if (lockedSignalId && dud(lockedSignalId)) {
         const d = identInfo(lockedSignalId);
