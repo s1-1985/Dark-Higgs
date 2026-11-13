@@ -5311,33 +5311,27 @@ class Ship {
                         this.setTarget(_amb.x, _amb.y); this._roam = 'patrol';
                         comThinkEvent('e', '気配なし → 偽SOSを ' + _dirTxt(this.x, this.y, _sp.x, _sp.y) + ' に出し、その近くの霧で待ち伏せる', 'e' + this.uid);
                     } else if (this.type !== 'fighter' && !_hasScent && ((_frameCount - (this._lastScentF || 0) > ENEMY_ROAM_QUIET * (1.4 - _pers.aggression) * (0.7 + 0.8 * (_pers.stealth ?? 0.4)) && Math.random() < 0.02)
-                               || (this._partHunt = enemySlotsUsed(this) < enemySlotsMax(this) && _frameCount - (this._lastScentF || 0) > (_frameCount < COM_EARLY_GATHER ? 120 : ENEMY_PART_QUIET) && (comDoctrine(_pers).partHunt || _frameCount < COM_EARLY_GATHER) && Math.random() < (_frameCount < COM_EARLY_GATHER ? 1 : 0.15 + _pers.greed * 0.3)))) { // 第41弾: 寄り道は自機COMと同じ方針 (隠密は寄り道しない)
+                               || ((this._gw = gatherWants(_pers, enemySlotsUsed(this), enemySlotsMax(this), _frameCount)) && _frameCount - (this._lastScentF || 0) > 120 && ((this._partHunt = this._gw.part) || this._gw.greed))) ) { // 第41弾: 寄り道は自機COMと同じ方針 (隠密は寄り道しない)
                         // 第33弾: 部品の枠が空いていれば、20秒気配が無いだけで部品を取りに出る (長い静けさを待たない)
                         // 第20弾: 長く何も聞こえない → 隠れ場所伝いに区間ごとに哨戒へ (行き先: 自分のものでないノード / コロニー / マップ中央)
                         let g = this._roamGoal;
                         if (g && g.der && g.der.salvaged) g = this._roamGoal = null; // 第33弾: 難破船は取られたら次へ
                         // 第33弾: 部品の枠が空いていれば、部品の取れる所 (まだ回収されていない難破船 / 部品をまだ取っていないノード・コロニー) を優先する
-                        if (!g && enemySlotsUsed(this) < enemySlotsMax(this) && (this._partHunt || Math.random() < 0.35 + _pers.greed * 0.5)) {
-                            let ps = null, pd = Infinity;
-                            for (const st of structures) {
-                                const ok = st.type === 'derelict' ? !st.salvaged : st.type === 'colony' ? !st._partE && st.owner !== 'enemy' : false;
-                                if (!ok) continue; const d = Math.hypot(st.x - this.x, st.y - this.y); if (d < pd) { pd = d; ps = st; }
-                            }
-                            for (const n of resourceNodes) { if (n._partE || n.owner === 'enemy') continue; const d = Math.hypot(n.x - this.x, n.y - this.y); if (d < pd) { pd = d; ps = n; } }
+                        if (!g) { // 第107弾: 自機COMと同じ関数で 最寄りを選ぶ (部品の枠が空いていれば部品の取れる所 / 貪欲なら最寄りの拠点)
+                            const gw = this._gw || gatherWants(_pers, enemySlotsUsed(this), enemySlotsMax(this), _frameCount);
+                            let ps = gw.part ? gatherPick('e', this.x, this.y, 'part', gw.range) : null, why = '気配なし・部品の枠が空いている';
+                            if (!ps && gw.greed) { ps = gatherPick('e', this.x, this.y, 'any', COM_GOAL_RANGE); why = '気配なし・貪欲さ' + _pct(_pers.greed); }
                             if (ps) {
                                 const isDer = ps.type === 'derelict', isCol = ps.type === 'colony';
-                                g = this._roamGoal = { x: ps.x, y: ps.y, lbl: isDer ? '難破船 (部品)' : isCol ? 'コロニー (部品)' : 'ノード (部品)', der: isDer ? ps : null, col: isCol ? ps : null, node: !isDer && !isCol ? ps : null };
-                                comThinkEvent('e', '気配なし・部品の枠が空いている → ' + g.lbl + ' (' + _dirTxt(this.x, this.y, g.x, g.y) + ')', 'e' + this.uid);
+                                g = this._roamGoal = { x: ps.x, y: ps.y, lbl: isDer ? '難破船 (部品)' : isCol ? 'コロニー (占有する)' : 'ノード (制圧する)', der: isDer ? ps : null, col: isCol ? ps : null, node: !isDer && !isCol ? ps : null };
+                                comThinkEvent('e', why + ' → ' + g.lbl + ' (' + _dirTxt(this.x, this.y, g.x, g.y) + ')', 'e' + this.uid);
                             }
                         }
                         if (!g || (g.col ? g.col.owner === 'enemy' : g.node ? g.node.owner === 'enemy' : g.der ? g.der.salvaged : Math.hypot(g.x - this.x, g.y - this.y) < 2500)) {
                             // 第23弾: コロニーを占有すれば自機の位置の手掛かり (方角・距離) が入る → 自分のでないコロニーを優先して取りに行く
                             let col = null, cd = Infinity;
                             for (const st of structures) { if (st.type !== 'colony' || st.owner === 'enemy') continue; const d = Math.hypot(st.x - this.x, st.y - this.y); if (d < cd) { cd = d; col = st; } }
-                            let ndO = null; // 第99弾: 自機COMと同じ「最寄りの自分のものでないコロニー/ノード」・同じ条件 (貪欲−隠密×0.45 ≥ 0.25)
-                            if (_pers.greed - (_pers.stealth ?? 0.4) * 0.45 >= 0.25) for (const n of resourceNodes) { if (n.owner === 'enemy') continue; const d = Math.hypot(n.x - this.x, n.y - this.y); if (d < cd) { cd = d; ndO = n; } }
-                            if (ndO) { g = this._roamGoal = { x: ndO.x, y: ndO.y, lbl: 'ノード (制圧する)', node: ndO }; comThinkEvent('e', '気配なし・貪欲さ' + _pct(_pers.greed) + ' → ノードを制圧しに行く (' + _dirTxt(this.x, this.y, g.x, g.y) + ')', 'e' + this.uid); }
-                            else if (col && Math.random() < 0.4 + _pers.greed * 0.5) {
+                            if (col && Math.random() < 0.4 + _pers.greed * 0.5) {
                                 g = this._roamGoal = { x: col.x, y: col.y, lbl: col.owner === 'player' ? '自機のコロニー (奪う)' : 'コロニー (占有する)', col };
                                 comThinkEvent('e', '気配なし → ' + g.lbl + ' (' + _dirTxt(this.x, this.y, g.x, g.y) + ')。占有すれば補給・聴音局・演算力', 'e' + this.uid);
                             }
@@ -17277,6 +17271,24 @@ const COM_STRATS = {
 const COM_STRAT_MIN = 5400, COM_STRAT_VAR = 12600; // 90〜300秒
 // 第66弾 (オーナー): 序盤は性格によらず部品を集める (人間も序盤は集める。集めないと艦が強化されない) — 最初の10分は、枠が2つ埋まるまで全員が部品を取りに行く
 const COM_EARLY_GATHER = 36000;
+// 第107弾 (段1・オーナー「人が操作する時も、最初は一番近い物を目指す」): 取りに行く物の「始める条件」と「選び方」を 自機COMも敵も同じ関数で (旧: 敵は確率と別の距離の条件で、自機COMは毎判断)
+function gatherWants(P, used, max, now) {
+    const D = comDoctrine(P), early = comEarlyGather(used, max, now);
+    return { part: used < max && (D.partHunt || early), early, greed: (P.greed ?? 0.4) - (P.stealth ?? 0.4) * 0.45 >= 0.25, range: Math.max(D.partRange, early ? 12000 : 0) };
+}
+// 最寄りの拠点 (コロニー・ノード) と難破船。side 'p'|'e'。mode 'part' = 部品をまだ取っていない物 (難破船も) / 'any' = 自分のものでない拠点。難破船は自分が見つけた物だけ (自機は discovered・敵は 2500u 以内に入った物)
+function gatherPick(side, x, y, mode, range) {
+    const me = side === 'p' ? 'player' : 'enemy', pk = side === 'p' ? '_partP' : '_partE';
+    let best = null, bd = range === undefined ? Infinity : range;
+    for (const st of structures) {
+        let ok = false;
+        if (st.type === 'derelict') { if (mode === 'part' && !st.salvaged) { if (side === 'e' && !st._discE && Math.hypot(st.x - x, st.y - y) < 2500) st._discE = true; ok = side === 'p' ? !!st.discovered : !!(st.discovered || st._discE); } }
+        else if (st.type === 'colony') ok = st.owner !== me && (mode === 'any' || !st[pk]);
+        if (!ok) continue; const d = Math.hypot(st.x - x, st.y - y); if (d < bd) { bd = d; best = st; }
+    }
+    for (const n of resourceNodes) { if (n.owner === me || (mode === 'part' && n[pk])) continue; const d = Math.hypot(n.x - x, n.y - y); if (d < bd) { bd = d; best = n; } }
+    return best;
+}
 function comEarlyGather(used, max, now) { return now < COM_EARLY_GATHER && used < Math.min(2, max); }
 // 第66弾 (オーナー「逃げ回るだけでは勝つ気がない・双方が隠密/慎重だと試合が終わらない」): 長く (10分) 相手の気配が無ければ痺れを切らし、性格が攻め寄りに傾く (20分で最大: 攻撃性+0.5・隠密性×0.3・慎重さ×0.6)
 function comStallPers(c, base, now, lastF) {
@@ -17800,12 +17812,8 @@ function comPilotStep() {
     }
     const _early = comEarlyGather(partSlotsUsed(), partSlotsMax(), now);
     if (!contact && (D.partHunt || _early) && partSlotsUsed() < partSlotsMax()) { // 第41弾: 寄り道は 貪欲さ − 隠密性×0.45 ≥ 0.05 の時だけ・距離も方針で (第66弾: 序盤は全員)
-        let ps = null, pd = Math.max(D.partRange, _early ? 12000 : 0);
-        for (const st of structures) {
-            const ok = st.type === 'derelict' ? !st.salvaged && st.discovered : st.type === 'colony' ? !st._partP && !st.hacked : false; // 第44弾: 見つけた難破船だけ
-            if (!ok) continue; const d = Math.hypot(st.x - player.x, st.y - player.y); if (d < pd) { pd = d; ps = st; }
-        }
-        for (const n of resourceNodes) { if (n._partP || n.owner === 'player') continue; const d = Math.hypot(n.x - player.x, n.y - player.y); if (d < pd) { pd = d; ps = n; } }
+        let pd = Math.max(D.partRange, _early ? 12000 : 0), ps = gatherPick('p', player.x, player.y, 'part', pd); // 第107弾: 最寄りを選ぶ関数は敵と共通
+        if (ps) pd = Math.hypot(ps.x - player.x, ps.y - player.y);
         for (const sid in _srcKnown) { const k = _srcKnown[sid]; if (k.kind !== 'cache') continue; const f = fieldSignals.find(q => q.sid === sid); if (!f) continue; const q = srcDrawPos(sid, f); const d = Math.hypot(q.x - player.x, q.y - player.y); if (d < pd) { pd = d; ps = { kind: 'cache', x: q.x, y: q.y, sid }; } } // 第40弾: 目視か解析で分かったコンテナ (位置は分かっている所)
         if (ps) {
             const kind = ps.kind === 'cache' ? '漂流コンテナ' : ps.type === 'derelict' ? '難破船' : ps.type === 'colony' ? 'コロニー' : 'ノード';
@@ -17817,7 +17825,7 @@ function comPilotStep() {
         }
     }
     if (!contact && P.greed - P.stealth * 0.45 >= 0.25) { // 第41弾: 隠密は取りに行かない
-        const g = _comNearest(true, true);
+        const g = gatherPick('p', player.x, player.y, 'any', COM_GOAL_RANGE); // 第107弾: 最寄りを選ぶ関数は敵と共通
         if (g) {
             const isNode = !g.type;
             _comGoTo(g, (isNode ? NODE_CAP_R : COLONY_HACK_R) * 0.6, c); c.item = { o: g, near: (isNode ? NODE_CAP_R : COLONY_HACK_R) * 0.6, f: now }; // 第66弾: 取り終えるまで続ける
