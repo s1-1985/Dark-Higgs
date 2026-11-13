@@ -13639,6 +13639,11 @@ function tacScore(F, id) {
 }
 function tacticDecide(F, A, X, act, doAct) {
     const now = _frameCount, cands = [];
+    if (window.__facts) { const T = window.__facts, c = (k) => { T[k] = (T[k] || 0) + 1; }; // 検証用: 前提条件ごとの成立回数
+        c('calls'); if (F.estAng !== null) c('hasEst'); if (F.estD < 4000) c('estD<4000'); if (F.estD < 9000) c('estD<9000'); if (F.exposure >= 1) c('expo>=1'); if (F.exposure >= 2) c('expo>=2'); if (F.exposure >= 3) c('expo3'); if (F.seen) c('seen');
+        if (F.hpF < 0.5) c('hp<.5'); if (F.hitAgo < 900) c('hit<900'); if (F.hiding) c('hiding'); if (F.dazed) c('dazed'); if (F.ammoOut) c('ammoOut'); if (F.hHere > 0.55) c('hHere>.55'); if (F.hHere < 0.4) c('hHere<.4');
+        for (const k of ['flash', 'noise', 'smoke', 'repair', 'blow', 'spray', 'sos', 'lure', 'fake']) if (F.n(k) > 0) c('has_' + k); if (F.bcn) c('has_bcn'); if (A.have('scout')) c('haveScout'); if (A.have('attack')) c('haveFtr'); if (A.mobile('attack')) c('mobFtr'); if (A.mobile('scout')) c('mobScout'); if (A.captured()) c('captured'); if (A.techBuilding()) c('techBuilding');
+        if (F.exposure >= 2 && F.hitAgo < 900 && F.estD < 9000) c('sat_ctx'); if (F.hpF < 0.5 && F.hitAgo < 900) c('repair_ctx'); if (F.estAng !== null && F.estD < 4000 && !F.seen) c('blow_ctx_est'); }
     // 聴き耳の最中: 止まって聴く (見えた・撃たれた・攻撃を受けたら中断)
     if ((F.get('tacHold') || 0) > now) { if (F.seen || F.hitAgo < 900 || F.exposure >= 3) F.set('tacHold', 0); else { A.hold(true); return true; } }
     const R = (id, cond, run) => {
@@ -18298,7 +18303,7 @@ function stratExtra(x) {
     return o;
 }
 function stratWeights(P, x) {
-    x = Object.assign({}, x, stratExtra(x)); if (window.__stratDbg && x.side) { const sd = window.__stratDbg; for (const id in STRAT_REG) { const d = sd[id] || (sd[id] = { n: 0, pos: 0 }); d.n++; if (STRAT_REG[id].w({ st: P.stealth ?? 0.4, ca: P.caution ?? 0.4, ag: P.aggression ?? 0.5, gr: P.greed ?? 0.4, early: x.early }, x) > 0) d.pos++; } } const k = { st: P.stealth ?? 0.4, ca: P.caution ?? 0.4, ag: P.aggression ?? 0.5, gr: P.greed ?? 0.4, early: x.early }, w = {};
+    x = Object.assign({}, x, stratExtra(x)); if (window.__stratDbg && x.side) { const sd = window.__stratDbg, cx = (k, v) => { if (v) sd['_' + k] = sd['_' + k] || { n: 0, pos: 0 }, sd['_' + k].n++; }; cx('ammoOut', x.ammoOut); cx('restockSite', x.restockSite); cx('expo>=2', x.expo >= 2); cx('hp<.5', x.hpF < 0.5); cx('expo2&hp<.5', x.expo >= 2 && x.hpF < 0.5); cx('hp<.65&owned', x.hpF < 0.65 && x.owned.length); cx('owned', x.owned.length); cx('estD4500-14000', x.estD < 14000 && x.estD > 4500); cx('salvageSite', x.salvageSite); cx('raid', x.raid); for (const id in STRAT_REG) { const d = sd[id] || (sd[id] = { n: 0, pos: 0 }); d.n++; if (STRAT_REG[id].w({ st: P.stealth ?? 0.4, ca: P.caution ?? 0.4, ag: P.aggression ?? 0.5, gr: P.greed ?? 0.4, early: x.early }, x) > 0) d.pos++; } } const k = { st: P.stealth ?? 0.4, ca: P.caution ?? 0.4, ag: P.aggression ?? 0.5, gr: P.greed ?? 0.4, early: x.early }, w = {};
     for (const id in STRAT_REG) { const R = STRAT_REG[id]; w[id] = R.w(k, x); if (x.near && R.near) w[id] = 0; if (x.side && !skillOn(x.side, 'st_' + id)) w[id] = 0; else if (w[id] > 0 && id !== 'gather') w[id] *= skillAff(P, 'st_' + id); } // 第147弾: 性格面・新しい軸による適性 (優先度) // 第142弾: 切ったスキルは選ばない // 相手が近い間は 待ち伏せ・餌・罠・Tech建造を始めない
     return w;
 }
