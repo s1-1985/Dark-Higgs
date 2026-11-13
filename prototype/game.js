@@ -1741,8 +1741,8 @@ const SURGE_VISION_MULT  = 0.6;    // サージ中の有視界倍率
 const SURGE_CLARITY_MULT = 1.5;    // クリアリング中の探知倍率
 const SURGE_WAKE_MULT    = 2.2;    // サージ中の移動ウェイク増幅 (動けば痕跡が残る)
 // 敵スポーン距離: パッシブ探知圏(11000)のすぐ外 → 接敵まで数分の空白を1〜2分に短縮
-const ENEMY_SPAWN_MIN = 13000;
-const ENEMY_SPAWN_VAR = 4000;
+const ENEMY_SPAWN_MIN = 28000;
+const ENEMY_SPAWN_VAR = 10000;
 
 // ═══════════════════════════════════════════════════════════════
 // ゲーム性進化 第2弾「音と決断」(2026-07-03):
@@ -8194,6 +8194,17 @@ function updateResupply() {
 function updateNodesAndColonies() {
     _capturing = null;
     for (const n of resourceNodes) { if (n.emFlashTimer > 0) n.emFlashTimer--; }
+    // 第104弾 (自機と敵の差): 自機は「450u以内に居れば、何をしていても5秒で制圧・進みは徐々に戻る」。敵は収集の状態でしか制圧せず、移動の途中や見張りで通っても進まなかった → 敵も同じ式
+    for (const e of enemies) {
+        if (e.type === 'fighter' || e.hp <= 0 || e.dead) continue;
+        for (const n of resourceNodes) {
+            if (n.owner === 'enemy') { n.capE = 0; continue; }
+            if (Math.hypot(e.x - n.x, e.y - n.y) < NODE_CAP_R) {
+                e._commsF = _frameCount; n.capE = (n.capE || 0) + gameSpeedFactor / NODE_CAP_TIME;
+                if (n.capE >= 1) { n.capE = 0; enemyCaptureNode(e, n); e.resourcePoints = (e.resourcePoints || 0) + 1; if (e.gatherTarget === n) { e.gatherTarget = null; e._capT = 0; if (e.aiState === 'gathering') { e.aiState = 'lurking'; e.lurking = true; } } }
+            } else if (n.capE > 0) n.capE = Math.max(0, n.capE - 0.004);
+        }
+    }
     if (!player || player.hp <= 0) return;
     for (const n of resourceNodes) {
         if (n.owner === 'player') { n.capP = 0; continue; }
