@@ -18191,12 +18191,12 @@ const STRAT_REG = {
     fallback:{ jp: '拠点へ退く', desc: '拠点へ退く (傷が深い時、占有したコロニーへ下がって補給・修理し、ドローンの庇護の下で立て直す)', w: (k, x) => x.owned.length && x.hpF < 0.65 ? 0.3 + 1.4 * k.ca + 0.5 * (1 - k.ag) : 0 },
     restock:{ jp: '補給に戻る', desc: '補給に戻る (弾が尽きかけたら、使える味方/空きのコロニーへ先回りして補給する)', w: (k, x) => x.ammoOut && x.restockSite ? 2.2 : 0 },
     playdead:{ jp: '死んだふり', desc: '死んだふり (深手で追われた時、機関を止めて信号を断ち、ノイズを流して撃沈したように装う)', w: (k, x) => x.expo >= 2 && x.hpF < 0.5 ? 0.3 + 1.2 * k.st + 0.6 * k.ca : 0 },
-    storm:  { jp: '嵐に潜む', desc: '嵐に潜む (磁気嵐の中は電磁波が通らない — 嵐の中で止まって聞こえなくする)', w: (k, x) => x.storm ? (x.expo >= 1 ? 0.5 : 0.2) + 1.0 * k.st + 0.4 * k.ca : 0 },
-    heatcloud:{ jp: '熱雲に潜む', desc: '熱雲に潜む (熱雲の中は熱の信号が通らない — 熱核の熱を紛らわせて止まる)', w: (k, x) => x.heat ? (x.expo >= 1 ? 0.5 : 0.2) + 0.9 * k.st + 0.4 * k.ca : 0 },
+    storm:  { jp: '嵐に潜む', desc: '嵐に潜む (磁気嵐の中は電磁波が通らない — 嵐の中で止まって聞こえなくする)', w: (k, x) => (x.storm ? (x.expo >= 1 ? 0.5 : 0.2) + 1.0 * k.st + 0.4 * k.ca : 0) * (k.early ? 0 : 1) },
+    heatcloud:{ jp: '熱雲に潜む', desc: '熱雲に潜む (熱雲の中は熱の信号が通らない — 熱核の熱を紛らわせて止まる)', w: (k, x) => (x.heat ? (x.expo >= 1 ? 0.5 : 0.2) + 0.9 * k.st + 0.4 * k.ca : 0) * (k.early ? 0 : 1) },
     surge:  { jp: 'サージ・凪に乗る', desc: 'サージ・凪に乗る (全体の探知が鈍る/遠くまで見える間に、全速で推定や未踏の海域へ動く)', w: (k, x) => x.lullSurge ? 0.6 + 1.2 * k.ag + 0.5 * k.gr : 0 },
-    wide_loop:{ jp: '大回りの奇襲', desc: '大回りの奇襲 (遠い推定の脇へ大きく回り込み、相手の背後・横腹から入る)', near: true, w: (k, x) => x.estD < 14000 && x.estD > 4500 ? 0.2 + 0.9 * k.st + 0.7 * k.ag : 0 },
-    center: { jp: '中央を押さえる', desc: '中央を押さえる (マップの中央で待ち、どこからの信号にも近い位置を取る)', w: (k, x) => x.farFromCenter ? (0.15 + 0.5 * k.gr + 0.3 * k.ag) * (k.early ? 0.3 : 1) : 0 },
-    orbit:  { jp: '拠点の周回警備', desc: '拠点の周回警備 (占有した拠点の周りを巡航して、近づく者を早く聞きつける)', w: (k, x) => x.owned.length ? 0.15 + 0.7 * k.ca + 0.3 * k.ag : 0 },
+    wide_loop:{ jp: '大回りの奇襲', desc: '大回りの奇襲 (遠い推定の脇へ大きく回り込み、相手の背後・横腹から入る)', near: true, w: (k, x) => (x.estD < 14000 && x.estD > 4500 ? 0.2 + 0.9 * k.st + 0.7 * k.ag : 0) * (k.early ? 0 : 1) },
+    center: { jp: '中央を押さえる', desc: '中央を押さえる (マップの中央で待ち、どこからの信号にも近い位置を取る)', w: (k, x) => x.farFromCenter ? (0.15 + 0.5 * k.gr + 0.3 * k.ag) * (k.early ? 0 : 1) : 0 },
+    orbit:  { jp: '拠点の周回警備', desc: '拠点の周回警備 (占有した拠点の周りを巡航して、近づく者を早く聞きつける)', w: (k, x) => (x.owned.length ? 0.15 + 0.7 * k.ca + 0.3 * k.ag : 0) * (k.early ? 0 : 1) },
     salvage:{ jp: 'お宝巡り', desc: 'お宝巡り (見つけた難破船を順に回収し、部品と弾を集める)', w: (k, x) => x.salvageSite ? (0.2 + 0.9 * k.gr) * (k.early ? 0.5 : 1) : 0 },
     net:    { jp: '聴音の網', desc: '聴音の網 (自分のでないノードを順に制圧して、聴音局の網を広げる)', w: (k, x) => x.netSite ? 0.2 + 0.8 * k.gr + 0.4 * k.st : 0 },
     // 第133弾 (オーナー「COMがノードを中継として使う」): 占有したノード/コロニーの周りにドローンを置いて見張らせ (通信の中継圏 DRONE_RELAY_R の内)、自分は別の仕事を続ける。奪われかけたら呼び戻す
@@ -18799,6 +18799,7 @@ function comStallTour(c, P, D, hpF, contact) { // 第125弾: 敵の索敵行と�
     if (c.shipLike || c.datum) { c.prowl = null; return false; }
     const quiet = now - Math.max(c.lastShipF || 0, c.prowlEndF || 0, (huntStats && huntStats.startFrame) || 0);
     if (!c.prowl && (quiet < prowlQuietT(P) || c.item || now < (c.prowlCD || 0))) return false;
+    if (!c.prowl) { const gw = gatherWants(P, partSlotsUsed(), partSlotsMax(), now); if (gw.part && gatherPick('p', player.x, player.y, 'part', gw.range)) return false; } // 第149弾: 部品の枠が空いていて取れる所があるうちは索敵行を始めない (敵と同じ — 第122弾。自機COMだけ抜けていて、静かな性格は序盤を漂って過ごした)
     // 第72弾 (オーナー「隠れ合うだけで接触しない」): 長く気配が無ければ、ごく弱いソナーを時々打つ = 「あえて少しだけ音を出す」(敵も firePingFromEnemy で同じ式)。
     if (prowlNudgeWants({ quiet, P, now, nudgeF: c.nudgeF, ready: omniSonarCooldown <= 0, exposed: playerExposureLevel >= 2 })) {
         c.nudgeF = now; const nb = comSonarBand(c); fireOmniSonar('weak', nb);
@@ -18909,7 +18910,8 @@ function _comDeploy(c, P) {
 // 出力スタンス: 全速(接近中・攻撃的) > 潜航(隠密 or 副長が「追われている」と言った) > 巡航
 function _comStance(c, P) {
     if (c.mode === 'escape' || c.mode === 'hide') return;
-    const want = c.flankUntil > _frameCount ? 'flank' : (P.stealth >= 0.5 || c.silentUntil > _frameCount) ? 'silent' : 'cruise';
+    // 第149弾: 取りに行く物へ向かう間は巡航 (敵の取りに行く移動も 巡航 — 旧: 自機COMだけ 隠密0.5以上は潜航で行き、序盤の占有が大きく遅れた)
+    const want = c.flankUntil > _frameCount ? 'flank' : c.silentUntil > _frameCount ? 'silent' : (c.item || c.mode === 'item') ? 'cruise' : P.stealth >= 0.5 ? 'silent' : 'cruise';
     if (powerStance !== want) setStance(want, true);
 }
 // 最寄りの「取れる」もの: ノード(自分のもの以外) / 未ハックのコロニー
