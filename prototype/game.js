@@ -9595,23 +9595,27 @@ function _hackAim(sa, ox, oy, H) {
     return null;
 }
 // 敵COMのハック: 推定が十分絞れていて (誤差/距離 ≤ 0.12)・届く距離の内・演算力が十分 (相手の耐性を平均3.0と見て H≥3.0) の時に撃つ。交戦中は火器管制ダウン・それ以外は機関停止 (止めてから忍び寄る)
+// 第111弾 (段3): ハック波を撃つかの判断は自機COMと敵で同じ関数。H≥3.0・方向が絞れている・相手が艦影らしい (信用できる) 時に撃つ。交戦中か2200u未満の距離が分かる時は火器管制ダウン・それ以外は機関停止
+function hackDecide(A) {
+    if (A.H < 3.0 || !A.credible) return null;
+    const aim = _hackAim(A.sa, A.x, A.y, A.H); if (!aim) return null;
+    return { ang: aim.ang, d: aim.d, eff: (aim.d !== null && (A.engaged || aim.d < 2200)) ? 'fcs' : 'halt' };
+}
 function enemyHackAI(e) {
     if (e.type === 'fighter' || e.hp <= 0 || e._dying || e._hackSess || _frameCount < (e._hackCD || 0) || !e._sa || !player || player.hp <= 0) return;
-    const H = hackPower('enemy', e); if (H < 3.0) return;
-    const aim = _hackAim(e._sa, e.x, e.y, H); if (!aim) return;
-    if ((e.contactFreshness || 0) < 0.15) return;
-    fireHackPulse(e, aim.ang, (aim.d !== null && (e.aiState === 'combat' || aim.d < 2200)) ? 'fcs' : 'halt');
+    const r = hackDecide({ H: hackPower('enemy', e), sa: e._sa, x: e.x, y: e.y, credible: (e.contactFreshness || 0) >= 0.15, engaged: e.aiState === 'combat' });
+    if (r) fireHackPulse(e, r.ang, r.eff);
 }
 // 自機COMのハック (同じ基準。追跡中の信号が艦影らしい時)
 function comHackStep() {
     if (comDemo !== true || !player || player.hp <= 0 || hackSessP || _hackPulseCD > 0 || !lockedSignalId) return;
-    const H = hackPower('player'); if (H < 3.0) return;
     const sa = _signalAnalysis[lockedSignalId]; if (!sa) return;
-    const idn = identInfo(lockedSignalId); if (!idn || idn.low || (idn.p !== undefined && idn.p < 0.5)) return;
-    const aim = _hackAim(sa, player.x, player.y, H); if (!aim) return;
-    const eff = aim.d !== null && aim.d < 2200 ? 'fcs' : 'halt';
-    comThinkEvent('p', 'ハック波を撃つ — ' + (aim.d !== null ? '推定の方向 (距離' + Math.round(aim.d / 100) * 100 + 'u)' : '最新の方位の方向') + '・' + HACK_EFFECTS[eff].jp + 'を狙う (止めてから忍び寄る)');
-    fireHackPulse('p', aim.ang, eff);
+    const idn = identInfo(lockedSignalId);
+    const engaged = enemies.some(q => q.hp > 0 && q.type !== 'fighter' && q.inVision) || (playerHitLog.length && _frameCount - playerHitLog[playerHitLog.length - 1].f < 600);
+    const r = hackDecide({ H: hackPower('player'), sa, x: player.x, y: player.y, credible: !!idn && !idn.low && !(idn.p !== undefined && idn.p < 0.5), engaged });
+    if (!r) return;
+    comThinkEvent('p', 'ハック波を撃つ — ' + (r.d !== null ? '推定の方向 (距離' + Math.round(r.d / 100) * 100 + 'u)' : '最新の方位の方向') + '・' + HACK_EFFECTS[r.eff].jp + 'を狙う (止めてから忍び寄る)');
+    fireHackPulse('p', r.ang, r.eff);
 }
 // 第89弾: 断線パルス (自機も敵も) — 自分へ侵入している回線 (艦へのハック・自分のドローンへのハック) を切り、30秒は回線を閉じる (その間ハック波は侵入できない)。使うと電磁波が1秒漏れる
 const LINKCUT_GUARD = 1800;
@@ -15936,48 +15940,66 @@ function planGeometry(mx, my, ex, ey) {
     const cl = (x, y) => clampToMapCircle(x, y, 1500);
     return { B: cl(ex + px * PLAN_SIDE_D, ey + py * PLAN_SIDE_D), A: cl(ex - px * PLAN_SIDE_D - ux * 600, ey - py * PLAN_SIDE_D - uy * 600) };
 }
-// 敵: 推定位置 (playerLastKnownPos) だけから。囮を持っていて・気配はあるが見えていない時に、性格 (隠密・慎重で多く、攻撃的で少ない) で発動
-function enemyPlanStep(e) {
-    const now = _frameCount, P = e.personality || { aggression: 0.5, stealth: 0.3, caution: 0.4 };
-    let pl = e._plan;
-    const end = (why, atk) => {
-        comThinkEvent('e', '作戦終了: ' + why, 'e' + e.uid);
-        e._plan = null; e._planCD = now + PLAN_CD;
-        if (atk) { e.aiState = 'hunting'; e.huntTimer = 900; e.lurking = false; const lk = e.playerLastKnownPos; if (lk) e.setTarget(lk.x, lk.y); }
-        return false;
-    };
-    const lk = e.playerLastKnownPos;
+// ═══ 第111弾 (段3): 作戦「囮で誘い背後を取る」を自機COMと敵で同じ関数に ═══
+// 判断は planStep(A) の1つ。A は行為者のアダプタ (自機 _planActorP / 敵 _planActorE)。アダプタが答えるのは「自分が知っていること」と「動かす口」だけ
+//   A.side 'p'|'e' / A.P 性格 / A.x A.y A.hp A.maxHp / A.m 作業メモ (キーは A.k('plan') など) / A.est() 推定 {x,y,r}|null / A.seen() 見えているか / A.blocked() 動けない事情 (潜伏・追跡の目的が無い…)
+//   A.items() 使える囮の種類 (好み順) / A.launch(kind,B) / A.goto(pt) / A.hold() / A.quiet() / A.say(text) / A.onEnd(atk)
+const PLAN_ROLL_F = 60, PLAN_ROLL_P = 0.2;
+function planStep(A) {
+    const now = _frameCount, P = A.P, M = A.m, k = A.k;
+    let pl = M[k('plan')];
+    const end = (why, atk) => { A.say('作戦終了: ' + why); M[k('plan')] = null; M[k('planCD')] = now + PLAN_CD; A.onEnd(!!atk); return false; };
     if (!pl) {
-        if (now < (e._planCD || 0) || now % 30 !== 0 || !lk || e.contactFreshness < 0.12 || e.inVision || e._hideT > 0 || e.hp < e.maxHp * 0.45) return false;
-        const _bk = e.itemBcn ? Object.keys(e.itemBcn).find(k => e.itemBcn[k] > 0) : null;
-        if (!((e.lureShip || 0) > 0 || (e.lureSOS || 0) > 0 || _bk)) return false;
-        const d = Math.hypot(lk.x - e.x, lk.y - e.y);
+        if (now < (M[k('planCD')] || 0) || now - (M[k('planRoll')] || -1e9) < PLAN_ROLL_F) return false;
+        if (A.seen() || A.hp < A.maxHp * 0.5 || A.blocked()) return false;
+        const est = A.est(); if (!est) return false;
+        const d = Math.hypot(est.x - A.x, est.y - A.y);
         if (d < PLAN_MIN_D || d > PLAN_MAX_D) return false;
+        const items = A.items(); if (!items.length) return false;
+        M[k('planRoll')] = now; // 条件が揃った時だけ1秒に1回さいころを振る (自機COMと敵で同じ頻度)
         const w = Math.max(0.05, Math.min(0.7, 0.12 + (P.stealth ?? 0.4) * 0.45 + (P.caution ?? 0.4) * 0.25 - (P.aggression ?? 0.5) * 0.3));
-        if (Math.random() > w * 0.12) return false;
-        const g = planGeometry(e.x, e.y, lk.x, lk.y);
-        const useBcn = !!_bk && (Math.random() < 0.6 || ((e.lureShip || 0) <= 0 && (e.lureSOS || 0) <= 0)), useShip = !useBcn && (e.lureShip || 0) > 0;
-        let _band = null;
-        if (useBcn) { e.itemBcn[_bk]--; _band = _bk; } else if (useShip) e.lureShip--; else e.lureSOS--;
-        launchLure('e', (useBcn || useShip) ? 'ship' : 'sos', e.x, e.y, g.B.x, g.B.y, _band || undefined);
-        pl = e._plan = { t0: now, A: g.A, B: g.B, ph: 'flank', hp0: e.hp };
-        comThinkEvent('e', '作戦「囮で誘い背後を取る」: 自機の推定位置 (' + _dirTxt(e.x, e.y, lk.x, lk.y) + ') の横 (' + _dirTxt(e.x, e.y, g.B.x, g.B.y) + ') へ' + (_band ? ({ heat: '熱', optic: '光', em: 'EM', higgs: '霧' })[_band] + 'ビーコン' : useShip ? '偽艦影ブイ' : '偽SOS') + ' → 自分は反対側 (' + _dirTxt(e.x, e.y, g.A.x, g.A.y) + ') へ回り込んで待つ', 'e' + e.uid);
+        if (Math.random() > w * PLAN_ROLL_P) return false;
+        const g = planGeometry(A.x, A.y, est.x, est.y);
+        const item = items[0];
+        A.launch(item, g.B);
+        pl = M[k('plan')] = { t0: now, A: g.A, B: g.B, ph: 'flank', hp0: A.hp };
+        A.say('作戦「囮で誘い背後を取る」: 相手の推定位置 (' + _dirTxt(A.x, A.y, est.x, est.y) + ') の横 (' + _dirTxt(A.x, A.y, g.B.x, g.B.y) + ') へ' + A.itemJp(item) + ' → 自分は反対側 (' + _dirTxt(A.x, A.y, g.A.x, g.A.y) + ') へ回り込んで待つ');
         return true;
     }
-    if (e.hp < pl.hp0 - e.maxHp * 0.04) return end('被弾 — 待ち伏せは中止', true);
-    if (e.inVision) return end('相手が見えた → 交戦', true);
+    if (A.hp < pl.hp0 - A.maxHp * 0.04) return end('被弾 — 待ち伏せは中止', true);
+    if (A.seen()) return end('相手が見えた → 交戦', true);
     if (now - pl.t0 > PLAN_WAIT) return end('時間切れ (相手は釣られなかった)', false);
-    if (lk && e.contactFreshness > 0.55 && Math.hypot(lk.x - e.x, lk.y - e.y) < 5500 && now - pl.t0 > 600) return end('相手を再び掴んだ (' + _dirTxt(e.x, e.y, lk.x, lk.y) + ') → 背後から狩りへ', true);
-    const dA = Math.hypot(pl.A.x - e.x, pl.A.y - e.y);
-    if (dA > 450) {
-        const ms = e._maxSpeeds(), ang = Math.atan2(pl.A.y - e.y, pl.A.x - e.x);
-        e._moveHeading(ang, ms ? ms.cruise * 0.8 : 1.0);
-    } else {
-        if (pl.ph !== 'wait') { pl.ph = 'wait'; comThinkEvent('e', '待ち伏せ位置に着いた → 止まって聴く (最長' + Math.round((PLAN_WAIT - (now - pl.t0)) / 60) + '秒)', 'e' + e.uid); }
-        if (e._coastIfIdle) e._coastIfIdle();
+    const est = A.est();
+    if (est && now - pl.t0 > 600 && est.r < 1500 && Math.hypot(est.x - A.x, est.y - A.y) < 4500) return end('相手が近づいてきた (' + _dirTxt(A.x, A.y, est.x, est.y) + ') → 背後から狩りへ', true);
+    A.quiet();
+    if (Math.hypot(pl.A.x - A.x, pl.A.y - A.y) > 450) A.goto(pl.A);
+    else {
+        if (pl.ph !== 'wait') { pl.ph = 'wait'; A.say('待ち伏せ位置に着いた → 止まって聴く (最長' + Math.round((PLAN_WAIT - (now - pl.t0)) / 60) + '秒)'); }
+        A.hold();
     }
     return true;
 }
+const _PLAN_JP = { lure: '偽艦影ブイ', fsos: '偽SOS', bcn_heat: '熱ビーコン', bcn_optic: '光ビーコン', bcn_em: 'EMビーコン', bcn_higgs: '霧ビーコン' };
+// 敵のアダプタ: 推定は方位の記録から解いたもの (e._sa)。無ければ最後の推定位置 (e.playerLastKnownPos・幅 e._estR)
+function _planActorE(e) {
+    return { side: 'e', P: e.personality || { aggression: 0.5, stealth: 0.3, caution: 0.4 }, x: e.x, y: e.y, hp: e.hp, maxHp: e.maxHp, m: e, k: n => '_' + n,
+        est: () => { const lk = e.playerLastKnownPos; if (!lk || (e.contactFreshness || 0) < 0.12) return null; const t = e._sa && e._sa.fix ? trackEstimate(e._sa, 0) : null; return t ? { x: t.x, y: t.y, r: t.r } : { x: lk.x, y: lk.y, r: e._estR || 3000 }; },
+        seen: () => !!e.inVision, blocked: () => e._hideT > 0,
+        items: () => {
+            const out = [], hb = e._heardBand && _frameCount - (e._heardBandF || -1e9) < 3600 ? e._heardBand : null;
+            if (hb && e.itemBcn && e.itemBcn[hb] > 0) out.push('bcn_' + hb);
+            if ((e.lureShip || 0) > 0) out.push('lure'); if ((e.lureSOS || 0) > 0) out.push('fsos');
+            if (e.itemBcn) for (const b in e.itemBcn) if (e.itemBcn[b] > 0 && !out.includes('bcn_' + b)) out.push('bcn_' + b);
+            return out;
+        },
+        itemJp: it => _PLAN_JP[it] || it,
+        launch: (it, B) => { let band; if (it.startsWith('bcn_')) { band = it.slice(4); e.itemBcn[band]--; } else if (it === 'lure') e.lureShip--; else e.lureSOS--; launchLure('e', it === 'fsos' ? 'sos' : 'ship', e.x, e.y, B.x, B.y, band); },
+        goto: pt => { const ms = e._maxSpeeds(); e._quietRun = true; e._moveHeading(Math.atan2(pt.y - e.y, pt.x - e.x), ms ? Math.min(ms.cruise * 0.8, ms.silent || 1e9) : 1.0); },
+        hold: () => { if (e._coastIfIdle) e._coastIfIdle(); }, quiet: () => { e._quietRun = true; },
+        say: t => comThinkEvent('e', t, 'e' + e.uid),
+        onEnd: atk => { if (atk) { e.aiState = 'hunting'; e.huntTimer = 900; e.lurking = false; const lk = e.playerLastKnownPos; if (lk) e.setTarget(lk.x, lk.y); } } };
+}
+function enemyPlanStep(e) { return planStep(_planActorE(e)); }
 // ═══ 第58弾: 敵COMの戦略 — 自機COMと同じ考え方 (集めずに拠点で待ち伏せる・餌を置いて待つ・拠点を守る)。気配が無い間にだけ選ぶ (気配があれば従来の追跡) ═══
 function enemyStratStep(e, P) {
     const now = _frameCount, jp = { ambush: '拠点の待ち伏せ', bait: '餌で誘う', guard: '拠点を守る', trap: '罠 (砲台を据えて誘い込む)', push: '圧倒して狩る' };
@@ -16353,47 +16375,26 @@ function comGrabStep(c, P, hpF, retreat, te, lk) {
     comThink('p', 'item', '取りに行くと決めた物を先に取る (' + _dirTxt(player.x, player.y, o.x, o.y) + '・' + Math.round(Math.hypot(o.x - player.x, o.y - player.y) / 100) * 100 + 'u)');
     return true;
 }
-// 自機COM: 追跡中の信号の推定位置だけから。完成した囮 (偽艦影ブイ / 偽SOS / ビーコン) を持っている時に同じ作戦
-function comPlanStep(c, P, D, hpF, te, lk) {
-    const now = _frameCount;
-    let pl = c.plan;
-    const end = (why) => { comThinkEvent('p', '作戦終了: ' + why); c.plan = null; c.planCD = now + PLAN_CD; return false; };
-    const kinds = ['lure', 'fsos', 'bcn_heat', 'bcn_optic', 'bcn_em', 'bcn_higgs'];
-    if (!pl) {
-        if (now < (c.planCD || 0) || (te && lk && lk.full) || hpF < 0.5 || !lockedSignalId) return false;
-        const sa = _signalAnalysis[lockedSignalId]; if (!sa || !sa.fix) return false;
-        const idn = identInfo(lockedSignalId); if (idn.known && idn.p < 0.4) return false;
-        let item = null;
-        const hb = c.heardBand && now - (c.heardBandF || -1e9) < 3600 ? 'bcn_' + c.heardBand : null; // 相手を聞いた帯域のビーコンが最も自然
-        if (hb && (cargo.stock[hb] || 0) > 0 && (SHIP_DRONES[gameState.shipType] || []).includes(hb)) item = hb;
-        else for (const k of kinds) if ((cargo.stock[k] || 0) > 0 && (SHIP_DRONES[gameState.shipType] || []).includes(k)) { item = k; break; }
-        if (!item) return false;
-        const est = trackEstimate(sa, 0), d = Math.hypot(est.x - player.x, est.y - player.y);
-        if (d < PLAN_MIN_D || d > PLAN_MAX_D) return false;
-        const w = Math.max(0.05, Math.min(0.7, 0.12 + P.stealth * 0.45 + P.caution * 0.25 - P.aggression * 0.3));
-        if (Math.random() > w * 0.3) return false;
-        const g = planGeometry(player.x, player.y, est.x, est.y);
-        deployDrone(item, g.B.x, g.B.y);
-        pl = c.plan = { t0: now, A: g.A, B: g.B, ph: 'flank', hp0: player.hp, sid: lockedSignalId };
-        comThinkEvent('p', '作戦「囮で誘い背後を取る」: SIG-' + sigNo(lockedSignalId) + ' の推定位置 (' + _dirTxt(player.x, player.y, est.x, est.y) + ') の横 (' + _dirTxt(player.x, player.y, g.B.x, g.B.y) + ') へ' + DRONE_SPEC[item].label + ' → 自分は反対側 (' + _dirTxt(player.x, player.y, g.A.x, g.A.y) + ') へ回り込んで待つ');
-        c.mode = 'plan';
-        return true;
-    }
-    if (player.hp < pl.hp0 - player.maxHp * 0.04) return end('被弾 — 待ち伏せは中止');
-    if (te && lk && lk.full) return end('相手が見えた → 交戦');
-    if (now - pl.t0 > PLAN_WAIT) return end('時間切れ (相手は釣られなかった)');
-    const sa = _signalAnalysis[pl.sid], est = sa && sa.fix ? trackEstimate(sa, 0) : null;
-    if (est && now - pl.t0 > 600 && Math.hypot(est.x - player.x, est.y - player.y) < 4500 && est.r < 1500) return end('相手が近づいてきた (' + _dirTxt(player.x, player.y, est.x, est.y) + ') → 背後から狩りへ');
-    c.mode = 'plan'; _comCMOff();
-    if (powerStance !== 'silent') setStance('silent', true);
-    const dA = Math.hypot(pl.A.x - player.x, pl.A.y - player.y);
-    if (dA > 450) { _comGoTo(pl.A, 450, c); }
-    else {
-        if (pl.ph !== 'wait') { pl.ph = 'wait'; comThinkEvent('p', '待ち伏せ位置に着いた → 止まって聴く (最長' + Math.round((PLAN_WAIT - (now - pl.t0)) / 60) + '秒)'); }
-        if (player.state === 'moving') player.setTarget(player.x, player.y);
-    }
-    return true;
+// 自機COMのアダプタ: 推定は追跡中の信号の方位の記録から (艦影らしくない信号は対象にしない)
+function _planActorP(c, P, hpF) {
+    const sa = lockedSignalId ? _signalAnalysis[lockedSignalId] : null;
+    const owned = k => (cargo.stock[k] || 0) > 0 && (SHIP_DRONES[gameState.shipType] || []).includes(k);
+    return { side: 'p', P, x: player.x, y: player.y, hp: player.hp, maxHp: player.maxHp, m: c, k: n => n,
+        est: () => { if (!sa || !sa.fix) return null; const idn = identInfo(lockedSignalId); if (idn.known && idn.p < 0.4) return null; const t = trackEstimate(sa, 0); return t ? { x: t.x, y: t.y, r: t.r } : null; },
+        seen: () => { const te = bestFireTarget(); const lk = te ? playerLockInfo(te) : null; return !!(te && lk && lk.full); }, blocked: () => !lockedSignalId,
+        items: () => {
+            const out = [], hb = c.heardBand && _frameCount - (c.heardBandF || -1e9) < 3600 ? 'bcn_' + c.heardBand : null;
+            if (hb && owned(hb)) out.push(hb);
+            for (const k of ['lure', 'fsos', 'bcn_heat', 'bcn_optic', 'bcn_em', 'bcn_higgs']) if (owned(k) && !out.includes(k)) out.push(k);
+            return out;
+        },
+        itemJp: it => DRONE_SPEC[it].label,
+        launch: (it, B) => { deployDrone(it, B.x, B.y); c.mode = 'plan'; },
+        goto: pt => { c.mode = 'plan'; _comCMOff(); _comGoTo(pt, 450, c); }, hold: () => { c.mode = 'plan'; if (player.state === 'moving') player.setTarget(player.x, player.y); },
+        quiet: () => { if (powerStance !== 'silent') setStance('silent', true); },
+        say: t => comThinkEvent('p', t), onEnd: () => {} };
 }
+function comPlanStep(c, P, D, hpF, te, lk) { return planStep(_planActorP(c, P, hpF)); }
 function comThinkEvent(side, text, key) {
     if (!comDemo && !(side === 'e' && matchRec)) return;
     const m = _thinkLast[(key || side) + ':ev'] || (_thinkLast[(key || side) + ':ev'] = {});
