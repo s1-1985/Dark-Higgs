@@ -1819,7 +1819,11 @@ const TECH_BUILD_SIG_MULT = 3.2; // 第50弾: Tech組み立て中のシグネチ
 let enemyScrap = 0; // 第52弾: 敵の使いかけの資材
 // 第66弾 (オーナー「敵のTech建造のハードルは自艦と同じか」): 敵の資材にも自機と同じ「完成品と弾が占めていない枠まで」の上限を掛ける。
 //   自機の空母は 弾4枠 + 未展開の完成品5枠 (砲台2・閃光・煙幕・リペア) が枠を占め、戦闘機と哨戒機を出した後で 枠16−9=7枠=14個まで積める → 敵も 14個 (旧: 敵の資材は上限なしで貯まった)
-function enemyMatCap() { const e = enemies.find(q => q.type !== 'fighter' && q.hp > 0); const cls = e ? (ENEMY_CLASS[e.type] || 'carrier') : 'carrier'; return Math.max(8, ((HOLD_CAP[cls] || 10) - 9) * MAT_PER_SLOT); }
+// 第135弾 (オーナー「自機と敵の差をなくす」): 敵の資材の上限も 自機と同じ式 — 積載枠 − 完成品・弾・消耗品が占めている枠 (旧: 空母は常に14個 = 戦闘機などを出しても枠が空かない自機COMとの差。Tech建造の回数が敵26回/自機COM2回に開いた)
+function enemyStockSlots(e) { let u = Math.ceil((e.ammoK || 0) / AMMO_PER_SLOT.kinetic) + Math.ceil((e.ammoM || 0) / AMMO_PER_SLOT.missile);
+    for (const k in LOOT_STOCK) u += (e[LOOT_STOCK[k]] || 0) * (DRONE_SPEC[k].w || 1); for (const b in (e.itemBcn || {})) u += e.itemBcn[b] || 0;
+    return u; }
+function enemyMatCap() { const e = enemies.find(q => q.type !== 'fighter' && q.hp > 0); if (!e) return 14; const cls = ENEMY_CLASS[e.type] || 'carrier'; return Math.max(0, ((HOLD_CAP[cls] || 10) - enemyStockSlots(e)) * MAT_PER_SLOT); }
 function enemyAddMat(n) { enemyMat = Math.min(enemyMatCap(), enemyMat + n); }
 let enemyMat = 8; // 第50弾B: 敵の資材 (自機の空母の既定と同じ8個から・ノード+4/コロニー+3/難破船+2で増える)
 // 補給の資材: 使いかけ (matScrap) から先に使い、足りなければ資材を1個割って使いかけにする。使いかけは建造には使えない
@@ -16261,7 +16265,7 @@ function stratFactsE(e) {
     return { cls, relays: ownRelaySites('enemy').length, slotsFree: enemySlotsMax(e) - enemySlotsUsed(e), lures, owned: structures.filter(q => q.type === 'colony' && q.owner === 'enemy'), near,
         expo: hitAgo < 480 ? 3 : (pingAgo < 900 || (e.detectionTimer || 0) > 60) ? 2 : 0, strong: (e.parts || []).length >= 3, early: comEarlyGather(enemySlotsUsed(e), enemySlotsMax(e), now), hpF: e.hp / e.maxHp,
         hasScout: (e.scoutStock || 0) > 0 || liveK('scout'), hasFtr: (e.droneStock || 0) > 0 || liveK('attack'), hasTech: liveK('mech'), hasBuild: (e.turretStock || 0) > 0,
-        canTech: cls === 'carrier' && !liveK('mech') && !e._techBuilt && !(e._techT > 0) };
+        canTech: cls === 'carrier' && !liveK('mech') && !(e._techT > 0) }; // 第135弾: 自機COMと同じく 作り直せる (旧: 敵は1試合に1回だけ)
 }
 // 第125弾 (共通化・段5後半の7): 戦略「待ち伏せ/餌/罠」の待機位置の決め方を自機COMと敵で同じ関数に
 //   拠点の外側 (罠は砲台の射程に入る近さ) の 近くの霧/岩礁帯 へ。時間切れの延長は遅い艦でも着く前に切れない値 (双方 0.2u/f で割る)
@@ -16336,6 +16340,26 @@ function stratRun(A, S, now) {
             }
             return false;
         }
+        case 'tech': { // 第135弾: Tech建造 — 資材を集める → (枠を空ける) → 隠れ場所へ → 砲台を据える → 組み立て (建造中は動けない) — 自機COMも敵も同じ
+            if (A.seen) return false;
+            const need = DRONE_SPEC.mech.mat;
+            if (A.mobile('mech')) return 'end:Techが完成した';
+            if (A.techBuilding()) { A.hold(false); A.think('strat', '戦略「Tech建造」: 組み立て中 (母艦は停止・大量のシグネチャ・砲台が守る)'); return true; }
+            if (A.mat() < need) {
+                if (A.makeRoom && cd('room', 10)) A.makeRoom(need);
+                const g = A.matSource(); if (!g) return 'end:資材の取れる所が無い';
+                const near = g.type === 'derelict' ? DERELICT_SALVAGE_R * 0.6 : !g.type ? NODE_CAP_R * 0.6 : COLONY_HACK_R * 0.6;
+                if (Math.hypot(g.x - A.x, g.y - A.y) > near) A.go(g.x, g.y, 300, null); else A.hold(false);
+                A.think('strat', '戦略「Tech建造」: 資材 ' + A.mat() + '/' + need + '個 → ' + (g.type === 'derelict' ? '難破船' : !g.type ? 'ノード' : 'コロニー') + 'で集める (' + _dirTxt(A.x, A.y, g.x, g.y) + ')');
+                return true;
+            }
+            if (!S.spot) { const cv = findCoverSpot(A.x, A.y, 7000); S.spot = cv ? { x: cv.x, y: cv.y } : clampToMapCircle(A.x, A.y, 800); A.say('資材' + A.mat() + '個が揃った → ' + (cv ? '霧/岩礁帯 (' + _dirTxt(A.x, A.y, S.spot.x, S.spot.y) + ')' : 'この場') + 'へ行って組み立てる'); }
+            if (Math.hypot(S.spot.x - A.x, S.spot.y - A.y) > 350) { A.go(S.spot.x, S.spot.y, 200, 'silent'); A.think('strat', '戦略「Tech建造」: 組み立て場所へ移動中'); return true; }
+            A.hold(false);
+            if (A.have('build') && !A.mobile('build')) { A.launch('build'); A.say('Techの組み立て前に砲台を据える (建造中は5分動けない)'); return true; }
+            if (A.canBuild()) { A.buildTech(); A.say('Techを組み立て開始 (資材' + need + '個・' + Math.round(DRONE_SPEC.mech.build / 60) + '秒・停止して大量のシグネチャ)'); }
+            return true;
+        }
         case 'guard': {
             const col = S.site; if (!col || col.owner !== A.owner) return 'end:拠点を失った';
             if (est && dEst < 5500 && est.r < 2800 && now - S.t0 > 300) return 'end:拠点へ近づく相手 → 迎え撃つ';
@@ -16352,11 +16376,11 @@ function stratRun(A, S, now) {
     }
     return false;
 }
-const STRAT_SHARED = { fogHide: 1, push: 1, screen: 1, guard: 1 };
+const STRAT_SHARED = { fogHide: 1, push: 1, screen: 1, guard: 1, tech: 1 };
 // 自機COMのアダプタ
 function stratActorP(c, hpF, te, lk) {
     const sa = lockedSignalId && _signalAnalysis[lockedSignalId], cap = () => CARGO_CAP[gameState.shipType] || 0;
-    const stockK = { scout: 'scout', attack: 'attack' }, itemK = { noise: 'noise', spray: 'fogspray', repair: 'repair', blow: 'fogblow' };
+    const stockK = { scout: 'scout', attack: 'attack', build: 'build' }, itemK = { noise: 'noise', spray: 'fogspray', repair: 'repair', blow: 'fogblow' };
     const stock = (k) => (SHIP_DRONES[gameState.shipType] || []).includes(k) && (cargo.stock[k] || 0) > 0;
     return { side: 'p', owner: 'player', x: player.x, y: player.y, hpF, expo: playerExposureLevel, hHere: getHiggsIntensity(player.x, player.y), seen: !!(te && lk && lk.full), ag: (c.pp ? c.pp.aggression : 0.5), partsN: partsOn.length,
         estName: 'SIG-' + sigNo(lockedSignalId), est: () => sa && sa.fix ? trackEstimate(sa, 0) : null, next: () => searchNext(player, player.x, player.y), kit: () => (player._kitT || 0) > 0,
@@ -16366,6 +16390,9 @@ function stratActorP(c, hpF, te, lk) {
         can: (k) => stock(itemK[k]), use: (k) => deployDrone(itemK[k]),
         have: (t) => stock(stockK[t]) && !playerDrones.some(d => d.type === t && d.hp > 0), mobile: (t) => playerDrones.some(d => d.type === t && d.hp > 0),
         launch: (t) => { if (activeDeployCount() < cap()) deployDrone(t); },
+        techBuilding: () => techBuilding(), mat: () => cargo.mat, canBuild: () => !cargo.asm && activeDeployCount() < cap(), buildTech: () => deployDrone('mech'),
+        makeRoom: (need) => { if (cargoMatCap() < need) for (const k of ['scout', 'attack']) if ((SHIP_DRONES[gameState.shipType] || []).includes(k) && (cargo.stock[k] || 0) > 0 && !playerDrones.some(d => d.type === k && d.hp > 0) && activeDeployCount() < cap()) { deployDrone(k); comThinkEvent('p', 'Tech建造の準備: ' + DRONE_SPEC[k].label + 'を出して積載の枠を空ける (資材の上限 ' + cargoMatCap() + '個 → 必要' + need + '個)'); break; } },
+        matSource: () => { let g = _comNearest(true, true), gd = g ? Math.hypot(g.x - player.x, g.y - player.y) : Infinity; for (const st of structures) { if (st.type !== 'derelict' || st.salvaged || !st.discovered) continue; const d = Math.hypot(st.x - player.x, st.y - player.y); if (d < gd) { gd = d; g = st; } } return g; },
         order: (types, kind, x, y) => { for (const t of types) if (playerDrones.some(d => d.type === t && d.hp > 0)) droneOrder(t, kind, x, y); },
         engaged: () => comEngaged(), recall: (why) => comDroneRecall(c, why), say: (t) => comThinkEvent('p', t), think: (sig, t) => comThink('p', sig, t) };
 }
@@ -16379,9 +16406,13 @@ function stratActorE(e) {
         hold: () => { if (e.state === 'moving') e.setTarget(e.x, e.y); e._roam = null; },
         can: (k) => k === 'noise' ? (e.itemNoise || 0) > 0 : k === 'spray' ? (e.itemSpray || 0) > 0 : k === 'repair' ? (e.itemRepair || 0) > 0 : (e.itemBlow || 0) > 0,
         use: (k) => { if (k === 'noise') enemyUseNoise(e, e.angle + (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2); else if (k === 'spray') enemyUseSpray(e); else if (k === 'repair') { e.itemRepair--; e._kitT = REPAIR_KIT_TIME; matchRecEvent('repairE', e.x, e.y, '敵: リペアキットを使う'); } else { e.itemBlow--; useFogBlow('e', e.x, e.y); } },
-        have: (t) => t === 'scout' ? (e.scoutStock || 0) > 0 && !liveK('scout') : (e.droneStock || 0) > 0 && enemies.filter(f => f.type === 'fighter' && !f._kind && f.hp > 0).length < 2,
-        mobile: (t) => t === 'scout' ? liveK('scout') : t === 'attack' ? liveF() : liveK('mech'),
-        launch: (t) => { if (t === 'scout') { e.scoutStock--; spawnEnemyDrone(e, 'scout'); } else { e.droneStock--; _eLaunchFighter(e, { x: e.x, y: e.y }); } },
+        have: (t) => t === 'build' ? (e.turretStock || 0) > 0 && !liveK('turret') : t === 'scout' ? (e.scoutStock || 0) > 0 && !liveK('scout') : (e.droneStock || 0) > 0 && enemies.filter(f => f.type === 'fighter' && !f._kind && f.hp > 0).length < 2,
+        mobile: (t) => t === 'scout' ? liveK('scout') : t === 'attack' ? liveF() : t === 'build' ? liveK('turret') : liveK('mech'),
+        techBuilding: () => e._techT > 0, mat: () => enemyMat, canBuild: () => !(e._techT > 0),
+        makeRoom: (need) => { if (enemyMatCap() < need) for (const k of ['scout', 'attack']) { const ok = k === 'scout' ? (e.scoutStock || 0) > 0 && !liveK('scout') : (e.droneStock || 0) > 0 && !liveF(); if (ok) { if (k === 'scout') { e.scoutStock--; spawnEnemyDrone(e, 'scout'); } else { e.droneStock--; _eLaunchFighter(e, { x: e.x, y: e.y }); } comThinkEvent('e', 'Tech建造の準備: ' + (k === 'scout' ? '哨戒機' : '戦闘機') + 'を出して積載の枠を空ける (資材の上限 ' + enemyMatCap() + '個 → 必要' + need + '個)', 'e' + e.uid); break; } } },
+        buildTech: () => { enemyMat -= DRONE_SPEC.mech.mat; e._techT = DRONE_SPEC.mech.build; e._techBuilt = true; logMessage('TACTICAL: 敵空母が停止して何かを組み立てている — 大きな電磁波・熱が出ている', 'warning-msg'); },
+        matSource: () => { const a = gatherPick('e', e.x, e.y, 'any'), b = gatherPick('e', e.x, e.y, 'part'); if (!a || !b) return a || b; return Math.hypot(a.x - e.x, a.y - e.y) <= Math.hypot(b.x - e.x, b.y - e.y) ? a : b; },
+        launch: (t) => { if (t === 'build') { e.turretStock--; spawnEnemyDrone(e, 'turret'); } else if (t === 'scout') { e.scoutStock--; spawnEnemyDrone(e, 'scout'); } else { e.droneStock--; _eLaunchFighter(e, { x: e.x, y: e.y }); } },
         order: (types, kind, x, y) => { e._sendTo = { x, y, until: now + 60 * 62 }; },
         engaged: () => stratNearE(e) || hitAgo < 600, recall: () => { e._sendTo = null; e._outpost = null; },
         say: (t) => comThinkEvent('e', t, 'e' + e.uid), think: (sig, t) => comThink('e', sig, t, 'e' + e.uid) };
@@ -16413,7 +16444,7 @@ function enemyStratStep(e, P) {
             return false;
         }
         if (pick === 'guard') S.site = x.owned[Math.floor(Math.random() * x.owned.length)];
-        else if (pick === 'tech') { e._techPush = now + 36000; S.until = now + 36000; e._strat = null; e._stratCD = now + 36000; comThinkEvent('e', '戦略「Tech建造」— 資材を集めて空母を止められる場所で組み立てる', 'e' + e.uid); return false; } // 集める動きは従来の収集 (資材14個・気配なしで組み立て開始)
+        else if (pick === 'tech') { S.until = now + 36000; comThinkEvent('e', '戦略「Tech建造」— 資材を集めて空母を止められる場所で組み立てる', 'e' + e.uid); } // 第135弾: 実行は自機COMと同じ (stratRun)
         else if (pick === 'push' || pick === 'screen' || pick === 'fogHide') { S.t0 = now; if (pick === 'fogHide') S.until = now + 3600 + Math.random() * 3600; // 第134弾: 実行は共通 (stratRun)
         } else {
             S.site = stratPickSite('e', e.x, e.y, e._siteUsed || (e._siteUsed = {}));
@@ -17688,56 +17719,10 @@ function comStratStep(c, P, D, hpF, contact, te, lk, r) {
             }
             return true;
         }
-        case 'screen': case 'fogHide': case 'push': case 'guard': { // 第134弾: 実行本体は敵と共通 (stratRun)
+        case 'screen': case 'fogHide': case 'push': case 'guard': case 'tech': { // 第134弾: 実行本体は敵と共通 (stratRun)
             const r2 = stratRun(stratActorP(c, hpF, te, lk), S, now);
             if (typeof r2 === 'string') return end(r2.slice(4));
             return r2;
-        }
-        case 'tech': { // 第66弾: Tech建造 — 資材を集める → 隠れ場所へ → 砲台を据えて組み立て (建造中は動けない)
-            if (te && lk && lk.full) return false; // 見えた → 通常の交戦
-            const x = comStratCtx(c, P), needMat = DRONE_SPEC.mech.mat;
-            if (x.mobile('mech')) return end('Techが完成した');
-            c.mode = 'strat'; _comCMOff();
-            if (techBuilding()) { _comHold(c); comThink('p', 'strat', '戦略「Tech建造」: 組み立て中 (空母は停止・大量のシグネチャ・砲台が守る)'); return true; }
-            if (cargo.mat < needMat) {
-                // 枠を空ける: 完成品を出すと、その枠の分だけ資材を積める (資材は完成品と弾が占めていない枠まで)
-                if (now - (c.itemF || -1e9) > 600 && cargoMatCap() < needMat) {
-                    for (const k of ['scout', 'attack']) if (x.has(k) && !x.mobile(k) && activeDeployCount() < (CARGO_CAP[gameState.shipType] || 0)) { c.itemF = now; deployDrone(k); comThinkEvent('p', 'Tech建造の準備: ' + DRONE_SPEC[k].label + 'を出して積載の枠を空ける (資材の上限 ' + cargoMatCap() + '個 → 必要' + needMat + '個)'); break; }
-                }
-                let g = _comNearest(true, true), gd = g ? Math.hypot(g.x - player.x, g.y - player.y) : Infinity;
-                for (const st of structures) { if (st.type !== 'derelict' || st.salvaged || !st.discovered) continue; const d = Math.hypot(st.x - player.x, st.y - player.y); if (d < gd) { gd = d; g = st; } }
-                if (!g) return end('資材の取れる所が無い');
-                const near = g.type === 'derelict' ? DERELICT_SALVAGE_R * 0.6 : !g.type ? NODE_CAP_R * 0.6 : COLONY_HACK_R * 0.6;
-                _comGoTo(g, near, c);
-                comThink('p', 'strat', '戦略「Tech建造」: 資材 ' + cargo.mat + '/' + needMat + '個 (上限' + cargoMatCap() + ') → ' + (g.type === 'derelict' ? '難破船' : !g.type ? 'ノード' : 'コロニー') + 'で集める (' + _dirTxt(player.x, player.y, g.x, g.y) + ')');
-                return true;
-            }
-            if (!S.spot) { const cv = findCoverSpot(player.x, player.y, 7000); S.spot = cv ? { x: cv.x, y: cv.y } : clampToMapCircle(player.x, player.y, 800); S.kindFog = cv ? cv.kind : null; comThinkEvent('p', '資材' + cargo.mat + '個が揃った → ' + (cv ? '霧/岩礁帯 (' + _dirTxt(player.x, player.y, S.spot.x, S.spot.y) + ')' : 'この場') + 'へ行って組み立てる'); }
-            const dS = Math.hypot(S.spot.x - player.x, S.spot.y - player.y);
-            if (dS > 350) { _comGoTo(S.spot, 350, c); comThink('p', 'strat', '戦略「Tech建造」: 組み立て場所へ移動中 (' + Math.round(dS / 100) * 100 + 'u)'); return true; }
-            _comHold(c);
-            if (x.has('build') && !playerDrones.some(d => d.type === 'build' && d.hp > 0) && activeDeployCount() < (CARGO_CAP[gameState.shipType] || 0)) { deployDrone('build'); comThinkEvent('p', 'Techの組み立て前に砲台を据える (建造中は5分動けない)'); return true; }
-            if (!cargo.asm && activeDeployCount() < (CARGO_CAP[gameState.shipType] || 0)) { deployDrone('mech'); comThinkEvent('p', 'Techを組み立て開始 (資材' + needMat + '個・' + Math.round(DRONE_SPEC.mech.build / 60) + '秒・停止して大量のシグネチャ)'); }
-            return true;
-        }
-        case 'outpost': { // 第133弾: 占有したノード/コロニーの中継圏に戦闘機・哨戒機を置いて見張らせる。自分は別の仕事を続ける (false を返す)
-            const x = comStratCtx(c, P);
-            if (!S.site) { S.site = outpostPick('player', player.x, player.y, c.siteUsed || (c.siteUsed = {})); if (!S.site) return end('中継にできる拠点が無い'); }
-            const st = S.site;
-            if (st.type !== 'colony' && (st.owner !== 'player' || (st.capE || 0) > DRONE_RELAY_CONTEST)) { comDroneRecall(c, '前哨の拠点が奪われかけ'); return end('前哨の拠点が奪われかけ → ドローンを呼び戻す'); }
-            if (st.type === 'colony' && st.owner !== 'player') { comDroneRecall(c, '前哨のコロニーを失った'); return end('前哨のコロニーを失った'); }
-            if (comEngaged()) return false;
-            if (!S.ordF || now - S.ordF > 3600) {
-                S.ordF = now;
-                const cap = CARGO_CAP[gameState.shipType] || 0;
-                if (x.has('scout') && !x.mobile('scout') && activeDeployCount() < cap) deployDrone('scout');
-                if (x.has('attack') && !x.mobile('attack') && activeDeployCount() < cap) deployDrone('attack');
-                let sent = 0;
-                for (const t of ['scout', 'attack']) if (playerDrones.some(d => d.type === t && d.hp > 0)) { droneOrder(t, 'patrol', st.x + (Math.random() - 0.5) * 900, st.y + (Math.random() - 0.5) * 900); sent++; }
-                if (!S.said) { S.said = true; comThinkEvent('p', (st.type === 'colony' ? 'コロニー' : 'ノード') + 'の中継圏 (' + _dirTxt(player.x, player.y, st.x, st.y) + '・' + Math.round(Math.hypot(st.x - player.x, st.y - player.y) / 100) * 100 + 'u) にドローン' + sent + '種を置いて見張らせる — 自分は別の仕事を続ける'); }
-                if (!sent) return end('置けるドローンが無い');
-            }
-            return false;
         }
     }
     return false;
