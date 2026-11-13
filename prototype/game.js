@@ -15781,6 +15781,27 @@ function huntApproach(HA, H, X) {
     if (now - (H.goLog || 0) > 1200) { H.goLog = now; say('【' + H.jp + '】静粛で回り込み中 — ' + X.who + 'の推定まで' + Math.round(D / 100) * 100 + 'u・撃つ位置まで' + Math.round(dS / 100) * 100 + 'u (' + (near ? '忍び足' : '巡航') + ')'); }
     return true;
 }
+// 第123弾 (段5後半の6): 偽装の罠の「待ち伏せ位置へ向かい、囮を置く」— 自機COMも敵も同じ関数 (敵の実装を土台に)
+//   X.releaseLure(H)=囮を H.B へ射出 (使えれば true) / HA.go・drift は他の任務と同じ口
+function huntLureSet(HA, H, X) {
+    const { est, D, now, say } = X;
+    const dH = Math.hypot(H.S.x - HA.x, H.S.y - HA.y);
+    if (!H.lured && dH < 3000) {
+        H.lured = true; H.lureF = now;
+        if (X.releaseLure(H)) say('【' + H.jp + '】囮を ' + _dirTxt(HA.x, HA.y, H.B.x, H.B.y) + ' へ射出 — 相手を誘い出す');
+    }
+    if (dH > 350) { // 静かに向かう: 相手の推定から4000u以内では噴かしては漂う / 相手へ近づく向きは避けて回り込む
+        let ga = Math.atan2(H.S.y - HA.y, H.S.x - HA.x);
+        if (est && D < 4500) { const toE = Math.atan2(est.y - HA.y, est.x - HA.x); if (Math.abs(_angDiff(ga, toE)) < 0.9) ga = toE + (_angDiff(ga, toE) >= 0 ? 0.9 : -0.9); }
+        const cyc = (now - H.f0) % (60 * 24);
+        if (est && D < 4000 && !(cyc < 60 * 10 || HA.v < 0.15)) HA.drift(ga);
+        else HA.go(HA.x + Math.cos(ga) * 1000, HA.y + Math.sin(ga) * 1000, est && D < 4000 ? 'silent' : 'cruise8');
+        return true;
+    }
+    H.ph = 'wait'; H.waitF = now;
+    say('【' + H.jp + '】待ち伏せ位置に着いた → 機関を止めて息を潜める');
+    return true;
+}
 // 第114弾 (段5・前半): 狩人の任務の重みは 自機COMも敵も同じ関数。F は行為者が知っていること
 //   P, D(推定までの距離), cls, stc(潜航型×1.5), fails(焦れ), hpF, closing, moving(動いている), hasLure, hasNoise, hasFake, hitOrPing(直近に撃たれた/探信された), strike(出せる艦載機/Tech), kOk, bOk, holdRecent(待ち伏せの最中に気配を掴んだ)
 function huntWeights(F) {
@@ -15960,6 +15981,8 @@ function enemyHunterStep(e, heard, hard) {
         onTrap: (h) => { e._hunt = null; e._huntCD = 0; e._forceNext = 'hold'; e._lastScentF = now; e.contactFreshness = 1; matchRecEvent('tacE', e.x, e.y, '敵の作戦「偽コンテナの罠」が成功 — 爆発で位置が割れた所を撃ちに行く'); },
         lastMove: () => (e._lastMove && now - e._lastMove.f < 60 * 120 ? e._lastMove : null), transit: (why) => huntTransitEngine(e, why),
         hard, hpF, fails: e._huntFails, silent: ms.silent, icptSpeed: ms.cruise * 0.95, dlRecent: () => !!(e._dlF && now - e._dlF < 600), mslReach: () => ENEMY_MISSILE_ENGAGE * epm(e).mslRange * 0.95, myVis: () => _visAt(e.x, e.y),
+        releaseLure: (h) => { if (h.lureK === 'ship' && (e.lureShip || 0) > 0) { e.lureShip--; launchLure('e', 'ship', e.x, e.y, h.B.x, h.B.y); return true; } if (h.lureK === 'sos' && (e.lureSOS || 0) > 0) { e.lureSOS--; launchLure('e', 'sos', e.x, e.y, h.B.x, h.B.y); return true; }
+            const bk = e.itemBcn && Object.keys(e.itemBcn).find(k => e.itemBcn[k] > 0); if (!bk) return false; e.itemBcn[bk]--; launchLure('e', 'ship', e.x, e.y, h.B.x, h.B.y, bk); return true; },
         whoSeen: '自機', sendTo: (es) => { e._sendTo = es ? { x: es.x, y: es.y, until: now + 60 * 20 } : null; },
         launch: (es) => { let n = 0; const live = enemies.filter(f => f.type === 'fighter' && f.hp > 0 && !f._dying && f._kind === undefined).length;
             while ((e.droneStock || 0) > 0 && live + n < CARGO_CAP.carrier && n < 2) { e.droneStock--; _eLaunchFighter(e, es); n++; }
@@ -15972,27 +15995,7 @@ function enemyHunterStep(e, heard, hard) {
         case 'approach': return huntApproach(HAx, H, HXx); // 第119弾: 自機COMと共通
         case 'screen': return huntScreen(HAx, H, HXx); // 第118弾: 自機COMと共通
         case 'shadow': return huntShadow(HAx, H, HXx); // 第116弾: 自機COMと共通
-        case 'set': { // 偽装の罠: 待ち伏せ位置へ → 囮を置く
-            const dH = Math.hypot(H.S.x - e.x, H.S.y - e.y);
-            if (!H.lured && dH < 3000) {
-                H.lured = true; H.lureF = now;
-                if (H.lureK === 'ship') { e.lureShip--; launchLure('e', 'ship', e.x, e.y, H.B.x, H.B.y); }
-                else if (H.lureK === 'sos') { e.lureSOS--; launchLure('e', 'sos', e.x, e.y, H.B.x, H.B.y); }
-                else { const bk = Object.keys(e.itemBcn).find(k => e.itemBcn[k] > 0); e.itemBcn[bk]--; launchLure('e', 'ship', e.x, e.y, H.B.x, H.B.y, bk); }
-                say('【' + H.jp + '】囮を ' + _dirTxt(e.x, e.y, H.B.x, H.B.y) + ' へ射出 — 自機を誘い出す');
-            }
-            if (dH > 350) { // 静かに向かう: 相手の推定から4000u以内では噴かしては漂う / 相手へ近づく向きは避けて回り込む
-                let ga = Math.atan2(H.S.y - e.y, H.S.x - e.x);
-                if (est && D < 4500) { const toE = Math.atan2(est.y - e.y, est.x - e.x); if (Math.abs(_angDiff(ga, toE)) < 0.9) ga = toE + (_angDiff(ga, toE) >= 0 ? 0.9 : -0.9); }
-                const cyc = (now - H.f0) % (60 * 24);
-                if (est && D < 4000 && !(cyc < 60 * 10 || (e._v || 0) < 0.15)) e._drift(ga);
-                else e._moveHeading(ga, est && D < 4000 ? ms.silent : ms.cruise * 0.8);
-                return true;
-            }
-            H.ph = 'wait'; H.waitF = now;
-            say('【' + H.jp + '】待ち伏せ位置に着いた → 機関を止めて息を潜める');
-            return true;
-        }
+        case 'set': return huntLureSet(HAx, H, HXx); // 第123弾: 自機COMと共通
     }
     return true;
 }
@@ -16244,6 +16247,7 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
         onTrap: (h) => { c.hunt = null; c.huntCD = 0; c.forceNext = 'hold'; if (h._trapSid) window._lockSignal(h._trapSid); matchRecEvent('tacP', player.x, player.y, '自機COMの作戦「偽コンテナの罠」が成功 — 爆発で位置が割れた所を撃ちに行く'); },
         lastMove: (es) => H.vh ? _huntVel(H, es) : null, transit: () => {},
         hard: false, who: 'SIG-' + sigNo(H.sid), hpF, fails: c.huntFails, silent: shipCruiseSpeed(gameState.shipType, genAlloc.engine, 1) * 0.5, icptSpeed: shipCruiseSpeed(gameState.shipType, genAlloc.engine, 1) * 0.9, dlRecent: () => !!(H.dlF && now - H.dlF < 600), mslReach: () => weaponRange('missile') * 0.95, myVis: () => _visAt(player.x, player.y),
+        releaseLure: (h) => { if ((cargo.stock[h.lureK] || 0) > 0) { deployDrone(h.lureK, h.B.x, h.B.y); return true; } return false; },
         whoSeen: 'SIG-' + sigNo(H.sid), sendTo: (es) => { if (es && now - (H.pSendF || 0) > 900) { H.pSendF = now; droneOrder('attack', 'attack', es.x, es.y); if (playerDrones.some(d => d.hp > 0 && d.type === 'mech')) droneOrder('mech', 'attack', es.x, es.y); } },
         launch: (es) => { H.sent = now; return { n: 0, tech: playerDrones.some(d => d.hp > 0 && d.type === 'mech') }; },
         seen: (es) => { const sa = _signalAnalysis[H.sid], dp = sa && sa.ping && /^d/.test(sa.ping.src || '') && now - sa.ping.f < 240 ? sa.ping : null; if (!dp) return null; return { ref: { x: dp.x, y: dp.y }, drones: playerDrones.filter(d => d.hp > 0 && (d.type === 'attack' || d.type === 'mech') && Math.hypot(d.x - dp.x, d.y - dp.y) < 3000) }; } };
@@ -16254,12 +16258,7 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
         case 'approach': return huntApproach(HAx, H, HXx); // 第119弾: 敵と共通
         case 'screen': return huntScreen(HAx, H, HXx); // 第118弾: 敵と共通
         case 'shadow': return huntShadow(HAx, H, HXx); // 第116弾: 敵と共通
-        case 'set': {
-            const dH = Math.hypot(H.S.x - player.x, H.S.y - player.y);
-            if (!H.lured && dH < 3000) { H.lured = true; if ((cargo.stock[H.lureK] || 0) > 0) { deployDrone(H.lureK, H.B.x, H.B.y); say('【' + H.jp + '】' + ((DRONE_SPEC[H.lureK] || {}).label || '囮') + 'を ' + _dirTxt(player.x, player.y, H.B.x, H.B.y) + ' へ射出 — 相手を誘い出す'); } }
-            if (dH > 350) { const near = est && D < 4000, cyc = (now - H.f0) % (60 * 24); if (near && cyc >= 60 * 10 && player.currentSpeed > 0.15) { if (!playerCoasting) toggleCoast(true); } else _comHGo(c, H.S.x, H.S.y, near ? 'silent' : 'cruise'); return true; }
-            H.ph = 'wait'; H.waitF = now; say('【' + H.jp + '】待ち伏せ位置に着いた → 機関を止めて息を潜める'); return true;
-        }
+        case 'set': return huntLureSet(HAx, H, HXx); // 第123弾: 敵と共通
     }
     return true;
 }
