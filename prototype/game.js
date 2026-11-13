@@ -5262,7 +5262,7 @@ class Ship {
                 // 第21弾: 潜伏中のゆっくりした移動 (隠れ場所へ0.08u/f) の途中でも4秒ごとに考え直す。
                 // 旧: 着くまで (数分) 次の判断をせず、遭難信号・哨戒・ノードに反応できなかった
                 if (this.state === 'idle' || (!this._roam && (_frameCount + this.uid) % 240 === 0) || (this._strat && (_frameCount + this.uid) % 120 === 0)) {
-                    if (this.type !== 'fighter' && !_hasScent && enemyStratStep(this, _pers)) { /* 第58弾: 戦略 (待ち伏せ・餌・拠点防衛) が行き先を決めた */ }
+                    if (this.type !== 'fighter' && !(_hasScent && stratNearE(this)) && enemyStratStep(this, _pers)) { /* 第58弾: 戦略 (待ち伏せ・餌・拠点防衛) が行き先を決めた */ }
                     else if (_hasScent && Math.random() < 0.15 + _pers.aggression * 0.3) { // 第66弾: 残り香を追う確率 5% → 15%+攻撃性×30% (旧: 4秒に1回5%で、ほとんど動かなかった)
                         // 残り香あり: 最終既知位置周辺を集中捜索しながらじわじわ詰める(獲物がヒッグス雲に潜伏と推定)
                         const _lkp = this.playerLastKnownPos;
@@ -15498,6 +15498,22 @@ function enemyGrabStep(e) {
     comThinkEvent('e', '目の前に' + (best.kind === 'cache' ? '漂流コンテナ' : '難破船') + ' (' + Math.round(bd / 100) * 100 + 'u) → 先に拾う', 'e' + e.uid);
     return true;
 }
+// 第114弾 (段5・前半): 狩人の任務の重みは 自機COMも敵も同じ関数。F は行為者が知っていること
+//   P, D(推定までの距離), cls, stc(潜航型×1.5), fails(焦れ), hpF, closing, moving(動いている), hasLure, hasNoise, hasFake, hitOrPing(直近に撃たれた/探信された), strike(出せる艦載機/Tech), kOk, bOk, holdRecent(待ち伏せの最中に気配を掴んだ)
+function huntWeights(F) {
+    const P = F.P, ag = P.aggression ?? 0.5, st = P.stealth ?? 0.4, ca = P.caution ?? 0.4, gr = P.greed ?? 0.4, D = F.D, cls = F.cls, stc = F.stc;
+    return {
+        charge: Math.max(0.05, 0.15 + 1.1 * ag - 0.7 * st - 0.3 * ca) * (D < 2600 ? 3 : 1) * (1 + 1.2 * (F.fails || 0)) * (cls === 'carrier' ? 0.4 : 1),
+        stalk: (0.35 + 1.1 * st + 0.5 * ca + 0.35 * ag) * stc * (cls === 'carrier' ? 0.45 : 1),
+        lure: F.hasLure && D > 2000 ? (0.6 + 1.3 * st + 0.8 * ca + 0.3 * gr) * stc : 0,
+        feint: F.hasNoise && D < 9000 && F.hitOrPing ? (1.2 + 1.0 * st + 0.8 * ca) * stc : 0,
+        fakebox: F.hasFake && D > 2000 ? (0.5 + 1.1 * st + 0.6 * gr + 0.4 * ca) * stc : 0,
+        hold: (F.closing && D < 9000 ? 0.3 + 0.9 * ca + 0.7 * st : 0) + (F.holdRecent && D < 10000 ? 3 : 0),
+        screen: cls === 'carrier' && F.strike && D > 3000 ? 0.8 + 0.6 * ag + 0.6 * ca + 0.4 * gr : 0,
+        rush: cls === 'assault' && F.kOk && F.hpF > 0.5 && D < 12000 ? (0.3 + 1.0 * ag + 0.5 * F.hpF + 0.3 * st) : 0,
+        snipe: F.bOk && cls !== 'carrier' && D > 5500 ? (0.15 + 0.7 * ca + 0.5 * st) * (cls === 'assault' ? 1.2 : 0.8) : 0,
+        shadow: cls === 'stealth' && F.moving && D < 12000 ? 0.4 + 1.1 * st + 0.6 * ca : 0 };
+}
 function enemyHunterStep(e, heard, hard) {
     if (e.type === 'fighter' || !player || player.hp <= 0) return false;
     const now = _frameCount, P = e.personality || { aggression: 0.5, stealth: 0.4, caution: 0.4, greed: 0.4 };
@@ -15565,20 +15581,8 @@ function enemyHunterStep(e, heard, hard) {
         // 第81弾: 艦種ごとの戦術 — 空母=艦載機の網 (艦載機で釘付けにし、母艦は霧の中から別の向きで撃つ) / 攻撃型=霧伝いの肉薄 (3連装の実弾を至近の背後から)・ビームの狙撃 / 潜航型=影追い (相手の後ろについて記録を貯め、背後から一撃)
         const kOk = _eHas(e, 'kinetic') && (e.ammoK === undefined || e.ammoK > 0), bOk = _eHas(e, 'beam');
         const myDrones = enemies.filter(f => f.type === 'fighter' && (f._home === e || f._home === undefined) && f.hp > 0 && !f._dying && (f._kind === undefined || f._kind === 'mech')).length;
-        const w = {
-            charge: Math.max(0.05, 0.15 + 1.1 * ag - 0.7 * st - 0.3 * ca) * (D < 2600 ? 3 : 1) * (1 + 1.2 * (e._huntFails || 0)) * (cls === 'carrier' ? 0.4 : 1),
-            stalk: (0.35 + 1.1 * st + 0.5 * ca + 0.35 * ag) * stc * (cls === 'carrier' ? 0.45 : 1),
-            lure: lureK && D > 2000 ? (0.6 + 1.3 * st + 0.8 * ca + 0.3 * gr) * stc : 0, // 2026-11-11: 記録11件で一度も選ばれなかった (4000u以上・重み0.25〜) → 2500u以上・重みを上げる
-            // 2026-11-11 (オーナー「だまし討ちされたと感じるシーンがない」): 偽装退却 = 見つかったと分かった時 (撃たれた・探信された) に、ノイズメーカーを『逃げる方向』へ全速で走らせ、
-            //   自分は機関を止めて横へ滑り、相手がノイズを追う間に背後へ回り込む / 偽コンテナの罠 = 相手の行く先に偽コンテナを置き、横の霧で待つ (開けたら爆発で位置が割れ、その場を撃つ)
-            feint: (e.itemNoise || 0) > 0 && D < 9000 && (now - (e._hpLossF ?? -1e9) < 1800 || now - (e._pingHeardF ?? -1e9) < 1800) ? (1.2 + 1.0 * st + 0.8 * ca) * stc : 0,
-            fakebox: (e.itemFake || 0) > 0 && D > 2000 ? (0.5 + 1.1 * st + 0.6 * gr + 0.4 * ca) * stc : 0,
-            hold: (closing && D < 9000 ? 0.3 + 0.9 * ca + 0.7 * st : 0) + (now - (e._stratEndF ?? -1e9) < 900 && D < 10000 ? 3 : 0), // 待ち伏せの最中に気配を掴んだら、そのまま待つ
-            screen: cls === 'carrier' && ((e.droneStock || 0) > 0 || myDrones > 0) && D > 3000 ? 0.8 + 0.6 * ag + 0.6 * ca + 0.4 * gr : 0,
-            rush: cls === 'assault' && kOk && hpF > 0.5 && D < 12000 ? (0.3 + 1.0 * ag + 0.5 * hpF + 0.3 * st) : 0,
-            snipe: bOk && cls !== 'carrier' && D > 5500 ? (0.15 + 0.7 * ca + 0.5 * st) * (cls === 'assault' ? 1.2 : 0.8) : 0,
-            shadow: cls === 'stealth' && (est.moving || (e._lastMove && now - e._lastMove.f < 900)) && D < 12000 ? 0.4 + 1.1 * st + 0.6 * ca : 0, // 推定の中心の動きからも (速度つきの解はなかなか出ない)
-        };
+        const w = huntWeights({ P, D, cls, stc, fails: e._huntFails, hpF, closing, moving: est.moving || !!(e._lastMove && now - e._lastMove.f < 900), hasLure: !!lureK, hasNoise: (e.itemNoise || 0) > 0, hasFake: (e.itemFake || 0) > 0,
+            hitOrPing: now - (e._hpLossF ?? -1e9) < 1800 || now - (e._pingHeardF ?? -1e9) < 1800, strike: (e.droneStock || 0) > 0 || myDrones > 0, kOk, bOk, holdRecent: now - (e._stratEndF ?? -1e9) < 900 });
         if (e._forceNext && w[e._forceNext] !== undefined) { for (const k in w) w[k] = k === e._forceNext ? 1 : 0; } e._forceNext = null; // 偽装退却/偽コンテナの罠の続き
         if (window.__huntForce && w[window.__huntForce] !== undefined) { for (const k in w) w[k] = k === window.__huntForce ? 1 : 0; }
         if (window.__huntWLog) { const o = {}; for (const k in w) if (w[k] > 0) o[k] = +w[k].toFixed(2); o._it = [e.itemNoise || 0, e.itemFake || 0, lureK]; window.__huntWLog.push(o); }
@@ -16007,6 +16011,8 @@ function _planActorE(e) {
 function enemyPlanStep(e) { return planStep(_planActorE(e)); }
 // ═══ 第58弾: 敵COMの戦略 — 自機COMと同じ考え方 (集めずに拠点で待ち伏せる・餌を置いて待つ・拠点を守る)。気配が無い間にだけ選ぶ (気配があれば従来の追跡) ═══
 // 第113弾 (段4): 重みの式・選び方・拠点の選び方は 自機COMと共通 (stratWeights / stratPick / stratPickSite)。敵が知っていること x は stratFactsE が作る
+// 第114弾: 「相手が近い」の判断は自機COMの comEngaged/near と同じ考え方 — 見えている・推定が6500u以内で新しい (弱い気配だけでは戦略を止めない)
+function stratNearE(e) { const lk = e.playerLastKnownPos; return !!(e.inVision || (lk && (e.contactFreshness || 0) > 0.25 && Math.hypot(lk.x - e.x, lk.y - e.y) < 6500)); }
 function stratFactsE(e) {
     const now = _frameCount, cls = _shipClass(e), liveK = (k) => enemies.some(f => f.type === 'fighter' && f._kind === k && f.hp > 0 && !f._dying);
     const lures = []; if ((e.lureSOS || 0) > 0) lures.push('fsos'); if ((e.lureShip || 0) > 1) lures.push('lure'); // 偽艦影の最後の1個は作戦用
@@ -16021,9 +16027,9 @@ function stratFactsE(e) {
 function enemyStratStep(e, P) {
     const now = _frameCount, jp = { ambush: '拠点の待ち伏せ', bait: '餌で誘う', guard: '拠点を守る', trap: '罠 (砲台を据えて誘い込む)', push: '圧倒して狩る', screen: 'ドローンで探る', fogHide: '霧に潜む', tech: 'Tech建造 (資材集め)' };
     let S = e._strat;
-    if (S && (now > S.until || (e.contactFreshness > 0.04 && S.id !== 'fogHide' && S.id !== 'screen'))) { if (e.contactFreshness > 0.04 && S.ph === 'wait') e._stratEndF = now; /* 第80弾: 待ち伏せ中に気配 → 狩人の頭脳で「待ち伏せ」を続ける */ comThinkEvent('e', '戦略「' + jp[S.id] + '」終了 (' + (now > S.until ? '時間' : '気配を掴んだ') + ')', 'e' + e.uid); if (S.id === 'tech') e._techPush = 0; e._strat = null; e._stratCD = now + 1200 + Math.random() * 2400; S = null; }
+    if (S && (now > S.until || (stratNearE(e) && S.id !== 'fogHide' && S.id !== 'screen'))) { if (stratNearE(e) && S.ph === 'wait') e._stratEndF = now; /* 第80弾: 待ち伏せ中に気配 → 狩人の頭脳で「待ち伏せ」を続ける */ comThinkEvent('e', '戦略「' + jp[S.id] + '」終了 (' + (now > S.until ? '時間' : '気配を掴んだ') + ')', 'e' + e.uid); if (S.id === 'tech') e._techPush = 0; e._strat = null; e._stratCD = now + 1200 + Math.random() * 2400; S = null; }
     if (!S) {
-        if (now < (e._stratCD || 0) || now - (e._lastScentF || 0) < 1500) return false;
+        if (now < (e._stratCD || 0) || stratNearE(e)) return false;
         const x = stratFactsE(e), pk = stratPick(P, x, e._lastStrat, window.__stratForceE), pick = pk.pick;
         e._lastStrat = pick;
         if (pick === 'gather') { e._stratCD = now + 1800 + Math.random() * 3600; return false; }
@@ -16109,18 +16115,8 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
         const myStrike = playerDrones.filter(d => d.hp > 0 && (d.type === 'attack' || d.type === 'mech')).length + ((cargo.stock.attack || 0) > 0 ? 1 : 0);
         const kOk = playerHasWeapon('kinetic') && cargo.ammoK > 0, bOk = playerHasWeapon('beam');
         const _hitAgoP = playerHitLog.length ? now - playerHitLog[playerHitLog.length - 1].f : 1e9;
-        const w = {
-            charge: Math.max(0.05, 0.15 + 1.1 * ag - 0.7 * st - 0.3 * ca) * (D < 2600 ? 3 : 1) * (1 + 1.2 * (c.huntFails || 0)) * (cls === 'carrier' ? 0.4 : 1),
-            stalk: (0.35 + 1.1 * st + 0.5 * ca + 0.35 * ag) * stc * (cls === 'carrier' ? 0.45 : 1),
-            lure: kinds.length && D > 2000 ? (0.6 + 1.3 * st + 0.8 * ca + 0.3 * gr) * stc : 0, // 敵と同じ重み
-            feint: (cargo.stock.noise || 0) > 0 && D < 9000 && (_hitAgoP < 1800 || now - (threatObs.pingF ?? -1e9) < 1800) ? (1.2 + 1.0 * st + 0.8 * ca) * stc : 0, // 2026-11-11: 自機COMも偽装退却 (敵と同じ)
-            fakebox: (cargo.stock.fakecache || 0) > 0 && D > 2000 ? (0.5 + 1.1 * st + 0.6 * gr + 0.4 * ca) * stc : 0, // 自機COMも偽コンテナの罠
-            hold: closing && D < 9000 ? 0.3 + 0.9 * ca + 0.7 * st : 0,
-            screen: cls === 'carrier' && myStrike > 0 && D > 3000 ? 0.8 + 0.6 * ag + 0.6 * ca + 0.4 * gr : 0,
-            rush: cls === 'assault' && kOk && hpF > 0.5 && D < 12000 ? 0.3 + 1.0 * ag + 0.5 * hpF + 0.3 * st : 0,
-            snipe: bOk && cls !== 'carrier' && D > 5500 ? (0.15 + 0.7 * ca + 0.5 * st) * (cls === 'assault' ? 1.2 : 0.8) : 0,
-            shadow: cls === 'stealth' && (est.moving || (c.lastMove && c.lastMove.sid === lockedSignalId && now - c.lastMove.f < 900)) && D < 12000 ? 0.4 + 1.1 * st + 0.6 * ca : 0,
-        };
+        const w = huntWeights({ P, D, cls, stc, fails: c.huntFails, hpF, closing, moving: est.moving || !!(c.lastMove && c.lastMove.sid === lockedSignalId && now - c.lastMove.f < 900), hasLure: kinds.length > 0, hasNoise: (cargo.stock.noise || 0) > 0, hasFake: (cargo.stock.fakecache || 0) > 0,
+            hitOrPing: _hitAgoP < 1800 || now - (threatObs.pingF ?? -1e9) < 1800, strike: myStrike > 0, kOk, bOk, holdRecent: now - (c.stratEndF ?? -1e9) < 900 });
         if (c.forceNext && w[c.forceNext] !== undefined) { for (const k in w) w[k] = k === c.forceNext ? 1 : 0; } c.forceNext = null; // 偽装退却/偽コンテナの罠の続き (敵と同じ)
         if (window.__huntForceP && w[window.__huntForceP] !== undefined) { for (const k in w) w[k] = k === window.__huntForceP ? 1 : 0; }
         let tot = 0; for (const k in w) tot += w[k];
@@ -17440,7 +17436,7 @@ function comStratStep(c, P, D, hpF, contact, te, lk, r) {
         case 'gather': return false;
         case 'ambush': case 'bait': case 'trap': {
             if (te && lk && lk.full) return end('相手が見えた → 交戦');
-            if (est && dEst < 5200 && est.r < 2600 && now - S.t0 > 300) { c.flankUntil = now + 1800; return end('相手が近づいてきた (' + _dirTxt(player.x, player.y, est.x, est.y) + ') → 先に撃つ構え'); }
+            if (est && dEst < 5200 && est.r < 2600 && now - S.t0 > 300) { c.flankUntil = now + 1800; c.stratEndF = now; return end('相手が近づいてきた (' + _dirTxt(player.x, player.y, est.x, est.y) + ') → 先に撃つ構え'); }
             c.mode = 'strat'; _comCMOff();
             const dS = Math.hypot(S.spot.x - player.x, S.spot.y - player.y);
             if (dS > 350) {
