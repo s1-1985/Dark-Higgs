@@ -13175,12 +13175,16 @@ function enemyUseFlash(e) {
     return true;
 }
 // 第51弾 (オーナー): 敵COMの搭載品は試合開始時に性格に合わせて選ぶ。艦種の積載枠のうち 弾と艦載機を除いた残りに、性格で重みをつけて1個ずつ (多くて同種2個) 積む
-function enemyPersonaLoadout(ship, P) {
-    const base = Object.assign({ mat: 0 }, DEFAULT_LOADOUT[ship]);
+// 第121弾: 艦載機・設置物などの運用は 空母だけ (敵COMは戦艦から出せる物が空母の戦闘機・哨戒機だけ) — 自機COMの積み込みも同じ規則に (旧: 自機COMの攻撃型だけ戦闘機を積み、敵の攻撃型は積まなかった = 鏡合わせの非対称)
+function personaStrip(base, ship) {
     const keep = ship === 'carrier' ? ['attack', 'scout', 'repair'] : ['repair'];
     for (const t of SHIP_DRONES[ship] || []) if (!keep.includes(t)) base[t] = 0;
     base.mat = 0;
     if (ship === 'carrier') base.mech = 0;
+}
+function enemyPersonaLoadout(ship, P) {
+    const base = Object.assign({ mat: 0 }, DEFAULT_LOADOUT[ship]);
+    personaStrip(base, ship);
     return personaFill(base, ship, P, Math.random);
 }
 // 第112弾 (段3.5): 消耗品の積み方は 自機COMも敵も同じ関数 (性格で重みをつけて枠が尽きるまで)。rnd は揺らぎ用の乱数 (自機COMは性格から決めた固定の種 → 同じ試合を再現できる)
@@ -13208,6 +13212,7 @@ function personaFill(base, ship, P, rnd) {
 function personaLoadoutP(ship, P) { // 自機COM: 消耗品を全部外し(完成品・弾・資材は既定のまま)、敵と同じ関数で性格どおりに積み直す
     const base = Object.assign({ mat: 0 }, DEFAULT_LOADOUT[ship]);
     for (const k of LO_CONSUMABLES) if (base[k]) base[k] = 0;
+    if (ship !== 'carrier') personaStrip(base, ship); // 第121弾: 敵と同じ規則 (空母の運用は 空母の既定のまま — 資材でTechも組み立てる)
     const h = Math.floor(((P.aggression ?? 0.5) * 1000 + (P.stealth ?? 0.4) * 100000 + (P.greed ?? 0.4) * 10000000 + (P.caution ?? 0.4) * 1000000000)) >>> 0;
     return personaFill(base, ship, P, _mulberry(h));
 }
