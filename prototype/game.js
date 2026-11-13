@@ -1349,10 +1349,10 @@ function adaptPersonality(p, contact, hpFrac) {
 function rollEnemyPersonality(type) {
     const R = (a, b) => a + Math.random() * (b - a);
     if (type !== 'fighter' && typeof _frameCount !== 'undefined' && Math.random() < ENEMY_ADAPTIVE_CHANCE) return makeAdaptivePersonality();
-    if (type === 'destroyer')     return { aggression: R(0.45, 1.00), stealth: R(0.00, 0.50), greed: R(0.15, 0.80), caution: R(0.10, 0.55) };
-    if (type === 'corvette')      return { aggression: R(0.20, 0.65), stealth: R(0.50, 1.00), greed: R(0.20, 0.85), caution: R(0.40, 0.95) };
-    if (type === 'carrier')       return { aggression: R(0.10, 0.45), stealth: R(0.25, 0.70), greed: R(0.45, 1.00), caution: R(0.50, 1.00) };
-    return { aggression: R(0.70, 1.00), stealth: R(0.00, 0.25), greed: R(0.00, 0.20), caution: R(0.00, 0.20) }; // fighter=無謀
+    if (type === 'destroyer')     return { aggression: R(0.45, 1.00), stealth: R(0.00, 0.50), greed: R(0.15, 0.80), caution: R(0.10, 0.55), cunning: R(0.05, 0.55), tech: R(0.10, 0.65), command: R(0.15, 0.60), patience: R(0.05, 0.55) };
+    if (type === 'corvette')      return { aggression: R(0.20, 0.65), stealth: R(0.50, 1.00), greed: R(0.20, 0.85), caution: R(0.40, 0.95), cunning: R(0.30, 1.00), tech: R(0.30, 0.95), command: R(0.10, 0.55), patience: R(0.40, 1.00) };
+    if (type === 'carrier')       return { aggression: R(0.10, 0.45), stealth: R(0.25, 0.70), greed: R(0.45, 1.00), caution: R(0.50, 1.00), cunning: R(0.20, 0.75), tech: R(0.30, 0.85), command: R(0.50, 1.00), patience: R(0.30, 0.95) };
+    return { aggression: R(0.70, 1.00), stealth: R(0.00, 0.25), greed: R(0.00, 0.20), caution: R(0.00, 0.20), cunning: R(0, 0.2), tech: R(0, 0.2), command: R(0, 0.2), patience: R(0, 0.15) }; // fighter=無謀
 }
 // 検知時フレーバー: 性格をふわっと言語化 (毎マッチ違う相手を感じさせる)
 function personalityTag(p) {
@@ -7375,7 +7375,7 @@ document.querySelectorAll('.sonar-band-btn').forEach(b => b.addEventListener('cl
 // ── 潜航型ジャミング3種 ──
 // 第89弾: 自機COMも同じ基準でジャミングを使う (敵の潜航型と同じ)
 function comJamStep(c) {
-    if (gameState.shipType !== 'stealth' || !player || player.hp <= 0 || !skillOn('p', 'jam')) return;
+    if (gameState.shipType !== 'stealth' || !player || player.hp <= 0 || !skillUse('p', 'jam')) return;
     const now = _frameCount, hitAgo = playerHitLog.length ? now - playerHitLog[playerHitLog.length - 1].f : 1e9;
     if (THREATS.some(t => t.kind === 'msl') && jamPulseCD <= 0) { document.getElementById('btn-jam-pulse')?.click(); comThinkEvent('p', 'ミサイルが来る → EMパルス (センサーとミサイルの誘導を1秒焼く)'); }
     else if (jamBurst <= 0 && now - (c.jamBF || -1e9) > 1800 && (hitAgo < 360 || (playerExposureLevel >= 2 && enemies.some(q => q.hp > 0 && q.type !== 'fighter' && q.inVision)))) { c.jamBF = now; document.getElementById('btn-jam-burst')?.click(); comThinkEvent('p', (hitAgo < 360 ? '撃たれた' : '至近で掴まれている') + ' → 範囲ジャミング (探知を6秒劣化・方位を乱す)'); }
@@ -7655,7 +7655,7 @@ const ENEMY_BAND_ORDER = ['heat', 'em', 'higgs', 'optic'];
 //   騒がしい (攻撃的): 短く聴いてすぐ動く・短い測量を重ねる・寄って行く・能動的に探し回る
 function comDoctrine(P) {
     const cl = (v) => Math.max(0, Math.min(1, v));
-    const still = cl((P.stealth ?? 0.4) * 0.75 + (P.caution ?? 0.4) * 0.35 - (P.aggression ?? 0.5) * 0.5);
+    const still = cl((P.stealth ?? 0.4) * 0.75 + (P.caution ?? 0.4) * 0.35 - (P.aggression ?? 0.5) * 0.5 + 0.35 * (persAx(P, 'patience') - 0.4)); // 第147弾: 忍耐が高いほど静かに待つ
     return {
         still,
         listenSec: 8 + 82 * still,          // 捜索で着いたら止まって聴く秒数
@@ -9723,7 +9723,7 @@ function _hackAim(sa, ox, oy, H) {
 // 敵COMのハック: 推定が十分絞れていて (誤差/距離 ≤ 0.12)・届く距離の内・演算力が十分 (相手の耐性を平均3.0と見て H≥3.0) の時に撃つ。交戦中は火器管制ダウン・それ以外は機関停止 (止めてから忍び寄る)
 // 第111弾 (段3): ハック波を撃つかの判断は自機COMと敵で同じ関数。H≥3.0・方向が絞れている・相手が艦影らしい (信用できる) 時に撃つ。交戦中か2200u未満の距離が分かる時は火器管制ダウン・それ以外は機関停止
 function hackDecide(A) {
-    const on = (id) => skillOn(A.side, id);
+    const on = (id) => skillUse(A.side, id);
     // 第142弾: ハックのスキル。効果の選び方 — 逃げる/隠れている=目隠し(センサー) / 交戦中・至近=火器管制潰し / 相手がドローンを出している=通信妨害 / それ以外=機関停止の奇襲。侵入できない演算力でも「探り」で位置を暴ける
     if (A.H >= 3.0 && A.credible) {
         const aim = _hackAim(A.sa, A.x, A.y, A.H);
@@ -13474,7 +13474,7 @@ function enemyUseSpray(e) {
 function itemReactPlan(F) {
     const P = F.P, st = P.stealth ?? 0.4, ca = P.caution ?? 0.4, ag = P.aggression ?? 0.5, gr = P.greed ?? 0.4, hp = F.hpF, hit = F.hitAgo;
     const go = (k, why, ck, extra) => { if (ck) F.mark(ck); return Object.assign({ k, why }, extra || {}); };
-    const on = (id) => skillOn(F.side, id), eA = F.estAng, rr = () => (Math.random() < 0.5 ? 1 : -1);
+    const on = (id) => skillUse(F.side, id), eA = F.estAng, rr = () => (Math.random() < 0.5 ? 1 : -1);
     if (on('it_linkcut') && F.n('linkcut') > 0 && F.hacked) return go('linkcut', '侵入されている → 断線パルスで回線を切る');
     // 修理: 損傷が大きく気配が無い (撃たれていない) 間・または傷が深く見えない所へ離れた直後
     if (on('it_repair') && F.n('repair') > 0 && !F.kit && !F.mslIn && F.missing > REPAIR_KIT_HP * 0.8 && F.cd('repF', 30) && ((hp < 0.55 && F.exposure <= 1 && hit > 1200) || (hp < 0.4 && hit > 420 && !F.seen))) return go('repair', '耐久' + _pct(hp) + '・今は撃たれていない → リペアキットで修理', 'repF');
@@ -13540,7 +13540,7 @@ function _skillSlipP(ang) {
 function _skillSlipE(e, ang) { const tp = clampToMapCircle(e.x + Math.cos(ang) * 4500, e.y + Math.sin(ang) * 4500, 1500); e.setTarget(tp.x, tp.y); e.postFireCooldown = 300; }
 // ═══ 第144弾: 複合戦術 — アイテム × ドローン × ハックを組み合わせた動き (自機COMも敵も同じ関数)。F = itemFacts (知っていること)・A = stratActor (ドローンの口)・X = {doI: アイテムの実行・slip: 横へ離れる・bait: 囮を置く・fake: 偽コンテナ・turret: 自分の砲台の位置} ═══
 function comboStep(F, A, X) {
-    const on = (id) => skillOn(F.side, id), eA = F.estAng, rr = () => (Math.random() < 0.5 ? 1 : -1), hit = F.hitAgo, say = (t) => A.say(t);
+    const on = (id) => skillUse(F.side, id), eA = F.estAng, rr = () => (Math.random() < 0.5 ? 1 : -1), hit = F.hitAgo, say = (t) => A.say(t);
     const hasFtr = () => A.have('attack') || A.mobile('attack');
     // 閃光→突撃: 至近で撃たれている/照射されているなら、閃光で目を焼いている間にドローンを突っ込ませる
     if (on('cb_flash_strike') && F.n('flash') > 0 && eA !== null && F.estD < 2400 && (F.exposure >= 2 || hit < 900) && (hasFtr() || A.mobile('mech')) && F.cd('cbFlashF', 60)) {
@@ -13631,7 +13631,7 @@ function statusDazed(s) { return (s._sysSensorTimer || 0) > 0 || (s._weaponJamTi
 function _tacSonarP(c, pw) { if (omniSonarCooldown > 0) return false; fireOmniSonar(pw, comSonarBand(c)); return true; }
 function _tacFocusP(c, k, sec) { c.tacFocusUntil = _frameCount + sec * 60; c.focus = k; c.focusF = _frameCount; setGenFocus(k, true); }
 function tacticStep(F, A, X) {
-    const on = (id) => skillOn(F.side, id), eA = F.estAng, now = _frameCount, hit = F.hitAgo, say = (t) => A.say(t), P = F.P || {}, rr = () => (Math.random() < 0.5 ? 1 : -1);
+    const on = (id) => skillUse(F.side, id), eA = F.estAng, now = _frameCount, hit = F.hitAgo, say = (t) => A.say(t), P = F.P || {}, rr = () => (Math.random() < 0.5 ? 1 : -1);
     const wideEst = eA !== null && F.estR < 1e8 && F.estR / Math.max(1, F.estD) > 0.3, tightEst = eA !== null && F.estR < 1e8 && F.estR / Math.max(1, F.estD) <= 0.25;
     // 聴き耳: 気配を見失った直後、止まって静かに20秒聴く (動くと自分の音で聞こえない)
     if ((F.get('tacHold') || 0) > now) { if (F.seen || hit < 900 || F.exposure >= 3) F.set('tacHold', 0); else { A.hold(true); return true; } }
@@ -13728,7 +13728,7 @@ function enemyItemsStep(e) {
     const hpF = e.hp / e.maxHp, hitAgo = e._lastHitF ? now - e._lastHitF : 1e9, dBel = lk ? Math.hypot(lk.x - e.x, lk.y - e.y) : 1e9;
     const cd = (k, sec) => now - (e[k] || -1e9) > sec * 60;
     // 第89弾: 潜航型のジャミング (自機の潜航型と同じ3種・同じ値) — EMパルス=自分へ向かうミサイル (20秒に1回) / 範囲ジャミング=撃たれた直後か至近で追われている時
-    if (ENEMY_CLASS[e.type] === 'stealth' && skillOn('e', 'jam')) {
+    if (ENEMY_CLASS[e.type] === 'stealth' && skillUse('e', 'jam')) {
         const _mi = projectiles.some(p => p.isPlayer && p.type === 'missile' && Math.hypot(p.x - e.x, p.y - e.y) < 2600 && Math.cos(Math.atan2(e.y - p.y, e.x - p.x) - p.angle) > 0.6);
         if (_mi && !(e._jamPCD > 0)) { e._jamP = JAM_PULSE_DUR; e._jamPCD = JAM_PULSE_CD; comThinkEvent('e', 'ミサイルが来る → EMパルス (半径' + JAM_PULSE_RADIUS + 'uのセンサーとミサイルの誘導を1秒焼く・EMは最大)', 'e' + e.uid); }
         else if (!(e._jamB > 0) && cd('_jamBF', 30) && (hitAgo < 360 || (e.aiState === 'combat' && dBel < 3500))) { e._jamBF = now; e._jamB = JAM_BURST_DUR; comThinkEvent('e', (hitAgo < 360 ? '撃たれた' : '至近で追われている') + ' → 範囲ジャミング (半径' + JAM_BURST_RADIUS + 'uの探知を6秒劣化・方位を乱す・EMが増える)', 'e' + e.uid); }
@@ -15762,13 +15762,22 @@ function switchWeapon(w) {
 
 // ═══ 第19弾: COM対戦デモ — 自機もCOMが操作する (オーナー合意 2026-10-25) ═══
 // 性格は4軸 (攻撃性・隠密性・貪欲さ・慎重さ 各0〜1)。プリセットで一括設定し、スライダーで微調整できる。ランダムは試合ごとに艦種の範囲で振る (敵の通常の決め方と同じ)
-const COM_AXES = [['aggression', '攻撃性'], ['stealth', '隠密性'], ['greed', '貪欲さ'], ['caution', '慎重さ']];
+// 第147弾 (オーナー「スキルの運用は性格パラメーターとの関連。新しい軸を足してもいい。スキルごとの優先度・使用頻度が変わるように」): 性格を4軸→8軸に。
+//   旧4軸 (攻撃性・隠密性・貪欲さ・慎重さ) + 新4軸 知略 (だまし・罠・偽装を好む)・電脳 (ハック・解析・ソナー・センサー)・統率 (ドローン・艦載機の運用)・忍耐 (待つ・長く静か ↔ 衝動的)
+const COM_AXES = [['aggression', '攻撃性'], ['stealth', '隠密性'], ['greed', '貪欲さ'], ['caution', '慎重さ'], ['cunning', '知略'], ['tech', '電脳'], ['command', '統率'], ['patience', '忍耐']];
+const PERS_DEF = { aggression: 0.5, stealth: 0.4, greed: 0.4, caution: 0.4, cunning: 0.4, tech: 0.4, command: 0.4, patience: 0.4 }; // 軸が無い性格 (古い保存・通常の敵・状況適応) の既定
+function persAx(P, k) { const v = P && P[k]; return v === undefined || v === null ? PERS_DEF[k] : v; }
 const COM_PRESETS = {
-    standard:   { label: '標準',     p: { aggression: 0.5, stealth: 0.4,  greed: 0.4, caution: 0.4 } },
-    aggressive: { label: '攻撃的',   p: { aggression: 0.9, stealth: 0.15, greed: 0.2, caution: 0.15 } },
-    cautious:   { label: '慎重',     p: { aggression: 0.3, stealth: 0.5,  greed: 0.3, caution: 0.85 } },
-    stealthy:   { label: '隠密',     p: { aggression: 0.4, stealth: 0.9,  greed: 0.3, caution: 0.6 } },
-    greedy:     { label: '貪欲',     p: { aggression: 0.4, stealth: 0.4,  greed: 0.9, caution: 0.5 } },
+    standard:   { label: '標準',     p: { aggression: 0.5, stealth: 0.4,  greed: 0.4, caution: 0.4, cunning: 0.4, tech: 0.4, command: 0.4, patience: 0.4 } },
+    aggressive: { label: '攻撃的',   p: { aggression: 0.9, stealth: 0.15, greed: 0.2, caution: 0.15, cunning: 0.15, tech: 0.3, command: 0.5, patience: 0.1 } },
+    cautious:   { label: '慎重',     p: { aggression: 0.3, stealth: 0.5,  greed: 0.3, caution: 0.85, cunning: 0.4, tech: 0.5, command: 0.3, patience: 0.7 } },
+    stealthy:   { label: '隠密',     p: { aggression: 0.4, stealth: 0.9,  greed: 0.3, caution: 0.6, cunning: 0.6, tech: 0.4, command: 0.3, patience: 0.8 } },
+    greedy:     { label: '貪欲',     p: { aggression: 0.4, stealth: 0.4,  greed: 0.9, caution: 0.5, cunning: 0.3, tech: 0.4, command: 0.5, patience: 0.3 } },
+    schemer:    { label: '策士',     p: { aggression: 0.4, stealth: 0.7,  greed: 0.3, caution: 0.5, cunning: 0.95, tech: 0.4, command: 0.4, patience: 0.6 } }, // 第147弾: だまし・罠・偽装で戦う
+    hacker:     { label: '電脳戦',   p: { aggression: 0.5, stealth: 0.5,  greed: 0.3, caution: 0.5, cunning: 0.4, tech: 0.95, command: 0.3, patience: 0.5 } }, // ハック・解析・ソナーで戦う
+    commander:  { label: '指揮官',   p: { aggression: 0.6, stealth: 0.3,  greed: 0.5, caution: 0.4, cunning: 0.4, tech: 0.5, command: 0.95, patience: 0.4 } }, // ドローン・艦載機を駆使する
+    sentinel:   { label: '番人',     p: { aggression: 0.3, stealth: 0.6,  greed: 0.2, caution: 0.8, cunning: 0.5, tech: 0.5, command: 0.5, patience: 0.95 } }, // 拠点を守り、じっと待つ
+    hunter:     { label: '狩人',     p: { aggression: 0.7, stealth: 0.8,  greed: 0.2, caution: 0.4, cunning: 0.5, tech: 0.5, command: 0.3, patience: 0.85 } }, // 隠れて機会をうかがい、仕留める
     adaptive:   { label: '状況適応', p: null }, // 第21弾: 状況で 隠密→貪欲→攻撃的→慎重 と変わる
     random:     { label: 'ランダム', p: null },
 };
@@ -15856,7 +15865,7 @@ var SKILL_EXTRA = [
 ];
 var HUNT_DESC = { charge: '推定へまっすぐ詰めて撃ち合う', stalk: '背後へ静かに回り込み、気付かれる前に撃つ', lure: '囮を置き、相手が向かう線の横で待ち伏せる', feint: '撃たれたらノイズを逃げる向きに流して横へ滑り、忍び寄りへ', fakebox: '偽コンテナを相手の行く先に置き、爆発で位置が割れたら撃つ', hold: '近づいてくる相手を機関を止めて待つ', screen: '艦載機を先に送り、見つけたら挟み撃ちにする', rush: '霧伝いに近づいて実弾の至近戦に持ち込む', snipe: 'ビームのチャージ警告の外から狙撃する', shadow: '相手の後ろにつき、方位を貯めて真後ろから撃つ' };
 // 第144弾: ドローン運用のスキル — 哨戒機 dr_scout・戦闘機 dr_ftr・砲台 dr_turret を出す / 指示を出す dr_order / 会敵で呼び戻す dr_recall。自機COMも敵も同じ
-function drOK(side, t) { const id = t === 'scout' ? 'dr_scout' : t === 'attack' ? 'dr_ftr' : t === 'build' ? 'dr_turret' : null; return !id || skillOn(side, id); }
+function drOK(side, t) { const id = t === 'scout' ? 'dr_scout' : t === 'attack' ? 'dr_ftr' : t === 'build' ? 'dr_turret' : null; return !id || skillUse(side, id); }
 function skillList() {
     const out = [];
     for (const id in STRAT_REG) out.push({ id: 'st_' + id, g: '戦略', jp: STRAT_REG[id].jp, desc: STRAT_REG[id].desc || '' });
@@ -15874,7 +15883,7 @@ function comDefaultCfg() {
              lo: { p: {}, e: {} }, sk: { p: {}, e: {} } }; // 第142弾: sk=スキルのオン・オフ // 第22弾: COM対戦の積み込み (自機/敵・艦種ごと。無ければ既定)
 }
 function loadComCfg() {
-    try { const c = JSON.parse(localStorage.getItem('darkEchoComDemo') || 'null'); if (c && c.pp && c.ep) { const r = Object.assign(comDefaultCfg(), c); if (!r.lo || !r.lo.p || !r.lo.e) r.lo = { p: {}, e: {} }; if (!r.sk || !r.sk.p || !r.sk.e) r.sk = { p: {}, e: {} }; return r; } } catch (e) {}
+    try { const c = JSON.parse(localStorage.getItem('darkEchoComDemo') || 'null'); if (c && c.pp && c.ep) { const r = Object.assign(comDefaultCfg(), c); for (const pk of ['pp', 'ep']) r[pk] = Object.assign({}, PERS_DEF, r[pk]); /* 第147弾: 新しい軸が無い古い保存は既定で埋める */ if (!r.lo || !r.lo.p || !r.lo.e) r.lo = { p: {}, e: {} }; if (!r.sk || !r.sk.p || !r.sk.e) r.sk = { p: {}, e: {} }; return r; } } catch (e) {}
     return comDefaultCfg();
 }
 function saveComCfg() { if (playReplay || /[?&]replay=1/.test(location.search)) return; try { localStorage.setItem('darkEchoComDemo', JSON.stringify(comCfg)); } catch (e) {} }
@@ -15886,7 +15895,72 @@ function comPersonalityFor(side) {
     if (pre === 'random') return Object.assign(rollEnemyPersonality(COM_ITYPE[side === 'p' ? comCfg.ship : comCfg.enemy]), { _side: side });
     return Object.assign({}, side === 'p' ? comCfg.pp : comCfg.ep, { _side: side });
 }
-function persLabel(p) { return (p && p._adaptive ? '状況適応(' + ADAPT_MODES[p._adaptive.mode].label + ') ' : '') + COM_AXES.map(([k, l]) => l.slice(0, 2) + Math.round((p[k] || 0) * 100)).join(' '); }
+// ── 第147弾: 性格面 (複合) と スキルの適性 ──
+//   性格面 = 軸の組み合わせで決まる「気質」。強いもの上位が名前になり、その気質のスキルが選ばれやすくなる (スキルの適性 skillAff に加点)
+const PERS_TRAITS = [
+    { id: 'warlord',  jp: '猛将',   f: (P) => 0.6 * persAx(P, 'aggression') + 0.3 * (1 - persAx(P, 'caution')) + 0.3 * (1 - persAx(P, 'patience')) - 0.3 * persAx(P, 'stealth'), ids: /^(hu_charge|hu_rush|hu_snipe|st_push|st_raid|tc_kite|tc_focus_weapon|tc_flash_open|cb_flash_strike|cb_blow_strike|hk_opener|hk_fcs|hk_pursuit|st_surge)$/ },
+    { id: 'hunter',   jp: '狩人',   f: (P) => 0.45 * persAx(P, 'stealth') + 0.45 * persAx(P, 'patience') + 0.25 * persAx(P, 'aggression') + 0.15 * persAx(P, 'cunning'), ids: /^(hu_stalk|hu_shadow|hu_hold|st_ambush|st_wide_loop|tc_listen|tc_focus_sensor|tc_spray_lair|hk_halt|dc_silent|so_nudge)$/ },
+    { id: 'schemer',  jp: '策士',   f: (P) => 0.8 * persAx(P, 'cunning') + 0.2 * persAx(P, 'stealth') + 0.1 * persAx(P, 'patience'), ids: /^(dc_|cb_nest|cb_watch_bait|cb_saturate|cb_decoy_drone|cb_scout_turret|cb_tech_guard|pl_decoy|it_noise|it_sos|it_fake|hu_lure|hu_feint|hu_fakebox|st_bait|st_trap|st_playdead|tc_noise_shadow|tc_beacon_ring|tc_ammo_flee)/ },
+    { id: 'netrunner',jp: '電脳戦士', f: (P) => 0.8 * persAx(P, 'tech') + 0.15 * persAx(P, 'patience') + 0.1 * persAx(P, 'caution'), ids: /^(hk_|jam|it_linkcut|tc_sonar_fix|tc_focus_scan|tc_ping_step|tc_probe_evade|st_center|st_net|st_storm|st_heatcloud|en_swap|se_hi|cb_hack_strike|cb_captured)/ },
+    { id: 'commander',jp: '指揮官', f: (P) => 0.8 * persAx(P, 'command') + 0.2 * persAx(P, 'caution') + 0.1 * persAx(P, 'greed'), ids: /^(dr_|hu_screen|st_screen|st_outpost|st_orbit|cb_flash_strike|cb_smoke_flank|cb_decoy_drone|cb_scout_turret|cb_blow_strike|tc_scout_ahead|st_tech)/ },
+    { id: 'warden',   jp: '守護者', f: (P) => 0.5 * persAx(P, 'caution') + 0.4 * persAx(P, 'patience') + 0.2 * persAx(P, 'command') - 0.2 * persAx(P, 'aggression'), ids: /^(st_guard|st_orbit|st_fallback|st_fogHide|st_restock|st_outpost|tc_status_retreat|cb_repair_smoke|it_repair|it_smoke|it_spray|hk_flee|hk_halt_flee|hk_counter)/ },
+    { id: 'collector',jp: '収集家', f: (P) => 0.8 * persAx(P, 'greed') + 0.1 * persAx(P, 'command'), ids: /^(st_gather|st_salvage|st_net|st_tech|gt_cv|cb_tech_guard)/ },
+];
+function persTraits(P) { return PERS_TRAITS.map(t => ({ id: t.id, jp: t.jp, v: Math.max(0, Math.min(1, t.f(P || {}))) })).sort((a, b) => b.v - a.v); }
+function persTraitLabel(P) { const t = persTraits(P).filter(x => x.v >= 0.62).slice(0, 2); return t.length ? t.map(x => x.jp).join('・') : '均整'; }
+// スキルごとの適性: 軸ごとの重み (ag/st/gr/ca/cu/te/co/pa × 係数)。戦略・任務は 旧4軸が既に重みに入っているので新4軸を中心に。残り (戦術・複合・だまし・ハック・搭載品・ドローン) は全軸
+const _AX = { ag: 'aggression', st: 'stealth', gr: 'greed', ca: 'caution', cu: 'cunning', te: 'tech', co: 'command', pa: 'patience' };
+const SKILL_AX = {
+    // 戦略 (st_*)
+    st_ambush: 'pa1.5 cu0.5', st_bait: 'cu1.5 pa0.5', st_screen: 'co1.5 te0.5', st_fogHide: 'pa0.5', st_push: 'co0.5 pa-1', st_raid: 'ag0.5 pa-0.5', st_guard: 'pa1 co0.5',
+    st_tech: 'te1.5 pa1 gr0.5', st_trap: 'cu1.5 pa0.5', st_outpost: 'co1.5 te0.5', st_fallback: 'ca1 pa-0.3', st_restock: 'pa0.3', st_playdead: 'cu1.5 st0.5', st_storm: 'te0.8 cu0.5 st0.5', st_heatcloud: 'te0.8 cu0.5 st0.5',
+    st_surge: 'ag0.5 pa-0.8 te0.5', st_wide_loop: 'cu1 pa0.7', st_center: 'te0.8 co0.3', st_orbit: 'co1 pa0.5', st_salvage: 'gr1', st_net: 'te1 gr0.5 co0.3',
+    // 狩人の任務 (hu_*)
+    hu_charge: 'pa-1.5', hu_stalk: 'pa1 cu0.5', hu_lure: 'cu1.5', hu_feint: 'cu1.5', hu_fakebox: 'cu1.5', hu_hold: 'pa1.5', hu_screen: 'co1.5', hu_rush: 'pa-0.8', hu_snipe: 'te0.8 pa0.8', hu_shadow: 'te0.8 pa1',
+    // 搭載品・作戦
+    it_linkcut: 'te1', it_repair: 'ca0.7', it_flash: 'ca0.5 cu0.3', it_noise: 'cu1 ca0.3', it_smoke: 'ca0.5 st0.5', it_sos: 'cu1.2', it_fake: 'cu1.5', it_spray: 'st0.5 te0.3', it_blow: 'ag0.5 te0.5', pl_decoy: 'cu1.5 pa0.7 st0.4', jam: 'te1.2',
+    // ハック
+    hk_halt: 'te1 ag0.5', hk_fcs: 'te1 ag0.5', hk_sensor: 'te1 st0.5', hk_comm: 'te1 co0.5', hk_probe: 'te0.8 pa0.5', hk_pursuit: 'te0.8 ag0.5', hk_flee: 'te0.8 ca0.5', hk_drone: 'te1.2 co0.8', hk_counter: 'te1 ca0.5', hk_opener: 'te1 ag0.7 pa0.3', hk_halt_flee: 'te1 ca0.5',
+    // だまし
+    dc_ghost: 'cu1.2 ca0.5', dc_trail: 'cu1.3 st0.4', dc_pivot: 'cu1 st0.5', dc_mirror: 'cu1.4', dc_wreck: 'cu1.4 gr0.5', dc_beacon: 'cu1.2 te0.4', dc_flashrun: 'cu1 ca0.5', dc_silent: 'pa1 st0.7 cu0.3',
+    // ドローン
+    dr_scout: 'co1 te0.5', dr_ftr: 'co1.2 ag0.5', dr_turret: 'co0.8 pa0.8', dr_order: 'co1',
+    // 複合
+    cb_flash_strike: 'co0.8 ag0.7 cu0.5', cb_hack_strike: 'te1 co0.7', cb_decoy_drone: 'co0.8 cu1', cb_watch_bait: 'cu1 co0.6 pa0.5', cb_nest: 'cu1.2 pa0.7 co0.5', cb_smoke_flank: 'co1 cu0.7', cb_tech_guard: 'cu1 te0.7',
+    cb_scout_turret: 'cu1 co0.7 pa0.5', cb_captured: 'te1 co0.5 ag0.3', cb_blow_strike: 'co0.8 ag0.6 te0.3', cb_repair_smoke: 'ca0.8 cu0.3', cb_saturate: 'cu1.5 te0.5',
+    // 戦術
+    tc_listen: 'pa1 te0.5', tc_sonar_fix: 'te1', tc_ping_step: 'te0.6 pa-0.8 cu0.4', tc_focus_scan: 'te1.2', tc_focus_weapon: 'ag0.8 te0.3', tc_focus_sensor: 'te0.8 pa0.5', tc_status_retreat: 'ca0.8', tc_ammo_flee: 'ca0.6 cu0.5',
+    tc_kite: 'ag0.3 te0.5', tc_probe_evade: 'ca0.6 te0.5', tc_scout_ahead: 'co1 te0.5', tc_flash_open: 'ag0.5 cu0.7', tc_noise_shadow: 'cu1.3 st0.5', tc_beacon_ring: 'cu1.2 pa0.5', tc_spray_lair: 'st0.8 pa0.5',
+    // 動き方 (占拠・拾い物は報酬なので適性で絞らない — 第141弾)
+    en_swap: 'te1', se_hi: 'te1 ca0.3', so_nudge: 'te0.8 pa-0.5',
+};
+const SKILL_AX_PARSED = {};
+for (const id in SKILL_AX) { const o = {}; for (const tok of SKILL_AX[id].split(' ')) { const m = /^([a-z]{2})(-?[\d.]+)$/.exec(tok); if (m) o[_AX[m[1]]] = +m[2]; } SKILL_AX_PARSED[id] = o; }
+// 適性 (倍率): 軸の重み×(性格−0.45)×1.6 の和 + 性格面の加点 を指数で。1=普通・>1=得意 (優先され、頻度が上がる)・<1=苦手。0.15〜3.0
+function skillAff(P, id) {
+    const W = SKILL_AX_PARSED[id]; if (!W) return 1;
+    let e = 0; for (const a in W) e += W[a] * (persAx(P, a) - 0.45) * 1.6;
+    for (const t of PERS_TRAITS) if (t.ids.test(id)) e += 1.1 * Math.max(0, Math.min(1, t.f(P || {})) - 0.5); // 気質の強さが0.5を超えた分だけ加点
+    return Math.max(0.15, Math.min(3, Math.exp(e)));
+}
+function persOfSide(side) {
+    if (side === 'p') return (_com && _com.pp) || (comCfg && comCfg.pp) || PERS_DEF;
+    const e = enemies.find(q => q.type !== 'fighter' && q.hp > 0); return (e && e.personality) || PERS_DEF;
+}
+const _NO_ROLL = /^(gt_|dr_recall|st_|hu_|tc_listen_)/; // 戦略・任務は重みで優先度が変わる (stratWeights/huntWeights)。占拠・拾い物・呼び戻しは絞らない
+const _useCache = { p: {}, e: {} };
+// 使用頻度: 適性が高いほど使う場面が増える。45秒ごとに「このスキルを今期は使う」を決める (同じ種・同じ試合なら同じ結果 — 記録から再現できる)
+function skillUse(side, id) {
+    if (!skillOn(side, id)) return false;
+    if (!SKILL_AX_PARSED[id] || _NO_ROLL.test(id)) return true;
+    const win = Math.floor(_frameCount / 2700), c = _useCache[side][id];
+    if (c && c.win === win && c.g === _gen) return c.v;
+    const aff = skillAff(persOfSide(side), id), pUse = Math.max(0.08, Math.min(1, 0.9 * Math.pow(aff, 1.1)));
+    let h = (_simSeed ^ (win * 2654435761) ^ (side === 'p' ? 0x9e3779b9 : 0x85ebca6b)) >>> 0; for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619) >>> 0; h = (h ^ (h >>> 15)) >>> 0;
+    const v = (h % 1000) / 1000 < pUse; _useCache[side][id] = { win, g: _gen, v }; return v;
+}
+let _gen = 0; // 試合ごとに増やして キャッシュを捨てる
+function persLabel(p) { return (p && p._adaptive ? '状況適応(' + ADAPT_MODES[p._adaptive.mode].label + ') ' : '') + '【' + persTraitLabel(p) + '】 ' + COM_AXES.map(([k, l]) => l.slice(0, 2) + Math.round(persAx(p, k) * 100)).join(' '); }
 
 // ── 思考ログ (専用欄。自機COM=水色 / 敵COM=橙) ──
 // 同じ判断の繰り返しは出さない (sig が変わった時だけ。同じ判断でも15秒たてば数字を更新して出し直す)
@@ -16425,7 +16499,7 @@ function huntBuild(cls) { return { spdK: (SHIP_MAX_SPEED_MULT[cls] || 0.58) / 0.
 function huntWeights(F) {
     const P = F.P, k = { ag: P.aggression ?? 0.5, st: P.stealth ?? 0.4, ca: P.caution ?? 0.4, gr: P.greed ?? 0.4 }, w = {};
     const b = huntBuild(F.cls); F.spdK = b.spdK; F.hullK = b.hullK; F.stc = F.spdK >= 2 ? 1.5 : 1;
-    for (const id in HUNT_REG) { w[id] = HUNT_REG[id].w(k, F); if (F.side && !skillOn(F.side, 'hu_' + id)) w[id] = 0; } // 第142弾
+    for (const id in HUNT_REG) { w[id] = HUNT_REG[id].w(k, F); if (F.side && !skillOn(F.side, 'hu_' + id)) w[id] = 0; else if (w[id] > 0) w[id] *= skillAff(P, 'hu_' + id); } // 第147弾: 適性 // 第142弾
     return w;
 }
 function enemyHunterStep(e, heard, hard) {
@@ -16608,7 +16682,7 @@ function planStep(A) {
     let pl = M[k('plan')];
     const end = (why, atk) => { A.say('作戦終了: ' + why); M[k('plan')] = null; M[k('planCD')] = now + PLAN_CD; A.onEnd(!!atk); return false; };
     if (!pl) {
-        if (!skillOn(A.side, 'pl_decoy')) return false; // 第142弾
+        if (!skillUse(A.side, 'pl_decoy')) return false; // 第142弾
         if (now < (M[k('planCD')] || 0) || now - (M[k('planRoll')] || -1e9) < PLAN_ROLL_F) return false;
         if (A.seen() || A.hp < A.maxHp * 0.5 || A.blocked()) return false;
         const est = A.est(); if (!est) return false;
@@ -18170,7 +18244,7 @@ function stratExtra(x) {
 }
 function stratWeights(P, x) {
     x = Object.assign({}, x, stratExtra(x)); const k = { st: P.stealth ?? 0.4, ca: P.caution ?? 0.4, ag: P.aggression ?? 0.5, gr: P.greed ?? 0.4, early: x.early }, w = {};
-    for (const id in STRAT_REG) { const R = STRAT_REG[id]; w[id] = R.w(k, x); if (x.near && R.near) w[id] = 0; if (x.side && !skillOn(x.side, 'st_' + id)) w[id] = 0; } // 第142弾: 切ったスキルは選ばない // 相手が近い間は 待ち伏せ・餌・罠・Tech建造を始めない
+    for (const id in STRAT_REG) { const R = STRAT_REG[id]; w[id] = R.w(k, x); if (x.near && R.near) w[id] = 0; if (x.side && !skillOn(x.side, 'st_' + id)) w[id] = 0; else if (w[id] > 0 && id !== 'gather') w[id] *= skillAff(P, 'st_' + id); } // 第147弾: 性格面・新しい軸による適性 (優先度) // 第142弾: 切ったスキルは選ばない // 相手が近い間は 待ち伏せ・餌・罠・Tech建造を始めない
     return w;
 }
 function stratPick(P, x, lastId, force) {
@@ -18848,6 +18922,7 @@ function _renderComCfg() {
             const v = Math.round((pp[k] || 0) * 100);
             h.push('<label class="com-sl"><span>' + lbl + '</span><input type="range" min="0" max="100" step="5" value="' + v + '" data-act="axis" data-v="' + k + '"' + (rnd ? ' disabled' : '') + '><b>' + (rnd ? '—' : v) + '</b></label>');
         }
+        if (!rnd && pre !== 'adaptive') h.push('<div class="com-trait">性格面: <b>' + persTraitLabel(pp) + '</b> <small>(' + persTraits(pp).slice(0, 3).map(t => t.jp + Math.round(t.v * 100)).join(' / ') + ') — 軸の組み合わせで決まる気質。その気質のスキルが選ばれやすい</small></div>');
         if (rnd) h.push('<div class="com-note">ランダム: 試合ごとに' + SHIP_JP[ship] + 'の範囲で決まる (敵の通常の決め方と同じ)</div>');
         else if (pre === 'custom') h.push('<div class="com-note">カスタム (スライダーで調整)</div>');
         // 第22弾: 積み込み (自機/敵とも編集できる)
@@ -18859,7 +18934,7 @@ function _renderComCfg() {
               let g = '';
               for (const x of L) {
                   if (x.g !== g) { g = x.g; h.push('<div class="com-sk-g">' + g + ' <button class="com-chip sm" data-act="skgrp" data-v="' + g + ':on">ON</button><button class="com-chip sm" data-act="skgrp" data-v="' + g + ':off">OFF</button></div>'); }
-                  h.push('<button class="com-sk' + (m[x.id] !== false ? ' on' : '') + '" data-act="skill" data-v="' + x.id + '"><b>' + x.jp + '</b><span>' + x.desc + '</span></button>');
+                  { const af = (pre === 'random' || pre === 'adaptive' || !SKILL_AX_PARSED[x.id]) ? null : skillAff(pp, x.id); h.push('<button class="com-sk' + (m[x.id] !== false ? ' on' : '') + '" data-act="skill" data-v="' + x.id + '"><b>' + x.jp + (af === null ? '' : ' <i class="com-aff ' + (af >= 1.3 ? 'hi' : af < 0.7 ? 'lo' : '') + '">適性×' + (Math.round(af * 10) / 10) + '</i>') + '</b><span>' + x.desc + '</span></button>'); }
               }
           } }
         box.innerHTML = h.join('');
@@ -18886,6 +18961,7 @@ function startComDemo() {
     toggleThinkLog(comCfg.think);
     window._comCfgSnap = JSON.parse(JSON.stringify(comCfg)); window._gsSnap = JSON.parse(JSON.stringify(gameState)); // プレイ画面のリプレイ: 同じ設定で同じ試合を作り直す
     _frameCount = 0; _simSeed = (window.__rpSeed !== undefined ? window.__rpSeed : (_nativeRandom() * 4294967296)) >>> 0; _simRng = _mulberry(_simSeed); // 試合の種 (記録に残す → 同じ試合を再生できる)
+    _gen++; _useCache.p = {}; _useCache.e = {};
     withSimRng(() => startGame(comCfg.ship));
     toggleHiggsView(!comCfg.higgsView);
     logMessage('COM対戦デモ: 自機もCOMが操作する (観戦のみ)。メニューで ヒッグス表示 / 思考ログ を切替、終わる時は「COM対戦を終えてロビーへ」', 'system-msg');
