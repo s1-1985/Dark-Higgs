@@ -4404,7 +4404,15 @@ class Ship {
             } else if (this.state === 'moving' && !playerCoasting) {
                 const _wpDist = Math.hypot(this.targetX - this.x, this.targetY - this.y);
                 if (_wpDist > Math.max(20, this.currentSpeed * 2)) {
-                    _steer(Math.atan2(this.targetY - this.y, this.targetX - this.x), _baseTargetSpeed);
+                    // 第140弾: 目標が旋回円の内側にあると、全速のまま目標の周りを回り続けた (到着直前に踵を返して周回する動き)。艦首が目標を向くまで、旋回円に収まる速さまで落とす (人間の操縦と同じ)
+                    const _wa = Math.atan2(this.targetY - this.y, this.targetX - this.x), _ea = Math.abs(_angDiff(_wa, this.angle));
+                    let _ts = _baseTargetSpeed;
+                    if (_ea > 0.3) {
+                        const _tr = (PLAYER_TURN_RATES[gameState.shipType] || PLAYER_TURN_RATE) * gameSpeedFactor * PM.turn * engineAgility(gameState.engineType).turn;
+                        const _vMax = _wpDist * _tr / Math.max(0.5, Math.sin(Math.min(_ea, Math.PI / 2)) * 2); // この速さなら半径 _wpDist/(2 sin) の旋回円に収まる
+                        _ts = Math.min(_ts, Math.max(_baseTargetSpeed * 0.12, _vMax));
+                    }
+                    _steer(_wa, _ts);
                 } else {
                     this.state = 'idle';
                     _coast();
@@ -4887,13 +4895,9 @@ class Ship {
             if (!_hideActive && this.type !== 'fighter' && this.ammoM !== undefined) {
                 const _profS = ENEMY_COMBAT[this.type] || ENEMY_COMBAT.destroyer;
                 // 第48弾: 弾を使う武器を積んでいる時だけ補給を考える (ビームだけの艦は弾の補給が要らない)。ミサイルを積んでいなければ実弾が25%を切った時だけ
-      const _hasAmmoW = (this._fullK || 0) > 0 || (this._fullM || 0) > 0;
-      const _kLow = this.ammoK < (this._fullK || 1) * 0.25;
-      const _needS = _hasAmmoW && ((this.ammoK <= 0 && this.ammoM <= 0) || (this.ammoM <= 0 && ((this._fullM || 0) > 0 ? (this._wpref(_profS.weaponEarly) !== 'kinetic' || _kLow) : _kLow)));
+      const _needS = supplyNeed({ hasAmmo: (this._fullK || 0) > 0 || (this._fullM || 0) > 0, K: this.ammoK, M: this.ammoM, fullK: this._fullK, fullM: this._fullM, prefKin: this._wpref(_profS.weaponEarly) === 'kinetic' }); // 第139弾: 自機COMと同じ判断
                 if (_needS && !this._supply) {
-                    let best = null, bd = Infinity, kind = '';
-                    for (const c of structures) { if (c.type !== 'colony' || c.hacked || _colUsed(c, 'E')) continue; const d = Math.hypot(c.x - this.x, c.y - this.y); if (d < bd) { bd = d; best = c; kind = 'コロニー'; } }
-                    if (!best) { for (const c of structures) { if (c.type !== 'colony' || c.hacked) continue; const d = Math.hypot(c.x - this.x, c.y - this.y); if (d < bd) { bd = d; best = c; kind = 'コロニー(補給の復活待ち)'; } } } // 第66弾: 全部使い切っていたら、一番近い自分のものでないコロニーへ行って復活を待つ
+                    const ss = supplySite(this.x, this.y, c => c.owner === 'player', c => _colUsed(c, 'E')), best = ss && ss.obj, kind = ss && ss.wait ? 'コロニー(補給の復活待ち)' : 'コロニー';
                     if (best) {
                         this._supply = { x: best.x, y: best.y, t: 0, col: best };
                         comThinkEvent('e', '弾が尽きた (実弾' + this.ammoK + '・ミサイル' + this.ammoM + ') → 交戦を離れて' + kind + 'で補給 (' + _dirTxt(this.x, this.y, best.x, best.y) + ')', 'e' + this.uid);
@@ -4948,7 +4952,7 @@ class Ship {
                 // 第39弾: 自機の耐久は知らない — 自分が当てた損害と、自機の艦種の耐久から見積もる (旧: 真の耐久を読んでいた。自機COMは相手の耐久を使わない)
                 const _pMax = PLAYER_HP_BASE[gameState.shipType] || 2500;
                 const playerHpFrac = Math.max(0, 1 - (this._dmgToPlayer || 0) / _pMax), _pHpEst = _pMax * playerHpFrac;
-                let retreatThresh = 0.12 + pers.caution * 0.43;          // 慎重なほど早く退く
+                let retreatThresh = retreatThreshold(pers);          // 慎重なほど早く退く (第139弾: 自機COMと同じ関数)
                 if (!ENEMY_CLASS[this.type] && playerHpFrac > hpFrac + 0.30) retreatThresh += 0.12; // 相手が格上 → さらに早く退く (第98弾: 戦艦は自機COMと同じ退き際 — 自機COMはこの加算を持たない)
                 const desperate = hpFrac < retreatThresh;
                 const killInstinct = hpFrac > 0.5 && playerHpFrac < 0.35; // 自分は健在で相手が瀕死 → 仕留めに踏み込む
@@ -8185,6 +8189,24 @@ function cargoBelowPlan() {
     if (cargo.mat < lo.mat * MAT_PER_SLOT) return true;
     for (const t of SHIP_DRONES[gameState.shipType] || []) if ((cargo.stock[t] || 0) < (lo[t] || 0)) return true;
     return false;
+}
+// ═══ 第139弾 (操縦の総括の統合): 補給の判断を 自機COMも敵も同じ関数に ═══
+// 要るか: 弾を使う武器を積んでいて、弾が尽きた / ミサイルが尽きて (実弾が使えるなら実弾が25%未満か、今の武器が実弾でない) 。A={hasAmmo,K,M,fullK,fullM,prefKin}
+// 退き際 (耐久の割合): 慎重なほど早く退く。自機COMも敵も同じ式
+function retreatThreshold(P) { return 0.12 + (P.caution ?? 0.4) * 0.43; }
+function supplyNeed(A) {
+    if (!A.hasAmmo) return false;
+    const kLow = A.K < (A.fullK || 1) * 0.25;
+    return (A.K <= 0 && A.M <= 0) || (A.M <= 0 && (A.fullM > 0 ? (!A.prefKin || kLow) : kLow));
+}
+// 行き先: 相手のものでなく使っていないコロニーのうち最寄り。無ければ最寄りの (相手のものでない) コロニー (復活を待つ・相手のものは遠く扱い)
+// oppOf(c)=その持ち主が相手だと知っているか / usedOf(c)=使用済みか
+function supplySite(x, y, oppOf, usedOf) {
+    let best = null, bd = Infinity;
+    for (const c of structures) { if (c.type !== 'colony' || oppOf(c) || usedOf(c)) continue; const d = Math.hypot(c.x - x, c.y - y); if (d < bd) { bd = d; best = c; } }
+    if (best) return { obj: best, wait: false };
+    for (const c of structures) { if (c.type !== 'colony') continue; const d = Math.hypot(c.x - x, c.y - y) + (oppOf(c) ? 12000 : 0); if (d < bd) { bd = d; best = c; } }
+    return best ? { obj: best, wait: true } : null;
 }
 function nearestResupply(x, y) {
     let best = null, bd = Infinity, kind = '';
@@ -17762,7 +17784,7 @@ function comPilotStep() {
     const c = _com || (_com = comNewMemo());
     const now = _frameCount, P = comStallPers(c, c.pp, now, c.lastContactF);
     const hpF = player.hp / player.maxHp;
-    const retreat = 0.12 + P.caution * 0.43;
+    const retreat = retreatThreshold(P);
     const fireThr = 0.65 - 0.35 * P.aggression;
     const sigs = currentSignals();
     // 第23弾: 内部IDで艦か囮かを見分けない (旧: 'e-' で始まる信号=敵艦と分かっていた)。囮と識別した信号だけ除く
@@ -17887,19 +17909,14 @@ function comPilotStep() {
     // 第20弾: 弾が尽きかけたら補給へ (補給所 / ハック済みのコロニー)。実弾が残っているうちはミサイル切れでも戦う
     {
         const loS = shipLoadout(gameState.shipType);
-        if ((cargo.ammoK <= 0 && cargo.ammoM <= 0) || (cargo.ammoM <= 0 && cargo.ammoK < loS.ammoK * AMMO_PER_SLOT.kinetic * 0.25)) {
-            const rs = nearestResupply(player.x, player.y);
-            if (rs) {
+        if (supplyNeed({ hasAmmo: true, K: cargo.ammoK, M: cargo.ammoM, fullK: loS.ammoK * AMMO_PER_SLOT.kinetic, fullM: loS.ammoM * AMMO_PER_SLOT.missile, prefKin: currentWeapon() === 'kinetic' })) { // 第139弾: 敵と同じ判断
+            const ss = supplySite(player.x, player.y, c => c._pObs === 'enemy', c => _colUsed(c, 'P'));
+            if (ss) {
                 c.mode = 'supply'; _comCMOff();
-                _comGoTo(rs.obj, RESUPPLY_R * 0.5, c);
-                comThink('p', 'supply', '弾が尽きかけ (実弾' + cargo.ammoK + '・ミサイル' + cargo.ammoM + ') → ' + (rs.kind === 'station' ? '補給所' : 'コロニー') + 'で補給 (' + _dirTxt(player.x, player.y, rs.obj.x, rs.obj.y) + ')');
+                _comGoTo(ss.obj, RESUPPLY_R * 0.5, c);
+                comThink('p', 'supply', '弾が尽きかけ (実弾' + cargo.ammoK + '・ミサイル' + cargo.ammoM + ') → コロニーで補給' + (ss.wait ? ' (使用済みは300秒で復活・敵のものは奪う)' : '') + ' (' + _dirTxt(player.x, player.y, ss.obj.x, ss.obj.y) + ')');
                 _comStance(c, P);
                 return;
-            }
-            else { // 第66弾: 補給できるコロニーが無い (全部使用済み/敵のもの) → 一番近いコロニーへ行って、復活を待つか奪い返す
-                let bc = null, bd2 = Infinity;
-                for (const st of structures) { if (st.type !== 'colony') continue; const d2 = Math.hypot(st.x - player.x, st.y - player.y) + (st._pObs === 'enemy' ? 12000 : 0); if (d2 < bd2) { bd2 = d2; bc = st; } }
-                if (bc) { c.mode = 'supply'; _comCMOff(); _comGoTo(bc, RESUPPLY_R * 0.5, c); comThink('p', 'supply', '弾が尽きた・補給できるコロニーが無い → 一番近いコロニーへ (使用済みは300秒で復活・敵のものは奪う)'); _comStance(c, P); return; }
             }
         }
     }
