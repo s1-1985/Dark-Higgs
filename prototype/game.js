@@ -15893,6 +15893,44 @@ function huntLureSet(HA, H, X) {
     say('【' + H.jp + '】待ち伏せ位置に着いた → 機関を止めて息を潜める');
     return true;
 }
+// 第125弾 (共通化・段5後半の8): 索敵行 — 長く気配が無い時の巡回と見張り。自機COM (旧 comStallTour: 最寄りのコロニー/ノードへ行くだけ・敵と待ち時間も違った) も敵も同じ関数
+//   A = {x,y,mine:'enemy'|'player',seen,lm,who,now}: 持ち主のアダプタ。相手が来そうな所 (自分のものでないコロニー・回収されていない難破船・ノード) の脇へ、噴かしては漂いながら静かに向かう。
+function prowlQuietT(P) { return 60 * (70 + 90 * P.caution + 40 * P.stealth - 50 * P.aggression); } // 気配が無い時間がこれを超えたら出る
+function prowlPickGoal(A) {
+    const now = A.now, vis = A.seen, sites = [];
+    for (const q of structures) if ((q.type === 'colony' && q.owner !== A.mine) || (q.type === 'derelict' && !q.salvaged)) sites.push({ o: q, lbl: q.type === 'colony' ? 'コロニー' : '難破船', w: q.type === 'colony' ? 1.4 : 1 });
+    for (const n of resourceNodes) if (n.owner !== A.mine) sites.push({ o: n, lbl: 'ノード', w: 0.7 });
+    const lm = A.lm; // 先読み: 最後に聞いた相手の針路の先にある拠点を重く見る
+    const ahead = (q) => { if (!lm) return 1; const hd = Math.atan2(lm.vy, lm.vx), a = Math.atan2(q.y - lm.y, q.x - lm.x), dq = Math.hypot(q.x - lm.x, q.y - lm.y); return Math.cos(_angDiff(a, hd)) > 0.6 && dq < 20000 ? 3.5 : 0.6; };
+    const sc = sites.filter(t => now - (vis[t.o.x + ',' + t.o.y] || -1e9) > 60 * 360).map(t => ({ t, v: t.w * ahead(t.o) * (0.5 + Math.random()) / (1 + Math.hypot(t.o.x - A.x, t.o.y - A.y) / 9000) })).sort((a, b) => b.v - a.v);
+    let goal = null;
+    if (sc.length && Math.random() < 0.75) {
+        const t = sc[0].t, q = t.o, a0 = Math.atan2(A.y - q.y, A.x - q.x) + (Math.random() - 0.5) * 2, takeIt = q.type === 'colony' || !q.type, off = takeIt ? 220 : 1300 + Math.random() * 600; // コロニー・ノードの見張りは占有できる距離で
+        vis[q.x + ',' + q.y] = now;
+        const cv = takeIt ? null : findCoverSpot(q.x + Math.cos(a0) * off, q.y + Math.sin(a0) * off, 1200);
+        goal = { nodeObj: !q.type ? q : null, x: cv ? cv.x : q.x + Math.cos(a0) * off, y: cv ? cv.y : q.y + Math.sin(a0) * off, lbl: (lm && ahead(q) > 1 ? '相手の向かう先らしい' : '') + t.lbl + 'の脇の' + (cv ? (cv.kind === 'fog' ? '霧' : '岩礁帯') : '暗がり'), site: { x: q.x, y: q.y }, lblS: t.lbl };
+    }
+    if (!goal) { const g = searchNext(A.who, A.x, A.y); if (g) goal = { x: g.x, y: g.y, lbl: 'まだ聴いていない海域' }; }
+    return goal;
+}
+function huntProwlRun(HA, H, X) { // 道中・見張りの動き。返り値: true=続ける / false=終わった (X.done / X.caught が後始末)
+    const { est, D, now, ag, st, ca, say } = X;
+    if (X.grab()) return true; // 道中・見張り中でも目の前の拾い物は拾う
+    if (est && est.age < 600 && (!H.probe || est.r <= Math.max(2500, D * 0.6) || D < 3500)) { X.caught(H); say('【索敵行】気配を掴んだ (推定' + Math.round(D / 100) * 100 + 'u) → どう仕掛けるか考える' + (H.ph === 'watch' ? ' (見張っていた所 — 待ち伏せが有利)' : '')); return false; }
+    const dG = Math.hypot(H.goal.x - HA.x, H.goal.y - HA.y);
+    if (H.ph === 'watch') { // 拠点の脇で機関を止めて見張る (相手が来たら狩人の頭脳が仕掛け方を選ぶ)
+        HA.drift(H.goal.site ? Math.atan2(H.goal.site.y - HA.y, H.goal.site.x - HA.x) : null);
+        X.watchTick(H);
+        if (now - H.watchF > H.watchT) { X.done('watched'); say('【索敵行】' + Math.round(H.watchT / 60) + '秒見張った — 誰も来ない → 次の場所へ'); return false; }
+        return true;
+    }
+    if (dG < 600 && H.goal.site) { H.ph = 'watch'; H.watchF = now; H.watchT = 60 * (50 + 80 * st + 40 * ca - 30 * ag); X.watchStart(H); say('【索敵行】' + H.goal.lblS + 'の脇に着いた → 機関を止めて' + Math.round(H.watchT / 60) + '秒 見張る (来た相手を待ち伏せる)'); return true; }
+    if (dG < 800 || now - H.t0 > 60 * 240) { X.done(dG < 800 ? 'arrived' : 'timeout'); say('【索敵行】' + (dG < 800 ? '着いた — 何も聞こえない → 次の場所を考える' : '時間切れ')); return false; }
+    if (dG > 5000) X.transit('索敵行で遠くへ移る');
+    const ga = Math.atan2(H.goal.y - HA.y, H.goal.x - HA.x), cyc = (now - H.f0) % (60 * 30);
+    if (cyc < 60 * (20 + 6 * ag - 6 * st) || HA.v < 0.15 || Math.abs(_angDiff(ga, HA.driftAng())) > 0.6) HA.go(H.goal.x, H.goal.y, 'cruise9'); else HA.drift(ga);
+    return true;
+}
 // 第114弾 (段5・前半): 狩人の任務の重みは 自機COMも敵も同じ関数。F は行為者が知っていること
 //   P, D(推定までの距離), cls, stc(潜航型×1.5), fails(焦れ), hpF, closing, moving(動いている), hasLure, hasNoise, hasFake, hitOrPing(直近に撃たれた/探信された), strike(出せる艦載機/Tech), kOk, bOk, holdRecent(待ち伏せの最中に気配を掴んだ)
 function huntWeights(F) {
@@ -15934,23 +15972,8 @@ function enemyHunterStep(e, heard, hard) {
             //   (旧: 待ち伏せの拠点で何分も止まり・忍び足 約12u/s でしか動かず、双方が離れたまま試合が終わった)
             { const gw = gatherWants(P, enemySlotsUsed(e), enemySlotsMax(e), now); if (gw.part && gatherPick('e', e.x, e.y, 'part', gw.range)) return why('部品が先'); } // 第122弾: 部品の枠が空いていて取れる所があるうちは 索敵行に出ない (自機COMは取りに行くのが戦略・詰めより先。旧: 敵は序盤10分の約63%を索敵行に使い、自機COMの約半分しか拠点・部品を取らなかった)
             const quietFor = now - Math.max(e._lastScentF || 0, e._huntEndF || 0, e._hpLossF || 0);
-            if (quietFor > 60 * (70 + 90 * ca + 40 * st - 50 * ag) && !e._supplyGo && (e.ammoM === undefined || e.ammoM > 0 || e.ammoK > 0 || _eHas(e, 'beam'))) {
-                let goal = null;
-                // 相手が来そうな所 (自分のものでないコロニー・回収されていない難破船・自分のものでないノード) の脇の霧で待ち伏せる。最近見張った所は避ける
-                const vis = e._prowlSeen || (e._prowlSeen = {}), sites = [];
-                for (const q of structures) if ((q.type === 'colony' && q.owner !== 'enemy') || (q.type === 'derelict' && !q.salvaged)) sites.push({ o: q, lbl: q.type === 'colony' ? 'コロニー' : '難破船', w: q.type === 'colony' ? 1.4 : 1 });
-                for (const n of resourceNodes) if (n.owner !== 'enemy') sites.push({ o: n, lbl: 'ノード', w: 0.7 });
-                // 先読み: 最後に聞いた相手の針路の先にある拠点を重く見る (相手は次にそこへ行くはず)
-                const lm = e._lastMove && now - e._lastMove.f < 60 * 240 ? e._lastMove : null;
-                const ahead = (q) => { if (!lm) return 1; const hd = Math.atan2(lm.vy, lm.vx), a = Math.atan2(q.y - lm.y, q.x - lm.x), dq = Math.hypot(q.x - lm.x, q.y - lm.y); return Math.cos(_angDiff(a, hd)) > 0.6 && dq < 20000 ? 3.5 : 0.6; };
-                const sc = sites.filter(t => now - (vis[t.o.x + ',' + t.o.y] || -1e9) > 60 * 360).map(t => ({ t, v: t.w * ahead(t.o) * (0.5 + Math.random()) / (1 + Math.hypot(t.o.x - e.x, t.o.y - e.y) / 9000) })).sort((a, b) => b.v - a.v);
-                if (sc.length && Math.random() < 0.75) {
-                    const t = sc[0].t, q = t.o, a0 = Math.atan2(e.y - q.y, e.x - q.x) + (Math.random() - 0.5) * 2, takeIt = q.type === 'colony' || !q.type, off = takeIt ? 220 : 1300 + Math.random() * 600; // 第97弾: コロニー・ノードの見張りは占有できる距離で (旧: 1300〜1900u脇＝見張るだけで取らなかった)
-                    vis[q.x + ',' + q.y] = now;
-                    const cv = takeIt ? null : findCoverSpot(q.x + Math.cos(a0) * off, q.y + Math.sin(a0) * off, 1200);
-                    goal = { nodeObj: !q.type ? q : null, x: cv ? cv.x : q.x + Math.cos(a0) * off, y: cv ? cv.y : q.y + Math.sin(a0) * off, lbl: (lm && ahead(q) > 1 ? '自機の向かう先らしい' : '') + t.lbl + 'の脇の' + (cv ? (cv.kind === 'fog' ? '霧' : '岩礁帯') : '暗がり'), site: { x: q.x, y: q.y }, lblS: t.lbl };
-                }
-                if (!goal) { const g = searchNext(e, e.x, e.y); if (g) goal = { x: g.x, y: g.y, lbl: 'まだ聴いていない海域' }; }
+            if (quietFor > prowlQuietT(P) && !e._supplyGo && (e.ammoM === undefined || e.ammoM > 0 || e.ammoK > 0 || _eHas(e, 'beam'))) {
+                const goal = prowlPickGoal({ x: e.x, y: e.y, mine: 'enemy', seen: e._prowlSeen || (e._prowlSeen = {}), lm: e._lastMove && now - e._lastMove.f < 60 * 240 ? e._lastMove : null, who: e, now }); // 第125弾: 自機COMと共通
                 if (goal && Math.hypot(goal.x - e.x, goal.y - e.y) > 2500) {
                     H = e._hunt = { k: 'prowl', jp: '索敵行', ph: 'prowl', t0: now, f0: now, hp0: e.hp, goal, side: 1, strikes: 0 };
                     say('【索敵行】' + Math.round(quietFor / 60) + '秒 気配が無い → ' + goal.lbl + ' (' + _dirTxt(e.x, e.y, goal.x, goal.y) + ') へ、噴かしては機関を止めて漂いながら静かに向かう' + (goal.site ? ' (着いたら' + goal.lblS + 'に来る相手を待ち伏せる)' : ''));
@@ -16044,22 +16067,14 @@ function enemyHunterStep(e, heard, hard) {
         if (now - H.sawF > 60 * 8) return end('目視したが撃てない → 交戦', true, 900);
         return true;
     } else H.sawF = 0;
-    if (H.k === 'prowl' && (H.ph === 'prowl' || H.ph === 'watch')) {
-        if (enemyGrabStep(e)) return true; // 道中・見張り中でも目の前の拾い物は拾う
-        if (est && est.age < 600 && (!H.probe || est.r <= Math.max(2500, D * 0.6) || D < 3500)) { e._hunt = null; e._huntCD = 0; e._lastScentF = now; if (H.ph === 'watch') e._stratEndF = now; say('【索敵行】気配を掴んだ (推定' + Math.round(D / 100) * 100 + 'u) → どう仕掛けるか考える' + (H.ph === 'watch' ? ' (見張っていた所 — 待ち伏せが有利)' : '')); return false; }
-        const dG = Math.hypot(H.goal.x - e.x, H.goal.y - e.y);
-        if (H.ph === 'watch') { // 拠点の脇で機関を止めて見張る (相手が来たら狩人の頭脳が仕掛け方を選ぶ — 近づいてくれば待ち伏せ)
-            e._drift(H.goal.site ? Math.atan2(H.goal.site.y - e.y, H.goal.site.x - e.x) : null);
-            const nO = H.goal.nodeObj; if (nO && nO.owner !== 'enemy' && Math.hypot(nO.x - e.x, nO.y - e.y) < NODE_CAP_R) { e._commsF = now; if ((e._capT = (e._capT || 0) + 1) >= NODE_CAP_TIME) { enemyCaptureNode(e, nO); e._capT = 0; e.resourcePoints = (e.resourcePoints || 0) + 1; } } // 第97弾: 見張りながらノードを制圧 (EMが漏れる)
-            if (now - H.watchF > H.watchT) { e._hunt = null; e._huntEndF = now - 60 * 40; e._huntCD = now + 300; say('【索敵行】' + Math.round(H.watchT / 60) + '秒見張った — 誰も来ない → 次の場所へ'); return false; }
-            return true;
-        }
-        if (dG < 600 && H.goal.site) { H.ph = 'watch'; H.watchF = now; H.watchT = 60 * (50 + 80 * st + 40 * ca - 30 * ag); e._stratEndF = -1e9; say('【索敵行】' + H.goal.lblS + 'の脇に着いた → 機関を止めて' + Math.round(H.watchT / 60) + '秒 見張る (来た相手を待ち伏せる)'); return true; }
-        if (dG < 800 || now - H.t0 > 60 * 240) { e._hunt = null; e._huntEndF = now - 60 * 40; e._huntCD = now + 600; say('【索敵行】' + (dG < 800 ? '着いた — 何も聞こえない → 次の場所を考える' : '時間切れ')); return false; }
-        if (dG > 5000) huntTransitEngine(e, '索敵行で遠くへ移る');
-        const ga = Math.atan2(H.goal.y - e.y, H.goal.x - e.x), cyc = (now - H.f0) % (60 * 30);
-        if (cyc < 60 * (20 + 6 * ag - 6 * st) || (e._v || 0) < 0.15 || Math.abs(_angDiff(ga, e._driftA ?? e.angle)) > 0.6) e._moveHeading(ga, ms.cruise * 0.9); else e._drift(ga);
-        return true;
+    if (H.k === 'prowl' && (H.ph === 'prowl' || H.ph === 'watch')) { // 第125弾: 自機COMと共通の索敵行
+        const D = est ? Math.hypot(est.x - e.x, est.y - e.y) : null;
+        return huntProwlRun({ x: e.x, y: e.y, v: e._v || 0, driftAng: () => e._driftA ?? e.angle, drift: (a) => e._drift(a), go: (x, y) => e._moveHeading(Math.atan2(y - e.y, x - e.x), ms.cruise * 0.9) }, H,
+            { est, D, now, ag, st, ca, say, grab: () => enemyGrabStep(e), transit: (why) => huntTransitEngine(e, why),
+              caught: (h) => { e._hunt = null; e._huntCD = 0; e._lastScentF = now; if (h.ph === 'watch') e._stratEndF = now; },
+              done: (why) => { e._hunt = null; e._huntEndF = now - 60 * 40; e._huntCD = now + (why === 'watched' ? 300 : 600); },
+              watchStart: () => { e._stratEndF = -1e9; },
+              watchTick: (h) => { const nO = h.goal.nodeObj; if (nO && nO.owner !== 'enemy' && Math.hypot(nO.x - e.x, nO.y - e.y) < NODE_CAP_R) { e._commsF = now; if ((e._capT = (e._capT || 0) + 1) >= NODE_CAP_TIME) { enemyCaptureNode(e, nO); e._capT = 0; e.resourcePoints = (e.resourcePoints || 0) + 1; } } } });
     }
     const HAx = { x: e.x, y: e.y, ang: e.angle, v: e._v || 0, driftAng: () => e._driftA ?? e.angle, drift: (a) => e._drift(a),
         go: (x, y, k, spd) => e._moveHeading(Math.atan2(y - e.y, x - e.x), k === 'flank' ? ms.flank : k === 'cruise' ? ms.cruise : k === 'cruise8' ? ms.cruise * 0.8 : k === 'creep' ? Math.min(ms.silent * 0.7, 0.5) : k === 'silent' ? ms.silent : k === 'speed' ? spd : 0.3) };
@@ -16247,6 +16262,12 @@ function _comHGo(c, x, y, stance) {
     if (powerStance !== stance) setStance(stance, true);
     if (player.state !== 'moving' || Math.hypot(player.targetX - x, player.targetY - y) > 300) { player.setTarget(x, y); _comSteered(c, 'hunt'); }
 }
+// 第125弾: 自機COMの動かす口 (狩人の任務・索敵行で共通)
+function comHAFor(c) {
+    return { x: player.x, y: player.y, ang: player.angle, v: player.currentSpeed || 0, driftAng: () => player.angle,
+        go: (x, y, k, spd) => { if (k === 'flank') _comHGo(c, x, y, 'flank'); else if (k === 'cruise' || k === 'cruise8' || k === 'cruise9' || (k === 'speed' && spd >= shipCruiseSpeed(gameState.shipType, genAlloc.engine, 1) * 0.8)) _comHGo(c, x, y, 'cruise'); else if (k === 'creep' || k === 'speed' || k === 'silent') _comHGo(c, x, y, 'silent'); else { if (!playerCoasting && player.currentSpeed > 0.1) toggleCoast(true); } },
+        drift: (a) => { if (powerStance !== 'silent') setStance('silent', true); if (!playerCoasting && player.currentSpeed > 0.1) toggleCoast(true); else if (player.state === 'moving' && player.currentSpeed <= 0.1) player.setTarget(player.x, player.y); } };
+}
 function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
     const now = _frameCount, ag = P.aggression, st = P.stealth, ca = P.caution, gr = P.greed;
     let H = c.hunt;
@@ -16331,9 +16352,7 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
         return true;
     };
     // 2026-11-11 (オーナー「戦術・戦略は自機COMも敵COMも同じレベル」): 偽装退却・偽コンテナの罠 — 敵 (enemyHunterStep) と同じ手順
-    const HAx = { x: player.x, y: player.y, ang: player.angle, v: player.currentSpeed || 0, driftAng: () => player.angle,
-        go: (x, y, k, spd) => { if (k === 'flank') _comHGo(c, x, y, 'flank'); else if (k === 'cruise' || k === 'cruise8' || (k === 'speed' && spd >= shipCruiseSpeed(gameState.shipType, genAlloc.engine, 1) * 0.8)) _comHGo(c, x, y, 'cruise'); else if (k === 'creep' || k === 'speed' || k === 'silent') _comHGo(c, x, y, 'silent'); else { if (!playerCoasting && player.currentSpeed > 0.1) toggleCoast(true); } },
-        drift: (a) => { if (powerStance !== 'silent') setStance('silent', true); if (!playerCoasting && player.currentSpeed > 0.1) toggleCoast(true); else if (player.state === 'moving' && player.currentSpeed <= 0.1) player.setTarget(player.x, player.y); } };
+    const HAx = comHAFor(c);
     const HXx = { est, D: est ? Math.hypot(est.x - player.x, est.y - player.y) : null, now, ag, st, ca, say, end: (why, combat, cd) => end(why, cd), tryFire, canStrike: (es) => !!(es && comStrikePlan(es)), plan: (es, f) => comStrikePlan(es, f), vel: (es) => H.vh ? _huntVel(H, es) : null,
         who: 'SIG-' + sigNo(H.sid), cruise: shipCruiseSpeed(gameState.shipType, genAlloc.engine, 1), visAt: _visAt, lureOk: () => (cargo.stock.lure || 0) > 0, lure: (x, y) => deployDrone('lure', x, y),
         mine: 'player', noise: (ang) => { if (!_comUseItem('noise', player.x + Math.cos(ang) * 3000, player.y + Math.sin(ang) * 3000)) return false; c.noiseF = now; return true; }, smokeOk: () => (cargo.stock.smoke || 0) > 0, smoke: () => _comUseItem('smoke'),
@@ -17955,31 +17974,30 @@ function enemyClueAt(x, y, lbl) {
 }
 // 第71弾: 長く気配が無ければ、相手も寄る所 (自分のものでないコロニー・ノード) を順に取りに行く。
 //   旧: 待ち伏せと捜索を繰り返すだけで、30分間どちらも相手を聞かない試合があった。拠点を取り合えば「通信途絶」の手掛かりが出る
-function comStallTour(c, P, D, hpF, contact) {
+function comStallTour(c, P, D, hpF, contact) { // 第125弾: 敵の索敵行と同じ関数 (prowlQuietT / prowlPickGoal / huntProwlRun)
     const now = _frameCount;
-    if (contact || c.datum) { c.tourT = null; return false; }
-    const quiet = now - Math.max(c.lastContactF || 0, (huntStats && huntStats.startFrame) || 0), stallT = (240 + 360 * D.still) * 60;
-    if (quiet < stallT) return false;
-    // 第72弾 (オーナー「隠れ合うだけで接触しない」→ A案+C案を漏れの無い形で): 長く気配が無ければ、ごく弱いソナーを時々打つ = 「あえて少しだけ音を出す」。
-    //   弱い出力は聞かれる距離が短い (約3000u) ので露出は小さいが、近くに居れば相手が寄ってくる。種類は順に回す (相手の位置・エンジンは使わない)。
-    //   拠点の取り合いと合わせて接触が生まれる。待ち伏せの置き場所を相手の動きに寄せることはしない (位置の漏れになるため)。
-    if (quiet > stallT * 1.15 && now - (c.nudgeF || -1e9) > 10800 && omniSonarCooldown <= 0 && playerExposureLevel < 2) {
+    if (contact || c.datum) { c.prowl = null; return false; }
+    const quiet = now - Math.max(c.lastContactF || 0, c.prowlEndF || 0, (huntStats && huntStats.startFrame) || 0);
+    if (!c.prowl && (quiet < prowlQuietT(P) || c.item || now < (c.prowlCD || 0))) return false;
+    // 第72弾 (オーナー「隠れ合うだけで接触しない」): 長く気配が無ければ、ごく弱いソナーを時々打つ = 「あえて少しだけ音を出す」(敵も firePingFromEnemy で同じ式)。
+    if (quiet > prowlQuietT(P) * 1.15 && now - (c.nudgeF || -1e9) > 10800 && omniSonarCooldown <= 0 && playerExposureLevel < 2) {
         c.nudgeF = now; const nb = comSonarBand(c); fireOmniSonar('weak', nb);
         comThinkEvent('p', Math.round(quiet / 3600) + '分 気配が無い → あえて弱い' + SONAR_BAND_JP[nb] + 'ソナーを打つ (聞かれる距離は短い・近くに居れば相手が寄ってくる)');
     }
-    let t = c.tourT;
-    if (t && t.owner === 'player') t = c.tourT = null;
-    if (!t) {
-        let bd = 1e9;
-        for (const st of structures) { if (st.type !== 'colony' || st.owner === 'player') continue; const d = Math.hypot(st.x - player.x, st.y - player.y); if (d < bd) { bd = d; t = st; } }
-        for (const n of resourceNodes) { if (n.owner === 'player') continue; const d = Math.hypot(n.x - player.x, n.y - player.y) * 1.4; if (d < bd) { bd = d; t = n; } }
-        c.tourT = t;
+    const say = (t) => comThinkEvent('p', t);
+    if (!c.prowl) {
+        const goal = prowlPickGoal({ x: player.x, y: player.y, mine: 'player', seen: c.prowlSeen || (c.prowlSeen = {}), lm: c.lastMove && now - c.lastMove.f < 60 * 240 ? c.lastMove : null, who: player, now });
+        if (!goal || Math.hypot(goal.x - player.x, goal.y - player.y) <= 2500) { c.prowlCD = now + 600; return false; }
+        c.prowl = { k: 'prowl', jp: '索敵行', ph: 'prowl', t0: now, f0: now, goal };
+        say('【索敵行】' + Math.round(quiet / 3600) + '分 気配が無い → ' + goal.lbl + ' (' + _dirTxt(player.x, player.y, goal.x, goal.y) + ') へ、噴かしては機関を止めて漂いながら静かに向かう' + (goal.site ? ' (着いたら' + goal.lblS + 'に来る相手を待ち伏せる)' : ''));
     }
-    if (!t) return false;
-    const isNode = resourceNodes.includes(t);
-    _comGoTo(t, (isNode ? NODE_CAP_R : COLONY_HACK_R) * 0.6, c);
-    comThink('p', 'tour', Math.round(quiet / 3600) + '分 気配が無い → 相手も寄る拠点を取りに行く: ' + (isNode ? 'ノード' : t._pObs === 'enemy' ? '敵のコロニー (奪えば相手に通信途絶で伝わる)' : 'コロニー') + ' (' + _dirTxt(player.x, player.y, t.x, t.y) + '・' + Math.round(Math.hypot(t.x - player.x, t.y - player.y) / 100) * 100 + 'u)');
-    return true;
+    const H = c.prowl, est = lockedSignalId ? comHunterEst(lockedSignalId) : null, ds = est ? Math.hypot(est.x - player.x, est.y - player.y) : null;
+    c.mode = 'hunt'; _comCMOff();
+    const r = huntProwlRun(comHAFor(c), H, { est, D: ds, now, ag: P.aggression, st: P.stealth, ca: P.caution, say, grab: () => false, transit: () => {},
+        caught: () => { c.prowl = null; c.prowlEndF = now; c.huntCD = 0; },
+        done: (why) => { c.prowl = null; c.prowlEndF = now - 60 * 40; c.prowlCD = now + (why === 'watched' ? 300 : 600); },
+        watchStart: () => {}, watchTick: () => {} });
+    return r;
 }
 // ═══ 第71弾: 決着をつける (自機COM) ═══
 // 旧: 2〜3kmまで寄っても「直交して測り直す」を続け、見失うと戦略を選び直して離れて行った → 30分で決着が付かない試合が6割。
