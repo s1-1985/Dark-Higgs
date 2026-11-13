@@ -13641,7 +13641,11 @@ function tacticDecide(F, A, X, act, doAct) {
     const now = _frameCount, cands = [];
     // 聴き耳の最中: 止まって聴く (見えた・撃たれた・攻撃を受けたら中断)
     if ((F.get('tacHold') || 0) > now) { if (F.seen || F.hitAgo < 900 || F.exposure >= 3) F.set('tacHold', 0); else { A.hold(true); return true; } }
-    const R = (id, cond, run) => { if (skillUse(F.side, id) && cond()) cands.push({ id, run, sc: tacScore(F, id) }); };
+    const R = (id, cond, run) => {
+        const dbg = window.__tacDbg; // 検証用: スキルごとの 判定回数・適性で使える・条件成立 (通常は未定義)
+        if (dbg) { const d = dbg[id] || (dbg[id] = { n: 0, on: 0, cond: 0, side: { p: 0, e: 0 } }); d.n++; if (skillUse(F.side, id)) { d.on++; if (cond()) { d.cond++; d.side[F.side]++; } } }
+        if (skillUse(F.side, id) && cond()) cands.push({ id, run, sc: tacScore(F, id) });
+    };
     if (act) cands.push({ id: '_item', run: () => { doAct(act); return true; }, sc: 1.6 * (0.7 + 0.6 * Math.random()) * (0.7 + 0.35 * (F.exposure || 0)) });
     comboRules(F, A, X, R); tacticRules(F, A, X, R);
     cands.sort((a, b) => b.sc - a.sc);
@@ -18294,7 +18298,7 @@ function stratExtra(x) {
     return o;
 }
 function stratWeights(P, x) {
-    x = Object.assign({}, x, stratExtra(x)); const k = { st: P.stealth ?? 0.4, ca: P.caution ?? 0.4, ag: P.aggression ?? 0.5, gr: P.greed ?? 0.4, early: x.early }, w = {};
+    x = Object.assign({}, x, stratExtra(x)); if (window.__stratDbg && x.side) { const sd = window.__stratDbg; for (const id in STRAT_REG) { const d = sd[id] || (sd[id] = { n: 0, pos: 0 }); d.n++; if (STRAT_REG[id].w({ st: P.stealth ?? 0.4, ca: P.caution ?? 0.4, ag: P.aggression ?? 0.5, gr: P.greed ?? 0.4, early: x.early }, x) > 0) d.pos++; } } const k = { st: P.stealth ?? 0.4, ca: P.caution ?? 0.4, ag: P.aggression ?? 0.5, gr: P.greed ?? 0.4, early: x.early }, w = {};
     for (const id in STRAT_REG) { const R = STRAT_REG[id]; w[id] = R.w(k, x); if (x.near && R.near) w[id] = 0; if (x.side && !skillOn(x.side, 'st_' + id)) w[id] = 0; else if (w[id] > 0 && id !== 'gather') w[id] *= skillAff(P, 'st_' + id); } // 第147弾: 性格面・新しい軸による適性 (優先度) // 第142弾: 切ったスキルは選ばない // 相手が近い間は 待ち伏せ・餌・罠・Tech建造を始めない
     return w;
 }
