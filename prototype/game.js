@@ -631,6 +631,7 @@ function _sfxFM(t0, dur, fc, ratio, depth, peak) {
 }
 function playSound(type, vol = 1) {
     if (!audioCtx) return;
+    if (playReplay && playReplay.view === 'e' && !_seatPass && type !== 'explosion') return; // 敵の席: 自機側の音は鳴らさない
     { const _m = SFX_LEGACY[type]; if (_m && sfx(_m, vol)) return; } // 第68弾: 効果音ファイルがあればそれを鳴らす (無ければ下の合成にフォールバック)
     if (audioCtx.state === 'suspended') audioCtx.resume();
     if (!_sfxInit()) return;
@@ -771,8 +772,19 @@ function toggleSfxSet() { setSfxSet(sfxSet === 'v3' ? 'v2' : 'v3'); sfxUI('ui_to
 function _syncSfxSetBtn() { const b = document.getElementById('mm-sfxset'); if (!b) return; const n3 = sfxCountSet('v3');
     b.textContent = sfxSet === 'v3' ? ('SE: 第3版' + (n3 ? ' (' + n3 + '音・残りは第2版)' : ' (未納品・第2版で再生)')) : 'SE: 第2版 (ロールバック中)'; }
 // 単発。鳴らせたら true (ファイルが無い・まだ読めていない時は false → 呼び出し側が合成にフォールバック)
+// 第106弾 (オーナー「リプレイの敵の席は SE まで自機の画面と同じに」): 敵の席では 自機の操作・自機の被弾などの音は鳴らさず、敵が受けた/出した音だけを鳴らす (seatSfx)
+var _seatPass = 0;
+const _SEAT_OK = /^(expl_|amb_|sys_battle_start|eng_hum_|alm_missile_warn|alm_fc_lock|alm_hack_intrusion_loop|alm_surge_warn|alm_lull_warn|alm_distress|convoy_)/; // 世界で起きること (サージ・凪・遭難信号) は双方に聞こえる
+function _seatOn() { return !!(playReplay && playReplay.view === 'e'); }
+function seatSfx(id, vol, legacy) { if (!_seatOn()) return false; _seatPass++; try { return sfx(id, vol) || (legacy ? (playSound(legacy, vol), true) : false); } finally { _seatPass--; } }
+// 発砲音: 聞き手 (自機 / 敵の席なら敵) との距離で小さくなる (自分の発砲は全音量)
+function shotSound(w, sx, sy) {
+    const L = _seatOn() ? prpPov() : player, d = L ? Math.hypot(sx - L.x, sy - L.y) : 0, v = d < 60 ? 1 : Math.max(0.25, 1 - d / 9000);
+    _seatPass++; try { playSound('shoot_' + w, v); } finally { _seatPass--; }
+}
 function sfx(id, vol, opt) {
     if (!audioCtx || !_sfxMan) return false;
+    if (playReplay && playReplay.view === 'e' && !_seatPass && !_SEAT_OK.test(id)) return true; // 敵の席: 自機側の音は鳴らさない
     const e = _sfxMan[id]; if (!e) return false;
     if (vol === undefined) vol = 1;
     if (sfxVolume <= 0) return true;
@@ -798,6 +810,7 @@ function sfx(id, vol, opt) {
 // ループ。on=true で鳴らし続け (音量 vol に近づける)・false で止める
 function sfxLoop(id, on, vol) {
     if (!audioCtx || !_sfxMan) return;
+    if (playReplay && playReplay.view === 'e' && !_prpSeatBusy && on) return; // 敵の席: ループは敵の席の枠 (updateSfxLoops) の中だけ
     const e = _sfxMan[id]; if (!e) return;
     const L = _sfxLoops[id], now = audioCtx.currentTime, tv = on ? Math.max(0, (vol === undefined ? 1 : vol)) * sfxVolume * (SFX_GAIN[id] ?? 1) : 0;
     if (L) { L.g.gain.setTargetAtTime(tv, now, on ? 0.25 : 0.2); L.on = on; if (!on) { L.offAt = now; } return; }
@@ -820,6 +833,7 @@ function sfxUI(id) { if (!sfx(id)) playSound('ui'); }
 function sfxOr(id, legacy, vol) { if (!sfx(id, vol)) playSound(legacy, vol); }
 // 自機の攻撃が敵に当たった音: 見えている=遠景の命中音 / 見えない=noteImpactObs が探知音を鳴らす
 function sfxHitEnemy(type, target, byDrone) {
+    if (_seatOn()) { if (target && target === prpPov()) seatSfx(byDrone ? 'hit_player_drone_gun' : type === 'missile' ? 'hit_player_missile' : type === 'beam' ? 'hit_player_beam' : 'hit_player_kinetic', 0.95, 'hit'); return; } // 敵の席: 自機の弾が当たった = 自分 (敵) が撃たれた
     if (!target || !inPlayerVision(target.x, target.y)) return;
     const id = (target.type === 'fighter' || byDrone) ? 'hit_enemy_drone' : type === 'missile' ? 'hit_enemy_missile' : type === 'beam' ? 'hit_enemy_beam' : 'hit_enemy_kinetic';
     if (!sfx(id)) playSound(type === 'missile' ? 'explosion' : 'hit', 0.6);
@@ -3052,7 +3066,8 @@ let playerHitLog = [];
 const _HIT_JP = { trap: '偽コンテナの爆発', beam: 'ビームの直撃', missile: 'ミサイル', smart: 'AIミサイル', kinetic: '実弾', nearmiss: 'ミサイルの至近弾' };
 function notePlayerHit(kind, dmg, sx, sy, strike, byFighter) {
     if (!player) return;
-    { // 第68弾: 自艦の被弾の音 (艦内の骨に響く音。旧: 被弾は無音だった)
+    if (_seatOn()) { const E = prpPov(); if (E && prpSeesPt(E, player.x, player.y)) seatSfx('hit_enemy_' + (byFighter ? 'drone' : kind === 'beam' ? 'beam' : kind === 'missile' || kind === 'smart' || kind === 'nearmiss' ? 'missile' : 'kinetic'), 0.9, 'hit'); }
+    else { // 第68弾: 自艦の被弾の音 (艦内の骨に響く音。旧: 被弾は無音だった)
         const _id = kind === 'nearmiss' ? 'hit_player_blast_near' : byFighter ? 'hit_player_drone_gun' : kind === 'missile' ? 'hit_player_missile' : kind === 'beam' ? 'hit_player_beam' : 'hit_player_kinetic';
         if (!sfx(_id)) playSound(kind === 'missile' || kind === 'nearmiss' ? 'explosion' : 'hit');
         if (strike && strike.preempt) sfx('hit_player_ambush');
@@ -3891,7 +3906,7 @@ function playerFireWeapon(s, target, wType, lk) {
     s._fireFlash = 90; s._fireFlashType = wType; s._lastFireType = wType; s._lastFireF = _frameCount; // 第22弾: 敵は撃たれた兵装で機動を選ぶ
     matchRecEvent('fireP', s.x, s.y, '自艦: ' + _WPN_JP[wType] + 'を撃つ' + (lk && lk.full ? ' (有視界)' : ' (推定点へ)'));
     if (wType === 'beam') s._beamDrain = BEAM_DRAIN_DUR; // ビームはジェネレータを食う: 発射後しばらく機関出力が落ちる
-    playSound('shoot_' + wType);
+    shotSound(wType, s.x, s.y);
     cancelSilentRunning('発砲');
     s.fireCooldown = WEAPON_COOLDOWNS[wType] * genF;
     if (huntStats) huntStats.shots = (huntStats.shots || 0) + 1;
@@ -5090,7 +5105,7 @@ class Ship {
                         _beamShooter = null;
                         projectiles.push(_eproj);
                     }
-                    playSound('shoot_' + wType, Math.max(0.25, 1 - (player ? Math.hypot(this.x - player.x, this.y - player.y) : 0) / 9000));
+                    shotSound(wType, this.x, this.y);
                     this.fireCooldown = this.type === 'fighter' ? prof.fireCD * (this.upgFireCD || 1) : WEAPON_COOLDOWNS[wType] * actorGenF(this); // 実弾の連射間隔 (ミサイル・ビームはリロードが律速)。第97弾: 戦艦は自機と同じクールダウン (実弾15f)。旧: 艦種表の105〜200fで、自機COMの約7倍遅く 鏡合わせで撃ち負けた
                     // 第20弾: 弾を消費してリロード (実弾=8斉射マガジン / ミサイル=1発ごとに10秒 / ビーム=35秒)
                     if (wType === 'kinetic' && this.ammoK !== undefined) { this.ammoK--; if (this._kMag === undefined) this._kMag = epm(this).kinMag; if (--this._kMag <= 0 || this.ammoK <= 0) this._kReload = KINETIC_RELOAD_TIME * epm(this).kinReload * shipFx(this).reload; }
@@ -8314,7 +8329,7 @@ function updateEnemyColonyCapture() {
         near._commsF = _frameCount; near.emSig = Math.max(near.emSig || 0, SIG_ACT.comms.em); // 第39弾: 通信の信号は自艦と同じ
         if (st.eHackP >= 1) {
             const was = st.owner;
-            st.owner = 'enemy'; st.hacked = false; st.eHackP = 0; st.hackP = 0;
+            seatSfx('cap_done_colony', 0.9); st.owner = 'enemy'; st.hacked = false; st.eHackP = 0; st.hackP = 0;
             if (!st._matE) { st._matE = true; enemyAddMat(COLONY_SUPPLY_MAT); } // 第50弾B (第66弾: 上限つき)
             if (!st._partE) { st._partE = true; enemyOfferDraft(near, 'colony', st.x, st.y); } // 第33弾: 敵も初めて占有したコロニーで部品
             // 第26弾: 占有しただけでは回復も補給もしない (補給は _supply の流れで1つのコロニーにつき1回)
@@ -8696,6 +8711,7 @@ function recomputeEnemyParts(e) {
 function _enemyPersonality(e) { return e.personality || { aggression: 0.5, stealth: 0.3, greed: 0.4, caution: 0.4 }; }
 function enemyOfferDraft(e, src, x, y) {
     if (!e || e.type === 'fighter' || !ENEMY_CLASS[e.type]) return;
+    seatSfx('draft_pick', 0.8);
     e.parts = e.parts || []; e.partsSpare = e.partsSpare || [];
     const owned = new Set(e.parts.concat(e.partsSpare));
     const pool = ENEMY_PART_OK.filter(id => !owned.has(id) && !PARTS[id].moved && (src === 'convoy' ? PARTS[id].rare : !PARTS[id].rare));
@@ -10134,6 +10150,7 @@ function relayListen() {
 }
 // 敵がノードを制圧 (自機と同じく近くに留まる)。自分の聴音局を奪われた時だけ通信途絶で分かる
 function enemyCaptureNode(e, n) {
+    seatSfx('cap_done_node', 0.9);
     const wasMine = n.owner === 'player';
     n.owner = 'enemy'; n.capP = 0; n.emFlashTimer = 120;
     if (!n._matE) { n._matE = true; enemyAddMat(4); } // 第50弾B
@@ -13128,6 +13145,7 @@ function useSmoke() {
 // 第22弾: 敵も離脱の消耗品を使う (積み込みで持たせた分だけ・自機と同じ効き目)
 function enemyUseFlash(e) {
     if (!(e.itemFlash > 0)) return false;
+    seatSfx('item_flash', 0.9, 'flash');
     e.itemFlash--;
     const d = player ? Math.hypot(player.x - e.x, player.y - e.y) : 1e9;
     if (player && player.hp > 0 && d < FLASH_RADIUS) player._sysSensorTimer = Math.max(player._sysSensorTimer || 0, FLASH_BLIND);
@@ -13181,6 +13199,7 @@ function enemyPersonaLoadout(ship, P) {
 // 散布弾 (潜む時に自分の周りを濃くする) / 吹き飛ばし弾 (推定が近いのに見えない・自分が濃い霧の中) / ビーコン (作戦で使う) — 敵COM
 function enemyUseSpray(e) {
     if (!(e.itemSpray > 0)) return false;
+    seatSfx('item_fogspray', 0.9);
     e._launchFlash = Math.max(e._launchFlash || 0, 60);
     e.itemSpray--; useFogSpray('e', e.x, e.y);
     comThinkEvent('e', '散布弾 — 周りの霧を濃くして身を隠す (' + Math.round(SPRAY_LIFE / 60) + '秒)', 'e' + e.uid);
@@ -13247,6 +13266,7 @@ function enemyItemsStep(e) {
 }
 function enemyUseSmoke(e) {
     if (!(e.itemSmoke > 0)) return false;
+    seatSfx('item_smoke', 0.9);
     e.itemSmoke--;
     smokeClouds.push({ x: e.x, y: e.y, r: SMOKE_R, dens: SMOKE_DENS, life: SMOKE_LIFE, max: SMOKE_LIFE, follow: null });
     comThinkEvent('e', '煙幕弾 — この場にヒッグス雲 (' + Math.round(SMOKE_LIFE / 60) + '秒)', 'e' + e.uid);
@@ -13255,6 +13275,7 @@ function enemyUseSmoke(e) {
 }
 function enemyUseNoise(e, ang) {
     if (!(e.itemNoise > 0)) return false;
+    seatSfx('item_noise', 0.9);
     e.itemNoise--;
     const ms = e._maxSpeeds ? e._maxSpeeds() : null, v = ms ? ms.flank : 1.5;
     // 偽艦影と同じ仕組みで、全速で12秒まっすぐ進む音源 (自機の受信には艦と同じに聞こえる)
@@ -14771,6 +14792,7 @@ function comSonarPower(P) {
 function enemyPingRange(e, pw) { return OMNI_SONAR_RANGE[1] * SONAR_FRAC * shipFx(e).sonar * (1 - getStormIntensity(e.x, e.y) * STORM_SONAR_DEGRADE) * (SONAR_POWER[pw || 'std'].r); }
 function firePingFromEnemy(e) {
     if (!player || player.hp <= 0) return;
+    seatSfx('sonar_omni_mid', 0.9);
     const _pw = comSonarPower(e.personality || {});
     // 第72弾: 敵も種類を選んで打つ — 自艦を最近聞いた帯域 / 無ければ順に回す (真の発信は読まない)
     const _eBand = (e._heardBand && e._heardBandF !== undefined && _frameCount - e._heardBandF < 3600) ? e._heardBand : SONAR_BANDS[(e._pingRot = ((e._pingRot || 0) + 1) % 4)];
@@ -15359,7 +15381,7 @@ function enemyShoot(e, wType, ax, ay, why) {
         _beamShooter = null;
         projectiles.push(pr);
     }
-    playSound('shoot_' + wType, Math.max(0.25, 1 - Math.hypot(e.x - player.x, e.y - player.y) / 9000));
+    shotSound(wType, e.x, e.y);
     e.fireCooldown = e.type === 'fighter' ? prof.fireCD * (e.upgFireCD || 1) : WEAPON_COOLDOWNS[wType] * actorGenF(e); // 第97弾: 自機と同じクールダウン
     if (wType === 'kinetic' && e.ammoK !== undefined) { e.ammoK--; if (e._kMag === undefined) e._kMag = epm(e).kinMag; if (--e._kMag <= 0 || e.ammoK <= 0) e._kReload = KINETIC_RELOAD_TIME * epm(e).kinReload * shipFx(e).reload; }
     else if (wType === 'missile' && e.ammoM !== undefined) { e.ammoM--; e._mReload = MISSILE_RELOAD_TIME * epm(e).mslReload * shipFx(e).reload; }
@@ -16934,9 +16956,24 @@ function prpTick() { // 描画のたび (状態は読むだけ)
 }
 // ── 敵の席: いつもの画面 (左の帯域バー・下の状態の帯・右列・AIの助言・兆候のチップ) に敵の値を出す ──
 const _EXPO_E = ['静穏', '受信', '照射', '攻撃'];
+// 敵の席の効果音 (敵が受けた/起きたこと): 信号の初受信・探信を聞いた・状態異常の始まり/解消・耐久の警報・兆候の上昇 — 自機の画面でなる音と同じ音
+const _PRP_STATUS_SFX = [['_weaponJamTimer', 'alm_status_fcs'], ['_haltTimer', 'alm_status_halt'], ['_sysEngineTimer', 'alm_status_engine'], ['_sysSensorTimer', 'alm_status_sensor'], ['_daze', 'alm_status_daze'], ['_commJam', 'alm_status_comm'], ['_burn', 'alm_status_burn']];
+function prpSeatSounds(e) {
+    const P = playReplay, now = _frameCount; if (!P) return;
+    const S = P._ss || (P._ss = { rx: -1e9, ping: e._pingHeardF ?? -1e9, st: {}, hull: 1, ex: 0, any: false });
+    { const on = e._rxOn || [], lv = e._rxLv || {}, hb = on.find(x => (lv[x] || 0) >= 0.5); if (hb) { if (now - S.rx > 1200) seatSfx('det_rx_' + hb, 0.8); S.rx = now; } } // 久しぶりに信号を受けた (しきい値の半分を超えた帯域)
+    if ((e._pingHeardF ?? -1e9) !== S.ping) { S.ping = e._pingHeardF; seatSfx('alm_ping_omni', 0.8); }
+    let any = false;
+    for (const [k, id] of _PRP_STATUS_SFX) { const on = (e[k] || 0) > 0; any = any || on; if (on && !S.st[k]) seatSfx(id, 0.8); S.st[k] = on; }
+    if (S.any && !any) seatSfx('alm_status_recover', 0.7); S.any = any;
+    { const dn = getHiggsIntensity(e.x, e.y); if (!S.dense && dn >= 0.74) { S.dense = true; seatSfx('env_dense_enter', 0.7); } else if (S.dense && dn < 0.66) { S.dense = false; seatSfx('env_dense_exit', 0.7); } } // 濃いヒッグスに入った/出た
+    const hf = e.hp / e.maxHp; if (S.hull > 0.5 && hf <= 0.5) seatSfx('alm_hull_50', 0.8); if (S.hull > 0.25 && hf <= 0.25) seatSfx('alm_hull_25', 0.9); S.hull = hf;
+    const ex = P.ex || 0; if (ex > S.ex) seatSfx('alm_exposure_' + Math.min(3, ex), 0.8); S.ex = ex;
+}
 function prpEnemyHud() {
     const e = prpPov(); if (!e) return;
     const now = _frameCount, lv = e._rxLv || {}, on = e._rxOn || [];
+    prpSeatSounds(e);
     // 左: 帯域バー (太=敵が受けた自艦の信号 / 斜線=敵が出している信号)
     for (const b of BANDS) {
         const el = _bandEls[b]; if (!el) continue;
@@ -17020,61 +17057,77 @@ function prpSeesPt(e, x, y) {
     const i = Math.floor(f), t = f - i;
     return Math.hypot(x - e.x, y - e.y) <= r[i] * (1 - t) + r[(i + 1) % VIS_RAYS] * t;
 }
-function prpDrawFog(ctx, e) {
-    if (higgsViewOff) return;
-    const r = prpEnemyRays(e), hHere = getHiggsIntensity(e.x, e.y), fogAlpha = 0.86 + hHere * 0.10, fogCol = hHere > 0.5 ? '#2c0406' : hHere > 0.2 ? '#22030a' : '#0e0103';
-    const holes = [{ x: e.x, y: e.y, r, n: VIS_RAYS }];
-    drawFogHoles(ctx, holes, fogCol, fogAlpha);
-}
-// 敵の席の重ね描き (霧の上): 方位の記録・推定円・作戦の目標・敵の周りのリング
-function prpDrawPovOverlay(ctx, e) {
-    const zc = 1 / camera.zoom, sa = e._sa, now = _frameCount;
-    ctx.save();
-    if (sa && sa.obs) for (const o of sa.obs) { // 方位の記録 (観測点から方位へ・古いほど薄い)
-        const age = now - o.f, a = Math.max(0.12, 0.85 - age / 5400), L = 9000;
-        ctx.globalAlpha = a; ctx.strokeStyle = '#ff9a40'; ctx.lineWidth = 1.6 * zc; ctx.setLineDash([10 * zc, 8 * zc]);
-        ctx.beginPath(); ctx.moveTo(o.ox, o.oy); ctx.lineTo(o.ox + Math.cos(o.ang) * L, o.oy + Math.sin(o.ang) * L); ctx.stroke();
-        ctx.setLineDash([]); ctx.globalAlpha = a * 0.25; ctx.fillStyle = '#ff9a40';
-        const sg = Math.min(0.5, o.sig || 0.05); ctx.beginPath(); ctx.moveTo(o.ox, o.oy); ctx.arc(o.ox, o.oy, L, o.ang - sg, o.ang + sg); ctx.closePath(); ctx.fill();
-        ctx.globalAlpha = a; ctx.beginPath(); ctx.arc(o.ox, o.oy, 5 * zc, 0, Math.PI * 2); ctx.fill();
-    }
-    const est = _huntEst(e);
-    if (est) { // 敵が思う自艦の位置 (撃つ判断に使う正直な幅)
-        const R = huntHonestR(est.r, est.age);
-        ctx.globalAlpha = 0.9; ctx.strokeStyle = '#ff4d4d'; ctx.lineWidth = 2.2 * zc; ctx.setLineDash([16 * zc, 10 * zc]);
-        ctx.beginPath(); ctx.arc(est.x, est.y, R, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
-        ctx.globalAlpha = 0.1; ctx.fillStyle = '#ff4d4d'; ctx.fill();
-        ctx.globalAlpha = 0.95; ctx.beginPath(); ctx.moveTo(est.x - 60 * zc, est.y); ctx.lineTo(est.x + 60 * zc, est.y); ctx.moveTo(est.x, est.y - 60 * zc); ctx.lineTo(est.x, est.y + 60 * zc); ctx.stroke();
-        queueTag(est.x, est.y - R, '敵の推定: 自艦はこの辺り', '±' + Math.round(R) + 'u・' + Math.round(est.age / 60) + '秒前', '255,90,90', 'b', 1);
-        if (est.moving) { ctx.beginPath(); ctx.moveTo(est.x, est.y); ctx.lineTo(est.x + est.vx * 600, est.y + est.vy * 600); ctx.stroke(); }
-    }
-    const H = e._hunt, tg = H ? (H.k === 'fakebox' || H.k === 'lure' ? (H.ph === 'place' || H.ph === 'set' ? H.B : H.S) : H.S || H.goal || H.P || H.ip || null) : null;
-    if (tg) { ctx.globalAlpha = 0.85; ctx.strokeStyle = '#ffd24a'; ctx.lineWidth = 1.6 * zc; ctx.setLineDash([6 * zc, 6 * zc]); ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(tg.x, tg.y); ctx.stroke(); ctx.setLineDash([]);
-        ctx.beginPath(); ctx.arc(tg.x, tg.y, 26 * zc, 0, Math.PI * 2); ctx.stroke(); queueTag(tg.x, tg.y, '作戦「' + H.jp + '」の行き先', H.ph || '', '255,210,74', 't', 1); }
-    if (H && H.B && (H.k === 'fakebox' || H.k === 'lure')) { ctx.globalAlpha = 0.9; ctx.strokeStyle = '#ff3fd0'; ctx.lineWidth = 2 * zc; ctx.strokeRect(H.B.x - 40 * zc, H.B.y - 40 * zc, 80 * zc, 80 * zc); queueTag(H.B.x, H.B.y, H.k === 'fakebox' ? '偽コンテナの置き場所' : '囮の置き場所', '', '255,63,208', 't', 1); }
-    ctx.restore();
-}
-// 第90弾 (オーナー「敵の席のリングも自艦と同じ表示に」): 自艦のリング (drawShipRing) をそのまま使い、描く間だけ 自艦 → 敵 に差し替える
-//   脅威 = 敵が観測できる物 (自艦のミサイルの接近・自艦のビームのチャージ・自艦に見られて狙われている・直近に受けた方位) / 記録 = 敵の方位の記録 (e._sa)。描画だけ・終わったら全部戻す
-const _prpRingMarks = [], _prpHitDirs = [];
-function prpDrawShipRingAs(ctx, e) {
+// 第106弾 (オーナー「敵の席も 自機の画面とインジケータ・名札・SEまで すべて同じに」): 敵の席は、自機の画面の描画関数 (霧・有視界・濃度・センサーの届く範囲・方位線・推定円・名札・リング・警告) を
+//   そのまま呼び、描く間だけ「自分」を敵に差し替える。敵の方位の記録 (e._sa) は自艦の記録と同じ形なので、同じ関数でそのまま描ける。描画だけ・終わったら全部戻す (試合の進行には触れない)
+let _prpSeatBusy = false;
+const _prpRingMarks = [], _prpHitDirs = [], _prpEmptyCargo = { stock: {}, mat: 0, matScrap: 0, asm: null, ammoK: 0, ammoM: 0 };
+function prpSeatThreats(e) { // 敵が観測できる脅威 (自艦のミサイルの接近・自艦のビームのチャージ・自艦に見られて狙われている・直近に受けた方位)
     const now = _frameCount, TH = [];
     const put = (key, kind, ang, sig, conf, label) => TH.push({ key, kind, ang, sig, conf, label, exp: now + 40, born: now - 20, jit: 0, jf: now + 999, shown: true });
     for (const p of projectiles) if (p.isPlayer && p.type === 'missile' && Math.hypot(p.x - e.x, p.y - e.y) < 2600) put('m' + (p._id || 0), 'msl', Math.atan2(p.y - e.y, p.x - e.x), 0.08, 1, 'ミサイル');
     if ((player._beamCharge || 0) > 0 && Math.hypot(player.x - e.x, player.y - e.y) < BEAM_CHARGE_WARN_R) put('b', 'beam', Math.atan2(player.y - e.y, player.x - e.x), 1.0, 0.5, '高エネルギー');
     if (e.inVision && (player.targetEntity === e)) put('l', 'lock', Math.atan2(player.y - e.y, player.x - e.x), 0.05, 1, 'ロック');
-    if (e._sa && e._sa.obs) for (const o of e._sa.obs) if (now - o.f < 300) { put('s' + o.f, 'sig', Math.atan2(o.oy + Math.sin(o.ang) * 9000 - e.y, o.ox + Math.cos(o.ang) * 9000 - e.x), Math.min(0.6, o.sig || 0.05), 0.6, '信号'); if (TH.length > 7) break; }
-    const sv = { player, pb: passiveBearings, lk: lockedSignalId, sa: _signalAnalysis, hd: playerHitDirs, ex: playerExposureLevel, rm: _ringMarks, cg: cargo, th: THREATS.splice(0) };
+    return TH;
+}
+function prpSeatWeapon(e) { let w = e.weaponType || 'missile'; if (e.wset && !e.wset.includes(w)) w = ['missile', 'beam', 'kinetic'].find(x => e.wset.includes(x)) || w; return w; }
+function prpSeat(e, fn) {
+    if (_prpSeatBusy || !e) return fn();
+    const _rg = { kinetic: actorWeaponRange(e, 'kinetic'), missile: actorWeaponRange(e, 'missile'), beam: actorWeaponRange(e, 'beam') }, _wrOrig = weaponRange, _cw = _curWeapon; // 射程は player を差し替える前に敵の値を取る
+    _prpSeatBusy = true;
+    const sv = { player, pb: passiveBearings, lk: lockedSignalId, sa: _signalAnalysis, hd: playerHitDirs, ex: playerExposureLevel, rm: _ringMarks, cg: cargo, th: THREATS.splice(0),
+        so: sensorsOn, sl: sensorLv, sor: sensorOrder, cs: currentSensor, pd: playerDrones, vr: _visRays, vf: _visRaysF, pvr: playerVisionRadius, nm: nearMissActive, cp: _capturing, rs: _resupply, co: playerCoasting,
+        hp: hackPending, id: _sigIdent['E-view'] };
     try {
-        for (const t of TH) THREATS.push(t);
-        player = e; passiveBearings = []; _signalAnalysis = e._sa ? { 'E-view': e._sa } : {}; lockedSignalId = e._sa && (e._sa.fix || e._sa.ping) ? 'E-view' : null;
-        playerHitDirs = _prpHitDirs; playerExposureLevel = playReplay && playReplay.ex !== undefined ? playReplay.ex : 0; _ringMarks = _prpRingMarks; cargo = { stock: {}, mat: 0, asm: null, ammoK: 0, ammoM: 0 };
-        drawShipRing(ctx);
-    } catch (err) { /* 描画の失敗で試合を止めない */ }
+        for (const t of prpSeatThreats(e)) THREATS.push(t);
+        const sa = e._sa, on = e._rxOn || [], lv = e._lv || {};
+        player = e; passiveBearings = []; _signalAnalysis = sa ? { 'E-view': sa } : {}; lockedSignalId = sa && (sa.fix || sa.ping || (sa.obs && sa.obs.length)) ? 'E-view' : null;
+        if (sa) { const p = sa.fix ? Math.min(0.97, 0.62 + 0.35 * Math.min(1, anaPct(sa.ana || 0) / 100)) : 0.5; _sigIdent['E-view'] = { L: Math.log(p / (1 - p)), n: IDENT_MIN_N, why: {}, sure: false }; }
+        playerHitDirs = _prpHitDirs; playerExposureLevel = playReplay && playReplay.ex !== undefined ? playReplay.ex : 0; _ringMarks = _prpRingMarks; cargo = _prpEmptyCargo;
+        sensorsOn = { heat: on.includes('heat'), optic: on.includes('optic'), em: on.includes('em'), higgs: on.includes('higgs') };
+        sensorLv = { heat: lv.heat || 2, optic: lv.optic || 2, em: lv.em || 2, higgs: lv.higgs || 2 }; sensorOrder = on.slice(); currentSensor = on[0] || 'heat';
+        playerDrones = []; _visRays = prpEnemyRays(e); _visRaysF = _frameCount; playerVisionRadius = Math.max(VIS_CLOSE, e._myDetR || _visAt(e.x, e.y));
+        nearMissActive = false; _capturing = null; _resupply = null; playerCoasting = !!e._coast; hackPending = null;
+        _curWeapon = prpSeatWeapon(e); weaponRange = w => _rg[w] || 800;
+        fn();
+    } catch (err) { if (!window.__prpErr) { window.__prpErr = err; console.error('prpSeat', err); } /* 描画の失敗で試合を止めない */ }
     finally {
         player = sv.player; passiveBearings = sv.pb; lockedSignalId = sv.lk; _signalAnalysis = sv.sa; playerHitDirs = sv.hd; playerExposureLevel = sv.ex; _ringMarks = sv.rm; cargo = sv.cg;
+        sensorsOn = sv.so; sensorLv = sv.sl; sensorOrder = sv.sor; currentSensor = sv.cs; playerDrones = sv.pd; _visRays = sv.vr; _visRaysF = sv.vf; playerVisionRadius = sv.pvr;
+        nearMissActive = sv.nm; _capturing = sv.cp; _resupply = sv.rs; playerCoasting = sv.co; hackPending = sv.hp;
+        weaponRange = _wrOrig; _curWeapon = _cw;
+        if (sv.id) _sigIdent['E-view'] = sv.id; else delete _sigIdent['E-view'];
         THREATS.length = 0; for (const t of sv.th) THREATS.push(t);
+        _prpSeatBusy = false;
     }
+}
+// 敵の席: 拠点の持ち主を 自機 ⇄ 敵 に入れ替えて fn を呼ぶ (自機の画面は「自分の物=自機」で描くため)。敵は拠点の位置を知っている物として扱う
+function prpSwapOwners(fn) {
+    const sw = o => o === 'player' ? 'enemy' : o === 'enemy' ? 'player' : o, sv = [];
+    for (const n of resourceNodes) { sv.push([n, n.owner, n.identified, n.knownLost]); n.owner = sw(n.owner); n.identified = true; n.knownLost = true; }
+    for (const st of structures) { sv.push([st, st.owner, st.identified, st.hacked, st.discovered, st._pObs]); st.owner = sw(st.owner); st.hacked = st.owner === 'player'; st._pObs = st.owner; st.identified = true; st.discovered = true; }
+    try { fn(); }
+    finally { for (const q of sv) { q[0].owner = q[1]; q[0].identified = q[2]; if (q.length === 4) q[0].knownLost = q[3]; else { q[0].hacked = q[3]; q[0].discovered = q[4]; q[0]._pObs = q[5]; } } }
+}
+// 敵の席のミニマップ: 自機の画面と同じ関数で描く。相手 (自機) は敵の目に見えている時だけ点で出る
+function prpMinimap(pv) {
+    const pl = player, ghost = { hp: pl.hp, x: pl.x, y: pl.y, inVision: prpSeesPt(pv, pl.x, pl.y), contactLife: 0, uid: -9, type: 'assault' };
+    prpSeat(pv, () => prpSwapOwners(() => { const sv = enemies; enemies = [ghost]; try { drawMinimap(); } finally { enemies = sv; } }));
+}
+// 敵の席の重ね描き (霧の上): 自機の画面と同じ関数で 方位線・推定円 (名札つき) を描く。作戦の行き先は「思」をオンにしている時だけ (敵の頭の中なので自機の画面には無い)
+function prpDrawPovOverlay(ctx, e) {
+    prpSeat(e, () => {
+        drawPassiveBearings(ctx); drawTriangulationCircle(ctx);
+        const est = _huntEst(e), R = weaponRange(currentWeapon()); // 射程と射角 (敵が推定を掴んで射程の1.5倍以内か、交戦中だけ。自機の画面と同じ条件)
+        if (e.aiState === 'combat' || (est && Math.hypot(est.x - e.x, est.y - e.y) < R * 1.5)) drawWeaponRange(ctx);
+    });
+    if (!thinkLogOn) return;
+    const zc = 1 / camera.zoom;
+    ctx.save();
+    const H = e._hunt, tg = H ? (H.k === 'fakebox' || H.k === 'lure' ? (H.ph === 'place' || H.ph === 'set' ? H.B : H.S) : H.S || H.goal || H.P || H.ip || null) : null;
+    if (tg) { ctx.globalAlpha = 0.85; ctx.strokeStyle = '#ffd24a'; ctx.lineWidth = 1.6 * zc; ctx.setLineDash([6 * zc, 6 * zc]); ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(tg.x, tg.y); ctx.stroke(); ctx.setLineDash([]);
+        ctx.beginPath(); ctx.arc(tg.x, tg.y, 26 * zc, 0, Math.PI * 2); ctx.stroke(); queueTag(tg.x, tg.y, '作戦「' + H.jp + '」', H.ph || '', '255,210,74', 'top', 1); }
+    if (H && H.B && (H.k === 'fakebox' || H.k === 'lure')) { ctx.globalAlpha = 0.9; ctx.strokeStyle = '#ff3fd0'; ctx.lineWidth = 2 * zc; ctx.strokeRect(H.B.x - 40 * zc, H.B.y - 40 * zc, 80 * zc, 80 * zc); queueTag(H.B.x, H.B.y, H.k === 'fakebox' ? '偽コンテナ' : '囮', '', '255,63,208', 'top', 1); }
+    ctx.restore();
 }
 // 敵の周りのリング (画面座標): 艦首・方位の目盛り・直近5秒に受けた方位 (帯域色)
 function prpDrawPovRing(ctx, e) {
@@ -18703,7 +18756,7 @@ function _stepWorldCore() {
         // 第21弾: マス目の濃さ全体に掛ける (旧: 円ごとの濃さを足していた。速さは旧と同じ ≈ 15分で+4%)
         if (player && player.hp > 0) higgsGrowth = Math.min(0.15, higgsGrowth + 0.0000008 * gameSpeedFactor);
         matchRecTick(); // 第22弾: 1秒ごとに位置を記録
-        if ((_frameCount & 31) === 0) updateSfxLoops();
+        if ((_frameCount & 31) === 0) { const _sp = prpPov(); if (_sp) prpSeat(_sp, () => { const _et = gameState.engineType, _jc = jamCont, _hk = _hack, _hs = hackSessP; gameState.engineType = _sp.engine || 'thermonuclear'; jamCont = false; _hack = null; hackSessP = null; try { updateSfxLoops(); } finally { gameState.engineType = _et; jamCont = _jc; _hack = _hk; hackSessP = _hs; } }); else updateSfxLoops(); } // 敵の席: 警報・機関音のループは敵の値で
         updateHiggsClears();
 
         // ソナークールダウン更新 — 表示は秒単位で変化する時のみ更新 (毎フレームinnerHTML禁止)
@@ -19070,7 +19123,7 @@ function renderWorld() {
         ctx.translate(-camera.x + sx, -camera.y + sy);
 
         drawBackground(ctx);
-        drawTargetLine(ctx);
+        if (_pov) prpSeat(_pov, () => drawTargetLine(ctx)); else drawTargetLine(ctx); // 敵の席: 敵の行き先の線 (自機の線は敵には見えない)
 
         // ズームアウト時 or デバッグフラグでshadowBlurをスキップ (描画コスト削減)
         const _blurEnabled = !PERF_DISABLE_SHADOW_BLUR && camera.zoom >= 0.12;
@@ -19109,7 +19162,7 @@ function renderWorld() {
 
         // ── 有視界フォグ ──
         // マップモード中はフォグを抑制して全体を戦術マップとして表示(索敵済みの情報のみ可視)。
-        if (_pov) { if (!mapMode) prpDrawFog(ctx, _pov); }
+        if (_pov) prpSeat(_pov, () => { if (!mapMode) drawFogOfWar(ctx); drawDensityOverlay(ctx); drawRefRing(ctx); });
         else {
         if (player && (player.hp > 0 || player._dying > 0) && !mapMode) drawFogOfWar(ctx); // 第22弾: 撃沈の演出中も霧は残す
         if (player && player.hp > 0) drawDensityOverlay(ctx); // 第21弾: 霧の濃さと地形 (自艦の周り / ボタンで全マップ)
@@ -19126,6 +19179,7 @@ function renderWorld() {
         if (!_pov) drawPlayerDrones(ctx);
         drawSaberFx(ctx); // 第36弾: Techのビームサーベル
         if (!_pov) projectiles.forEach(p => { if (p.isPlayer) p.draw(ctx); });
+        if (!_pov) { // 敵の席では 自機の知識で描く物 (囮・ノイズ・ドローンの視界・特定した信号・空き巣の跡) は出さない
         drawNoiseMakers(ctx);
         drawLures(ctx); // 第21弾
         drawFieldSignals(ctx); // 第31弾
@@ -19133,6 +19187,7 @@ function renderWorld() {
         drawDroneVision(ctx); // 第44弾: ドローンの有視界
         drawMines(ctx); // 第32弾
         drawLootTraces(ctx); drawConvoys(ctx); // 第34弾
+        }
         if (!_pov) { drawOwnOrdnanceMarkers(ctx);
         drawColonyIntel(ctx);
         if (player && (player.hp > 0 || player._dying > 0)) player.draw(ctx); }
@@ -19144,12 +19199,16 @@ function renderWorld() {
 
         // ── ランドマーク（ステーション・構造物・ヒッグスノード）— ヒッグスより手前に表示 ──
         // 未発見・未特定の構造物は非表示; 有視界発見(discovered)または信号特定(identified)時のみ表示
+        if (_pov) prpSeat(_pov, () => prpSwapOwners(() => { // 敵の席: 持ち主を入れ替えて (敵の物=自分の物)・敵は拠点の位置を知っている物として描く
+            structures.forEach(s => { if (s.type !== 'derelict' || !s.salvaged) s.draw(ctx); }); drawNodesAndColonies(ctx, _vpX, _vpY, _vpW, _vpH);
+        })); else {
         stations.forEach(s => s.draw(ctx));
         structures.forEach(s => { if (s.discovered || s.identified) s.draw(ctx); });
         drawNodesAndColonies(ctx, _vpX, _vpY, _vpW, _vpH);
+        }
 
         // ── 特定済み地形効果 (熱雲帯/磁気嵐帯/ヒッグス高濃度域) — ヒッグスより手前に恒久マーカー ──
-        drawIdentifiedTerrain(ctx, _vpX, _vpY, _vpW, _vpH);
+        if (!_pov) drawIdentifiedTerrain(ctx, _vpX, _vpY, _vpW, _vpH);
 
         // ── センサー痕跡(ソナーの影/コンタクト) — ヒッグスより手前に表示 ──
         if (!_pov) for (const e of enemies) e.drawSensorTrace(ctx);
@@ -19203,9 +19262,9 @@ function renderWorld() {
 
         drawHiggsMedium(ctx);
         flushTags(ctx); // 第40弾: 地図の名札 (画面座標でまとめて)
-        if (_pov) { prpDrawShipRingAs(ctx, _pov); drawScaleBar(ctx); } else { drawHUDOverlay(ctx); drawAlertFx(ctx); }
+        if (_pov) prpSeat(_pov, () => { drawHUDOverlay(ctx); drawAlertFx(ctx); }); else { drawHUDOverlay(ctx); drawAlertFx(ctx); }
         if (playReplay) prpTick();
-        if (_rfc % 3 === 0) drawMinimap(); // 第89弾: 描画の回数で数える (倍速では _frameCount が飛び、HUDがほとんど更新されなかった)
+        if (_rfc % 3 === 0) { if (_pov) prpMinimap(_pov); else drawMinimap(); } // 第89弾: 描画の回数で数える (倍速では _frameCount が飛び、HUDがほとんど更新されなかった)
         if (_rfc % 10 === 0) updateEnvInfo();
         if (_rfc % 8 === 0) updateTacStrip();
         if (_rfc % 20 === 0) updateLandmarkBanner();
