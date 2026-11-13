@@ -4923,7 +4923,8 @@ class Ship {
             // 状態別AI実行
             // ──────────────────────────────────────
             let _planActive = false;
-            if (!_hideActive && !_supplyActive && this.type !== 'fighter') _planActive = enemyHunterStep(this, playerSigDetected, _hardDetect) || enemyGrabStep(this) || enemyItemStep(this) || enemyPlanStep(this); // 第80弾: 狩人の頭脳 (忍び寄り・偽装の罠・待ち伏せ) / 第46弾: 作戦「囮で誘い背後を取る」
+            if (!_hideActive && !_supplyActive && this.type !== 'fighter') _planActive = !!pilotLadder({ plan: () => !this._hunt && enemyPlanStep(this), // 第137弾: 自機COMと同じ並び (PILOT_LADDER: 作戦 → 拾い物 → 狩人の任務)。旧: 狩人 → 拾い物 → 作戦 (自機COMは 作戦 → 拾い物 → 狩人)
+            grab: () => enemyGrabStep(this) || enemyItemStep(this), hunt: () => enemyHunterStep(this, playerSigDetected, _hardDetect) }); // 第80弾: 狩人の頭脳 (忍び寄り・偽装の罠・待ち伏せ) / 第46弾: 作戦「囮で誘い背後を取る」
             if (_hideActive || _supplyActive || _planActive) {
                 // 潜伏中 (上で処理済み)
             } else if (this.aiState === 'combat') {
@@ -17550,6 +17551,9 @@ function comExtrasStep(c, P, D, hpF, contact) {
 // ═══ 第58弾 (オーナー): COMの戦略テンプレート — 性格1つにつき戦略1つでは単調 → 状況と性格で重みをつけた乱択で、人が考えそうな立ち回りを切り替える ═══
 // 「動いてアイテムを集めて強化 → 相手を圧倒」の骨子を生かし切る: 集めない待ち伏せ・餌で誘う・ドローンで探って攻める・霧に潜む・強化したら狩りに出る・拠点を守る。
 // 戦略は一定時間続き (90〜300秒)、終わったら重みつきの乱数で次を選ぶ (直前の戦略は選ばれにくい)。退く・迫るミサイル・補給・撃つ は戦略より優先 (従来どおり)。
+// ═══ 第137弾: 操縦の優先順位 — 自機COMも敵も この並びで上から試し、最初に動いた段で終わる ═══
+const PILOT_LADDER = ['plan', 'fire', 'grab', 'hunt', 'press', 'stall'];
+function pilotLadder(X) { for (const id of PILOT_LADDER) { const f = X[id]; if (f && f()) return id; } return null; }
 // ═══ 第133弾 (段6・登録簿方式): 戦略の登録簿 — 戦略は「id・名前・説明・重みの式」を1か所に登録する。自機COMも敵も stratWeights がこの登録簿を回して選ぶ。
 //   新しい戦略 = ここに1行足し、実行を comStratStep (自機)・enemyStratStep (敵) か 共通の実行 (outpostRun など) に足す。艦種に縛らず、必要な持ち物・状態 (x の事実) を重みの式の中で見る。
 //   k = 性格と状況の係数 {st 隠密, ca 慎重, ag 攻撃, gr 貪欲, early 序盤}・x = 行為者が知っていること・near = 相手が近い間は始めない
@@ -17860,16 +17864,15 @@ function comPilotStep() {
             deployDrone('repair');
             comThinkEvent('p', '耐久' + _pct(hpF) + ' < 退き際' + _pct(retreat) + '・振り切った → リペアキットで修理 (残り' + (cargo.stock.repair || 0) + '個)');
         }
-        if (!c.hideUntil) c.hideUntil = now + COM_HIDE_TIME;
+        if (!c.hideUntil) { c.hideUntil = now + COM_HIDE_TIME; c.retreatS = null; }
         if (now < c.hideUntil) {
             c.mode = 'hide';
-            if (playerCoasting) toggleCoast(false);
-            player.setTarget(player.x, player.y);
-            if (powerStance !== 'silent') setStance('silent', true);
-            comThink('p', 'hide', '耐久' + _pct(hpF) + '・振り切った → 止まって潜む (残り' + Math.ceil((c.hideUntil - now) / 60) + '秒)');
-            return;
-        }
-        comThink('p', 'hide-end', '潜伏を終える — 耐久' + _pct(hpF) + 'のまま狩りへ戻る (また追われたら退く)');
+            // 第138弾 (操縦の総括の統合): 退いた後の潜伏は 敵と同じ「近くの濃い霧/岩礁帯へ行って止まる」(戦略 fogHide の実行 stratRun と同じ関数)。旧: その場で止まるだけ (敵は隠れ場所まで走っていた)
+            const RS = c.retreatS || (c.retreatS = { id: 'fogHide', t0: now - 3600, until: c.hideUntil, ph: 'go' });
+            const rr = stratRun(stratActorP(c, hpF, null, null), RS, now);
+            if (typeof rr === 'string') { c.hideUntil = now; comThinkEvent('p', '潜伏を終える (' + rr.slice(4) + ')'); }
+            else { comThink('p', 'hide', '耐久' + _pct(hpF) + '・振り切った → 隠れ場所で潜む (残り' + Math.ceil((c.hideUntil - now) / 60) + '秒)'); return; }
+        } else comThink('p', 'hide-end', '潜伏を終える — 耐久' + _pct(hpF) + 'のまま狩りへ戻る (また追われたら退く)');
     }
     if (playerCoasting) toggleCoast(false);
     // 2) 迫るミサイル (副長の回避・デコイ)
@@ -17903,58 +17906,64 @@ function comPilotStep() {
     // 3) 撃つ
     const te = bestFireTarget(), lk = te ? playerLockInfo(te) : null;
     comDatumNote(c, te, lk); // 第71弾: 相手を掴んだ位置を覚える
-    if (!c.hunt && comPlanStep(c, P, D, hpF, te, lk)) { _comStance(c, P); return; } // 第46弾: 作戦「囮で誘い背後を取る」
     let held = null;
+    // ═══ 第137弾 (操縦の総括・オーナー「いつやるんだ」): 任務の優先順位は 自機COMも敵も同じ並び (PILOT_LADDER) を同じ走査 (pilotLadder) で通す。
+    //   各段の実行は持ち主ごと (自機=このアダプタ・敵=Ship.update 側のアダプタ)。敵に無い段 (fire=見えている間の撃ち合いは aiState 'combat'・press=詰める・stall=拠点巡り) は null で、
+    //   それぞれ 敵では 'combat' 状態・追跡 (hunting) の持続・索敵行 (huntProwlRun) が受け持つ
+    const fireStep = () => {
     if (te && lk.full) {
-        // 見えている間は自動攻撃に任せる (航路を引くと自動攻撃より移動命令が優先されて撃ち合いから外れる)
-        // 第20弾: 撃てるものから持ち替える — ミサイル(リロード済み) → 実弾(射程内) → ビーム(射程の外側・溜まっていれば) → 届くもの
-        // (ビームは射角±10°で2秒溜めるので、至近の撃ち合いでは実弾を止めてしまう)
-        const wNow = currentWeapon();
-        const wWant = actorPickWeapon(player, lk.dist) || _wset[0]; // 第98弾: 敵と同じ1つの関数 (ミサイル→実弾→遠くのビーム)
-        if (wWant !== wNow && (wNow !== 'beam' || !(player._beamCharge > 0))) {
-            switchWeapon(wWant);
-            comThinkEvent('p', '有視界 ' + Math.round(lk.dist / 100) * 100 + 'u → ' + _WPN_JP[wWant] + 'に持ち替える');
-        }
-        // 第22弾: 見えている間は戦闘モードで操艦する (性格と相手の兵装で 正対/回り込み・優先を選び、10秒は続ける)
-        const oppW = te._lastFireType && now - (te._lastFireF || -1e9) < 1200 ? te._lastFireType : null;
-        if (!c.cm || now - c.cm.f >= CM_HOLD || c.cm.oppW !== oppW || (c.cm.hp >= 0.5) !== (hpF >= 0.5)) {
-            const ch = comChooseManeuver(P, hpF, wWant, oppW);
-            const changed = !c.cm || c.cm.mode !== ch.mode || c.cm.prio !== ch.prio;
-            c.cm = { f: now, oppW, hp: hpF, mode: ch.mode, prio: ch.prio };
-            if (changed) comThinkEvent('p', '戦闘機動 → ' + (ch.mode === 'flank' ? '回り込み (後方へ周回)' : '正対 (艦首を向けて間合いを保つ)') + '・' + (ch.prio === 'evade' ? '回避' : '攻撃') + '優先・間合いは兵装' + (oppW ? ' — 相手は' + _WPN_JP[oppW] : '') + ' (攻撃性' + _pct(P.aggression) + '・慎重さ' + _pct(P.caution) + ')');
-        }
-        if (combatMode.mode !== c.cm.mode || combatMode.prio !== c.cm.prio || combatMode.range !== 'auto') { combatMode = { mode: c.cm.mode, range: 'auto', prio: c.cm.prio }; syncCombatBar(); }
-        comThink('p', 'full', '有視界で捉えた (' + Math.round(lk.dist / 100) * 100 + 'u) → ' + (combatMode.mode === 'flank' ? '回り込み' : '正対') + 'で撃つ');
-        if (contact && (P.aggression >= 0.5 || P.caution >= 0.5 || playerExposureLevel >= 2) && now - c.lastDeploy > COM_DEPLOY_GAP && !(c.st && (c.st.id === 'ambush' || c.st.id === 'bait' || c.st.id === 'fogHide'))) _comDeploy(c, P); // 第58弾: 潜む戦略の間はドローンを出して信号を増やさない
-        _comStance(c, P);
-        return;
-    } else if (te && lk.assumed && !c.hunt) { // 第80弾: 任務中は任務の判断で撃つ
-        _comCMOff(); // 推定だけの間は測量の航路を引く (戦闘モードは見えている時だけ)
-        const w = currentWeapon(), sa = _signalAnalysis[enemySid(te)];
-        const lm = sa && sa.misses && sa.misses[sa.misses.length - 1], lo = sa && sa.obs[sa.obs.length - 1];
-        const hc = comHitChance(te, w, lk, sa);
-        let bw = w, bh = hc;
-        for (const w2 of ['beam', 'missile']) { if (!playerHasWeapon(w2)) continue; const h2 = comHitChance(te, w2, lk, sa); if (h2 > bh + 0.15) { bw = w2; bh = h2; } }
-        const no = sigNo(enemySid(te));
-        if (lm && (!lo || lo.f < lm.f + 90)) held = 'SIG-' + no + ' 推定点は外れた → 新しい方位を取るまで撃たない';
-        else if (bw !== w && bh >= fireThr) {
-            switchWeapon(bw);
-            comThink('p', 'sw' + bw, 'SIG-' + no + ' ' + _WPN_JP[bw] + 'なら命中予測' + _pct(bh) + ' ≥ 撃つ基準' + _pct(fireThr) + ' → 持ち替える');
-        } else if (hc >= fireThr && playerWeaponReady(player, w)) {
-            issueFireOrder();
-            comThinkEvent('p', 'SIG-' + no + ' 命中予測' + _pct(hc) + ' ≥ 撃つ基準' + _pct(fireThr) + ' (攻撃性' + _pct(P.aggression) + ') → ' + _WPN_JP[w] + 'で撃つ (推定' + Math.round(lk.dist / 100) * 100 + 'u)');
+            // 見えている間は自動攻撃に任せる (航路を引くと自動攻撃より移動命令が優先されて撃ち合いから外れる)
+            // 第20弾: 撃てるものから持ち替える — ミサイル(リロード済み) → 実弾(射程内) → ビーム(射程の外側・溜まっていれば) → 届くもの
+            // (ビームは射角±10°で2秒溜めるので、至近の撃ち合いでは実弾を止めてしまう)
+            const wNow = currentWeapon();
+            const wWant = actorPickWeapon(player, lk.dist) || _wset[0]; // 第98弾: 敵と同じ1つの関数 (ミサイル→実弾→遠くのビーム)
+            if (wWant !== wNow && (wNow !== 'beam' || !(player._beamCharge > 0))) {
+                switchWeapon(wWant);
+                comThinkEvent('p', '有視界 ' + Math.round(lk.dist / 100) * 100 + 'u → ' + _WPN_JP[wWant] + 'に持ち替える');
+            }
+            // 第22弾: 見えている間は戦闘モードで操艦する (性格と相手の兵装で 正対/回り込み・優先を選び、10秒は続ける)
+            const oppW = te._lastFireType && now - (te._lastFireF || -1e9) < 1200 ? te._lastFireType : null;
+            if (!c.cm || now - c.cm.f >= CM_HOLD || c.cm.oppW !== oppW || (c.cm.hp >= 0.5) !== (hpF >= 0.5)) {
+                const ch = comChooseManeuver(P, hpF, wWant, oppW);
+                const changed = !c.cm || c.cm.mode !== ch.mode || c.cm.prio !== ch.prio;
+                c.cm = { f: now, oppW, hp: hpF, mode: ch.mode, prio: ch.prio };
+                if (changed) comThinkEvent('p', '戦闘機動 → ' + (ch.mode === 'flank' ? '回り込み (後方へ周回)' : '正対 (艦首を向けて間合いを保つ)') + '・' + (ch.prio === 'evade' ? '回避' : '攻撃') + '優先・間合いは兵装' + (oppW ? ' — 相手は' + _WPN_JP[oppW] : '') + ' (攻撃性' + _pct(P.aggression) + '・慎重さ' + _pct(P.caution) + ')');
+            }
+            if (combatMode.mode !== c.cm.mode || combatMode.prio !== c.cm.prio || combatMode.range !== 'auto') { combatMode = { mode: c.cm.mode, range: 'auto', prio: c.cm.prio }; syncCombatBar(); }
+            comThink('p', 'full', '有視界で捉えた (' + Math.round(lk.dist / 100) * 100 + 'u) → ' + (combatMode.mode === 'flank' ? '回り込み' : '正対') + 'で撃つ');
+            if (contact && (P.aggression >= 0.5 || P.caution >= 0.5 || playerExposureLevel >= 2) && now - c.lastDeploy > COM_DEPLOY_GAP && !(c.st && (c.st.id === 'ambush' || c.st.id === 'bait' || c.st.id === 'fogHide'))) _comDeploy(c, P); // 第58弾: 潜む戦略の間はドローンを出して信号を増やさない
             _comStance(c, P);
-            return;
-        } else if (hc >= fireThr) held = 'SIG-' + no + ' 命中予測' + _pct(hc) + ' — ' + _WPN_JP[w] + 'が装填中/弾切れ → まだ撃てない'; // 第71弾: 旧は「63% < 基準34%」と矛盾した文だった
-        else if (hc > 0) held = 'SIG-' + no + ' 命中予測' + _pct(hc) + ' < 撃つ基準' + _pct(fireThr) + ' → まだ撃たない';
-    }
-    // 3a) 第80弾 (オーナー「目の前にアイテムがあるのに取らずに急に方向転換する」): 取りに行くと決めた物・目の前 (3000u以内) の拾い物は、危険が無ければ戦略や詰めより先に取る
-    if (comGrabStep(c, P, hpF, retreat, te, lk)) { _comStance(c, P); return; }
-    // 3a') 第80弾: 狩人の頭脳 (自機COM) — 忍び寄り・偽装の罠・待ち伏せ
-    if (comHunterStep(c, P, D, hpF, retreat, te, lk)) return;
-    // 3b) 第71弾: 決着をつける — 掴んだ相手へ詰める / 見失ったら最後の推定位置を捜す (戦略より先)
-    if (comPressStep(c, P, D, hpF, te, lk, retreat, held, contact)) { _comStance(c, P); return; }
-    if (comStallTour(c, P, D, hpF, contact)) { _comStance(c, P); return; }
+            return true;
+        } else if (te && lk.assumed && !c.hunt) { // 第80弾: 任務中は任務の判断で撃つ
+            _comCMOff(); // 推定だけの間は測量の航路を引く (戦闘モードは見えている時だけ)
+            const w = currentWeapon(), sa = _signalAnalysis[enemySid(te)];
+            const lm = sa && sa.misses && sa.misses[sa.misses.length - 1], lo = sa && sa.obs[sa.obs.length - 1];
+            const hc = comHitChance(te, w, lk, sa);
+            let bw = w, bh = hc;
+            for (const w2 of ['beam', 'missile']) { if (!playerHasWeapon(w2)) continue; const h2 = comHitChance(te, w2, lk, sa); if (h2 > bh + 0.15) { bw = w2; bh = h2; } }
+            const no = sigNo(enemySid(te));
+            if (lm && (!lo || lo.f < lm.f + 90)) held = 'SIG-' + no + ' 推定点は外れた → 新しい方位を取るまで撃たない';
+            else if (bw !== w && bh >= fireThr) {
+                switchWeapon(bw);
+                comThink('p', 'sw' + bw, 'SIG-' + no + ' ' + _WPN_JP[bw] + 'なら命中予測' + _pct(bh) + ' ≥ 撃つ基準' + _pct(fireThr) + ' → 持ち替える');
+            } else if (hc >= fireThr && playerWeaponReady(player, w)) {
+                issueFireOrder();
+                comThinkEvent('p', 'SIG-' + no + ' 命中予測' + _pct(hc) + ' ≥ 撃つ基準' + _pct(fireThr) + ' (攻撃性' + _pct(P.aggression) + ') → ' + _WPN_JP[w] + 'で撃つ (推定' + Math.round(lk.dist / 100) * 100 + 'u)');
+                _comStance(c, P);
+                return true;
+            } else if (hc >= fireThr) held = 'SIG-' + no + ' 命中予測' + _pct(hc) + ' — ' + _WPN_JP[w] + 'が装填中/弾切れ → まだ撃てない'; // 第71弾: 旧は「63% < 基準34%」と矛盾した文だった
+            else if (hc > 0) held = 'SIG-' + no + ' 命中予測' + _pct(hc) + ' < 撃つ基準' + _pct(fireThr) + ' → まだ撃たない';
+        }
+        return false;
+    };
+    const got = pilotLadder({
+        plan: () => !c.hunt && comPlanStep(c, P, D, hpF, te, lk) && (_comStance(c, P), true), // 第46弾: 作戦「囮で誘い背後を取る」
+        fire: fireStep,
+        grab: () => comGrabStep(c, P, hpF, retreat, te, lk) && (_comStance(c, P), true), // 第80弾: 取りに行くと決めた物・目の前の拾い物
+        hunt: () => comHunterStep(c, P, D, hpF, retreat, te, lk), // 第80弾: 狩人の頭脳
+        press: () => comPressStep(c, P, D, hpF, te, lk, retreat, held, contact) && (_comStance(c, P), true), // 第71弾: 決着をつける
+        stall: () => comStallTour(c, P, D, hpF, contact) && (_comStance(c, P), true) });
+    if (got) return;
     // 4) 出す
     if (contact && (P.aggression >= 0.5 || P.caution >= 0.5 || playerExposureLevel >= 2) && now - c.lastDeploy > COM_DEPLOY_GAP && !(c.st && (c.st.id === 'ambush' || c.st.id === 'bait' || c.st.id === 'fogHide'))) _comDeploy(c, P); // 第58弾: 潜む戦略の間はドローンを出して信号を増やさない
     // 4b) 第58弾: 戦略テンプレート (待ち伏せ・餌・ドローン・霧に潜む・狩り・拠点防衛)。収集は従来どおり下の流れ
