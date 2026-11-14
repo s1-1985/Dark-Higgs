@@ -2834,6 +2834,7 @@ canvas.addEventListener('touchstart', (e) => {
             touch.holding = false;
             if (!touch.isPinching && !touch.moved && player) {
                 const { x: worldX, y: worldY } = screenToWorld(touch.startX, touch.startY);
+                if (hackPending || droneHackMode) { if (tryFireHackPending(worldX, worldY)) { touch.waypointFired = true; return; } } // 第160弾 (Android): 指を置いたままでも発射 (旧: 400ms以上押すと長押しメニューになり撃てなかった)
                 // 指向性ソナー待機中: 長押しで発射方向を決定
                 if (dirSonarPendingFire) {
                     dirSonarPendingFire = false;
@@ -10002,6 +10003,8 @@ function armHackWave() { // 「ハック」ボタン: 撃つ構え (もう一度
     if (!hackSel) { hackNeedSel(); return; }
     droneHackMode = false; document.getElementById('btn-hackw-drone')?.classList.remove('pending-fire');
     hackPending = hackSel; canvas.style.cursor = 'crosshair'; _hackSelUi();
+    if (window.closeActionPopover) setTimeout(() => window.closeActionPopover(), 60); // 第160弾 (Android): ポップオーバーが地図を覆い、方向をタップできなかった (ボタンが stopPropagation で、閉じる処理が走っていなかった)
+    uiToast('ハック (' + HACK_EFFECTS[hackSel].jp + ') — 電波を飛ばす方向を地図でタップ', false);
     { const _h0 = getHiggsIntensity(player.x, player.y); if (_h0 >= HIGGS_DENSE) logMessage('HACK: 今は濃いヒッグス(' + Math.round(_h0 * 100) + '%)の中 — 電波が通らず当たらない。霧の薄い所へ出てから撃つ', 'warning-msg'); }
     logMessage('HACK: ハック波 (' + HACK_EFFECTS[hackSel].jp + ') 待機中 — 電波を飛ばす方向を地図でタップ/クリックしてください。', 'system-msg');
     sfxUI('ui_select');
@@ -10018,6 +10021,7 @@ function selectDroneHack() {
     else if (c.length === 1) { droneHackPick = c[0]; droneHackMode = false; logMessage('HACK: ドローン侵入 — ' + (c[0]._kind === 'mech' ? 'Tech' : '戦闘機') + 'へ (離れる/濃い霧に入られると切れる)', 'system-msg'); }
     else { droneHackMode = true; logMessage('HACK: ドローン侵入 — 地図の候補 (' + c.length + '機・番号つき) をタップして選ぶ。もう一度押すと自動 (Tech→近い順)', 'system-msg'); }
     document.getElementById('btn-hackw-drone')?.classList.toggle('pending-fire', droneHackMode);
+    if (droneHackMode && window.closeActionPopover) setTimeout(() => window.closeActionPopover(), 60);
     sfxUI(c.length && lf.s2 ? 'ew_drone_hack_omni' : 'ui_deny');
 }
 function tryPickDroneHack(wx, wy) {
