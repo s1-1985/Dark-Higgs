@@ -454,7 +454,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261114a';
+const SPRITE_VER = '20261114c';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -2168,11 +2168,12 @@ function _bakeHiggsGrid(white) {
         if (d <= 0.01) continue;
         if (white) { px[o] = 225; px[o + 1] = 238; px[o + 2] = 255; px[o + 3] = Math.min(140, d * 150) | 0; continue; }
         let r, g, b, a;
-        if (d >= 0.85)      { r = 100; g = 20;  b = 200; a = 0.20; }
-        else if (d >= 0.70) { r = 40;  g = 80;  b = 220; a = 0.17; }
-        else if (d >= 0.50) { r = 0;   g = 200; b = 240; a = 0.13; }
-        else if (d >= 0.30) { r = 20;  g = 120; b = 160; a = 0.09; }
-        else                { r = 15;  g = 40;  b = 100; a = 0.03 + d * 0.15; }
+        // 第158弾 (オーナー「ヒッグス雲が背景の青い宇宙と重なって分かりづらい・暗い紫で」): 暗い紫 (濃いほど暗く濃く)
+        if (d >= 0.85)      { r = 48; g = 8;  b = 88;  a = 0.62; }
+        else if (d >= 0.70) { r = 56; g = 12; b = 100; a = 0.52; }
+        else if (d >= 0.50) { r = 64; g = 18; b = 112; a = 0.42; }
+        else if (d >= 0.30) { r = 62; g = 22; b = 104; a = 0.30; }
+        else                { r = 54; g = 24; b = 96;  a = 0.04 + d * 0.45; }
         px[o] = r; px[o + 1] = g; px[o + 2] = b; px[o + 3] = (a * 255) | 0;
     }
     cx.putImageData(img, 0, 0);
@@ -2267,46 +2268,44 @@ function getDebrisIntensity(x, y) {
     const key = (Math.round(x / 500) * 100000 + Math.round(y / 500)) | 0;
     let v = _debrisCache.get(key);
     if (v !== undefined) return v;
-    let total = 0;
-    for (let i = 0; i < debrisField.length; i++) {
-        const m = debrisField[i];
-        const dist = Math.hypot(x - m.x, y - m.y);
-        if (dist < m.r) total += (1 - dist / m.r) * m.density;
-    }
-    v = total > 1.0 ? 1.0 : total;
+    v = _stampIntensity(debrisField, x, y); // 第158弾: 岩石帯は絵を置いた所だけ
     _debrisCache.set(key, v);
     return v;
 }
 // 第152弾: 岩石帯・残骸帯の絵。絵 (透明地) を ばらまいて円の縁を薄れさせた1枚を、帯ごとに一度だけ焼く (読み込めるまでは従来の点描だけ)
-function _bakeBelt(img, m, n, szMin, szMax) {
-    const S = 512, c = document.createElement('canvas'); c.width = c.height = S; const x = c.getContext('2d');
-    let sd = ((m.x * 7 + m.y * 13) | 0) >>> 0; const rnd = () => { sd = (sd * 1664525 + 1013904223) >>> 0; return sd / 4294967296; };
+// 第158弾 (オーナー「岩石帯・残骸帯の効果範囲はスプライトと重なる範囲だけ・スプライトの解像度が低い」): 帯は「絵を置いた位置 (stamps)」の集まり。
+//   絵の描画 (大きいまま1枚ずつ・旧: 512pxに焼いてボケた) と 効果の範囲 (絵を置いた所の内側) は同じ stamps から決める。生成時に試合の乱数で決める (リプレイで同じ)。
+function _genStamps(m, n0, n1, smin, smax, sc) {
+    const n = Math.max(3, Math.round((n0 + n1 * m.density) * sc)); m.st = [];
     for (let i = 0; i < n; i++) {
-        const a = rnd() * 6.283, r = Math.sqrt(rnd()) * S * 0.5, sz = szMin + rnd() * (szMax - szMin);
-        x.save(); x.translate(S / 2 + Math.cos(a) * r, S / 2 + Math.sin(a) * r); x.rotate(rnd() * 6.283); x.globalAlpha = 0.55 + rnd() * 0.45; x.drawImage(img, -sz / 2, -sz / 2, sz, sz); x.restore();
+        const sz = smin + Math.random() * (smax - smin), a = Math.random() * 6.283, rr = i ? Math.sqrt(Math.random()) * Math.max(0, m.r - sz * 0.35) : 0;
+        m.st.push({ x: m.x + Math.cos(a) * rr, y: m.y + Math.sin(a) * rr, s: sz, rot: Math.random() * 6.283, al: 0.75 + Math.random() * 0.25 });
     }
-    x.globalCompositeOperation = 'destination-in';
-    const g = x.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2); g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(0.55, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
-    x.fillStyle = g; x.fillRect(0, 0, S, S); return c;
+}
+function _stampIntensity(arr, x, y) { // 絵を置いた円 (絵の幅の0.42倍) の内側だけ 濃さ=その帯の濃さ (縁で薄れる)
+    let best = 0;
+    for (let i = 0; i < arr.length; i++) {
+        const m = arr[i], dx = x - m.x, dy = y - m.y, R = m.r + 3000; if (!m.st || dx * dx + dy * dy > R * R) continue;
+        for (let k = 0; k < m.st.length; k++) { const t = m.st[k], ex = x - t.x, ey = y - t.y, rs = t.s * 0.42; if (ex * ex + ey * ey < rs * rs) { const v = m.density * Math.min(1, (1 - Math.sqrt(ex * ex + ey * ey) / rs) * 2.5); if (v > best) best = v; } }
+    }
+    return best;
 }
 function drawBelts(ctx, cx, cy, vw, vh) {
-    const one = (arr, img, key, n0, n1, s0, s1, alpha) => {
+    const one = (arr, img, alpha) => {
         if (!spriteReady(img)) return;
         for (let i = 0; i < arr.length; i++) {
-            const m = arr[i]; if (m.x + m.r < cx || m.x - m.r > cx + vw || m.y + m.r < cy || m.y - m.r > cy + vh) continue;
-            const k = key + i; let cv = _beltCv[k]; if (!cv) cv = _beltCv[k] = _bakeBelt(img, m, Math.round(n0 + n1 * m.density), s0, s1);
-            ctx.globalAlpha = alpha * (0.6 + 0.4 * m.density); ctx.drawImage(cv, m.x - m.r, m.y - m.r, m.r * 2, m.r * 2);
+            const m = arr[i]; if (!m.st || m.x + m.r + 3000 < cx || m.x - m.r - 3000 > cx + vw || m.y + m.r + 3000 < cy || m.y - m.r - 3000 > cy + vh) continue;
+            for (const t of m.st) {
+                if (t.x + t.s < cx || t.x - t.s > cx + vw || t.y + t.s < cy || t.y - t.s > cy + vh) continue;
+                ctx.save(); ctx.globalAlpha = alpha * t.al; ctx.translate(t.x, t.y); ctx.rotate(t.rot); ctx.drawImage(img, -t.s / 2, -t.s / 2, t.s, t.s); ctx.restore();
+            }
         }
         ctx.globalAlpha = 1;
     };
-    one(debrisField, SPRITES.terrain_rock, 'r', 10, 22, 110, 220, 0.95);
-    one(wreckField, SPRITES.terrain_wreck, 'w', 8, 12, 110, 210, 1.0);
+    one(debrisField, SPRITES.terrain_rock, 1);
+    one(wreckField, SPRITES.terrain_wreck, 1);
 }
-function getWreckIntensity(x, y) { // 第152弾: 残骸帯 (数が少ないので毎回その場で足す)
-    let total = 0;
-    for (let i = 0; i < wreckField.length; i++) { const m = wreckField[i], dx = x - m.x, dy = y - m.y, r2 = m.r * m.r; if (dx * dx + dy * dy < r2) total += (1 - Math.sqrt((dx * dx + dy * dy) / r2)) * m.density; }
-    return total > 1 ? 1 : total;
-}
+function getWreckIntensity(x, y) { return _stampIntensity(wreckField, x, y); } // 第158弾: 残骸帯は絵を置いた所だけ
 function getStormIntensity(x, y) {
     if (_stormCacheFrame !== _frameCount) { _stormCache.clear(); _stormCacheFrame = _frameCount; }
     const key = (Math.round(x / 500) * 100000 + Math.round(y / 500)) | 0;
@@ -6699,7 +6698,7 @@ function generateSector() {
             for (let tries = 0; tries < 260; tries++) {
                 const a = Math.random() * Math.PI * 2, rr = Math.sqrt(Math.random()) * Math.max(0, MAP_RADIUS * 0.96 - r * 0.7);
                 const x = MAP_CX + Math.cos(a) * rr, y = MAP_CY + Math.sin(a) * rr;
-                if (_discs.every(q => Math.hypot(q.x - x, q.y - y) >= q.r + r + 900)) { const d = { x, y, r }; _discs.push(d); return d; }
+                if (_discs.every(q => Math.hypot(q.x - x, q.y - y) >= (q.r + r) * 0.55)) { const d = { x, y, r }; _discs.push(d); return d; } // 第158弾: 見た目で多少重なってよい (旧: 900u離す)
             }
         }
         return null;
@@ -6709,13 +6708,13 @@ function generateSector() {
     const _nDebris = _rockPct > 0 ? Math.max(1, Math.round(_rockPct / 100 * _mapArea / (Math.PI * 6000 * 6000))) : 0;
     for (let i = 0; i < _nDebris; i++) {
         const r0 = Math.sqrt(_rockPct / 100 * _mapArea / _nDebris / Math.PI) * (0.85 + Math.random() * 0.3);
-        const d = _placeDisc(r0); if (d) debrisField.push({ x: d.x, y: d.y, r: d.r, density: Math.random() * 0.5 + 0.25 }); // 第152弾: 熱雲・磁気嵐3個分の広さ
+        const d = _placeDisc(r0); if (d) { const m = { x: d.x, y: d.y, r: d.r, density: Math.random() * 0.4 + 0.55 }; _genStamps(m, 8, 14, 2600, 4600, (d.r / 6000) * (d.r / 6000)); debrisField.push(m); } // 第152弾: 熱雲・磁気嵐3個分の広さ
     }
     const _nThermal = Math.max(0, Math.round(MC.thermal * _th.t)), _nStorm = Math.max(0, Math.round(MC.storm * _th.s)), _nWreck = Math.max(0, Math.round(MC.wreck));
-    for (let i = 0; i < _nStorm; i++) { const d = _placeDisc(Math.random() * 4000 + 2200); if (d) stormField.push({ x: d.x, y: d.y, r: d.r, density: Math.random() * 0.55 + 0.25 }); }
-    for (let i = 0; i < _nThermal; i++) { const d = _placeDisc(Math.random() * 3800 + 1600); if (d) thermalField.push({ x: d.x, y: d.y, r: d.r, density: Math.random() * 0.50 + 0.20 }); }
-    for (let i = 0; i < _nWreck; i++) { const d = _placeDisc(Math.random() * 1200 + 1800); if (d) wreckField.push({ x: d.x, y: d.y, r: d.r, density: Math.random() * 0.3 + 0.7 }); } // 第152弾: 壊れたコロニーの残骸帯
-    generateHiggsGrid(MC.cloud, _discs);
+    for (let i = 0; i < _nStorm; i++) { const d = _placeDisc(Math.random() * 1200 + 1800); if (d) stormField.push({ x: d.x, y: d.y, r: d.r, density: Math.random() * 0.55 + 0.25 }); }
+    for (let i = 0; i < _nThermal; i++) { const d = _placeDisc(Math.random() * 1200 + 1800); if (d) thermalField.push({ x: d.x, y: d.y, r: d.r, density: Math.random() * 0.50 + 0.20 }); }
+    for (let i = 0; i < _nWreck; i++) { const d = _placeDisc(Math.random() * 1200 + 1800); if (d) { const m = { x: d.x, y: d.y, r: d.r, density: Math.random() * 0.3 + 0.7 }; _genStamps(m, 4, 6, 1300, 2300, (d.r / 2400) * (d.r / 2400)); wreckField.push(m); } } // 第152弾: 壊れたコロニーの残骸帯
+    generateHiggsGrid(MC.cloud, []); // 第158弾: 雲は地形の円を避けない (円の縁の境目が目立った・見た目で重なってよい)
     // bgMistをオフスクリーンキャンバスに事前焼き付け (毎フレームのcreateRadialGradientを排除)
     // サイズを512に抑える: 4096x4096=64MBは生成に数秒かかりモバイルをフリーズさせるため
     setTimeout(() => {
@@ -6726,35 +6725,7 @@ function generateSector() {
         // ヒッグス雲(白) — 視野内で「下から見上げた雲」として 'lighter' 合成する用 (濃いほど白い)
         higgsCloudCanvas = _bakeHiggsGrid(true);
 
-        // ── デブリ帯 (岩石帯) ベイク: 散らばった岩片の点描 (灰色) ──
-        const dc = document.createElement('canvas');
-        dc.width = dc.height = 768;
-        const dcx = dc.getContext('2d');
-        let _ds = 0x9e3779b9 >>> 0;
-        const drng = () => { _ds = (_ds * 1664525 + 1013904223) >>> 0; return _ds / 4294967296; };
-        debrisField.forEach(m => {
-            const sx = m.x * scale, sy = m.y * scale, sr = m.r * scale;
-            // ベース(岩礁の影) + 岩片の点描 — 濃度高いほど視認しやすく
-            const g = dcx.createRadialGradient(sx, sy, 0, sx, sy, sr);
-            g.addColorStop(0, `rgba(160,155,140,${(0.22 * m.density).toFixed(3)})`);
-            g.addColorStop(0.6, `rgba(100,98,88,${(0.12 * m.density).toFixed(3)})`);
-            g.addColorStop(1, 'rgba(0,0,0,0)');
-            dcx.fillStyle = g;
-            dcx.beginPath(); dcx.arc(sx, sy, sr, 0, Math.PI * 2); dcx.fill();
-            const rocks = Math.floor(sr * sr * 0.0016 * m.density);
-            for (let k = 0; k < rocks; k++) {
-                const a = drng() * Math.PI * 2;
-                const rr = Math.sqrt(drng()) * sr;
-                const px = sx + Math.cos(a) * rr, py = sy + Math.sin(a) * rr;
-                const sz = 0.6 + drng() * 1.8;
-                const sh = 90 + (drng() * 80) | 0;
-                dcx.globalAlpha = 0.35 + drng() * 0.55;
-                dcx.fillStyle = `rgb(${sh},${sh - 4},${sh - 14})`;
-                dcx.fillRect(px, py, sz, sz);
-            }
-            dcx.globalAlpha = 1;
-        });
-        debrisCanvas = dc;
+        debrisCanvas = null; // 第158弾: 岩石帯は絵 (drawBelts) だけ・円い下地は描かない
 
         // ── 磁気嵐帯 ベイク: 紫〜シアンのEMノイズ雲 (描画時に明滅) ──
         const sc2c = document.createElement('canvas');
@@ -9552,7 +9523,7 @@ function _fieldSpotFor(kind) {
         const c = [];
         for (let k = 0; k < 80; k++) { const a = Math.random() * Math.PI * 2, r = 3000 + Math.sqrt(Math.random()) * (FIELD_SPREAD_R - 3000), x = MAP_CX + Math.cos(a) * r, y = MAP_CY + Math.sin(a) * r; if (ok(x, y, 2000)) c.push({ x, y, h: higgsBaseAt(x, y) }); }
         c.sort((a, b) => b.h - a.h); if (c.length) sp = c[Math.floor(Math.random() * Math.min(5, c.length))];
-    } else if (kind === 'cache' && Math.random() < 0.65) sp = inCloud(debrisField, 0.7, 2000);
+    } else if (kind === 'cache' && Math.random() < 0.10) sp = inCloud(debrisField, 0.7, 2000); // 第158弾: 岩石帯の中に偏らせない (旧65%)
     return sp || _fieldSpot();
 }
 function _fieldSpot() {
@@ -10454,6 +10425,19 @@ function _phantomMarks() {
     }
     return out;
 }
+// 第158弾: 自然の信号 (霧のゆらぎ・嵐の放電・熱泉) の絵は ③地形の層 (ヒッグス雲の下) に描く。見える条件は従来どおり (有視界か特定済み)
+function drawNatureFx(ctx) {
+    if (!player || prpPov()) return;
+    const t = _frameCount / 60;
+    for (const f0 of fieldSignals) {
+        if (f0.kind !== 'cloud' && f0.kind !== 'storm' && f0.kind !== 'vent') continue;
+        const known = _srcKnown[f0.sid];
+        if (!known && !higgsViewOff && !inPlayerVision(f0.x, f0.y)) continue;
+        const img = SPRITES['fx_field_' + f0.kind]; if (!spriteReady(img)) continue;
+        const f = known && !higgsViewOff ? Object.assign(Object.create(f0), srcDrawPos(f0.sid, f0)) : f0;
+        ctx.save(); drawFieldFx(ctx, f, img, Math.min(1, f.age / FIELD_FADE, f.life / FIELD_FADE), t); ctx.restore();
+    }
+}
 function drawFieldSignals(ctx) {
     const inv = 1 / camera.zoom, t = _frameCount / 60;
     for (const f0 of fieldSignals.concat(_phantomMarks())) {
@@ -10478,7 +10462,7 @@ function drawFieldSignals(ctx) {
             if (f.kind === 'cache') {
                 const L = Math.max(150, 30 * inv);
                 ctx.save(); ctx.globalAlpha = 0.95; ctx.translate(f.x, f.y); ctx.rotate(f.ph); ctx.drawImage(_fxImg, -L / 2, -L / 2, L, L); ctx.restore();
-            } else drawFieldFx(ctx, f, _fxImg, fade, t); // 第38弾: 重ね絵とアニメーション (旧: 1枚の絵を置くだけで浮いて見えた)
+            } /* 自然の信号の絵は drawNatureFx (地形の層) */
             if (f.kind === 'cache' && f.takeP > 0) { ctx.globalAlpha = 0.9; ctx.strokeStyle = '#ffe18c'; ctx.lineWidth = 2 * inv; ctx.beginPath(); ctx.arc(f.x, f.y, CACHE_R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, f.takeP / CACHE_TIME)); ctx.stroke(); }
             if (f.kind === 'cache') { ctx.globalAlpha = 0.3; ctx.strokeStyle = '#ffe18c'; ctx.lineWidth = 1.5 * inv; ctx.setLineDash([6 * inv, 8 * inv]); ctx.beginPath(); ctx.arc(f.x, f.y, CACHE_R, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
         } else if (f.kind === 'cloud') {
@@ -12662,11 +12646,6 @@ function drawBackground(ctx) {
     const _mapFade = 0.07; // マップモード時の非対応層のフェード値
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    if (bgMistCanvas) {
-        ctx.globalAlpha = ((!mapMode || sensorsOn.higgs) ? 1.0 : _mapFade) * (1 - 0.8 * lullK); // 第34弾: 凪
-        ctx.drawImage(bgMistCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
-        ctx.globalAlpha = 1;
-    }
     if (debrisCanvas) {
         ctx.globalAlpha = (!mapMode || sensorsOn.optic) ? 1.0 : _mapFade;
         ctx.drawImage(debrisCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
@@ -12682,6 +12661,14 @@ function drawBackground(ctx) {
         const _ta = (!mapMode || sensorsOn.heat) ? 0.78 + Math.sin(Date.now() * 0.003 + 2.1) * 0.12 : _mapFade;
         ctx.save(); ctx.globalAlpha = _ta; ctx.imageSmoothingEnabled = true;
         ctx.drawImage(thermalCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE); ctx.restore();
+    }
+
+    drawNatureFx(ctx); // 第158弾: ③ 熱源・磁気嵐・ヒッグスの揺らぎの絵 (地形と同じ層・雲の下)
+    // ④ ヒッグス雲 (地形・自然の信号の上)
+    if (bgMistCanvas) {
+        ctx.globalAlpha = ((!mapMode || sensorsOn.higgs) ? 1.0 : _mapFade) * (1 - 0.8 * lullK); // 第34弾: 凪
+        ctx.drawImage(bgMistCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
+        ctx.globalAlpha = 1;
     }
 
     // Sparse coordinate grid (large cells)
