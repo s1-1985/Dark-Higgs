@@ -6554,6 +6554,12 @@ function updateDrawSonarEffects(ctx) {
 
 let _logDedup = {};
 var _logHist = [], _xoHist = []; // var: 初期化中に logMessage が呼ばれても落ちない
+function uiToast(msg, warn) {
+    let d = document.getElementById('ui-toast');
+    if (!d) { d = document.createElement('div'); d.id = 'ui-toast'; d.style.cssText = 'position:fixed;left:50%;top:76px;transform:translateX(-50%);z-index:9000;max-width:70vw;padding:8px 14px;border-radius:6px;font:13px/1.45 sans-serif;text-align:center;pointer-events:none'; document.body.appendChild(d); }
+    d.style.background = warn ? 'rgba(40,20,8,0.94)' : 'rgba(8,24,34,0.94)'; d.style.border = '1px solid ' + (warn ? '#ffb070' : '#66ddff'); d.style.color = warn ? '#ffe0c0' : '#c8f4ff';
+    d.textContent = msg; d.style.display = 'block'; clearTimeout(d._t); d._t = setTimeout(() => { d.style.display = 'none'; }, 4200);
+}
 function logMessage(text, className) {
     const log = document.getElementById('message-log');
     if (!log) return;
@@ -6566,6 +6572,7 @@ function logMessage(text, className) {
     // 第16弾: 方位を含むログは自艦リング上でその方位を点灯 (ズームアウトせずに方角が分かる)
     const _bm = /方位\s?(\d{1,3})°/.exec(text);
     if (_bm && typeof ringMarkBearing === 'function') ringMarkBearing(+_bm[1], className === 'warning-msg' ? '#ffb070' : '#ffe08a');
+    if (text.startsWith('HACK:') && !playReplay && !comDemo) uiToast(text.slice(5).trim(), className === 'warning-msg'); // 第159弾: ログ欄が無いので、ハックの結果・失敗の理由は画面中央にも出す
     const msg = document.createElement('div');
     msg.className = `message ${className}`;
     const now = new Date();
@@ -9995,6 +10002,7 @@ function armHackWave() { // 「ハック」ボタン: 撃つ構え (もう一度
     if (!hackSel) { hackNeedSel(); return; }
     droneHackMode = false; document.getElementById('btn-hackw-drone')?.classList.remove('pending-fire');
     hackPending = hackSel; canvas.style.cursor = 'crosshair'; _hackSelUi();
+    { const _h0 = getHiggsIntensity(player.x, player.y); if (_h0 >= HIGGS_DENSE) logMessage('HACK: 今は濃いヒッグス(' + Math.round(_h0 * 100) + '%)の中 — 電波が通らず当たらない。霧の薄い所へ出てから撃つ', 'warning-msg'); }
     logMessage('HACK: ハック波 (' + HACK_EFFECTS[hackSel].jp + ') 待機中 — 電波を飛ばす方向を地図でタップ/クリックしてください。', 'system-msg');
     sfxUI('ui_select');
 }
@@ -10097,10 +10105,10 @@ function drawHackFx(ctx) {
     const inv = 1 / camera.zoom;
     // 第90弾: 撃つ側は「どこまで届くか」を見て撃つ — ハック波を選んでいる間は届く距離の円 (霧の向こう・濃いヒッグスの中には届かない)
     if ((hackPending || hackSel) && player && player.hp > 0 && !comDemo && !playReplay) {
-        const R = hackPulseRange(hackPower('player'), player);
+        const R0 = hackPulseRange(hackPower('player'), player), _hh = getHiggsIntensity(player.x, player.y), R = waveReach(R0, { mean: _hh, start: _hh, wreck: getWreckIntensity(player.x, player.y) }); // 第159弾: 円は霧で縮んだ実際の届く距離 (旧: 霧を引く前の距離を描いて、撃っても届かなかった)
         ctx.save(); ctx.strokeStyle = '#ff66cc'; ctx.globalAlpha = 0.75; ctx.lineWidth = 1.6 * inv; ctx.setLineDash([12 * inv, 10 * inv]);
         ctx.beginPath(); ctx.arc(player.x, player.y, R, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); ctx.restore();
-        queueTag(player.x, player.y - R, 'ハック波 届く距離 ' + Math.round(R / 100) * 100 + 'u', '霧が濃いほど縮む・濃いヒッグス(70%)の中には届かない', '255,102,204', 'top', 1);
+        queueTag(player.x, player.y - R, _hh >= HIGGS_DENSE ? 'ハック波 — 濃いヒッグスの中では電波が通らない' : 'ハック波 届く距離 ' + Math.round(R / 100) * 100 + 'u', '霧が濃いほど縮む・濃いヒッグス(70%)の中には届かない', '255,102,204', 'top', 1);
     }
     if (_droneHackCands.length && player && player.hp > 0 && (droneHackMode || !droneHackPick)) { // ドローン侵入の候補 (番号)
         ctx.save(); ctx.strokeStyle = '#ff66cc'; ctx.globalAlpha = droneHackMode ? 0.7 : 0.3; ctx.lineWidth = 1.2 * inv; ctx.setLineDash([6 * inv, 8 * inv]);
@@ -10547,8 +10555,8 @@ const ANA_MIN = 0.12, ANA_TAU = 6, ANA_COLONY = 0.6, ANA_NEWPOS = 1.5; // 第72�
 //   解析の速さ = 演算力 × 受け取りの質。受け取りの質 qf = (確かさ conf − 最低ライン) ÷ (1 − 最低ライン) (conf は受信の強さ=距離・感度・経路の減衰で決まる)。
 //   最低ライン cmin = ANA_CMIN ÷ 演算力^0.6 — 演算力が低いと弱い信号 (遠い・感度が低い) は解析がまったく進まず、コロニーを取ると遠く弱い信号も進む。
 //   精度 (推定円の下限) も演算力で締まる。進捗 (名札の蛍光グリーン) = 解析量 ÷ ANA_FULL。自艦も敵も同じ式 (anaRate)。
-const ANA_CMIN = 0.34, ANA_RATE = 0.26, ANA_FULL = 12;
-const ANA_CONF_REF = 0.30; // 実測: 受け取りの確かさ conf は 近く=0.2〜0.25・中距離=0.1・遠く=0.05 前後 (最大でも0.3台) → 0.30 を「十分強い」とする
+const ANA_CMIN = 0.24, ANA_RATE = 0.36, ANA_FULL = 12; // 第159弾 (オーナー「演算力1.0で2000u先の熱源の解析に時間がかかりすぎ」): 最低ライン 0.34→0.24・速さ 0.26→0.36 (conf 0.1 の遠い信号が進まなかった)
+const ANA_CONF_REF = 0.26; // 実測: 受け取りの確かさ conf は 近く=0.2〜0.25・中距離=0.1・遠く=0.05 前後 (最大でも0.3台) → 0.30 を「十分強い」とする
 function anaQf(cp, conf) { const sn = Math.min(1, conf / ANA_CONF_REF), cmin = ANA_CMIN / Math.pow(Math.max(0.3, cp), 0.6); return Math.max(0, (sn - cmin) / (1 - cmin)); }
 function anaRate(cp, conf, newPos) { return cp * anaQf(cp, conf) * ANA_RATE * (newPos ? ANA_NEWPOS : 1); }
 function anaProgress(sa) { return sa ? Math.max(0, Math.min(1, (sa.ana || 0) / ANA_FULL)) : 0; }
@@ -11835,9 +11843,9 @@ function drawShipRing(ctx) {
     // (10) 第21弾: 今いる場所の霧と地形 (リングの左下)
     {
         const hh = getHiggsIntensity(player.x, player.y), dbr = getDebrisIntensity(player.x, player.y), stm = getStormIntensity(player.x, player.y), thm = getThermalIntensity(player.x, player.y);
-        const rows = [['霧 ' + Math.round(hh * 100) + '%', hh > 0.5 ? '#c79bff' : hh > 0.2 ? '#7fd8ff' : '#7fa8c8']];
+        const rows = [['HIGGS ' + Math.round(hh * 100) + '%', hh > 0.5 ? '#5f9bff' : hh > 0.2 ? '#7fb8ff' : '#7fa8d8']]; // 第159弾: ヒッグス濃度は青の HIGGS・磁気嵐は紫の EM
         if (dbr > 0.1) rows.push(['岩石 ' + Math.round(dbr * 100) + '%', '#c8c8b4']);
-        if (stm > 0.1) rows.push(['嵐 ' + Math.round(stm * 100) + '%', '#c89cff']);
+        if (stm > 0.1) rows.push(['EM ' + Math.round(stm * 100) + '%', '#c07cff']);
         if (thm > 0.1) rows.push(['熱雲 ' + Math.round(thm * 100) + '%', '#ffb070']);
         for (let i = 0; i < rows.length; i++) screenTag(ctx, cx - R * 0.74, cy + R * 0.8 + i * 18, rows[i][0], null, rows[i][1], 0.85, 'right'); // 第40弾: 名札
     }
