@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261114d">
+    <link rel="stylesheet" href="style.css?v=20261114e">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -694,6 +694,7 @@
                         <div class="com-side" data-side="e"></div>
                     </div>
                     <div class="com-opts" id="com-opts"></div>
+                    <div class="com-mapcfg" id="com-map"></div>
                     <div class="db-btns">
                         <button class="btn btn-small" id="com-cancel">戻る</button>
                         <button class="btn btn-primary" id="com-start">COM対戦を開始 ▶</button>
@@ -831,7 +832,7 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261114d"></script>
+    <script src="game.js?v=20261114e"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {

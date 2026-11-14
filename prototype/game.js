@@ -1614,6 +1614,9 @@ const RESUPPLY_R = 600, RESUPPLY_TIME = 480, COLONY_RESUPPLY_CD = 3600;
 //   1つ=方角(幅120°) / 2つ=+距離(幅5000u) / 3つ以上=方角の幅30°・距離の幅1000u。10秒ごとに更新 (中心は真の位置から幅の内でずれる)
 //   自分のノード1つごとに幅を10%狭める (最大40%)。ノードは聴音局のまま。難破船は一度だけ弾と資材を拾える。S&Dは全コロニーの占有で勝ち (奪われれば負け)
 // 第24弾 (オーナー選択「コロニーを増やす」): 接触が少ない対策。近くにコロニーがあれば早く占有でき、情報 (方角→距離) が早く効く。双方が同じ所を取り合うので出会いも増える
+// 第155弾 (オーナー): マップの設定 (COM対戦の設定画面で調整)。面積 = %・個数 = 個。cloud+rock+(何もない空間)=100%
+const MAP_DEF = { cloud: 50, rock: 6, thermal: 5, storm: 4, wreck: 4, fluct: 6, colony: 5, node: 6, cache: 5, derelict: 5, convoy: 1 };
+let mapCfg = Object.assign({}, MAP_DEF);
 const COLONY_COUNT = { br: 5, sd: 5 }; // 第26弾: 8→5 (倍速で試合時間を縮められるので、密集させない — オーナー)
 const COLONY_INTEL_PERIOD = 600;
 const COLONY_INTEL = [null, { ang: Math.PI / 3, dist: null }, { ang: Math.PI / 3, dist: 2500 }, { ang: Math.PI / 12, dist: 500 }]; // 半幅
@@ -2199,7 +2202,11 @@ function updateHiggsClears() {
 }
 // 濃度のマス目を作る: 4段の値ノイズ (6000/3000/1500/750u) を、面積の割合が狙いどおりになるよう順位で濃さへ写す
 // (0%=約15% / 20%未満=約20% / 20〜50%=約35% / 50〜90%=約22% / 90%以上=約8% — 旧設計の「0%が1割・20〜50%が6割・51〜90%が2割・100%が1割」に近い形)
-function generateHiggsGrid() {
+// 第155弾 (オーナー): 地図の面積配分。ヒッグス雲(濃い) = 全体の cloudPct% / 何もない空間 = うっすらした濃度 / 岩石帯・熱雲・磁気嵐・残骸帯の円の中も うっすら (雲とランドマークは被らない)。
+//   discs = 置いたランドマークの円 [{x,y,r}]。円の内側は雲から外し、縁の外側 0〜40% は雲が薄れる。残りのマスで 値ノイズの順位が上位の cloudPct% を雲にする (雲の縁はなめらかにつなぐ)。
+function generateHiggsGrid(cloudPct, discs) {
+    if (cloudPct === undefined) cloudPct = 50;
+    discs = discs || [];
     const seed = (Math.random() * 0xffffffff) >>> 0;
     const hash = (x, y) => { let h = (x * 374761393 + y * 668265263 + seed) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
     const vn = (x, y) => {
@@ -2208,28 +2215,43 @@ function generateHiggsGrid() {
         const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1);
         return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
     };
-    const N = HG_N, g = new Float32Array(N * N);
+    const N = HG_N, g = new Float32Array(N * N), ratio = new Float32Array(N * N);
     const BINS = 1024, hist = new Uint32Array(BINS);
+    let inside = 0, free = 0;
     for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
         let v = 0, amp = 0.5, f = 1 / 60, norm = 0;
         for (let o = 0; o < 4; o++) { v += vn(i * f + o * 17.3, j * f - o * 9.1) * amp; norm += amp; amp *= 0.55; f *= 2; }
         v /= norm;
-        g[j * N + i] = v;
-        hist[Math.min(BINS - 1, (v * BINS) | 0)]++;
+        const k = j * N + i, x = (i + 0.5) * HG_CELL, y = (j + 0.5) * HG_CELL;
+        g[k] = v;
+        let rt = 99;
+        if (Math.hypot(x - MAP_CX, y - MAP_CY) <= MAP_RADIUS) {
+            inside++;
+            for (let q = 0; q < discs.length; q++) { const dd = discs[q], t = Math.hypot(x - dd.x, y - dd.y) / dd.r; if (t < rt) rt = t; }
+            if (rt > 1) { free++; hist[Math.min(BINS - 1, (v * BINS) | 0)]++; }
+            ratio[k] = rt;
+        } else ratio[k] = -1; // 地図の外
     }
-    // 順位 (累積の割合) → 濃さ
-    const Q = [[0, 0], [0.15, 0], [0.35, 0.2], [0.70, 0.5], [0.92, 0.9], [1, 1]];
+    const cFree = free > 0 ? Math.min(0.98, Math.max(0, cloudPct / 100 * inside / free)) : 0, thr = 1 - cFree;
+    // 順位 q (自由なマス内の累積の割合) → 濃さ。q<thr = 何もない空間 (うっすら 0.02〜0.22) / q>=thr = ヒッグス雲 (0.22 → 1.0・縁でなめらかにつながる)
     const map = new Float32Array(BINS);
     let cum = 0;
-    const total = N * N;
     for (let b = 0; b < BINS; b++) {
         cum += hist[b];
-        const q = cum / total;
-        let k = 1; while (k < Q.length - 1 && q > Q[k][0]) k++;
-        const [q0, d0] = Q[k - 1], [q1, d1] = Q[k];
-        map[b] = q1 > q0 ? d0 + (d1 - d0) * Math.min(1, Math.max(0, (q - q0) / (q1 - q0))) : d1;
+        const q = free > 0 ? cum / free : 0;
+        map[b] = q < thr ? 0.02 + 0.20 * (thr > 0 ? q / thr : 0) : 0.22 + 0.78 * Math.pow(cFree > 0 ? (q - thr) / cFree : 0, 0.8);
     }
-    for (let k = 0; k < N * N; k++) g[k] = map[Math.min(BINS - 1, (g[k] * BINS) | 0)];
+    for (let k = 0; k < N * N; k++) {
+        const v = g[k], rt = ratio[k];
+        let d;
+        if (rt < 0) d = 0.08;                                        // 地図の外
+        else if (rt <= 1) d = 0.02 + 0.12 * v;                       // ランドマークの円の中: うっすら
+        else {
+            d = map[Math.min(BINS - 1, (v * BINS) | 0)];
+            if (rt < 1.4) { const t = (rt - 1) / 0.4, sm = t * t * (3 - 2 * t); d = Math.min(d, 0.02 + 0.12 * v) * (1 - sm) + d * sm; } // 円の縁の外側: 雲がなめらかに薄れる
+        }
+        g[k] = d;
+    }
     higgsGrid = g;
     higgsGrowth = 0;
     higgsClears = [];
@@ -6665,28 +6687,37 @@ function generateSector() {
         return { x: MAP_CX + r * Math.cos(a), y: MAP_CY + r * Math.sin(a) };
     };
 
-    // 第21弾: ヒッグス濃度は円の集まり (bgMist) ではなくマス目 (細かく・まばら)。bgMist は空のまま
-    generateHiggsGrid();
-    // 第44弾 (オーナー): 試合ごとに地形の傾向を振る — 熱雲が多いマップ・磁気嵐が多いマップ・岩石帯が多いマップ・霧のゆらぎが多いマップなど (コロニー・ノードの数は一定)
+    // 第155弾 (オーナー): マップの設定 (COM対戦の設定画面) どおりに、岩石帯・熱雲・磁気嵐・残骸帯を互いに重ならないように置き、
+    //   ヒッグス雲 (濃い) は それらの外側に 面積 cloud% だけ。残りは うっすらした何もない空間。通常の試合は既定値 (MAP_DEF) に 傾向 (mapTheme) の振れを掛ける
+    const MC = Object.assign({}, MAP_DEF, (comDemo && comCfg && comCfg.map) ? comCfg.map : null), _custom = !!(comDemo && comCfg && comCfg.map);
+    mapCfg = MC;
     rollMapTheme();
-    const _nDebris = Math.max(4, Math.round(6 * mapTheme.d)), _nStorm = Math.max(5, Math.round(12 * mapTheme.s)), _nThermal = Math.max(6, Math.round(14 * mapTheme.t));
-    // デブリ帯 (岩石帯): 2倍・均等分散 (旧10→20)
+    const _th = _custom ? { t: 1, s: 1, d: 1, c: 1 } : mapTheme;
+    const _mapArea = Math.PI * MAP_RADIUS * MAP_RADIUS;
+    const _discs = [];
+    const _placeDisc = (r0) => { // 他の円と重ならない場所を探す (入らなければ小さくして探し直す)
+        let r = r0;
+        for (let shrink = 0; shrink < 6; shrink++, r *= 0.9) {
+            for (let tries = 0; tries < 260; tries++) {
+                const a = Math.random() * Math.PI * 2, rr = Math.sqrt(Math.random()) * Math.max(0, MAP_RADIUS * 0.96 - r * 0.7);
+                const x = MAP_CX + Math.cos(a) * rr, y = MAP_CY + Math.sin(a) * rr;
+                if (_discs.every(q => Math.hypot(q.x - x, q.y - y) >= q.r + r + 900)) { const d = { x, y, r }; _discs.push(d); return d; }
+            }
+        }
+        return null;
+    };
+    // 岩石帯: 面積 (全体の rock%) を 熱雲3個分くらいの円で割る (個数は面積から決まる)
+    const _rockPct = Math.max(0, Math.min(60, MC.rock * _th.d));
+    const _nDebris = _rockPct > 0 ? Math.max(1, Math.round(_rockPct / 100 * _mapArea / (Math.PI * 6000 * 6000))) : 0;
     for (let i = 0; i < _nDebris; i++) {
-        const p = _rndSector(i, _nDebris, MAP_RADIUS * 0.90);
-        debrisField.push({ ...p, r: Math.random() * 3000 + 5200, density: Math.random() * 0.5 + 0.25 }); // 第152弾: 岩石帯は熱雲・磁気嵐3〜4個分の広さ (旧 岩石帯 20個・半径1800〜5300 → 6個・5200〜8200)
+        const r0 = Math.sqrt(_rockPct / 100 * _mapArea / _nDebris / Math.PI) * (0.85 + Math.random() * 0.3);
+        const d = _placeDisc(r0); if (d) debrisField.push({ x: d.x, y: d.y, r: d.r, density: Math.random() * 0.5 + 0.25 }); // 第152弾: 熱雲・磁気嵐3個分の広さ
     }
-    // 第152弾: 壊れたコロニーの残骸帯 5個 (熱雲・磁気嵐より小さい)
-    for (let i = 0; i < 5; i++) { const p = _rndSector(i, 5, MAP_RADIUS * 0.80); wreckField.push({ ...p, r: Math.random() * 1200 + 1800, density: Math.random() * 0.3 + 0.7 }); }
-    // 磁気嵐帯: 2倍・均等分散 (旧6→12)
-    for (let i = 0; i < _nStorm; i++) {
-        const p = _rndSector(i, _nStorm, MAP_RADIUS * 0.85);
-        stormField.push({ ...p, r: Math.random() * 4000 + 2200, density: Math.random() * 0.55 + 0.25 });
-    }
-    // 熱雲(プラズマ雲): 2倍・均等分散 (旧7→14)
-    for (let i = 0; i < _nThermal; i++) {
-        const p = _rndSector(i, _nThermal, MAP_RADIUS * 0.88);
-        thermalField.push({ ...p, r: Math.random() * 3800 + 1600, density: Math.random() * 0.50 + 0.20 });
-    }
+    const _nThermal = Math.max(0, Math.round(MC.thermal * _th.t)), _nStorm = Math.max(0, Math.round(MC.storm * _th.s)), _nWreck = Math.max(0, Math.round(MC.wreck));
+    for (let i = 0; i < _nStorm; i++) { const d = _placeDisc(Math.random() * 4000 + 2200); if (d) stormField.push({ x: d.x, y: d.y, r: d.r, density: Math.random() * 0.55 + 0.25 }); }
+    for (let i = 0; i < _nThermal; i++) { const d = _placeDisc(Math.random() * 3800 + 1600); if (d) thermalField.push({ x: d.x, y: d.y, r: d.r, density: Math.random() * 0.50 + 0.20 }); }
+    for (let i = 0; i < _nWreck; i++) { const d = _placeDisc(Math.random() * 1200 + 1800); if (d) wreckField.push({ x: d.x, y: d.y, r: d.r, density: Math.random() * 0.3 + 0.7 }); } // 第152弾: 壊れたコロニーの残骸帯
+    generateHiggsGrid(MC.cloud, _discs);
     // bgMistをオフスクリーンキャンバスに事前焼き付け (毎フレームのcreateRadialGradientを排除)
     // サイズを512に抑える: 4096x4096=64MBは生成に数秒かかりモバイルをフリーズさせるため
     setTimeout(() => {
@@ -6838,6 +6869,7 @@ function generateSector() {
     intelBearing = null;
     boss.intelPos = null;
     // S&Dモード: コロニーノードを多く配置 (ハック目標)
+    COLONY_COUNT.br = COLONY_COUNT.sd = Math.max(1, Math.min(12, Math.round(MC.colony)));
     const colonyCount = COLONY_COUNT[gameState.mode] || COLONY_COUNT.br; // 第24弾: 3/5 → 8/8 (接触を増やす)
     // 第21弾: ランドマークは半径24500u以内・6方向に順に割り振る・間隔あり (randomLandmarkSpot)。難破船も最初から海図に載る
     const _lmPlaced = [];
@@ -6849,7 +6881,7 @@ function generateSector() {
         structures.push(col);
     }
     _so = _sectorOrder();
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < Math.max(0, Math.min(12, Math.round(MC.derelict))); i++) {
         const lp = randomLandmarkSpot(_lmPlaced, _so[i % 6]);
         const der = new Structure(lp.x, lp.y, 'derelict');
         der.discovered = false; // 第44弾 (オーナー): 難破船は見つけるまでヒッグスの下 (有視界・ドローンの視界・ソナーで見つかる。旧: 第21弾で最初から海図に載っていた)
@@ -6863,7 +6895,7 @@ function generateSector() {
 
     // リソースノード: 5〜8個。第21弾: 6方向へ順に・互いに3000u以上・他のランドマークから2000u以上
     // (旧: 6割を自機と敵の間の帯に置いていた → 一箇所に固まっていた)
-    const nodeCount = 5 + Math.floor(Math.random() * 4);
+    const nodeCount = Math.max(0, Math.min(15, Math.round(MC.node)));
     const _nodePlaced = [];
     _so = _sectorOrder();
     for (let i = 0; i < nodeCount; i++) {
@@ -6883,7 +6915,7 @@ function generateSector() {
     isBottomed = false; nearMissActive = false; _commsInterceptCD = 0;
     lures = []; pendingLure = null; // 第21弾
     generateFieldSignals(); sigZones = []; // 第31弾
-    lootTraces = []; convoys = []; convoyNext = 7200 + Math.floor(Math.random() * 7200); // 第34弾: 最初の輸送船は2〜4分後
+    lootTraces = []; convoys = []; convoyNext = convoyWait(7200 + Math.floor(Math.random() * 7200)); // 第34弾: 最初の輸送船は2〜4分後 (第155弾: 出現頻度の設定で伸び縮み)
     noiseMakers = []; smokeClouds = []; playerCoasting = false; boostT = 0; boostCD = 0; _flashScreen = 0; _xoEsc = null; // 第17弾
     huntStats = { startFrame: _frameCount, firstContact: -1, ambushes: 0, crits: 0, timesEngaged: 0, dmgDealt: 0, dmgTaken: 0, pings: 0 };
     matchRecStart(); // 第22弾: 試合の記録
@@ -9120,6 +9152,8 @@ function drawLootTraces(ctx) {
 //    全帯域0.6でうるさい (識別は艦影寄り)・耐久1500・撃ち返さない。沈めるか、500u以内に5秒寄り添って拿捕すると漂流コンテナを2個落とす。
 //    1500u以内に居る艦は輸送船の音に紛れて推定の誤差×2 (混信+2)。敵は拿捕だけ (撃つ判断は入れていない)
 const CONVOY_MIN = 14400, CONVOY_VAR = 7200, CONVOY_R0 = 18000, CONVOY_OFF = 8000, CONVOY_SPEED = 0.7, CONVOY_HP = 1500, CONVOY_SIG = 0.6, CONVOY_CLUTTER_R = 1500, CONVOY_BOARD_R = 500, CONVOY_BOARD_T = 300;
+// 第155弾: 輸送船の出現頻度 (設定の倍率。0=出ない)
+function convoyWait(base) { const f = mapCfg ? mapCfg.convoy : 1; return f > 0 ? base / f : Infinity; }
 function spawnConvoy() {
     const th = Math.random() * Math.PI * 2, off = (Math.random() * 2 - 1) * CONVOY_OFF;
     const ux = Math.cos(th), uy = Math.sin(th), nx = -uy, ny = ux;
@@ -9173,7 +9207,7 @@ function damageConvoy(cv, dmg, byPlayer) {
     _convoyDrop(cv, 'kill');
     if (byPlayer) convoyReward(cv, null, 'kill');
     convoys.splice(convoys.indexOf(cv), 1);
-    convoyNext = CONVOY_MIN + Math.floor(Math.random() * CONVOY_VAR);
+    convoyNext = convoyWait(CONVOY_MIN + Math.floor(Math.random() * CONVOY_VAR));
     logMessage('輸送船: ' + (byPlayer ? '撃沈 — 漂流コンテナが2つ落ちた' : '沈んだ'), 'warning-msg');
     matchRecEvent(byPlayer ? 'convoyP' : 'convoyE', cv.x, cv.y, '輸送船を撃沈' + (byPlayer ? ' (自艦)' : ''));
 }
@@ -9209,7 +9243,7 @@ function updateConvoys() {
             if (cv.log && cv.log.length > 40) cv.log.splice(0, cv.log.length - 40);
             if (cv.logP && cv.logP.length > 20) cv.logP.splice(0, cv.logP.length - 20);
         }
-        if ((cv.left -= gameSpeedFactor) <= 0) { convoys.splice(i, 1); convoyNext = CONVOY_MIN + Math.floor(Math.random() * CONVOY_VAR); for (const e of enemies) if (e._cvT === cv.sid) { e._cvT = null; if (e._roam === 'convoy') { e._roam = null; e.state = 'idle'; } } continue; }
+        if ((cv.left -= gameSpeedFactor) <= 0) { convoys.splice(i, 1); convoyNext = convoyWait(CONVOY_MIN + Math.floor(Math.random() * CONVOY_VAR)); for (const e of enemies) if (e._cvT === cv.sid) { e._cvT = null; if (e._roam === 'convoy') { e._roam = null; e.state = 'idle'; } } continue; }
         // 追っている敵は先回りの点へ向け直す (2秒ごと)
         if (_frameCount % 120 === 0) for (const e of enemies) {
             if (e.hp <= 0 || e._dying || e.type === 'fighter' || !ENEMY_CLASS[e.type]) continue;
@@ -9248,7 +9282,7 @@ function updateConvoys() {
             const byP = cv.boardP >= CONVOY_BOARD_T;
             _convoyDrop(cv, 'board');
             convoyReward(cv, byP ? null : eN, 'board');
-            convoys.splice(i, 1); convoyNext = CONVOY_MIN + Math.floor(Math.random() * CONVOY_VAR);
+            convoys.splice(i, 1); convoyNext = convoyWait(CONVOY_MIN + Math.floor(Math.random() * CONVOY_VAR));
             logMessage(byP ? '輸送船: 拿捕 — 積み荷 (漂流コンテナ2つ) を落として逃げた' : '輸送船: 何者かに拿捕された', byP ? 'system-msg' : 'warning-msg');
             matchRecEvent(byP ? 'convoyP' : 'convoyE', cv.x, cv.y, '輸送船を拿捕' + (byP ? ' (自艦)' : ' (敵)'));
             if (!byP && comDemo) comThinkEvent('e', '輸送船を拿捕 → 積み荷が落ちた', 'e' + eN.uid);
@@ -9484,8 +9518,10 @@ function _fieldSpotFor(kind) {
     const ok = (x, y, sep) => Math.hypot(x - MAP_CX, y - MAP_CY) < FIELD_SPREAD_R && !(player && Math.hypot(x - player.x, y - player.y) < 2500) && !fieldSignals.some(f => Math.hypot(f.x - x, f.y - y) < sep);
     const inCloud = (arr, jit, sep) => {
         const cand = arr.filter(m => Math.hypot(m.x - MAP_CX, m.y - MAP_CY) < FIELD_SPREAD_R);
-        for (let k = 0; k < 24 && cand.length; k++) {
-            const m = cand[Math.floor(Math.random() * cand.length)], a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * m.r * jit;
+        const used = m => fieldSignals.filter(f => (f.kind === 'vent' || f.kind === 'storm') && Math.hypot(f.x - m.x, f.y - m.y) < m.r).length; // 第155弾: 1つの雲に1つずつ
+        let mn = 1e9; for (const m of cand) mn = Math.min(mn, used(m)); const pool = cand.filter(m => used(m) === mn);
+        for (let k = 0; k < 24 && pool.length; k++) {
+            const m = pool[Math.floor(Math.random() * pool.length)], a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * m.r * jit;
             const x = m.x + Math.cos(a) * d, y = m.y + Math.sin(a) * d;
             if (ok(x, y, sep)) return { x, y };
         }
@@ -9522,14 +9558,11 @@ function makeFieldSignal(kind) {
 }
 function generateFieldSignals() {
     fieldSignals = []; _fieldRespawn = [];
-    // 第44弾: 自然の信号12個を 傾向の重み (熱泉=熱雲・嵐=磁気嵐・霧のゆらぎ) で割り振る (どの種類も最低1つ)。コンテナは岩石帯が多いほど少し増える
-    const w = { vent: mapTheme.t, storm: mapTheme.s, cloud: mapTheme.c }, ws = w.vent + w.storm + w.cloud, cnt = {};
-    let left = FIELD_NATURE_N;
-    for (const k in w) { cnt[k] = Math.max(1, Math.round(FIELD_NATURE_N * w[k] / ws)); left -= cnt[k]; }
-    while (left !== 0) { const k = ['vent', 'storm', 'cloud'].sort((a, b) => (left > 0 ? w[b] - w[a] : w[a] - w[b]))[0]; if (left < 0 && cnt[k] <= 1) { cnt.cloud = Math.max(1, cnt.cloud); break; } cnt[k] += left > 0 ? 1 : -1; left += left > 0 ? -1 : 1; }
+    // 第155弾: 自然の信号は 熱泉=熱雲と同数 (1つの熱雲に1つ)・嵐の放電=磁気嵐と同数・霧のゆらぎ=設定の個数
+    const cnt = { vent: thermalField.length, storm: stormField.length, cloud: Math.max(0, Math.min(30, Math.round(mapCfg.fluct * mapTheme.c))) };
     for (const k of ['cloud', 'storm', 'vent']) for (let i = 0; i < cnt[k]; i++) fieldSignals.push(makeFieldSignal(k));
     for (const m of wreckField) fieldSignals.push({ sid: 'N-' + (++_fieldSeq), kind: 'wreck', x: m.x, y: m.y, b: { heat: WRECK_SIG, optic: 0.02, em: WRECK_SIG, higgs: 0.02 }, age: FIELD_FADE, life: Infinity, on: true, flip: 0, takeP: 0, takeE: 0, ph: Math.random() * 6.28 }); // 第152弾: 残骸帯の信号 (微弱な熱とEM・動かない)
-    const nCache = Math.max(5, Math.min(12, Math.round(FIELD_CACHE_N * (0.7 + 0.3 * mapTheme.d))));
+    const nCache = Math.max(0, Math.min(30, Math.round(mapCfg.cache))); // 第155弾: 設定の個数 (既定5・旧8〜)
     for (let i = 0; i < nCache; i++) fieldSignals.push(makeFieldSignal('cache'));
 }
 // その帯域でその信号が出している強さ (出現と消える時は5秒でなめらかに)
@@ -16073,10 +16106,10 @@ function skillOn(side, id) {
 function comDefaultCfg() {
     return { ship: 'assault', enemy: 'assault', mode: 'br', pPreset: 'standard', ePreset: 'standard',
              pp: Object.assign({}, COM_PRESETS.standard.p), ep: Object.assign({}, COM_PRESETS.standard.p), higgsView: true, think: true,
-             lo: { p: {}, e: {} }, sk: { p: {}, e: {} } }; // 第142弾: sk=スキルのオン・オフ // 第22弾: COM対戦の積み込み (自機/敵・艦種ごと。無ければ既定)
+             lo: { p: {}, e: {} }, sk: { p: {}, e: {} }, map: Object.assign({}, MAP_DEF) }; // 第155弾: map=マップの設定 // 第142弾: sk=スキルのオン・オフ // 第22弾: COM対戦の積み込み (自機/敵・艦種ごと。無ければ既定)
 }
 function loadComCfg() {
-    try { const c = JSON.parse(localStorage.getItem('darkEchoComDemo') || 'null'); if (c && c.pp && c.ep) { const r = Object.assign(comDefaultCfg(), c); for (const pk of ['pp', 'ep']) r[pk] = Object.assign({}, PERS_DEF, r[pk]); /* 第147弾: 新しい軸が無い古い保存は既定で埋める */ if (!r.lo || !r.lo.p || !r.lo.e) r.lo = { p: {}, e: {} }; if (!r.sk || !r.sk.p || !r.sk.e) r.sk = { p: {}, e: {} }; return r; } } catch (e) {}
+    try { const c = JSON.parse(localStorage.getItem('darkEchoComDemo') || 'null'); if (c && c.pp && c.ep) { const r = Object.assign(comDefaultCfg(), c); for (const pk of ['pp', 'ep']) r[pk] = Object.assign({}, PERS_DEF, r[pk]); /* 第147弾: 新しい軸が無い古い保存は既定で埋める */ if (!r.lo || !r.lo.p || !r.lo.e) r.lo = { p: {}, e: {} }; if (!r.sk || !r.sk.p || !r.sk.e) r.sk = { p: {}, e: {} }; r.map = Object.assign({}, MAP_DEF, r.map); return r; } } catch (e) {}
     return comDefaultCfg();
 }
 function saveComCfg() { if (playReplay || /[?&]replay=1/.test(location.search)) return; try { localStorage.setItem('darkEchoComDemo', JSON.stringify(comCfg)); } catch (e) {} }
@@ -19209,6 +19242,35 @@ function _renderComCfg() {
         + '<span class="com-opt-lbl">ヒッグス表示</span><button class="com-chip' + (c.higgsView ? ' on' : '') + '" data-act="higgs">' + (c.higgsView ? 'ON' : 'OFF (全艦が見える)') + '</button>'
         + '<span class="com-opt-lbl">思考ログ</span><button class="com-chip' + (c.think ? ' on' : '') + '" data-act="think">' + (c.think ? 'ON' : 'OFF') + '</button>'
         + '<span class="com-opt-lbl com-sector">セクター' + gameState.sector + '・今の改修のまま</span>';
+    _renderMapCfg();
+}
+// 第155弾 (オーナー): マップの設定 — 面積 (ヒッグス雲・岩石帯・何もない空間) は %、地形・信号・拠点は個数、輸送船は頻度
+var _comMapOpen = false;
+const MAP_SL = [ // [キー, 表示名, 最小, 最大, 刻み, 単位, 説明]
+    ['thermal', '熱源帯 (熱雲)', 0, 20, 1, '個', '中に居ると 熱の信号が熱源に紛れる・演算力が下がる'],
+    ['storm', '磁気嵐帯', 0, 20, 1, '個', '中に居ると EMが紛れる・全センサーの受信が下がる'],
+    ['wreck', '残骸帯', 0, 15, 1, '個', '微弱な熱とEMを出す・光学が下がる'],
+    ['fluct', 'ヒッグスの揺らぎ', 0, 30, 1, '個', '霧の濃い所に現れる自然の信号'],
+    ['colony', 'コロニー', 1, 12, 1, '個', ''],
+    ['node', 'ノード', 0, 15, 1, '個', ''],
+    ['cache', '漂流コンテナ', 0, 30, 1, '個', ''],
+    ['derelict', '難破船', 0, 12, 1, '個', ''] ];
+const MAP_CONVOY = [[0, 'なし'], [0.5, '少なめ'], [1, '標準'], [2, '多め'], [3, '頻繁']];
+function _mapAreaRow(k, lbl, v, note) { return '<label class="com-sl"><span>' + lbl + '</span><input type="range" min="0" max="' + (k === 'rock' ? 40 : 100) + '" step="1" value="' + v + '" data-act="map" data-k="' + k + '"><b id="mp-' + k + '">' + v + '%</b></label>'; }
+function _renderMapCfg() {
+    const box = document.getElementById('com-map'); if (!box || !comCfg) return;
+    const m = comCfg.map = Object.assign({}, MAP_DEF, comCfg.map);
+    const empty = Math.max(0, 100 - m.cloud - m.rock);
+    const h = ['<div class="com-sk-head"><button class="com-chip' + (_comMapOpen ? ' on' : '') + '" data-act="mapopen">マップの設定 ' + (_comMapOpen ? '▴' : '▾') + '</button><button class="com-chip" data-act="mapreset">初期値に戻す</button></div>'];
+    if (_comMapOpen) {
+        h.push('<div class="com-note">面積 (ヒッグス雲＋岩石帯＋何もない空間＝100%)。熱源・磁気嵐・残骸帯の円は「何もない空間」の中に、互いに重ならないように置く。雲と地形は被らない</div>');
+        h.push(_mapAreaRow('cloud', 'ヒッグス雲 (濃い)', m.cloud));
+        h.push(_mapAreaRow('rock', '岩石帯', m.rock));
+        h.push(_mapAreaRow('empty', '何もない空間 (うっすら)', empty));
+        for (const [k, lbl, mn, mx, st, u, d] of MAP_SL) h.push('<label class="com-sl" title="' + d + '"><span>' + lbl + '</span><input type="range" min="' + mn + '" max="' + mx + '" step="' + st + '" value="' + m[k] + '" data-act="map" data-k="' + k + '"><b id="mp-' + k + '">' + m[k] + u + '</b></label>');
+        h.push('<div class="com-row"><span class="com-opt-lbl">輸送船の頻度</span>' + MAP_CONVOY.map(([v, l]) => '<button class="com-chip' + (m.convoy === v ? ' on' : '') + '" data-act="mapconvoy" data-v="' + v + '">' + l + '</button>').join('') + '</div>');
+    }
+    box.innerHTML = h.join('');
 }
 function startComDemo() {
     saveComCfg();
@@ -19254,6 +19316,9 @@ function exitComDemo() { location.reload(); }
             else if (act === 'skall') { for (const x of L) { if (v === 'on') delete m[x.id]; else m[x.id] = false; } }
             else { const [gn, onoff] = v.split(':'); for (const x of L) if (x.g === gn) { if (onoff === 'on') delete m[x.id]; else m[x.id] = false; } }
         }
+        else if (act === 'mapopen') _comMapOpen = !_comMapOpen;
+        else if (act === 'mapreset') comCfg.map = Object.assign({}, MAP_DEF);
+        else if (act === 'mapconvoy') comCfg.map.convoy = +v;
         else if (act === 'mode') comCfg.mode = v;
         else if (act === 'higgs') comCfg.higgsView = !comCfg.higgsView;
         else if (act === 'think') comCfg.think = !comCfg.think;
@@ -19261,6 +19326,18 @@ function exitComDemo() { location.reload(); }
         sfxUI('ui_close');
     });
     ov.addEventListener('input', (ev) => {
+        const mr = ev.target.closest('input[data-act="map"]');
+        if (mr && comCfg) { // 第155弾: マップの設定 (雲・岩石帯・何もない空間は合計100%に連動)
+            const m = comCfg.map = Object.assign({}, MAP_DEF, comCfg.map), k = mr.dataset.k, v = +mr.value;
+            if (k === 'cloud') { m.cloud = v; m.rock = Math.min(m.rock, 100 - v); }
+            else if (k === 'rock') { m.rock = v; m.cloud = Math.min(m.cloud, 100 - v); }
+            else if (k === 'empty') { m.cloud = Math.max(0, 100 - m.rock - v); if (m.cloud + m.rock > 100) m.rock = 100 - m.cloud; }
+            else m[k] = v;
+            const set = (id, t) => { const e = document.getElementById('mp-' + id); if (e) e.textContent = t; const i = document.querySelector('input[data-act="map"][data-k="' + id + '"]'); if (i && id !== k) i.value = id === 'empty' ? Math.max(0, 100 - m.cloud - m.rock) : m[id]; };
+            if (k === 'cloud' || k === 'rock' || k === 'empty') { set('cloud', m.cloud + '%'); set('rock', m.rock + '%'); set('empty', Math.max(0, 100 - m.cloud - m.rock) + '%'); }
+            else { const sl = MAP_SL.find(x => x[0] === k); const e = document.getElementById('mp-' + k); if (e) e.textContent = v + (sl ? sl[5] : ''); }
+            return;
+        }
         const r = ev.target.closest('input[data-act="axis"]');
         if (!r || !comCfg) return;
         const side = r.closest('.com-side').dataset.side;
