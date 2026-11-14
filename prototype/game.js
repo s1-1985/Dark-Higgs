@@ -7067,6 +7067,16 @@ function comLoadout(side, ship) {
     }
     return lo;
 }
+// 設定画面の積み込みの要約 (第157弾): 編集していない自機側は 試合ごとに無作為に積むので、表示のたびに引き直すと 他のボタン (マップのランダム等) を押しただけで中身が入れ替わって見えた。
+//   → 艦種・性格・全部ランダム・編集内容が同じ間は 同じ要約を出す (実際の試合の中身は 開始の時に別に決まる)
+var _loPrevMemo = {};
+function _loPreview(side, ship, c) {
+    const edited = !!(c.lo && c.lo[side] && c.lo[side][ship]);
+    if (edited || side === 'e') return loSummary(comLoadout(side, ship), ship, side === 'e');
+    const key = side + '|' + ship + '|' + JSON.stringify(c.pp) + '|' + (c.pPreset) + '|' + !!(c.rndAll && c.rndAll[side]);
+    if (!_loPrevMemo[key]) _loPrevMemo[key] = loSummary(comLoadout(side, ship), ship, false) + ' ※目安 (試合ごとに無作為)';
+    return _loPrevMemo[key];
+}
 function loSummary(lo, ship, enemySide) {
     const wl = normalizeWset(ship, lo.w), parts = ['武器:' + wl.map(k => _WPN_NAME[k]).join('+')];
     if (wl.includes('kinetic')) parts.push('実弾' + (lo.ammoK || 0));
@@ -19266,7 +19276,7 @@ function _renderComCfg() {
         if (rnd) h.push('<div class="com-note">ランダム: 試合ごとに' + SHIP_JP[ship] + 'の範囲で決まる (敵の通常の決め方と同じ)</div>');
         else if (pre === 'custom') h.push('<div class="com-note">カスタム (スライダーで調整)</div>');
         // 第22弾: 積み込み (自機/敵とも編集できる)
-        h.push('<div class="com-row com-lo"><span class="com-lo-sum">積み込み: ' + loSummary(comLoadout(side, ship), ship, side === 'e') + '</span><button class="com-chip" data-act="loadout">編集</button></div>');
+        h.push('<div class="com-row com-lo"><span class="com-lo-sum">積み込み: ' + _loPreview(side, ship, c) + '</span><button class="com-chip" data-act="loadout">編集</button></div>');
         // 第142弾: スキルのオン・オフ
         { const L = skillList(), m = (c.sk && c.sk[side]) || {}, nOn = L.filter(x => m[x.id] !== false).length;
           h.push('<div class="com-sk-head"><button class="com-chip' + (_comSkOpen ? ' on' : '') + '" data-act="skopen">スキル ' + nOn + '/' + L.length + ' ' + (_comSkOpen ? '▴' : '▾') + '</button><button class="com-chip" data-act="skall" data-v="on">全ON</button><button class="com-chip" data-act="skall" data-v="off">全OFF</button></div>');
