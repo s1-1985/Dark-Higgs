@@ -3335,7 +3335,9 @@ class Projectile {
             this.angle = Math.atan2(target.y - y, target.x - x);
         } else if (type === 'beam') {
             this.active = false;
-            if (target && target.hp > 0) {
+            let _bRockMiss = false; // 第153弾: 岩石帯の中から撃つと ビームも外れやすい (実弾・ミサイルと同じ式・撃つ側も同じ)
+            if (target && target.hp > 0) { const _rk = getDebrisIntensity(x, y) * ROCK_SHOOT_MISS; if (_rk > 0 && Math.random() < _rk) { _bRockMiss = true; effects.push({ x: this.x, y: this.y, tx: target.x + (Math.random() - 0.5) * 900, ty: target.y + (Math.random() - 0.5) * 900, type: 'beam', a: 1, c: isPlayer ? '#00ffaa' : '#ff4d4d' }); } }
+            if (target && target.hp > 0 && !_bRockMiss) {
                 // ヒッグス高濃度エリアではビームダメージ大幅低下 (設計確定仕様)
                 const higgsBetween = getHiggsIntensity((x + target.x) / 2, (y + target.y) / 2);
                 const higgsBeamPenalty = 1 - higgsBetween * 0.8 * (isPlayer ? PM.beamFog : epm(_beamShooter).beamFog); // 最大80%ダメージ減衰 (第32弾: 霧貫通で半分)
@@ -8363,7 +8365,7 @@ function updateNodesAndColonies() {
         } else if (n.capP > 0) n.capP = Math.max(0, n.capP - 0.004);
     }
     for (const st of structures) {
-        if (st.type === 'derelict' && !st.salvaged && st.discovered && !derelictSosOn(st) && Math.hypot(player.x - st.x, player.y - st.y) < DERELICT_HIJACK_R && hackPower('player') >= DERELICT_HIJACK_H && !document.getElementById('hijack-pop') && pendingLure !== 'derelictfly') { // 第152弾: SOS が止まっている間は ハックして偽装艦に
+        if (st.type === 'derelict' && !st.salvaged && st.discovered && !derelictSosOn(st) && Math.hypot(player.x - st.x, player.y - st.y) < DERELICT_HIJACK_R && hackPower('player') >= DERELICT_HIJACK_H && (!comDemo || skillUse('p', 'dc_hijack')) && !document.getElementById('hijack-pop') && pendingLure !== 'derelictfly') { // 第152弾: SOS が止まっている間は ハックして偽装艦に
             st._hjP = (st._hjP || 0) + gameSpeedFactor / DERELICT_HIJACK_TIME;
             _capturing = { kind: 'derelict', obj: st, p: st._hjP, hijack: true };
             if (st._hjP >= 1) { st._hjP = 0; openHijackChoice(st); }
@@ -8976,7 +8978,7 @@ function updateEnemyDerelictSalvage() {
         if (player && player.hp > 0 && Math.hypot(player.x - st.x, player.y - st.y) < DERELICT_SALVAGE_R) continue;
         if (!derelictSosOn(st)) { // 第152弾: SOS が止まっている間は 回収できない — だまし好みで演算力が足りれば ハックして偽装艦に (自機と同じ)
             const _P = near.personality || {};
-            if ((persAx(_P, 'cunning') >= 0.5 || (_P.stealth || 0) >= 0.6) && hackPower('enemy', near) >= DERELICT_HIJACK_H && Math.hypot(near.x - st.x, near.y - st.y) < DERELICT_HIJACK_R) {
+            if ((persAx(_P, 'cunning') >= 0.5 || (_P.stealth || 0) >= 0.6 || near._strat && near._strat.id === 'decoyship') && skillUse('e', 'dc_hijack') && hackPower('enemy', near) >= DERELICT_HIJACK_H && Math.hypot(near.x - st.x, near.y - st.y) < DERELICT_HIJACK_R) {
                 st.eHjP = (st.eHjP || 0) + gameSpeedFactor / DERELICT_HIJACK_TIME; near._commsF = _frameCount; // EMが漏れる (自機と同じ)
                 if (st.eHjP >= 1) { const lk = near.playerLastKnownPos; hijackDerelict('e', st, lk ? 'fly' : 'stay', lk ? lk.x + (Math.random() - 0.5) * 3000 : undefined, lk ? lk.y + (Math.random() - 0.5) * 3000 : undefined); comThinkEvent('e', '難破船をハックして偽装艦に — ' + (lk ? '自機が居そうな方へ飛ばす' : 'その場で信号を出す'), 'e' + near.uid); }
             }
@@ -14394,7 +14396,11 @@ class Drone {
         logMessage('DRONE: ' + _droneName(this) + ' 補給開始 (約' + Math.round(this._rsNeed / 60) + '秒) — 資材' + cost + '個を使った (使いかけ残り' + (Math.round(cargo.matScrap * 100) / 100) + '・資材' + cargo.mat + '個)', 'system-msg');
     }
     // 第50弾 (オーナー): ドローンが出すシグネチャ。小さいが、自動制御 (通信途絶) の間は熱とEMが増える。撃った直後は光
-    sigOf(b) {
+    sigOf(b) { // 第153弾: ドローンの発信も 熱雲/嵐に紛れ・岩石帯/残骸帯で光学が弱まる (艦と同じ)
+        if (terrainMasked(this.x, this.y, b)) return 0;
+        return this._sigOf0(b) * terrainTxMul(this.x, this.y, b);
+    }
+    _sigOf0(b) {
         const base = { attack: { heat: 0.24, em: 0.18 }, mech: { heat: 0.30, em: 0.26 }, scout: { heat: 0.14, em: 0.16 }, build: { heat: 0.05, em: 0.14 } }[this.type];
         if (!base) return 0;
         const au = this._auto ? 1 : 0;
@@ -15960,6 +15966,7 @@ const COM_ITYPE = { assault: 'destroyer', stealth: 'corvette', carrier: 'carrier
 //   スキル = 戦略 (STRAT_REG)・狩人の任務 (HUNT_REG)・反応で使う搭載品・作戦・ハック・だまし。判断の関数はそのまま、重みを0にする/条件を外すだけで「使わない」にできる。
 //   設定は comCfg.sk = { p: {id:false,...}, e: {...} } (書いていない = ON)。COM対戦の時だけ効く (人が操作する試合・通常の敵は全部ON)。自機COMと敵は同じ一覧 (差を作らない)
 var SKILL_EXTRA = [
+    { id: 'dc_hijack', g: 'だまし', jp: '難破船を偽装艦に', desc: 'SOSが止まっている難破船を演算力でハックして、偽装艦 (その場で発信／相手の方へ飛ばす) にする' }, // 第153弾
     // 反応で使う搭載品 (itemReactPlan)
     { id: 'it_linkcut', g: '搭載品', jp: '断線パルス', desc: 'ハックで侵入されたら、回線を切って30秒は閉じる' },
     { id: 'it_repair', g: '搭載品', jp: '応急修理', desc: '撃たれていない間に傷が深ければリペアキットを使う' },
@@ -16091,6 +16098,7 @@ const SKILL_AX = {
     // 戦略 (st_*)
     st_ambush: 'pa1.5 cu0.5', st_bait: 'cu1.5 pa0.5', st_screen: 'co1.5 te0.5', st_fogHide: 'pa0.5', st_push: 'co0.5 pa-1', st_raid: 'ag0.5 pa-0.5', st_guard: 'pa1 co0.5',
     st_tech: 'te1.5 pa1 gr0.5', st_trap: 'cu1.5 pa0.5', st_outpost: 'co1.5 te0.5', st_fallback: 'ca1 pa-0.3', st_restock: 'pa0.3', st_playdead: 'cu1.5 st0.5', st_storm: 'te0.8 cu0.5 st0.5', st_heatcloud: 'te0.8 cu0.5 st0.5',
+    st_rock: 'st0.8 pa1', st_wreck: 'st0.8 pa0.8', st_hop: 'cu1 st0.5 pa0.5', st_decoyship: 'cu1.5 te0.8', dc_hijack: 'cu1.5 te0.8',
     st_surge: 'ag0.5 pa-0.8 te0.5', st_wide_loop: 'cu1 pa0.7', st_center: 'te0.8 co0.3', st_orbit: 'co1 pa0.5', st_salvage: 'gr1', st_net: 'te1 gr0.5 co0.3',
     // 狩人の任務 (hu_*)
     hu_charge: 'pa-1.5', hu_stalk: 'pa1 cu0.5', hu_lure: 'cu1.5', hu_feint: 'cu1.5', hu_fakebox: 'cu1.5', hu_hold: 'pa1.5', hu_screen: 'co1.5', hu_rush: 'pa-0.8', hu_snipe: 'te0.8 pa0.8', hu_shadow: 'te0.8 pa1',
@@ -17064,6 +17072,32 @@ function stratRun(A, S, now) {
             if (Math.hypot(S.spot.x - A.x, S.spot.y - A.y) > 300) { A.go(S.spot.x, S.spot.y, 200, 'silent'); return true; }
             A.hold(true); A.think('strat', '戦略「' + (kind === 'storm' ? '嵐に潜む' : '熱雲に潜む') + '」: 待機中'); return true;
         }
+        case 'rock': case 'wreck': { // 第153弾: 岩石帯 (光学↓・被弾↓・動きにくい) / 残骸帯 (光学の発信↓) の中で止まって待つ
+            const kind = S.id;
+            if (!S.spot) { const t = terrainSpot(A.x, A.y, kind, 12000); if (!t) return 'end:' + (kind === 'rock' ? '岩石帯' : '残骸帯') + 'が無い'; S.spot = { x: t.x, y: t.y }; A.say((kind === 'rock' ? '岩石帯に潜む — 岩石帯の中は光学が弱まり、撃たれても外れやすい' : '残骸帯に隠れる — 残骸の中は光学の発信が弱まる') + ' (' + _dirTxt(A.x, A.y, t.x, t.y) + ')'); }
+            if (A.expo >= 3) return 'end:撃たれた';
+            if (Math.hypot(S.spot.x - A.x, S.spot.y - A.y) > 300) { A.go(S.spot.x, S.spot.y, 200, 'silent'); return true; }
+            A.hold(true); A.think('strat', '戦略「' + (kind === 'rock' ? '岩石帯に潜む' : '残骸帯に隠れる') + '」: 待機中'); return true;
+        }
+        case 'hop': { // 第153弾: 推定へ 地形の陰から陰へ (着いたら15秒止まって聴き、次の陰へ)
+            if (!est || dEst > 18000) return 'end:推定が無い/遠い';
+            if (dEst < 3500) return 'end:近づいた (撃ち合いへ)';
+            if (A.expo >= 3 || A.hpF < 0.5) return 'end:危険';
+            if (!S.pt) { const q = coverToward(A.x, A.y, est.x, est.y); if (!q) return 'end:隠れる地形が無い'; S.pt = q; S.arrived = 0; A.say('地形伝いの接近 — ' + _dirTxt(A.x, A.y, q.x, q.y) + ' の陰へ (推定まで' + Math.round(dEst / 100) * 100 + 'u)'); }
+            { const dd = Math.hypot(S.pt.x - A.x, S.pt.y - A.y); if (dd > 400) { A.go(S.pt.x, S.pt.y, 250, dd > 2500 && A.expo < 2 ? 'cruise' : 'silent'); return true; } }
+            if (!S.arrived) S.arrived = now;
+            if (now - S.arrived < 900) { A.hold(true); A.think('strat', '戦略「地形伝いの接近」: 陰で聴いている'); return true; }
+            S.pt = null; return true;
+        }
+        case 'decoyship': { // 第153弾: SOSが止まっている難破船へ行き、ハックして偽装艦に (ハック自体は近くに居れば進む — 自機: updateNodesAndColonies / 敵: updateEnemyDerelictSalvage)
+            const st = S.site || (S.site = _hijackSite(A.owner === 'player' ? 'p' : 'e', A.x, A.y));
+            if (!st) return 'end:難破船が無い'; if (st.salvaged) return 'end:' + (st._hijacked ? '偽装艦にした' : '回収された');
+            if (derelictSosOn(st)) return 'end:SOSが鳴り始めた';
+            if (A.hpF < 0.5 || A.expo >= 3) return 'end:危険';
+            if (!S.said) { S.said = 1; A.say('難破船を偽装艦に — SOSが止まっている難破船 (' + _dirTxt(A.x, A.y, st.x, st.y) + ') をハックして囮にする'); }
+            if (Math.hypot(st.x - A.x, st.y - A.y) > 350) { A.go(st.x, st.y, 250, 'cruise'); return true; }
+            A.hold(false); return true;
+        }
         case 'surge': { // サージ・凪の間は探知が変わる — 動く
             const ls = lullPhase === 'warn' || lullPhase === 'active' || surgePhase === 'warn' || surgePhase === 'active';
             if (!ls && now - S.t0 > 1200) return 'end:サージ・凪が終わった';
@@ -17128,9 +17162,9 @@ function stratRun(A, S, now) {
     }
     return false;
 }
-const HIDE_STRATS = { fogHide: 1, ambush: 1, bait: 1, trap: 1, storm: 1, heatcloud: 1, playdead: 1, guard: 1 }; // 第150弾: 隠れて待つ戦略
-const STRAT_NEW = { fallback: 1, restock: 1, playdead: 1, storm: 1, heatcloud: 1, surge: 1, wide_loop: 1, center: 1, orbit: 1, salvage: 1, net: 1 }, STRAT_KEEP = { fogHide: 1, screen: 1, fallback: 1, playdead: 1, storm: 1, heatcloud: 1, restock: 1 }; // 第146弾: 新しい戦略 / 相手が近くても続ける戦略
-const STRAT_SHARED = { fogHide: 1, push: 1, screen: 1, guard: 1, tech: 1, raid: 1, fallback: 1, restock: 1, playdead: 1, storm: 1, heatcloud: 1, surge: 1, wide_loop: 1, center: 1, orbit: 1, salvage: 1, net: 1 };
+const HIDE_STRATS = { rock: 1, wreck: 1, fogHide: 1, ambush: 1, bait: 1, trap: 1, storm: 1, heatcloud: 1, playdead: 1, guard: 1 }; // 第150弾: 隠れて待つ戦略
+const STRAT_NEW = { fallback: 1, restock: 1, playdead: 1, storm: 1, heatcloud: 1, surge: 1, wide_loop: 1, center: 1, orbit: 1, salvage: 1, net: 1, rock: 1, wreck: 1, hop: 1, decoyship: 1 }, STRAT_KEEP = { rock: 1, wreck: 1, fogHide: 1, screen: 1, fallback: 1, playdead: 1, storm: 1, heatcloud: 1, restock: 1 }; // 第146弾: 新しい戦略 / 相手が近くても続ける戦略
+const STRAT_SHARED = { rock: 1, wreck: 1, hop: 1, decoyship: 1, fogHide: 1, push: 1, screen: 1, guard: 1, tech: 1, raid: 1, fallback: 1, restock: 1, playdead: 1, storm: 1, heatcloud: 1, surge: 1, wide_loop: 1, center: 1, orbit: 1, salvage: 1, net: 1 };
 // 自機COMのアダプタ
 function stratActorP(c, hpF, te, lk) {
     const sa = lockedSignalId && _signalAnalysis[lockedSignalId], cap = () => CARGO_CAP[gameState.shipType] || 0;
@@ -18336,6 +18370,11 @@ const STRAT_REG = {
     orbit:  { jp: '拠点の周回警備', desc: '拠点の周回警備 (占有した拠点の周りを巡航して、近づく者を早く聞きつける)', w: (k, x) => (x.owned.length ? 0.15 + 0.7 * k.ca + 0.3 * k.ag : 0) * (k.early ? 0 : 1) },
     salvage:{ jp: 'お宝巡り', desc: 'お宝巡り (見つけた難破船を順に回収し、部品と弾を集める)', w: (k, x) => x.salvageSite ? (0.2 + 0.9 * k.gr) * (k.early ? 0.5 : 1) : 0 },
     net:    { jp: '聴音の網', desc: '聴音の網 (自分のでないノードを順に制圧して、聴音局の網を広げる)', w: (k, x) => x.netSite ? 0.2 + 0.8 * k.gr + 0.4 * k.st : 0 },
+    // 第153弾 (オーナー「ランドマークを活かしたスキル」): 岩石帯・残骸帯・難破船・地形伝い (自機COMも敵も同じ重み・同じ実行)
+    rock:   { jp: '岩石帯に潜む', desc: '岩石帯に潜む (岩石帯の中は光学が弱まり、撃たれても外れやすい — 動けないぶん止まって待ち伏せる)', w: (k, x) => (x.rock ? (x.expo >= 1 ? 0.5 : 0.15) + 0.8 * k.st + 0.5 * k.ca : 0) * (k.early ? 0 : 1) },
+    wreck:  { jp: '残骸帯に隠れる', desc: '残骸帯に隠れる (壊れたコロニーの残骸の中は光学の発信が弱まる — 実弾・ビームの閃光で見つかりにくい)', w: (k, x) => (x.wreck ? (x.expo >= 1 ? 0.35 : 0.1) + 0.5 * k.st + 0.4 * k.ca : 0) * (k.early ? 0 : 1) },
+    hop:    { jp: '地形伝いの接近', desc: '地形伝いの接近 (相手の推定へ、熱雲・嵐・岩石帯・残骸帯の陰から陰へ移って詰める — 熱・EMを紛らわせ、光学を弱めながら近づく)', w: (k, x) => (x.estD < 16000 && x.estD > 5000 ? 0.3 + 0.9 * k.st + 0.5 * k.ag : 0) * (k.early ? 0 : 1) },
+    decoyship:{ jp: '難破船を偽装艦に', desc: '難破船を偽装艦に (SOSが止まっている難破船へ行き、演算力でハックして偽装艦にする — 相手の推定の方へ飛ばして誘う)', w: (k, x) => x.hijackSite ? (0.3 + 0.8 * k.st + 0.3 * k.ca) * (k.early ? 0.3 : 1) : 0 },
     // 第133弾 (オーナー「COMがノードを中継として使う」): 占有したノード/コロニーの周りにドローンを置いて見張らせ (通信の中継圏 DRONE_RELAY_R の内)、自分は別の仕事を続ける。奪われかけたら呼び戻す
     outpost:{ jp: '前哨', desc: '前哨 (占有したノード/コロニーの中継圏にドローンを置いて見張らせ、自分は別の仕事を続ける)', w: (k, x) => (x.relays || 0) > 0 && (x.hasScout || x.hasFtr) ? (0.3 + 0.9 * k.ca + 0.4 * k.gr + 0.3 * (1 - k.ag)) * (k.early ? 0.3 : 1) : 0 },
 };
@@ -18412,12 +18451,25 @@ function comStratCtx(c, P) {
 }
 // 第113弾 (段4): 戦略の重みと選び方は 自機COMも敵も同じ関数。x は行為者が「知っていること」: cls, slotsFree, lures[], owned[], near, hasScout/hasFtr/hasTech, hasBuild(砲台を持つ), canTech(空母でTechを作れる), strong(部品3つ以上), hpF, expo(兆候の段階), early(序盤)
 // 第146弾: 戦略の重みに使う追加の事実 (持ち主ごとに px,py,estD,ammoOut を渡す。残りは世界の事実から)
-function terrainSpot(x, y, kind, R) { // 嵐 (EMが通らない)・熱雲 (熱が通らない) の濃い所のうち最寄り
-    const f = kind === 'storm' ? getStormIntensity : getThermalIntensity;
-    if (f(x, y) > 0.4) return { x, y, d: 0 };
-    for (let r = 800; r <= R; r += 800) { let best = null, bd = Infinity; for (let i = 0; i < 16; i++) { const a = (i + r / 800 * 0.31) / 16 * Math.PI * 2, p = clampToMapCircle(x + Math.cos(a) * r, y + Math.sin(a) * r); if (f(p.x, p.y) > 0.4) { const d = Math.hypot(p.x - x, p.y - y); if (d < bd) { bd = d; best = { x: p.x, y: p.y, d }; } } } if (best) return best; }
+function terrainSpot(x, y, kind, R) { // 嵐 (EMが通らない)・熱雲 (熱が通らない)・岩石帯・残骸帯 の濃い所のうち最寄り
+    const f = kind === 'storm' ? getStormIntensity : kind === 'rock' ? getDebrisIntensity : kind === 'wreck' ? getWreckIntensity : getThermalIntensity, THR = (kind === 'rock' || kind === 'wreck') ? 0.25 : 0.4;
+    if (f(x, y) > THR) return { x, y, d: 0 };
+    for (let r = 800; r <= R; r += 800) { let best = null, bd = Infinity; for (let i = 0; i < 16; i++) { const a = (i + r / 800 * 0.31) / 16 * Math.PI * 2, p = clampToMapCircle(x + Math.cos(a) * r, y + Math.sin(a) * r); if (f(p.x, p.y) > THR) { const d = Math.hypot(p.x - x, p.y - y); if (d < bd) { bd = d; best = { x: p.x, y: p.y, d }; } } } if (best) return best; }
     return null;
 }
+// 第153弾: 相手の推定へ向かう途中で身を隠せる地形 (熱雲・嵐・岩石帯・残骸帯) — 推定へ1200u以上近づける・隠れる濃さ≥0.3 のうち最も良い点
+function coverToward(px, py, ex, ey) {
+    const d0 = Math.hypot(ex - px, ey - py), a0 = Math.atan2(ey - py, ex - px); let best = null, bs = 0;
+    for (let i = 0; i < 28; i++) {
+        const a = a0 + (((i % 7) - 3) / 3) * 1.0, r = 2500 + (Math.floor(i / 7)) * 1500, p = clampToMapCircle(px + Math.cos(a) * r, py + Math.sin(a) * r, 1500);
+        const cover = Math.max(getThermalIntensity(p.x, p.y), getStormIntensity(p.x, p.y), getDebrisIntensity(p.x, p.y), getWreckIntensity(p.x, p.y) * 0.8); if (cover < 0.3) continue;
+        const gain = d0 - Math.hypot(ex - p.x, ey - p.y); if (gain < 1200) continue;
+        const sc = cover * (1 + gain / 6000); if (sc > bs) { bs = sc; best = p; }
+    }
+    return best;
+}
+// 第153弾: 偽装艦にできる難破船 (見つけた・使っていない・SOSが止まっている) の最寄り
+function _hijackSite(side, x, y) { let b = null, bd = 20000; for (const st of structures) if (st.type === 'derelict' && !st.salvaged && (side === 'p' ? st.discovered : (st.discovered || st._discE)) && !derelictSosOn(st) && derelictSosIn(st) > 1800) { const d = Math.hypot(st.x - x, st.y - y); if (d < bd) { bd = d; b = st; } } return b; }
 function _restockSite(side, x, y) { const opp = side === 'p' ? 'enemy' : 'player'; let b = null, bd = 20000; for (const st of structures) if (st.type === 'colony' && st.owner !== opp) { const d = Math.hypot(st.x - x, st.y - y); if (d < bd) { bd = d; b = st; } } return b; }
 function _salvageSite(side, x, y) { let b = null, bd = 20000; for (const st of structures) if (st.type === 'derelict' && !st.salvaged && (st.discovered || (side === 'e' && st._discE))) { const d = Math.hypot(st.x - x, st.y - y); if (d < bd) { bd = d; b = st; } } return b; }
 function _netSite(side, x, y) { const me = side === 'p' ? 'player' : 'enemy'; let b = null, bd = CAP_RANGE; for (const n of resourceNodes) if (n.owner !== me) { const d = Math.hypot(n.x - x, n.y - y); if (d < bd) { bd = d; b = n; } } return b; }
@@ -18427,6 +18479,8 @@ function stratExtra(x) {
     o.storm = !!terrainSpot(px, py, 'storm', 9000); o.heat = !!terrainSpot(px, py, 'heat', 9000);
     o.lullSurge = lullPhase === 'warn' || lullPhase === 'active' || surgePhase === 'warn' || surgePhase === 'active';
     o.farFromCenter = Math.hypot(px - MAP_CX, py - MAP_CY) > 9000;
+    o.rock = !!terrainSpot(px, py, 'rock', 12000); o.wreck = !!terrainSpot(px, py, 'wreck', 12000); // 第153弾
+    { const _who = side === 'p' ? null : enemies.find(q => q.hp > 0 && q.type !== 'fighter'); o.hijackSite = (side === 'p' ? hackPower('player') : (_who ? hackPower('enemy', _who) : 0)) >= DERELICT_HIJACK_H ? _hijackSite(side, px, py) : null; }
     o.restockSite = _restockSite(side, px, py); o.salvageSite = _salvageSite(side, px, py); o.netSite = _netSite(side, px, py);
     return o;
 }
@@ -18523,7 +18577,7 @@ function comStratStep(c, P, D, hpF, contact, te, lk, r) {
             }
             return true;
         }
-        case 'screen': case 'fogHide': case 'push': case 'guard': case 'tech': case 'raid': case 'fallback': case 'restock': case 'playdead': case 'storm': case 'heatcloud': case 'surge': case 'wide_loop': case 'center': case 'orbit': case 'salvage': case 'net': { // 第134弾: 実行本体は敵と共通 (stratRun)
+        case 'rock': case 'wreck': case 'hop': case 'decoyship': case 'screen': case 'fogHide': case 'push': case 'guard': case 'tech': case 'raid': case 'fallback': case 'restock': case 'playdead': case 'storm': case 'heatcloud': case 'surge': case 'wide_loop': case 'center': case 'orbit': case 'salvage': case 'net': { // 第134弾: 実行本体は敵と共通 (stratRun)
             const r2 = stratRun(stratActorP(c, hpF, te, lk), S, now);
             if (typeof r2 === 'string') return end(r2.slice(4));
             return r2;
