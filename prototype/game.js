@@ -1756,8 +1756,8 @@ const SURGE_VISION_MULT  = 0.6;    // サージ中の有視界倍率
 const SURGE_CLARITY_MULT = 1.5;    // クリアリング中の探知倍率
 const SURGE_WAKE_MULT    = 2.2;    // サージ中の移動ウェイク増幅 (動けば痕跡が残る)
 // 敵スポーン距離: パッシブ探知圏(11000)のすぐ外 → 接敵まで数分の空白を1〜2分に短縮
-const ENEMY_SPAWN_MIN = 28000;
-const ENEMY_SPAWN_VAR = 10000;
+const ENEMY_SPAWN_MIN = (typeof window !== 'undefined' && window.__spawnMin) || 28000; // 検証用: window.__spawnMin で開始位置の距離を変える
+const ENEMY_SPAWN_VAR = (typeof window !== 'undefined' && window.__spawnVar) || 10000;
 
 // ═══════════════════════════════════════════════════════════════
 // ゲーム性進化 第2弾「音と決断」(2026-07-03):
@@ -13472,9 +13472,11 @@ function enemyUseSpray(e) {
 }
 // ═══ 第110弾 (段2・オーナー「判断の一本化」): 反応で使う搭載品 (修理・閃光・ノイズ・煙幕・偽コンテナ・偽SOS・散布・吹き飛ばし・断線) の判断を 自機COMも敵も同じ関数で ═══
 // F = その行為者が知っていること {P, hpF, hitAgo(秒でなくフレーム), nearD(相手までの距離・見えているか思っている位置), seen, exposure(0〜3), quietF(気配が無いフレーム数), hHere, hiding, kit, missing, mslIn, estD(推定までの距離), hacked, n(k)=持っている数, cd(key,秒), mark(key)}
-function itemReactPlan(F) {
+function itemReactPlan(F0) {
+    // 第151弾: 冷却の記録は「選んだ時」でなく「実際に使った時」に打つ — 候補が他に負けて使われなかった時に冷却だけ消費していた。ここでは記録を溜めるだけにし、tacticDecide の _item 実行時に打つ
+    const marks = [], F = Object.assign({}, F0, { mark: (k) => { marks.push(k); } });
     const P = F.P, st = P.stealth ?? 0.4, ca = P.caution ?? 0.4, ag = P.aggression ?? 0.5, gr = P.greed ?? 0.4, hp = F.hpF, hit = F.hitAgo;
-    const go = (k, why, ck, extra) => { if (ck) F.mark(ck); return Object.assign({ k, why }, extra || {}); };
+    const go = (k, why, ck, extra) => { if (ck) F.mark(ck); return Object.assign({ k, why, _marks: marks.slice() }, extra || {}); };
     const on = (id) => skillUse(F.side, id), eA = F.estAng, rr = () => (Math.random() < 0.5 ? 1 : -1);
     if (on('it_linkcut') && F.n('linkcut') > 0 && F.hacked) return go('linkcut', '侵入されている → 断線パルスで回線を切る');
     // 修理: 損傷が大きく気配が無い (撃たれていない) 間・または傷が深く見えない所へ離れた直後
@@ -13643,7 +13645,7 @@ function tacticDecide(F, A, X, act, doAct) {
         c('calls'); if (F.estAng !== null) c('hasEst'); if (F.estD < 4000) c('estD<4000'); if (F.estD < 9000) c('estD<9000'); if (F.exposure >= 1) c('expo>=1'); if (F.exposure >= 2) c('expo>=2'); if (F.exposure >= 3) c('expo3'); if (F.seen) c('seen');
         if (F.hpF < 0.5) c('hp<.5'); if (F.hitAgo < 900) c('hit<900'); if (F.hiding) c('hiding'); if (F.hiding && F.exposure<=1) c('hide_calm'); if (F.dazed) c('dazed'); if (F.ammoOut) c('ammoOut'); if (F.hHere > 0.55) c('hHere>.55'); if (F.hHere < 0.4) c('hHere<.4');
         for (const k of ['flash', 'noise', 'smoke', 'repair', 'blow', 'spray', 'sos', 'lure', 'fake']) if (F.n(k) > 0) c('has_' + k); if (F.bcn) c('has_bcn'); if (A.have('scout')) c('haveScout'); if (A.have('attack')) c('haveFtr'); if (A.mobile('attack')) c('mobFtr'); if (A.mobile('scout')) c('mobScout'); if (A.captured()) c('captured'); if (A.techBuilding()) c('techBuilding');
-        if (F.exposure >= 2 && F.hitAgo < 900 && F.estD < 9000) c('sat_ctx'); if (F.hpF < 0.5 && F.hitAgo < 900) c('repair_ctx'); if (F.estAng !== null && F.estD < 4000 && !F.seen) c('blow_ctx_est'); }
+        if (F.exposure >= 2 && F.hitAgo < 900 && F.estD < 9000) { c('sat_ctx'); if (F.n('noise') > 0) c('sat_ctx_noise'); if (F.n('noise') > 0 && (F.n('lure') > 2 || F.bcn)) c('sat_ctx_all'); } if (F.hpF < 0.5 && F.hitAgo < 900) { c('repair_ctx'); if (F.n('smoke') > 0) c('repair_ctx_smoke'); if (F.n('smoke') > 0 && F.n('repair') > 0) c('repair_ctx_smoke_repair'); if (F.n('smoke') > 0 && F.n('repair') > 0 && !F.kit) c('repair_ctx_all'); } if (F.estAng !== null && F.estD < 4000 && !F.seen) c('blow_ctx_est'); }
     // 聴き耳の最中: 止まって聴く (見えた・撃たれた・攻撃を受けたら中断)
     if ((F.get('tacHold') || 0) > now) { if (F.seen || F.hitAgo < 900 || F.exposure >= 3) F.set('tacHold', 0); else { A.hold(true); return true; } }
     const R = (id, cond, run) => {
@@ -13651,7 +13653,7 @@ function tacticDecide(F, A, X, act, doAct) {
         if (dbg) { const d = dbg[id] || (dbg[id] = { n: 0, on: 0, cond: 0, side: { p: 0, e: 0 } }); d.n++; if (skillUse(F.side, id)) { d.on++; if (cond()) { d.cond++; d.side[F.side]++; } } }
         if (skillUse(F.side, id) && cond()) cands.push({ id, run, sc: tacScore(F, id) });
     };
-    if (act) cands.push({ id: '_item', run: () => { doAct(act); return true; }, sc: 1.6 * (0.7 + 0.6 * Math.random()) * (0.7 + 0.35 * (F.exposure || 0)) });
+    if (act) cands.push({ id: '_item', run: () => { for (const k of (act._marks || [])) F.mark(k); doAct(act); return true; }, sc: 1.6 * (0.7 + 0.6 * Math.random()) * (0.7 + 0.35 * (F.exposure || 0)) });
     comboRules(F, A, X, R); tacticRules(F, A, X, R);
     cands.sort((a, b) => b.sc - a.sc);
     for (const c of cands) if (c.run()) { F.set('tacLast', c.id); return true; } // 動かなかった(false)候補は飛ばして 次に点の高い候補へ
