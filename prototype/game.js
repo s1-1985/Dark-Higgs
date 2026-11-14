@@ -188,11 +188,27 @@ function engineDirGain(d, ang, sx, sy, rx, ry) {
 }
 // 発信源 s の帯域 b を (rx,ry) から聴いた強さ (直近1秒の最大値)。向きのある推進の分は向きで減る — 自艦も敵も同じ
 function sigToward(s, b, rx, ry) {
-    const tot = sigPeak(s, b), pk = s._sigPk;
-    if (!pk || !(pk.dir > 0) || pk.dirB !== b || !s._dirEng) return tot;
+    if (terrainMasked(s.x, s.y, b)) return 0; // 第152弾: 熱雲の中の熱・磁気嵐の中のEMは 雲/嵐の信号に紛れる
+    const tot = sigPeak(s, b), pk = s._sigPk, tm = terrainTxMul(s.x, s.y, b);
+    if (!pk || !(pk.dir > 0) || pk.dirB !== b || !s._dirEng) return tot * tm;
     const g = engineDirGain(s._dirEng, s._dirAng ?? s.angle ?? 0, s.x, s.y, rx, ry);
-    return Math.max(0, tot - pk.dir * (1 - g));
+    return Math.max(0, tot - pk.dir * (1 - g)) * tm;
 }
+// 第152弾: 地形による遮蔽 (自艦も敵も同じ)。受け手の周りで受信距離が縮む / 発信源の周りで出す強さが変わる / 紛れて聞き分けられない帯域
+function terrainRxMul(rx, ry, b) {
+    let k = 1; const st = getStormIntensity(rx, ry); if (st > 0) k *= 1 - STORM_RX_PEN * st;
+    if (b === 'optic') { const r = getDebrisIntensity(rx, ry); if (r > 0) k *= 1 - ROCK_OPTIC_RX * r; }
+    return k;
+}
+function terrainTxMul(sx, sy, b) {
+    if (b !== 'optic') return 1;
+    let k = 1; const r = getDebrisIntensity(sx, sy); if (r > 0) k *= 1 - ROCK_OPTIC_TX * r;
+    const w = getWreckIntensity(sx, sy); if (w > 0) k *= 1 - WRECK_OPTIC_TX * w;
+    return k;
+}
+function terrainMasked(sx, sy, b) { return b === 'heat' ? getThermalIntensity(sx, sy) >= THERMAL_MASK_MIN : b === 'em' ? getStormIntensity(sx, sy) >= STORM_MASK_MIN : false; }
+// 熱雲の中の熱暴走: 演算力 ×(1−0.35×濃さ)
+function thermalComputeMul(x, y) { const t = getThermalIntensity(x, y); return t > 0 ? 1 - THERMAL_COMPUTE_PEN * t : 1; }
 // 行動ごとに出る信号 (その行動の間だけ足す)。発砲・発進は1.5秒/1秒で薄れる
 const SIG_ACT = {
     kinFire:    { optic: 0.6, heat: 0.10 },              // 実弾の発砲: 閃光
@@ -289,14 +305,14 @@ function sigPeakUpdate(s) {
 }
 function sigPeak(s, b) { const pk = s._sigPk; return pk ? pk[b] : (b === 'heat' ? s.heatSig : b === 'optic' ? s.opticalSig : b === 'em' ? s.emSig : s.higgsSig) || 0; }
 
-// ═══ 第39弾 (オーナー合意): 経路の減衰 — 発信源と受け手の間の霧・磁気嵐・熱雲・岩礁帯は、帯域ごとに信号を弱め、方位の誤差を広げる ═══
-// (自艦が聴く時も敵が聴く時も同じ。旧: 中点の1点だけを見て、嵐・熱雲・岩礁帯は敵が自艦を聴く時だけ効いていた)
+// ═══ 第39弾 (オーナー合意): 経路の減衰 — 発信源と受け手の間の霧・磁気嵐・熱雲・岩石帯は、帯域ごとに信号を弱め、方位の誤差を広げる ═══
+// (自艦が聴く時も敵が聴く時も同じ。旧: 中点の1点だけを見て、嵐・熱雲・岩石帯は敵が自艦を聴く時だけ効いていた)
 // a = 弱める割合 (経路の平均の濃さ×a) / n = 方位の誤差の広がり (1 + 濃さ×n 倍)
 const PATH_MEDIA = {
     fog:     { a: { heat: 0.35, optic: 0.85, em: 0.10, higgs: 0.30 }, n: { heat: 0.5, optic: 0.4, em: 0.2, higgs: 1.2 } },
     storm:   { a: { heat: 0,    optic: 0.20, em: 0.90, higgs: 0 },    n: { heat: 0,   optic: 0.3, em: 2.0, higgs: 0 } },
     thermal: { a: { heat: 0.80, optic: 0,    em: 0,    higgs: 0 },    n: { heat: 2.0, optic: 0,   em: 0,   higgs: 0 } },
-    debris:  { a: { heat: 0.20, optic: 0.85, em: 0,    higgs: 0 },    n: { heat: 0.3, optic: 0.5, em: 0,   higgs: 0 } },
+    debris:  { a: { heat: 0,    optic: 0.40, em: 0,    higgs: 0 },    n: { heat: 0,   optic: 0.5, em: 0,   higgs: 0 } }, // 第152弾: 光学以外は普通に通る (光学は発信・受信の両端でも弱まる)
 };
 const PATH_SAMPLES = 8;
 // 経路の平均の濃さ {fog,storm,thermal,debris}。発信源の位置を含め、受け手の位置は含めない (受け手の周りは受け手の事情)
@@ -328,19 +344,19 @@ function hearSource(src, key, rx, ry, sx, sy, sigOf, range, bands, gainOf) {
     const pmd = pathMediaCached(src, key, sx, sy, rx, ry);
     let best = null, bestQ = 0, nb = 0;
     for (const b of bands) {
-        const g = gainOf ? gainOf(b) : 1, rb = range * g;
+        const g = gainOf ? gainOf(b) : 1, rb = range * g * terrainRxMul(rx, ry, b); // 第152弾: 磁気嵐の中は全帯域・岩石帯の中は光学の受信が鈍る
         if (d >= rb) continue;
         const sc = sensorConfig[b], sig = (sigOf(b) || 0) * (1 - d / rb) * pathAtten(pmd, b);
         if (sig > sc.threshold * 0.5) { nb++; const q = sig / sc.threshold; if (q > bestQ) { bestQ = q; best = { band: b, sig, noise: pathNoise(pmd, b) * (g > 1 ? HI_NOISE : 1) }; } }
     }
-    return best ? { band: best.band, sig: best.sig, noise: best.noise, nb, d } : null;
+    return best ? { band: best.band, sig: best.sig, noise: best.noise * (1 + (WRECK_NOISE - 1) * getWreckIntensity(rx, ry)), nb, d } : null; // 第152弾: 残骸帯の中では金属片の乱反射で方位の誤差が広がる
 }
 // 受信レベル (帯域ごと・しきい値に対する比)。バー表示用
 function hearLevels(src, key, rx, ry, sx, sy, sigOf, range, out, bands, gainOf) {
     const d = Math.hypot(sx - rx, sy - ry);
     if (d >= range * (gainOf ? HI_RANGE : 1)) return;
     const pmd = pathMediaCached(src, key, sx, sy, rx, ry);
-    for (const b of bands) { const rb = range * (gainOf ? gainOf(b) : 1); if (d >= rb) continue; const lvl = (sigOf(b) || 0) * (1 - d / rb) * pathAtten(pmd, b) / sensorConfig[b].threshold; if (lvl > out[b]) out[b] = lvl; }
+    for (const b of bands) { const rb = range * (gainOf ? gainOf(b) : 1) * terrainRxMul(rx, ry, b); if (d >= rb) continue; const lvl = (sigOf(b) || 0) * (1 - d / rb) * pathAtten(pmd, b) / sensorConfig[b].threshold; if (lvl > out[b]) out[b] = lvl; }
 }
 // 方位の誤差 (1σ, rad) — 自艦も敵も同じ式。強い信号ほど・追跡中ほど鋭い。経路の霧・嵐・熱雲で広がる・探知重視で鋭い
 const BEAR_DIV = 0.96; // 旧: 探知の配分と AI の解析精度の割り算 (均等で ≈0.96)
@@ -438,7 +454,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261112p';
+const SPRITE_VER = '20261114a';
 const SPRITE_FILES = {
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
@@ -501,6 +517,8 @@ const SPRITE_FILES = {
     icon_atk:    'assets/icon_atk.png',
     // 第35弾 (Higgsfield gpt_image_2_5): 漂流コンテナ・輸送船・機雷・開けた跡 (透過) / 嵐の放電・霧のゆらぎ・熱泉 (黒地・加算で描く)
     field_cache:  'assets/field_cache.png',
+    terrain_rock:  'assets/terrain_rock.png',  // 第152弾: 岩石帯の岩の絵 (透明地・上から見た岩の群れ)
+    terrain_wreck: 'assets/terrain_wreck.png', // 第152弾: 残骸帯 (壊れたコロニーの外殻・リング・支柱)
     field_trap:   'assets/field_trap.png',   // 偽コンテナ (自分で置いた・見抜いた) の印。ゲーム中の本物そっくりの絵は field_cache のまま (見た目で分からないように)
     fx_trap_blast: 'assets/fx_trap_blast.png', // 偽コンテナの爆発 (火球)
     fx_trap_smoke: 'assets/fx_trap_smoke.png', // 偽コンテナの爆発 (煙)
@@ -1174,7 +1192,8 @@ let higgsGrowth = 0;         // 自然成長 (時間で濃くなる割合)
 let higgsClears = [];        // ビームが晴らした筋 {x0,y0,x1,y1,t}
 const BEAM_CLEAR_W = 300, BEAM_CLEAR_HOLD = 1800, BEAM_CLEAR_RECOVER = 1800; // 合意: 幅300u・30秒晴れて30秒で戻る
 // Phase2 地形ハザード (§3-13 D): デブリ帯 / 磁気嵐帯
-let debrisField = [], stormField = [];
+let _beltCv = {}; // 第152弾: 岩石帯・残骸帯の1つずつの焼き込み絵
+let debrisField = [], stormField = [], wreckField = []; // 第152弾: wreckField = 壊れたコロニーの残骸帯
 let debrisCanvas = null, stormCanvas = null;
 let _debrisCache = new Map(), _debrisCacheFrame = -1;
 let _stormCache  = new Map(), _stormCacheFrame  = -1;
@@ -1573,9 +1592,9 @@ let playerCoasting = false;
 const BOOST_MULT = 2, BOOST_DUR = 360, BOOST_OVERHEAT = 480, BOOST_CD = 2700, BOOST_ACCEL = 20; // 第22弾: 噴射4→6秒
 let boostT = 0, boostCD = 0;
 let _flashScreen = 0; // 閃光弾の画面フラッシュ (frame)
-// 敵の潜伏: 後退時に半径5000u内の濃い霧/岩礁帯へ。潜んでいる間は止まってシグネチャ×0.55・毎秒0.5%修復・45秒で狩りへ戻る
+// 敵の潜伏: 後退時に半径5000u内の濃い霧/岩石帯へ。潜んでいる間は止まってシグネチャ×0.55・毎秒0.5%修復・45秒で狩りへ戻る
 const ENEMY_HIDE_SEARCH = 5000, ENEMY_HIDE_TIME = 2700, ENEMY_HIDE_HEAL = 0.005 / 60, ENEMY_HIDE_SIG = 0.55;
-// 副長の離脱助言: 捕捉中・耐久50%未満で、近くの濃い霧(0.5以上)/岩礁帯を探す半径
+// 副長の離脱助言: 捕捉中・耐久50%未満で、近くの濃い霧(0.5以上)/岩石帯を探す半径
 const XO_ESCAPE_HP = 0.5, XO_ESCAPE_SEARCH = 4000;
 // 第18弾: 地図の縮尺 — コロニー等の画面上の最小サイズ / ノードの画面上の最小サイズ / これより引いたらラベルを短く
 const STRUCT_MIN_PX = 20, NODE_MIN_PX = 14, LABEL_FAR_ZOOM = 0.06;
@@ -1600,6 +1619,41 @@ const COLONY_INTEL_PERIOD = 600;
 const COLONY_INTEL = [null, { ang: Math.PI / 3, dist: null }, { ang: Math.PI / 3, dist: 2500 }, { ang: Math.PI / 12, dist: 500 }]; // 半幅
 const NODE_INTEL_BUFF = 0.10, NODE_INTEL_BUFF_MAX = 0.40;
 const DERELICT_SALVAGE_R = 500, DERELICT_SALVAGE_TIME = 180;
+// ═══ 第152弾 (オーナー): 難破船は SOS を出している間だけ物資がもらえる。止まっている間は 演算力でハックして「偽装艦」にできる ═══
+//   SOS: 4分周期で90秒 (難破船ごとに位相がずれる・見つけた難破船は金色の輪で分かる)。偽装艦: 6秒そばに留まり (EMが漏れる) 演算力 H≥1.8 でハック →
+//   その場で偽装艦として信号を出し続ける (90秒) か、指定した方向へ飛ばす (飛ぶ囮)。使うと難破船は消える (自機も敵も同じ)
+const DERELICT_SOS_PERIOD = 14400, DERELICT_SOS_ON = 5400, DERELICT_HIJACK_R = 600, DERELICT_HIJACK_H = 1.8, DERELICT_HIJACK_TIME = 360, HIJACK_STAY_LIFE = 5400;
+let _hijackPending = null;
+function derelictPhase(st) { return st._ph !== undefined ? st._ph : (st._ph = Math.abs((st.x * 31 + st.y * 17) | 0) % DERELICT_SOS_PERIOD); }
+function derelictSosOn(st) { return (_frameCount + derelictPhase(st)) % DERELICT_SOS_PERIOD < DERELICT_SOS_ON; }
+function derelictSosIn(st) { const t = (_frameCount + derelictPhase(st)) % DERELICT_SOS_PERIOD; return t < DERELICT_SOS_ON ? 0 : DERELICT_SOS_PERIOD - t; } // 次に鳴るまでのフレーム
+function hijackDerelict(side, st, mode, tx, ty) {
+    if (!st || st.salvaged) return;
+    st.salvaged = true; st._hijacked = side;
+    const seq = ++_lureSeq;
+    if (mode === 'fly' && tx !== undefined) launchLure(side, 'ship', st.x, st.y, tx, ty);
+    else lures.push({ owner: side, kind: 'ship', x: st.x, y: st.y, tx: st.x, ty: st.y, vx: 0, vy: 0, a: 0, phase: 'on', life: HIJACK_STAY_LIFE, band: null, sid: 'L-' + seq, wid: (side === 'e' ? 'e-lure-' : 'lure-') + seq });
+    matchRecEvent(side === 'p' ? 'hijackP' : 'hijackE', st.x, st.y, (side === 'p' ? '自艦' : '敵') + 'が難破船をハックして偽装艦に (' + (mode === 'fly' ? '飛ばす' : 'その場で発信') + ')');
+    if (side === 'p') { logMessage('EW: 難破船のハック完了 — 偽装艦として' + (mode === 'fly' ? '指定の方向へ飛ばした' : 'その場で信号を出している (90秒)'), 'system-msg'); sfxOr('item_lure_ship', 'deploy'); }
+}
+function openHijackChoice(st) {
+    if (document.getElementById('hijack-pop')) return;
+    if (comDemo) { // COM対戦: 追跡中の推定があればそちらへ飛ばす・無ければその場で
+        const sa = lockedSignalId && _signalAnalysis[lockedSignalId], te = sa && sa.fix ? trackEstimate(sa, 0) : null;
+        hijackDerelict('p', st, te ? 'fly' : 'stay', te ? te.x + (Math.random() - 0.5) * 3000 : undefined, te ? te.y + (Math.random() - 0.5) * 3000 : undefined); return;
+    }
+    const d = document.createElement('div'); d.id = 'hijack-pop';
+    d.style.cssText = 'position:fixed;left:50%;bottom:90px;transform:translateX(-50%);z-index:60;background:rgba(10,24,40,.94);border:1px solid #4ad;border-radius:8px;padding:10px 12px;color:#cfe;font:13px sans-serif;pointer-events:auto;text-align:center';
+    d.innerHTML = '<div style="margin-bottom:8px">難破船をハック — 偽装艦にする</div>'
+        + '<button id="hj-stay" style="margin:0 4px;padding:8px 10px">その場で偽装艦として発信</button>'
+        + '<button id="hj-fly" style="margin:0 4px;padding:8px 10px">方向を指定して飛ばす</button>'
+        + '<button id="hj-no" style="margin:0 4px;padding:8px 10px">やめる</button>';
+    document.body.appendChild(d);
+    const close = () => { d.remove(); st._hjP = 0; };
+    d.querySelector('#hj-stay').onclick = () => { d.remove(); hijackDerelict('p', st, 'stay'); };
+    d.querySelector('#hj-fly').onclick = () => { d.remove(); _hijackPending = st; pendingLure = 'derelictfly'; logMessage('EW: 偽装艦を飛ばす方向 (地点) をタップ', 'system-msg'); };
+    d.querySelector('#hj-no').onclick = close;
+}
 let _resupply = null; // 自機が今補給している所 { obj, kind:'station'|'colony', p }
 
 // ── 潜航型デコイ (強EM放射のダミー → 敵ミサイルを誘引・索敵妨害) ──
@@ -1699,7 +1753,13 @@ const MIN_VISION_FACTOR = 0.05; // 100%ヒッグスでも最低限の視認性�
 // (旧: 敵の居る場所の濃度でも視認を落とすゲート §3-13 C があり、視界内なのに半透明・想定ロック止まりになっていた → 撤去)
 
 // ── Phase2 地形ハザード (§3-13 D) tunable定数 ──
-// デブリ帯=岩礁帯(OPTIC干渉・移動/命中デバフ・ビーム貫通) / 磁気嵐帯(EM干渉・AI退避所)
+// デブリ帯=岩石帯(OPTIC干渉・移動/命中デバフ・ビーム貫通) / 磁気嵐帯(EM干渉・AI退避所)
+// ═══ 第152弾 (オーナー): 地形に「隠れる」— 帯域ごとの遮蔽 (自機も敵も同じ式) ═══
+//   熱雲の中: 艦の熱は熱源に紛れる (相手が解析しても熱源がある、としか分からない)・熱暴走で演算力が下がる / 磁気嵐の中: EMは嵐に紛れる・全センサーの受信が鈍る
+//   岩石帯 (旧 岩石帯): 命中率↓ (狙われる側も撃つ側も)・速度↓・光学の発信と受信が弱まる・自身は何も発信しない / 残骸帯: 微弱な熱とEMを発信・光学の発信が弱まる・方位の誤差が広がる
+const THERMAL_MASK_MIN = 0.20, STORM_MASK_MIN = 0.20, THERMAL_COMPUTE_PEN = 0.35, STORM_RX_PEN = 0.40;
+const ROCK_OPTIC_TX = 0.60, ROCK_OPTIC_RX = 0.60, ROCK_SHOOT_MISS = 0.35;
+const WRECK_OPTIC_TX = 0.50, WRECK_NOISE = 1.6, WRECK_WAVE = 0.7, WRECK_SIG = 0.16;
 const DEBRIS_SLOW        = 0.40; // デブリ密度100%での最大移動減速率
 const DEBRIS_AI_MITIGATE = 0.70; // AI配分100%で減速を最大70%軽減 (姿勢制御補助)
 const DEBRIS_ENEMY_MITIGATE = 0.35; // 敵の固定デブリ軽減 (動けなくなるのを防ぐ)
@@ -1788,7 +1848,7 @@ const WOUNDED_HEAT_FLOOR = 0.45;     // 手負いの熱シグネチャ下限 (�
 
 // ═══════════════════════════════════════════════════════════════
 // ゲーム性進化 第3弾「深淵の駆け引き」(2026-07-03):
-//   10. デブリ擬態: 岩礁帯(デブリ帯)で完全停止+静粛 → 岩塊に紛れて至近でも探知されない
+//   10. デブリ擬態: 岩石帯(デブリ帯)で完全停止+静粛 → 岩塊に紛れて至近でも探知されない
 //   11. ニアミス「息を殺せ」: 未発見のまま敵艦が至近を通過する恐怖演出
 //   12. チャージビーム: 2秒チャージで威力増。チャージ中は熱/EM激増=敵のcharging適応が本物になる
 //   13. 通信傍受: EMセンサーで敵の艦内通信 (状態・意図) を垣間見る
@@ -1796,8 +1856,8 @@ const WOUNDED_HEAT_FLOOR = 0.45;     // 手負いの熱シグネチャ下限 (�
 //   15. 戦闘詳報: クリア/撃沈時に狩りの統計を表示
 // 全数値は実機調整前提の tunable
 // ═══════════════════════════════════════════════════════════════
-let isBottomed = false;              // デブリ擬態状態 (岩礁帯+完全停止+静粛)
-const BOTTOM_DEBRIS_MIN = 0.30;      // デブリ擬態に必要な岩礁帯密度
+let isBottomed = false;              // デブリ擬態状態 (岩石帯+完全停止+静粛)
+const BOTTOM_DEBRIS_MIN = 0.30;      // デブリ擬態に必要な岩石帯密度
 const BOTTOM_SIG_MULT = 0.30;        // 擬態中の追加シグネチャ倍率 (静粛×0.55にさらに乗算)
 let nearMissActive = false;          // ニアミス状態 (息を殺せ)
 const NEAR_MISS_DIST = 1600;         // ニアミス発動距離
@@ -2195,6 +2255,36 @@ function getDebrisIntensity(x, y) {
     _debrisCache.set(key, v);
     return v;
 }
+// 第152弾: 岩石帯・残骸帯の絵。絵 (透明地) を ばらまいて円の縁を薄れさせた1枚を、帯ごとに一度だけ焼く (読み込めるまでは従来の点描だけ)
+function _bakeBelt(img, m, n, szMin, szMax) {
+    const S = 512, c = document.createElement('canvas'); c.width = c.height = S; const x = c.getContext('2d');
+    let sd = ((m.x * 7 + m.y * 13) | 0) >>> 0; const rnd = () => { sd = (sd * 1664525 + 1013904223) >>> 0; return sd / 4294967296; };
+    for (let i = 0; i < n; i++) {
+        const a = rnd() * 6.283, r = Math.sqrt(rnd()) * S * 0.5, sz = szMin + rnd() * (szMax - szMin);
+        x.save(); x.translate(S / 2 + Math.cos(a) * r, S / 2 + Math.sin(a) * r); x.rotate(rnd() * 6.283); x.globalAlpha = 0.55 + rnd() * 0.45; x.drawImage(img, -sz / 2, -sz / 2, sz, sz); x.restore();
+    }
+    x.globalCompositeOperation = 'destination-in';
+    const g = x.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2); g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(0.55, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    x.fillStyle = g; x.fillRect(0, 0, S, S); return c;
+}
+function drawBelts(ctx, cx, cy, vw, vh) {
+    const one = (arr, img, key, n0, n1, s0, s1, alpha) => {
+        if (!spriteReady(img)) return;
+        for (let i = 0; i < arr.length; i++) {
+            const m = arr[i]; if (m.x + m.r < cx || m.x - m.r > cx + vw || m.y + m.r < cy || m.y - m.r > cy + vh) continue;
+            const k = key + i; let cv = _beltCv[k]; if (!cv) cv = _beltCv[k] = _bakeBelt(img, m, Math.round(n0 + n1 * m.density), s0, s1);
+            ctx.globalAlpha = alpha * (0.6 + 0.4 * m.density); ctx.drawImage(cv, m.x - m.r, m.y - m.r, m.r * 2, m.r * 2);
+        }
+        ctx.globalAlpha = 1;
+    };
+    one(debrisField, SPRITES.terrain_rock, 'r', 10, 22, 110, 220, 0.95);
+    one(wreckField, SPRITES.terrain_wreck, 'w', 8, 12, 110, 210, 1.0);
+}
+function getWreckIntensity(x, y) { // 第152弾: 残骸帯 (数が少ないので毎回その場で足す)
+    let total = 0;
+    for (let i = 0; i < wreckField.length; i++) { const m = wreckField[i], dx = x - m.x, dy = y - m.y, r2 = m.r * m.r; if (dx * dx + dy * dy < r2) total += (1 - Math.sqrt((dx * dx + dy * dy) / r2)) * m.density; }
+    return total > 1 ? 1 : total;
+}
 function getStormIntensity(x, y) {
     if (_stormCacheFrame !== _frameCount) { _stormCache.clear(); _stormCacheFrame = _frameCount; }
     const key = (Math.round(x / 500) * 100000 + Math.round(y / 500)) | 0;
@@ -2268,7 +2358,7 @@ function playerClutter() {
     if (_clutterCache.f !== _frameCount) _clutterCache = { f: _frameCount, n: player ? clutterCount(player.x, player.y, player) : 0 };
     return _clutterCache.n;
 }
-// 第17弾: 隠れ場所 — 半径R内で最も近い「濃い霧(敵の探信が埋もれる濃さ)」か「岩礁帯(擬態できる濃さ)」。無ければ null。
+// 第17弾: 隠れ場所 — 半径R内で最も近い「濃い霧(敵の探信が埋もれる濃さ)」か「岩石帯(擬態できる濃さ)」。無ければ null。
 // 自機の副長の離脱助言と、敵の潜伏で共用 (霧と岩礁は海図の既知物なので、どちらも知っていてよい)
 function findCoverSpot(x, y, R, avoidAng = null) {
     const ok = (px, py) => getHiggsIntensity(px, py) >= ENEMY_PING_HIGGS_BLOCK ? 'fog' : getDebrisIntensity(px, py) > BOTTOM_DEBRIS_MIN ? 'debris' : null;
@@ -2477,6 +2567,11 @@ function updateStatusStrip() {
     if (player._sysSensorTimer > 0) chips.push(['センサー損傷', sec(player._sysSensorTimer), 'sen']); else if (player._daze > 0) chips.push(['センサー撹乱', sec(player._daze), 'sen']);
     if (player._commJam > 0) chips.push(['通信障害', sec(player._commJam), 'sen']);
     if (player._burn > 0) chips.push(['延焼', sec(player._burn), 'bad']);
+    { const _t = getThermalIntensity(player.x, player.y), _s = getStormIntensity(player.x, player.y), _r = getDebrisIntensity(player.x, player.y), _w = getWreckIntensity(player.x, player.y); // 第152弾: 今いる地形の効果
+      if (_t >= THERMAL_MASK_MIN) chips.push(['熱源に紛れる・熱暴走 演算−' + Math.round(THERMAL_COMPUTE_PEN * _t * 100) + '%', '', 'sen']);
+      if (_s >= STORM_MASK_MIN) chips.push(['EMが嵐に紛れる・受信−' + Math.round(STORM_RX_PEN * _s * 100) + '%', '', 'sen']);
+      if (_r > 0.05) chips.push(['岩石帯 速度↓・光学↓・被弾↓/命中↓', '', 'sen']);
+      if (_w > 0.05) chips.push(['残骸帯 光学↓・方位誤差↑', '', 'sen']); }
     if (debugMode) chips.push([_dbgGod ? 'DEBUG 無敵' : 'DEBUG', '', 'sen']); // 第73弾: 無敵が残っていても気づけるように常に表示
     const key = chips.map(c => c[0] + c[1]).join('|');
     if (key !== _ssKey) { _ssKey = key; const st = document.getElementById('ss-stat'); if (st) st.innerHTML = chips.map(c => '<span class="ss-chip ' + c[2] + '">' + c[0] + (c[1] === '' ? '' : '<i>' + c[1] + 's</i>') + '</span>').join(''); }
@@ -2812,7 +2907,7 @@ canvas.addEventListener('touchend', (e) => {
 class Structure {
     constructor(x, y, type) {
         this.x = x; this.y = y; this.type = type; // 'colony' or 'derelict'
-        this.radius = type === 'colony' ? 60 : 30;
+        this.radius = type === 'colony' ? 60 : 150; // 第152弾: 難破船は作り直した絵に合わせて大きく (旧 30)
         this.hacked = false;
         this.owner = null; // 第23弾: null / 'player' / 'enemy' (hacked = owner==='player')
         this.discovered = false;
@@ -2828,6 +2923,12 @@ class Structure {
     }
     draw(ctx) {
         const t = Date.now();
+        if (this.type === 'derelict' && !this.salvaged && this.discovered) { // 第152弾: SOS が鳴っている間は金色の輪が広がる (止まっている間は灰色の点線 — ハックで偽装艦にできる)
+            const on = derelictSosOn(this), ph = (_frameCount % 90) / 90, R = DERELICT_SALVAGE_R;
+            ctx.save(); ctx.strokeStyle = on ? '#ffd24a' : '#7a8a99'; ctx.lineWidth = Math.max(2, 2 / camera.zoom);
+            if (on) { ctx.globalAlpha = 0.85 * (1 - ph); ctx.beginPath(); ctx.arc(this.x, this.y, R * (0.3 + 0.7 * ph), 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 0.35; } else ctx.globalAlpha = 0.22;
+            ctx.setLineDash([R * 0.08, R * 0.1]); ctx.beginPath(); ctx.arc(this.x, this.y, R, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+        }
         const hColor = this.hacked ? '#00aaff' : (this._pObs === 'enemy' ? '#ff8844' : null); // 第72弾: 持ち主は見た/奪われた時だけ分かる
 
         // アイコンスケール: 最低20px画面サイズを保証（Stationと同様の視認性）
@@ -3436,10 +3537,11 @@ class Projectile {
         }
 
         if (hitTarget && hitTarget.hp > 0) {
-            // デブリ帯(岩礁帯): 遮蔽で実弾/ミサイルが外れやすい (ビームは貫通=Projectile生成時に即着弾でここを通らない)
+            // デブリ帯(岩石帯): 遮蔽で実弾/ミサイルが外れやすい (ビームは貫通=Projectile生成時に即着弾でここを通らない)
             // AI命中精度(武器配分): 自機の弾はミス率を低減
             const _debHit = getDebrisIntensity(hitTarget.x, hitTarget.y);
-            const _missChance = _debHit * DEBRIS_MISS * (1 - aiPrec('weapon') * AI_WEAPON_AIM); // 第39弾: 自機も敵も同じ
+            let _missChance = _debHit * DEBRIS_MISS * (1 - aiPrec('weapon') * AI_WEAPON_AIM); // 第39弾: 自機も敵も同じ
+            { const _rkS = getDebrisIntensity(this.ox, this.oy); if (_rkS > 0) _missChance = 1 - (1 - _missChance) * (1 - _rkS * ROCK_SHOOT_MISS); } // 第152弾: 岩石帯の中から撃つと当たりにくい (撃つ側も同じ)
             if (_missChance > 0 && Math.random() < _missChance) {
                 this.active = false; // 岩片に阻まれ命中せず
                 createHitEffect(this.x, this.y, '#8a8a7a');
@@ -4070,7 +4172,7 @@ class Ship {
     _maxSpeeds() {
         const cls = ENEMY_CLASS[this.type];
         if (!cls) return null;
-        // 第39弾: 自機と同じ式 — 機関の配分 (航行モード)・エンジンの種類・霧の減速 (ヒッグスエンジンは霧で速くなる)・岩礁帯・部品
+        // 第39弾: 自機と同じ式 — 機関の配分 (航行モード)・エンジンの種類・霧の減速 (ヒッグスエンジンは霧で速くなる)・岩石帯・部品
         const _eg = ENGINE_TYPES[this.engine] || ENGINE_TYPES.thermonuclear, _h = getHiggsIntensity(this.x, this.y);
         const base = shipCruiseSpeed(cls, (this.gen || GEN_FOCUS.balance).engine, 1) * engineSpeedFactor(this.engine || 'thermonuclear', _h) * this.terrainSpeedMult() * epm(this).speed; // 第33弾: 部品 / 第42弾: エンジンの速さ
         return { silent: base * SILENT_SPEED_MULT, cruise: base, flank: base * 1.5 };
@@ -4158,7 +4260,7 @@ class Ship {
         }
     }
 
-    // デブリ帯(岩礁帯)による移動減速 (§3-13 D)。AI配分で姿勢制御補助=軽減 (プレイヤーのみ)。
+    // デブリ帯(岩石帯)による移動減速 (§3-13 D)。AI配分で姿勢制御補助=軽減 (プレイヤーのみ)。
     terrainSpeedMult() {
         // 機関損傷: 速度大幅低下 (奇襲/後方被弾のサブシステム・クリット)
         const _sysEng = (this._sysEngineTimer > 0) ? SYS_ENGINE_SLOW : 1;
@@ -4844,7 +4946,7 @@ class Ship {
                     && ((_P.aggression ?? 0.5) >= 0.5 || (_P.caution ?? 0.4) >= 0.5 || _engaged) && (_frameCount + this.uid) % 60 === 0) { this.turretStock--; spawnEnemyDrone(this, 'turret'); } }
             }
 
-            // ── 第17弾: 潜伏 — 後退した敵は濃い霧/岩礁帯で止まって修復し、45秒で狩りに戻る ──
+            // ── 第17弾: 潜伏 — 後退した敵は濃い霧/岩石帯で止まって修復し、45秒で狩りに戻る ──
             // (旧: 後退中も全速で動き続け熱が最大になるため、追われて沈むまで殴り合いになっていた)
             let _hideActive = false;
             if (this._hideT > 0) {
@@ -4864,7 +4966,7 @@ class Ship {
                         const _msH = this._maxSpeeds();
                         this._moveHeading(ang, _msH ? _msH.flank : 1.5); // 第22弾: 隠れ場所へ全速 (自機の全速と同じ)
                     } else {
-                        if (!this._hiding && (this.inVision || this.contactLife > 0)) logMessage('SENSOR: 敵艦が' + (hs.kind === 'fog' ? '濃い霧' : '岩礁帯') + 'で機関を止めた — 潜んで修復している', 'system-msg');
+                        if (!this._hiding && (this.inVision || this.contactLife > 0)) logMessage('SENSOR: 敵艦が' + (hs.kind === 'fog' ? '濃い霧' : '岩石帯') + 'で機関を止めた — 潜んで修復している', 'system-msg');
                         this._hiding = true;
                         // 第26弾: 修理はリペアキットだけ (旧: 潜伏中に毎秒0.5%回復)
                         if ((this.itemRepair || 0) > 0 && !(this._kitT > 0) && this.hp < this.maxHp - REPAIR_KIT_HP * 0.8) {
@@ -4976,11 +5078,11 @@ class Ship {
                             if ((this.personality && (this.personality.stealth ?? 0) >= 0.5) && (this.itemSpray || 0) > 0) enemyUseSpray(this); // 第51弾
                         }
                     }
-                    // 第17弾: 近くに濃い霧/岩礁帯があればそこへ潜む (ノードより優先。ノードは位置が知られている)
+                    // 第17弾: 近くに濃い霧/岩石帯があればそこへ潜む (ノードより優先。ノードは位置が知られている)
                     if (!(this._hideCD > 0) && !(this._hideT > 0) && this.type !== 'fighter') {
                         const lkC = this.playerLastKnownPos;
                         const cs = findCoverSpot(this.x, this.y, ENEMY_HIDE_SEARCH, lkC ? Math.atan2(lkC.y - this.y, lkC.x - this.x) : null);
-                        if (cs) { this._hideSpot = cs; this._hideT = ENEMY_HIDE_TIME; this._hiding = false; comThinkEvent('e', '耐久' + _pct(hpFrac) + ' < 退き際' + _pct(retreatThresh) + ' → 近くの' + (cs.kind === 'fog' ? '濃い霧' : '岩礁帯') + 'に潜んで修復する', 'e' + this.uid);
+                        if (cs) { this._hideSpot = cs; this._hideT = ENEMY_HIDE_TIME; this._hiding = false; comThinkEvent('e', '耐久' + _pct(hpFrac) + ' < 退き際' + _pct(retreatThresh) + ' → 近くの' + (cs.kind === 'fog' ? '濃い霧' : '岩石帯') + 'に潜んで修復する', 'e' + this.uid);
                             // 第21弾: 潜りに行く前に、反対方向へ偽艦影ブイを撃って追手の耳を逸らす (自機の囮と同じもの)
                             if ((this.lureShip || 0) > 0) {
                                 this.lureShip--;
@@ -6546,7 +6648,7 @@ function generateSector() {
     bgMist = [];
     bgMistCanvas = null; higgsOverlayCanvas = null;
     higgsCloudCanvas = null;
-    debrisField = []; stormField = []; thermalField = [];
+    debrisField = []; stormField = []; thermalField = []; wreckField = []; _beltCv = {};
     debrisCanvas = null; stormCanvas = null; thermalCanvas = null;
     // 円内ランダム配置ヘルパー (uniformなdisk sampling)
     const _rndCirc = (maxR) => {
@@ -6563,14 +6665,16 @@ function generateSector() {
 
     // 第21弾: ヒッグス濃度は円の集まり (bgMist) ではなくマス目 (細かく・まばら)。bgMist は空のまま
     generateHiggsGrid();
-    // 第44弾 (オーナー): 試合ごとに地形の傾向を振る — 熱雲が多いマップ・磁気嵐が多いマップ・岩礁帯が多いマップ・霧のゆらぎが多いマップなど (コロニー・ノードの数は一定)
+    // 第44弾 (オーナー): 試合ごとに地形の傾向を振る — 熱雲が多いマップ・磁気嵐が多いマップ・岩石帯が多いマップ・霧のゆらぎが多いマップなど (コロニー・ノードの数は一定)
     rollMapTheme();
-    const _nDebris = Math.max(8, Math.round(20 * mapTheme.d)), _nStorm = Math.max(5, Math.round(12 * mapTheme.s)), _nThermal = Math.max(6, Math.round(14 * mapTheme.t));
-    // デブリ帯 (岩礁帯): 2倍・均等分散 (旧10→20)
+    const _nDebris = Math.max(4, Math.round(6 * mapTheme.d)), _nStorm = Math.max(5, Math.round(12 * mapTheme.s)), _nThermal = Math.max(6, Math.round(14 * mapTheme.t));
+    // デブリ帯 (岩石帯): 2倍・均等分散 (旧10→20)
     for (let i = 0; i < _nDebris; i++) {
         const p = _rndSector(i, _nDebris, MAP_RADIUS * 0.90);
-        debrisField.push({ ...p, r: Math.random() * 3500 + 1800, density: Math.random() * 0.5 + 0.25 });
+        debrisField.push({ ...p, r: Math.random() * 3000 + 5200, density: Math.random() * 0.5 + 0.25 }); // 第152弾: 岩石帯は熱雲・磁気嵐3〜4個分の広さ (旧 岩石帯 20個・半径1800〜5300 → 6個・5200〜8200)
     }
+    // 第152弾: 壊れたコロニーの残骸帯 5個 (熱雲・磁気嵐より小さい)
+    for (let i = 0; i < 5; i++) { const p = _rndSector(i, 5, MAP_RADIUS * 0.80); wreckField.push({ ...p, r: Math.random() * 1200 + 1800, density: Math.random() * 0.3 + 0.7 }); }
     // 磁気嵐帯: 2倍・均等分散 (旧6→12)
     for (let i = 0; i < _nStorm; i++) {
         const p = _rndSector(i, _nStorm, MAP_RADIUS * 0.85);
@@ -6591,7 +6695,7 @@ function generateSector() {
         // ヒッグス雲(白) — 視野内で「下から見上げた雲」として 'lighter' 合成する用 (濃いほど白い)
         higgsCloudCanvas = _bakeHiggsGrid(true);
 
-        // ── デブリ帯 (岩礁帯) ベイク: 散らばった岩片の点描 (灰色) ──
+        // ── デブリ帯 (岩石帯) ベイク: 散らばった岩片の点描 (灰色) ──
         const dc = document.createElement('canvas');
         dc.width = dc.height = 768;
         const dcx = dc.getContext('2d');
@@ -8259,7 +8363,13 @@ function updateNodesAndColonies() {
         } else if (n.capP > 0) n.capP = Math.max(0, n.capP - 0.004);
     }
     for (const st of structures) {
-        if (st.type === 'derelict' && !st.salvaged && Math.hypot(player.x - st.x, player.y - st.y) < DERELICT_SALVAGE_R) { // 第23弾: 難破船から一度だけ拾う
+        if (st.type === 'derelict' && !st.salvaged && st.discovered && !derelictSosOn(st) && Math.hypot(player.x - st.x, player.y - st.y) < DERELICT_HIJACK_R && hackPower('player') >= DERELICT_HIJACK_H && !document.getElementById('hijack-pop') && pendingLure !== 'derelictfly') { // 第152弾: SOS が止まっている間は ハックして偽装艦に
+            st._hjP = (st._hjP || 0) + gameSpeedFactor / DERELICT_HIJACK_TIME;
+            _capturing = { kind: 'derelict', obj: st, p: st._hjP, hijack: true };
+            if (st._hjP >= 1) { st._hjP = 0; openHijackChoice(st); }
+            continue;
+        }
+        if (st.type === 'derelict' && !st.salvaged && derelictSosOn(st) && Math.hypot(player.x - st.x, player.y - st.y) < DERELICT_SALVAGE_R) { // 第23弾: 難破船から一度だけ拾う (第152弾: SOS が鳴っている間だけ)
             st.salvP = (st.salvP || 0) + gameSpeedFactor / DERELICT_SALVAGE_TIME;
             if (st.salvP >= 0) _capturing = { kind: 'derelict', obj: st, p: st.salvP }; // 負=積む場所がなかった後の待ち
             if (st.salvP >= 1) salvageDerelictByPlayer(st);
@@ -8862,8 +8972,16 @@ function updateEnemyDerelictSalvage() {
         if (st.type !== 'derelict' || st.salvaged) continue;
         let near = null;
         for (const e of enemies) if (e.hp > 0 && !e._dying && e.type !== 'fighter' && Math.hypot(e.x - st.x, e.y - st.y) < DERELICT_SALVAGE_R) { near = e; break; }
-        if (!near) { st.eSalvP = 0; continue; }
+        if (!near) { st.eSalvP = 0; st.eHjP = 0; continue; }
         if (player && player.hp > 0 && Math.hypot(player.x - st.x, player.y - st.y) < DERELICT_SALVAGE_R) continue;
+        if (!derelictSosOn(st)) { // 第152弾: SOS が止まっている間は 回収できない — だまし好みで演算力が足りれば ハックして偽装艦に (自機と同じ)
+            const _P = near.personality || {};
+            if ((persAx(_P, 'cunning') >= 0.5 || (_P.stealth || 0) >= 0.6) && hackPower('enemy', near) >= DERELICT_HIJACK_H && Math.hypot(near.x - st.x, near.y - st.y) < DERELICT_HIJACK_R) {
+                st.eHjP = (st.eHjP || 0) + gameSpeedFactor / DERELICT_HIJACK_TIME; near._commsF = _frameCount; // EMが漏れる (自機と同じ)
+                if (st.eHjP >= 1) { const lk = near.playerLastKnownPos; hijackDerelict('e', st, lk ? 'fly' : 'stay', lk ? lk.x + (Math.random() - 0.5) * 3000 : undefined, lk ? lk.y + (Math.random() - 0.5) * 3000 : undefined); comThinkEvent('e', '難破船をハックして偽装艦に — ' + (lk ? '自機が居そうな方へ飛ばす' : 'その場で信号を出す'), 'e' + near.uid); }
+            }
+            continue;
+        }
         st.eSalvP = (st.eSalvP || 0) + gameSpeedFactor / 180;
         if (st.eSalvP < 1) continue;
         st.salvaged = true; st._partDone = true; st.eSalvP = 0;
@@ -8875,7 +8993,7 @@ function updateEnemyDerelictSalvage() {
 
 // ═══ 第34弾 (オーナー採用・数値は委任 2026-10-31): 凪・空き巣の跡・輸送船 ═══
 // ── 1) 凪: 4〜6分おき (サージと重ならない)。予兆15秒 → 10秒 (前後2秒で薄れて戻る)。霧×0.15・有視界の上限1800→5000u (自機/敵とも)。
-//    岩礁帯 (0.3超)・難破船の500u以内・煙幕の中に居れば、凪の間も1800uより遠くからは見えない
+//    岩石帯 (0.3超)・難破船の500u以内・煙幕の中に居れば、凪の間も1800uより遠くからは見えない
 function lullSheltered(t) {
     if (!t || lullK <= 0) return false;
     if (getDebrisIntensity(t.x, t.y) > 0.3) return true;
@@ -8883,7 +9001,7 @@ function lullSheltered(t) {
     for (const c of smokeClouds) if (Math.hypot(c.x - t.x, c.y - t.y) < c.r * 0.6) return true;
     return false;
 }
-// 凪の隠れ場所 (いちばん近い難破船の陰 or 岩礁帯)
+// 凪の隠れ場所 (いちばん近い難破船の陰 or 岩石帯)
 function lullShelterSpot(x, y, R) {
     let best = null, bd = R;
     for (const st of structures) { if (st.type !== 'derelict') continue; const d = Math.hypot(st.x - x, st.y - y); if (d < bd) { bd = d; best = { x: st.x + 200, y: st.y, d, lbl: '難破船の陰' }; } }
@@ -8891,7 +9009,7 @@ function lullShelterSpot(x, y, R) {
         const a = k / 24 * Math.PI * 2;
         for (const r of [1500, 3000, 4500]) {
             const px = x + Math.cos(a) * r, py = y + Math.sin(a) * r;
-            if (r < bd && getDebrisIntensity(px, py) > 0.35) { bd = r; best = { x: px, y: py, d: r, lbl: '岩礁帯' }; }
+            if (r < bd && getDebrisIntensity(px, py) > 0.35) { bd = r; best = { x: px, y: py, d: r, lbl: '岩石帯' }; }
         }
     }
     return best;
@@ -8901,7 +9019,7 @@ function updateLull() {
         if ((lullNext -= gameSpeedFactor) > 0) return;
         if (surgePhase !== 'none') { lullNext = 1200; return; } // サージと重ねない
         lullPhase = 'warn'; lullT = LULL_WARN;
-        logMessage('SENSOR: 霧の流れが止まる — あと' + Math.round(LULL_WARN / 60) + '秒で凪 (霧が晴れ、遠くまで見える・見られる)。岩礁帯・難破船の陰・煙幕なら隠れられる', 'warning-msg');
+        logMessage('SENSOR: 霧の流れが止まる — あと' + Math.round(LULL_WARN / 60) + '秒で凪 (霧が晴れ、遠くまで見える・見られる)。岩石帯・難破船の陰・煙幕なら隠れられる', 'warning-msg');
         sfxOr('alm_lull_warn', 'alert');
         matchRecEvent('lull', player ? player.x : 0, player ? player.y : 0, '凪の予兆');
         // 敵: 慎重・隠密なら隠れ場所へ / 攻撃的なら見張る
@@ -9242,6 +9360,7 @@ const FIELD_KINDS = {
     storm: { lbl: '嵐の放電', band: 'em', lo: 0.40, hi: 0.60, col: '180,90,255' },
     vent:  { lbl: '熱泉', band: 'heat', lo: 0.30, hi: 0.40, col: '255,130,50' },
     cache: { lbl: '漂流コンテナ', band: null, lo: 0.15, hi: 0.25, col: '255,225,140' },
+    wreck: { lbl: '残骸帯', band: null, lo: 0.16, hi: 0.16, col: '200,170,140' }, // 第152弾: 壊れたコロニーの残骸が出す微弱な熱とEM
 };
 const CLOUD_LIFE = 7200, FIELD_FADE = 300, CACHE_R = 400, CACHE_TIME = 180, CACHE_RESPAWN = 3600, FIELD_IDENT_R = 2500;
 // ═══ 第40弾 (オーナー): 特定した発信元 = 海図の既知物 ═══
@@ -9343,7 +9462,7 @@ function updateSrcKnown() {
 // 特定した発信元の描く位置: 目視で分かった物は今の位置 / 解析で分かった物は推定の中心 (見えたらその場で目視に切り替わる)
 function srcDrawPos(sid, obj) { const k = _srcKnown[sid]; if (!k || !obj) return obj; if (k.by === 'eye' && inPlayerVision(obj.x, obj.y)) return obj; return { x: k.x, y: k.y }; } // 第44弾: 目視で分かった物も、有視界の外では最後に見た位置
 // ═══ 第44弾 (オーナー): マップの傾向 (毎試合ランダム) と、信号の置き場所 ═══
-//   傾向 mapTheme {t:熱雲, s:磁気嵐, d:岩礁帯, c:霧のゆらぎ} は 地形の数と、その地形に対応する信号 (熱泉=熱雲の中心・嵐の放電=磁気嵐の中心・霧のゆらぎ=霧の濃い所・漂流コンテナ=岩礁帯) の数に掛かる。
+//   傾向 mapTheme {t:熱雲, s:磁気嵐, d:岩石帯, c:霧のゆらぎ} は 地形の数と、その地形に対応する信号 (熱泉=熱雲の中心・嵐の放電=磁気嵐の中心・霧のゆらぎ=霧の濃い所・漂流コンテナ=岩石帯) の数に掛かる。
 //   半分は均等 (0.85〜1.15)、残りはどれか1つが多く (1.7〜2.2倍・他は0.5〜0.75倍)・時々 2つが多い
 let mapTheme = { t: 1, s: 1, d: 1, c: 1, name: '均等' };
 function rollMapTheme() {
@@ -9352,11 +9471,11 @@ function rollMapTheme() {
         const keys = ['t', 's', 'd', 'c'], pickN = Math.random() < 0.22 ? 2 : 1, dom = [];
         while (dom.length < pickN) { const k = keys[Math.floor(Math.random() * 4)]; if (!dom.includes(k)) dom.push(k); }
         for (const k of keys) th[k] = dom.includes(k) ? 1.7 + Math.random() * 0.5 : 0.5 + Math.random() * 0.25;
-        th.name = dom.map(k => ({ t: '熱雲', s: '磁気嵐', d: '岩礁帯', c: '霧のゆらぎ' })[k]).join('・') + 'が多い';
+        th.name = dom.map(k => ({ t: '熱雲', s: '磁気嵐', d: '岩石帯', c: '霧のゆらぎ' })[k]).join('・') + 'が多い';
     }
     mapTheme = th;
 }
-// その種類の信号を置く場所 — 対応する背景の地形の中 (熱泉=熱雲の中心 / 嵐の放電=磁気嵐の中心 / 霧のゆらぎ=霧が濃い所 / 漂流コンテナ=岩礁帯の中が多め)
+// その種類の信号を置く場所 — 対応する背景の地形の中 (熱泉=熱雲の中心 / 嵐の放電=磁気嵐の中心 / 霧のゆらぎ=霧が濃い所 / 漂流コンテナ=岩石帯の中が多め)
 function _fieldSpotFor(kind) {
     const ok = (x, y, sep) => Math.hypot(x - MAP_CX, y - MAP_CY) < FIELD_SPREAD_R && !(player && Math.hypot(x - player.x, y - player.y) < 2500) && !fieldSignals.some(f => Math.hypot(f.x - x, f.y - y) < sep);
     const inCloud = (arr, jit, sep) => {
@@ -9399,12 +9518,13 @@ function makeFieldSignal(kind) {
 }
 function generateFieldSignals() {
     fieldSignals = []; _fieldRespawn = [];
-    // 第44弾: 自然の信号12個を 傾向の重み (熱泉=熱雲・嵐=磁気嵐・霧のゆらぎ) で割り振る (どの種類も最低1つ)。コンテナは岩礁帯が多いほど少し増える
+    // 第44弾: 自然の信号12個を 傾向の重み (熱泉=熱雲・嵐=磁気嵐・霧のゆらぎ) で割り振る (どの種類も最低1つ)。コンテナは岩石帯が多いほど少し増える
     const w = { vent: mapTheme.t, storm: mapTheme.s, cloud: mapTheme.c }, ws = w.vent + w.storm + w.cloud, cnt = {};
     let left = FIELD_NATURE_N;
     for (const k in w) { cnt[k] = Math.max(1, Math.round(FIELD_NATURE_N * w[k] / ws)); left -= cnt[k]; }
     while (left !== 0) { const k = ['vent', 'storm', 'cloud'].sort((a, b) => (left > 0 ? w[b] - w[a] : w[a] - w[b]))[0]; if (left < 0 && cnt[k] <= 1) { cnt.cloud = Math.max(1, cnt.cloud); break; } cnt[k] += left > 0 ? 1 : -1; left += left > 0 ? -1 : 1; }
     for (const k of ['cloud', 'storm', 'vent']) for (let i = 0; i < cnt[k]; i++) fieldSignals.push(makeFieldSignal(k));
+    for (const m of wreckField) fieldSignals.push({ sid: 'N-' + (++_fieldSeq), kind: 'wreck', x: m.x, y: m.y, b: { heat: WRECK_SIG, optic: 0.02, em: WRECK_SIG, higgs: 0.02 }, age: FIELD_FADE, life: Infinity, on: true, flip: 0, takeP: 0, takeE: 0, ph: Math.random() * 6.28 }); // 第152弾: 残骸帯の信号 (微弱な熱とEM・動かない)
     const nCache = Math.max(5, Math.min(12, Math.round(FIELD_CACHE_N * (0.7 + 0.3 * mapTheme.d))));
     for (let i = 0; i < nCache; i++) fieldSignals.push(makeFieldSignal('cache'));
 }
@@ -9515,7 +9635,8 @@ function hackPower(side, who) {
     const col = coloniesOwned(side === 'player' ? 'player' : 'enemy'), parts = side === 'player' ? (PM.ana || 0) : (who && who.pm ? who.pm.ana || 0 : 0);
     const focus = side === 'player' ? genFocusKey : (who && who._focus);
     const hp = side === 'player' ? (PM.hackPow || 0) : (who && who.pm ? who.pm.hackPow || 0 : 0); // 第89弾: 侵入演算機
-    return (1 + ANA_COLONY * col + parts + hp) * (focus === 'analysis' ? HACK_FOCUS_MULT : 1);
+    const me = side === 'player' ? player : who; // 第152弾: 熱暴走
+    return (1 + ANA_COLONY * col + parts + hp) * (focus === 'analysis' ? HACK_FOCUS_MULT : 1) * (me ? thermalComputeMul(me.x, me.y) : 1);
 }
 function hackStages(kind, H) { const t = HACK_THR[kind]; return { s1: H + 1e-6 >= t.s1, s2: H + 1e-6 >= t.s2 }; }
 function hackSigma(kind, H) { const m = H - HACK_THR[kind].s1; return m < 0.1 ? 0.35 : m < 0.7 ? 0.17 : 0.09; } // 方角の誤差 ±20°/±10°/±5°
@@ -9785,7 +9906,7 @@ function hackFollowUps() {
         if (inv && skillOn('p', 'hk_counter') && !hackSessP && !(_hackPulseCD > 0)) { const ang = Math.atan2(inv.y - player.y, inv.x - player.x) + (Math.random() - 0.5) * 0.08; comThinkEvent('p', '侵入されている → 侵入元の方向へ逆探知のハック波を撃ち返す'); fireHackPulse('p', ang, 'counter'); }
         if (inv && skillOn('p', 'hk_flee') && now - ((_com && _com.hkFleeF) || -1e9) > 900) {
             const cs = findCoverSpot(player.x, player.y, 7000);
-            if (cs) { if (_com) { _com.hkFleeF = now; _comSteered(_com, 'free'); _com.legF = now; } if (playerCoasting) toggleCoast(false); player.setTarget(cs.x, cs.y); comThinkEvent('p', '侵入されている → 近くの' + (cs.kind === 'fog' ? '濃い霧' : '岩礁帯') + 'へ逃げて回線を切る (' + _dirTxt(player.x, player.y, cs.x, cs.y) + ')'); }
+            if (cs) { if (_com) { _com.hkFleeF = now; _comSteered(_com, 'free'); _com.legF = now; } if (playerCoasting) toggleCoast(false); player.setTarget(cs.x, cs.y); comThinkEvent('p', '侵入されている → 近くの' + (cs.kind === 'fog' ? '濃い霧' : '岩石帯') + 'へ逃げて回線を切る (' + _dirTxt(player.x, player.y, cs.x, cs.y) + ')'); }
         }
     }
     for (const e of enemies) {
@@ -9798,7 +9919,7 @@ function hackFollowUps() {
         if (hackSessP && hackSessP.tgt === e && hackSessP.p > 60 && skillOn('e', 'hk_counter') && !e._hackSess && now >= (e._hackCD || 0) && player && player.hp > 0) { const ang = Math.atan2(player.y - e.y, player.x - e.x) + (Math.random() - 0.5) * 0.08; comThinkEvent('e', '侵入されている → 侵入元の方向へ逆探知のハック波を撃ち返す', 'e' + e.uid); fireHackPulse(e, ang, 'counter'); }
         if (hackSessP && hackSessP.tgt === e && hackSessP.p > 60 && skillOn('e', 'hk_flee') && now - (e._hkFleeF || -1e9) > 900) {
             const cs = findCoverSpot(e.x, e.y, 7000);
-            if (cs) { e._hkFleeF = now; e._hideSpot = cs; e._hideT = 1800; e._hiding = false; comThinkEvent('e', '侵入されている → 近くの' + (cs.kind === 'fog' ? '濃い霧' : '岩礁帯') + 'へ逃げて回線を切る', 'e' + e.uid); }
+            if (cs) { e._hkFleeF = now; e._hideSpot = cs; e._hideT = 1800; e._hiding = false; comThinkEvent('e', '侵入されている → 近くの' + (cs.kind === 'fog' ? '濃い霧' : '岩石帯') + 'へ逃げて回線を切る', 'e' + e.uid); }
         }
     }
 }
@@ -10284,6 +10405,7 @@ function drawFieldSignals(ctx) {
         // 第40弾: 特定した発信元 (目視・解析) は霧の外でも海図として霧の上に描く。未特定のものは見えている時だけ
         // 第44弾: 解析で特定したものは推定の中心に・目視で特定したものは有視界の外では最後に見た位置に描く (誤認した囮は誤認した種類で `_phantomMarks`)
         const known = _srcKnown[f0.sid];
+        if (f0.kind === 'wreck') continue; // 第152弾: 残骸帯は帯の絵 (drawBelts) で描く
         if (!known && !higgsViewOff && !(player && inPlayerVision(f0.x, f0.y))) continue;
         const f = known && !higgsViewOff ? Object.assign(Object.create(f0), srcDrawPos(f0.sid, f0)) : f0;
         const k = FIELD_KINDS[f.kind], fade = Math.min(1, f.age / FIELD_FADE, f.life / FIELD_FADE);
@@ -10395,7 +10517,8 @@ function cpTotal() { return player ? analysisPower('player') : 1; } // 画面に
 function analysisPower(side, who) { let ea = 0; if (side !== 'player') for (const e of enemies) if (e.pm && e.hp > 0) ea = Math.max(ea, e.pm.ana); // 第32弾: 解析コア (第33弾: 敵も)
     const fx = side === 'player' ? playerFx() : shipFx(who || enemies.find(e => e.hp > 0 && e.type !== 'fighter')); // 第39弾: 解析重視は解析の速さ×1.4
     const _tp = side === 'player' ? persOfSide('p') : ((who && who.personality) || persOfSide('e')); // 第148弾: 電脳が高いほど解析が速い
-    return (1 + ANA_COLONY * Math.min(3, coloniesOwned(side)) + (side === 'player' ? PM.ana : ea)) * fx.anaSpeed * axMul(null, 'tech', 1.0, _tp); }
+    const _me = side === 'player' ? player : (who || enemies.find(e => e.hp > 0 && e.type !== 'fighter')); // 第152弾: 熱雲の中は熱暴走で演算力が落ちる
+    return (1 + ANA_COLONY * Math.min(3, coloniesOwned(side)) + (side === 'player' ? PM.ana : ea)) * fx.anaSpeed * axMul(null, 'tech', 1.0, _tp) * (_me ? thermalComputeMul(_me.x, _me.y) : 1); }
 function anaFloorFrac(ana, cp) { return Math.max(ANA_MIN * 0.5, (ANA_MIN + (1 - ANA_MIN) * Math.exp(-(ana || 0) / ANA_TAU)) / (0.7 + 0.3 * (cp || 1))); } // 第72弾: 演算力でも締まる
 function anaPct(ana) { return Math.round((1 - (anaFloorFrac(ana) - ANA_MIN) / (1 - ANA_MIN)) * 100); }
 const _RX_WORD = { heat: '熱源', optic: '光', em: '電磁波', higgs: '霧の乱れ' };
@@ -10492,7 +10615,7 @@ function checkPassiveDetection() {
     relayListen(); // 第16弾: 聴音局(制圧したノード)からの方位
     const range = passiveRange();
     const px = player.x, py = player.y;
-    // 第39弾: 自艦も敵と同じ hearSource で聴く (経路の霧・嵐・熱雲・岩礁帯で弱まり、方位の誤差が広がる)。強さは直近1秒の最大値
+    // 第39弾: 自艦も敵と同じ hearSource で聴く (経路の霧・嵐・熱雲・岩石帯で弱まり、方位の誤差が広がる)。強さは直近1秒の最大値
     const allContacts = [];
     for (const e of enemies) {
         if (e.hp <= 0) continue;
@@ -11186,7 +11309,7 @@ const HIGGS_DENSE = 0.7; // 第90弾: 「濃いヒッグスの中」— ソナ�
 function sonarFog(x0, y0, x1, y1) {
     let sum = 0; const N = 8;
     for (let i = 1; i <= N; i++) sum += getHiggsIntensity(x0 + (x1 - x0) * i / N, y0 + (y1 - y0) * i / N);
-    return { mean: sum / N, end: getHiggsIntensity(x1, y1), start: getHiggsIntensity(x0, y0) };
+    return { mean: sum / N, end: getHiggsIntensity(x1, y1), start: getHiggsIntensity(x0, y0), wreck: getWreckIntensity(x0, y0) };
 }
 // 届くか: 距離 ≤ 出力の半径 ×(1 − 経路の濃さ×0.85) かつ 目標の場所が濃い雲の外
 function sonarReaches(x0, y0, x1, y1, range) {
@@ -11195,7 +11318,7 @@ function sonarReaches(x0, y0, x1, y1, range) {
     return f.end < SONAR_FOG_BLOCK && d <= waveReach(range, f);
 }
 // 第90弾: 電波 (ソナー・ハック) の届く距離 = 出力 × (1 − 経路の濃さ×0.85) × (出す側が濃い霧の中なら 1 − 濃さ)。濃いヒッグス (70%以上) の中から出すと ほぼ届かない
-function waveReach(range, f) { return range * (1 - SONAR_FOG_PATH * Math.min(1, f.mean)) * (f.start >= HIGGS_DENSE ? Math.max(0, 1 - f.start) : 1); }
+function waveReach(range, f) { return range * (1 - SONAR_FOG_PATH * Math.min(1, f.mean)) * (f.start >= HIGGS_DENSE ? Math.max(0, 1 - f.start) : 1) * (1 - (1 - WRECK_WAVE) * (f.wreck || 0)); } // 第152弾: 出す側が残骸帯の中なら 電波が散乱して届く距離が縮む
 // ハックの回線の強さ (0〜1): 0 で断線。距離が届く距離に近いほど・間の霧が濃いほど弱い。どちらかが濃いヒッグスの中なら 0
 function hackLinkStrength(A, T, range) {
     const f = sonarFog(A.x, A.y, T.x, T.y); if (f.end >= HIGGS_DENSE || f.start >= HIGGS_DENSE) return 0;
@@ -11674,7 +11797,7 @@ function drawShipRing(ctx) {
     {
         const hh = getHiggsIntensity(player.x, player.y), dbr = getDebrisIntensity(player.x, player.y), stm = getStormIntensity(player.x, player.y), thm = getThermalIntensity(player.x, player.y);
         const rows = [['霧 ' + Math.round(hh * 100) + '%', hh > 0.5 ? '#c79bff' : hh > 0.2 ? '#7fd8ff' : '#7fa8c8']];
-        if (dbr > 0.1) rows.push(['岩礁 ' + Math.round(dbr * 100) + '%', '#c8c8b4']);
+        if (dbr > 0.1) rows.push(['岩石 ' + Math.round(dbr * 100) + '%', '#c8c8b4']);
         if (stm > 0.1) rows.push(['嵐 ' + Math.round(stm * 100) + '%', '#c89cff']);
         if (thm > 0.1) rows.push(['熱雲 ' + Math.round(thm * 100) + '%', '#ffb070']);
         for (let i = 0; i < rows.length; i++) screenTag(ctx, cx - R * 0.74, cy + R * 0.8 + i * 18, rows[i][0], null, rows[i][1], 0.85, 'right'); // 第40弾: 名札
@@ -12494,6 +12617,7 @@ function drawBackground(ctx) {
         ctx.drawImage(debrisCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
         ctx.globalAlpha = 1;
     }
+    ctx.globalAlpha = (!mapMode || sensorsOn.optic) ? 1.0 : _mapFade; drawBelts(ctx, cx, cy, vw, vh); ctx.globalAlpha = 1; // 第152弾: 岩石帯・残骸帯の絵
     if (stormCanvas) {
         const _sa = (!mapMode || sensorsOn.em) ? 0.82 + Math.sin(Date.now() * 0.006) * 0.12 : _mapFade;
         ctx.save(); ctx.globalAlpha = _sa; ctx.imageSmoothingEnabled = true;
@@ -13173,6 +13297,7 @@ function canDeployNow(type) {
 // 展開ボタン: 完成品があれば即座に / 無ければ資材から組み立て (完成したら自動で出す)
 function deployDrone(type, tx, ty) {
     if (!player || player.hp <= 0) return;
+    if (type === 'derelictfly') { const st = _hijackPending; _hijackPending = null; if (st && !st.salvaged && tx !== undefined) hijackDerelict('p', st, 'fly', tx, ty); return; } // 第152弾: 難破船の偽装艦を飛ばす
     const ship = gameState.shipType, spec = DRONE_SPEC[type];
     if (!spec || !(SHIP_DRONES[ship] || []).includes(type)) { logMessage(`搭載: ${spec ? spec.label : type} はこの艦に積めない`, 'warning-msg'); return; }
     // 第21弾: 囮は射出する地点が要る — 地点が無ければ「次にタップした地点」へ (長押しメニューからも撃てる)
@@ -15559,12 +15684,12 @@ function updateThreats() {
 let _thrUid = 0;
 function updateHuntTension() {
     if (!player || player.hp <= 0) return;
-    // ── デブリ擬態判定: 岩礁帯(デブリ帯)で完全停止+静粛 → 漂う岩塊に艦影が紛れる ──
+    // ── デブリ擬態判定: 岩石帯(デブリ帯)で完全停止+静粛 → 漂う岩塊に艦影が紛れる ──
     const _wasBottomed = isBottomed;
     isBottomed = silentRunning && player.currentSpeed < 0.05 &&
                  getDebrisIntensity(player.x, player.y) > BOTTOM_DEBRIS_MIN;
-    if (isBottomed && !_wasBottomed) logMessage('TAC: デブリ擬態 — 機関完全停止。岩礁帯の岩塊に艦影が紛れる。至近でも探知されにくい', 'system-msg');
-    else if (!isBottomed && _wasBottomed) logMessage('TAC: 擬態解除 — 岩礁帯の擬装を解いた', 'system-msg');
+    if (isBottomed && !_wasBottomed) logMessage('TAC: デブリ擬態 — 機関完全停止。岩石帯の岩塊に艦影が紛れる。至近でも探知されにくい', 'system-msg');
+    else if (!isBottomed && _wasBottomed) logMessage('TAC: 擬態解除 — 岩石帯の擬装を解いた', 'system-msg');
     // ═══ 第23弾 (オーナー合意): 「観測できる兆候」だけで脅威の段階を決める (旧: 敵の内部状態=追跡/交戦を読んでいた=情報漏れ) ═══
     //   0 静穏 / 1 受信 = 何かの信号を10秒以内に受けた / 2 照射 = 敵の探信を受けた(15秒)・火器管制の照準波(EM)を受けている
     //   3 攻撃 = 被弾8秒以内・ミサイルの高速推進波・ビームのチャージ反応
@@ -15750,8 +15875,8 @@ function xoEscapeAdvice() {
     const has = t => (cargo.stock[t] || 0) > 0;
     let where;
     if (!spot) where = has('smoke') ? '近くに隠れ場所なし — 離れてから煙幕で潜め' : '近くに隠れ場所なし — 敵の反対へ離れろ';
-    else if (spot.d < 150) where = spot.kind === 'fog' ? '濃い霧の中 — 止まって潜め' : '岩礁帯の中 — 潜航で止まれば擬態';
-    else where = '方位' + compassDeg(Math.atan2(spot.y - player.y, spot.x - player.x)) + '° ' + Math.round(spot.d / 100) * 100 + 'uに' + (spot.kind === 'fog' ? '濃い霧' : '岩礁帯');
+    else if (spot.d < 150) where = spot.kind === 'fog' ? '濃い霧の中 — 止まって潜め' : '岩石帯の中 — 潜航で止まれば擬態';
+    else where = '方位' + compassDeg(Math.atan2(spot.y - player.y, spot.x - player.x)) + '° ' + Math.round(spot.d / 100) * 100 + 'uに' + (spot.kind === 'fog' ? '濃い霧' : '岩石帯');
     const steps = [];
     const near = (o) => Math.hypot(o.x - player.x, o.y - player.y) < FLASH_RADIUS;
     if (has('flash') && (enemies.some(e => e.hp > 0 && e.inVision && near(e)) || projectiles.some(p => p.active && !p.isPlayer && p.type === 'missile' && near(p)))) steps.push('閃光');
@@ -16236,7 +16361,7 @@ function huntPostStrike(HA, H, X) {
             HA.go(est.x, est.y, 'creep');
             return true;
         }
-        case 'egress': { // 一撃離脱: 推定から離れる向きの霧/岩礁帯へ
+        case 'egress': { // 一撃離脱: 推定から離れる向きの霧/岩石帯へ
             if (!H.eg) {
                 // 離れる向き: 相手から遠ざかる向き。相手がこちらへ動いているなら、その針路から直角に外れる (まっすぐ逃げても追いつかれる)
                 const hvE = est && X.vel ? X.vel(est) : null;
@@ -16515,7 +16640,7 @@ function prowlPickGoal(A) {
         const t = sc[0].t, q = t.o, a0 = Math.atan2(A.y - q.y, A.x - q.x) + (Math.random() - 0.5) * 2, takeIt = q.type === 'colony' || !q.type, off = takeIt ? 220 : 1300 + Math.random() * 600; // コロニー・ノードの見張りは占有できる距離で
         vis[q.x + ',' + q.y] = now;
         const cv = takeIt ? null : findCoverSpot(q.x + Math.cos(a0) * off, q.y + Math.sin(a0) * off, 1200);
-        goal = { nodeObj: !q.type ? q : null, x: cv ? cv.x : q.x + Math.cos(a0) * off, y: cv ? cv.y : q.y + Math.sin(a0) * off, lbl: (lm && ahead(q) > 1 ? '相手の向かう先らしい' : '') + t.lbl + 'の脇の' + (cv ? (cv.kind === 'fog' ? '霧' : '岩礁帯') : '暗がり'), site: { x: q.x, y: q.y }, lblS: t.lbl };
+        goal = { nodeObj: !q.type ? q : null, x: cv ? cv.x : q.x + Math.cos(a0) * off, y: cv ? cv.y : q.y + Math.sin(a0) * off, lbl: (lm && ahead(q) > 1 ? '相手の向かう先らしい' : '') + t.lbl + 'の脇の' + (cv ? (cv.kind === 'fog' ? '霧' : '岩石帯') : '暗がり'), site: { x: q.x, y: q.y }, lblS: t.lbl };
     }
     if (!goal) { const g = searchNext(A.who, A.x, A.y); if (g) goal = { x: g.x, y: g.y, lbl: 'まだ聴いていない海域' }; }
     return goal;
@@ -16809,7 +16934,7 @@ function stratFactsE(e) {
         canTech: cls === 'carrier' && !liveK('mech') && !(e._techT > 0) }; // 第135弾: 自機COMと同じく 作り直せる (旧: 敵は1試合に1回だけ)
 }
 // 第125弾 (共通化・段5後半の7): 戦略「待ち伏せ/餌/罠」の待機位置の決め方を自機COMと敵で同じ関数に
-//   拠点の外側 (罠は砲台の射程に入る近さ) の 近くの霧/岩礁帯 へ。時間切れの延長は遅い艦でも着く前に切れない値 (双方 0.2u/f で割る)
+//   拠点の外側 (罠は砲台の射程に入る近さ) の 近くの霧/岩石帯 へ。時間切れの延長は遅い艦でも着く前に切れない値 (双方 0.2u/f で割る)
 function stratSpotFor(id, ox, oy, site) {
     const a0 = Math.atan2(oy - site.y, ox - site.x) + (Math.random() - 0.5) * 1.6, off = id === 'trap' ? 500 + Math.random() * 700 : 1200 + Math.random() * 1400;
     const sx = site.x + Math.cos(a0) * off, sy = site.y + Math.sin(a0) * off, cv = findCoverSpot(sx, sy, 3000);
@@ -16831,7 +16956,7 @@ function stratRun(A, S, now) {
             if (S.ph === 'go' || !S.spot) {
                 const cv = findCoverSpot(A.x, A.y, 6000);
                 S.spot = cv ? { x: cv.x, y: cv.y } : clampToMapCircle(A.x, A.y, 800); S.ph = 'run';
-                A.say((cv ? '霧/岩礁帯 (' + _dirTxt(A.x, A.y, S.spot.x, S.spot.y) + '・' + Math.round(cv.d / 100) * 100 + 'u)' : '隠れ場所なし') + 'へ潜る' + (A.expo >= 2 ? ' — 追われている' : ''));
+                A.say((cv ? '霧/岩石帯 (' + _dirTxt(A.x, A.y, S.spot.x, S.spot.y) + '・' + Math.round(cv.d / 100) * 100 + 'u)' : '隠れ場所なし') + 'へ潜る' + (A.expo >= 2 ? ' — 追われている' : ''));
                 if (A.expo >= 2 && A.can('noise') && cd('noise', 40)) { A.use('noise'); A.say('ノイズメーカーを流して本物から目を逸らす'); }
             }
             if (Math.hypot(S.spot.x - A.x, S.spot.y - A.y) > 300) { A.go(S.spot.x, S.spot.y, 200, 'silent'); return true; }
@@ -16894,7 +17019,7 @@ function stratRun(A, S, now) {
                 A.think('strat', '戦略「Tech建造」: 資材 ' + A.mat() + '/' + need + '個 → ' + (g.type === 'derelict' ? '難破船' : !g.type ? 'ノード' : 'コロニー') + 'で集める (' + _dirTxt(A.x, A.y, g.x, g.y) + ')');
                 return true;
             }
-            if (!S.spot) { const cv = findCoverSpot(A.x, A.y, 7000); S.spot = cv ? { x: cv.x, y: cv.y } : clampToMapCircle(A.x, A.y, 800); A.say('資材' + A.mat() + '個が揃った → ' + (cv ? '霧/岩礁帯 (' + _dirTxt(A.x, A.y, S.spot.x, S.spot.y) + ')' : 'この場') + 'へ行って組み立てる'); }
+            if (!S.spot) { const cv = findCoverSpot(A.x, A.y, 7000); S.spot = cv ? { x: cv.x, y: cv.y } : clampToMapCircle(A.x, A.y, 800); A.say('資材' + A.mat() + '個が揃った → ' + (cv ? '霧/岩石帯 (' + _dirTxt(A.x, A.y, S.spot.x, S.spot.y) + ')' : 'この場') + 'へ行って組み立てる'); }
             if (Math.hypot(S.spot.x - A.x, S.spot.y - A.y) > 350) { A.go(S.spot.x, S.spot.y, 200, 'silent'); A.think('strat', '戦略「Tech建造」: 組み立て場所へ移動中'); return true; }
             A.hold(false);
             if (A.have('build') && !A.mobile('build')) { A.launch('build'); A.say('Techの組み立て前に砲台を据える (建造中は5分動けない)'); return true; }
@@ -17050,7 +17175,7 @@ function stratActorE(e) {
 function stratGoWait(A) {
     const S = A.S, d = Math.hypot(A.spot.x - A.px, A.spot.y - A.py);
     if (d > 350) { A.go(d); return 'go'; }
-    if (S.ph !== 'wait') { S.ph = 'wait'; A.say('待ち伏せ位置に着いた (' + (S.kindFog === 'fog' ? '濃い霧' : S.kindFog === 'debris' ? '岩礁帯' : '外れ') + ') → 止まって待つ'); if (A.arrive) A.arrive(); }
+    if (S.ph !== 'wait') { S.ph = 'wait'; A.say('待ち伏せ位置に着いた (' + (S.kindFog === 'fog' ? '濃い霧' : S.kindFog === 'debris' ? '岩石帯' : '外れ') + ') → 止まって待つ'); if (A.arrive) A.arrive(); }
     A.hold(); return 'wait';
 }
 function enemyStratStep(e, P) {
@@ -17087,7 +17212,7 @@ function enemyStratStep(e, P) {
                 else if (k) { const bd = k.slice(4); e.itemBcn[bd]--; launchLure('e', 'ship', e.x, e.y, S.site.x, S.site.y, bd); } else S.id = 'ambush';
             }
         }
-        comThinkEvent('e', '戦略「' + jp[S.id] + '」(約' + Math.round((S.until - now) / 60) + '秒)' + (S.site ? ': ' + (S.site.lbl || 'コロニー') + 'の近く (' + _dirTxt(e.x, e.y, (S.spot || S.site).x, (S.spot || S.site).y) + ') ' + (S.id === 'bait' ? 'へ餌を置き、近くで待つ' : S.id === 'guard' ? 'を守る' : 'の霧/岩礁帯で待ち伏せる') : ''), 'e' + e.uid);
+        comThinkEvent('e', '戦略「' + jp[S.id] + '」(約' + Math.round((S.until - now) / 60) + '秒)' + (S.site ? ': ' + (S.site.lbl || 'コロニー') + 'の近く (' + _dirTxt(e.x, e.y, (S.spot || S.site).x, (S.spot || S.site).y) + ') ' + (S.id === 'bait' ? 'へ餌を置き、近くで待つ' : S.id === 'guard' ? 'を守る' : 'の霧/岩石帯で待ち伏せる') : ''), 'e' + e.uid);
     }
     if (STRAT_SHARED[S.id]) { // 第134弾: 霧に潜む・圧倒して狩る・ドローンで探る・拠点を守る は自機COMと同じ実行 (stratRun)
         const A = stratActorE(e), r2 = stratRun(A, S, now);
@@ -18253,7 +18378,7 @@ function gatherPick(side, x, y, mode, range) {
     let best = null, bs = Infinity; const lim = range === undefined ? Infinity : range;
     for (const st of structures) {
         let ok = false;
-        if (st.type === 'derelict') { if (mode === 'part' && !st.salvaged) { if (side === 'e' && !st._discE && Math.hypot(st.x - x, st.y - y) < 2500) st._discE = true; ok = side === 'p' ? !!st.discovered : !!(st.discovered || st._discE); } }
+        if (st.type === 'derelict') { if (mode === 'part' && !st.salvaged) { if (side === 'e' && !st._discE && Math.hypot(st.x - x, st.y - y) < 2500) st._discE = true; ok = (side === 'p' ? !!st.discovered : !!(st.discovered || st._discE)) && (derelictSosOn(st) || derelictSosIn(st) < 3600); } } // 第152弾: SOS が鳴っている (か間もなく鳴る) 難破船だけ
         else if (st.type === 'colony') ok = st.owner !== me && (mode === 'any' || !st[pk]);
         if (!ok) continue; const d = Math.hypot(st.x - x, st.y - y); if (d >= lim) continue; const sc = d * kd / (kw[st.type] || kd); if (sc < bs) { bs = sc; best = st; }
     }
@@ -18358,12 +18483,12 @@ function comStratStep(c, P, D, hpF, contact, te, lk, r) {
             if (S.id === 'trap') {
                 const pref = ['fsos', 'lure', 'bcn_heat', 'bcn_optic', 'bcn_em', 'bcn_higgs'].filter(k => x.has(k));
                 S.item = pref.length ? pref[Math.floor(Math.random() * pref.length)] : null;
-                comThinkEvent('p', site.lbl + 'の近く (' + _dirTxt(player.x, player.y, S.spot.x, S.spot.y) + ') に砲台を据え' + (S.item ? '、' + DRONE_SPEC[S.item].label + 'で誘い込む' : '') + ' → その近くの' + (S.kindFog ? '霧/岩礁帯' : '外れ') + 'で待つ');
+                comThinkEvent('p', site.lbl + 'の近く (' + _dirTxt(player.x, player.y, S.spot.x, S.spot.y) + ') に砲台を据え' + (S.item ? '、' + DRONE_SPEC[S.item].label + 'で誘い込む' : '') + ' → その近くの' + (S.kindFog ? '霧/岩石帯' : '外れ') + 'で待つ');
             } else if (S.id === 'bait') {
                 const pref = ['fsos', 'lure', 'bcn_heat', 'bcn_optic', 'bcn_em', 'bcn_higgs'].filter(k => x.has(k)); const k = pref[Math.floor(Math.random() * Math.min(2, pref.length))] || pref[0];
                 if (!k || !_comUseItem(k, site.x, site.y)) { c.st = null; S = null; return false; }
-                S.item = k; comThinkEvent('p', DRONE_SPEC[k].label + 'を' + site.lbl + 'の方 (' + _dirTxt(player.x, player.y, site.x, site.y) + ') へ置く → その近くの' + (S.kindFog ? '霧/岩礁帯' : '外れ') + 'で待つ');
-            } else comThinkEvent('p', site.lbl + 'の近く (' + _dirTxt(player.x, player.y, S.spot.x, S.spot.y) + ') の' + (S.kindFog ? '霧/岩礁帯' : '外れ') + 'で、取りに来る相手を待つ');
+                S.item = k; comThinkEvent('p', DRONE_SPEC[k].label + 'を' + site.lbl + 'の方 (' + _dirTxt(player.x, player.y, site.x, site.y) + ') へ置く → その近くの' + (S.kindFog ? '霧/岩石帯' : '外れ') + 'で待つ');
+            } else comThinkEvent('p', site.lbl + 'の近く (' + _dirTxt(player.x, player.y, S.spot.x, S.spot.y) + ') の' + (S.kindFog ? '霧/岩石帯' : '外れ') + 'で、取りに来る相手を待つ');
         } else if (S.id === 'guard' || S.id === 'orbit') { S.site = x.owned[Math.floor(Math.random() * x.owned.length)]; }
     }
     // ── 共通の中止条件 ──
@@ -18545,7 +18670,7 @@ function comPilotStep() {
         if (!c.hideUntil) { c.hideUntil = now + COM_HIDE_TIME; c.retreatS = null; }
         if (now < c.hideUntil) {
             c.mode = 'hide';
-            // 第138弾 (操縦の総括の統合): 退いた後の潜伏は 敵と同じ「近くの濃い霧/岩礁帯へ行って止まる」(戦略 fogHide の実行 stratRun と同じ関数)。旧: その場で止まるだけ (敵は隠れ場所まで走っていた)
+            // 第138弾 (操縦の総括の統合): 退いた後の潜伏は 敵と同じ「近くの濃い霧/岩石帯へ行って止まる」(戦略 fogHide の実行 stratRun と同じ関数)。旧: その場で止まるだけ (敵は隠れ場所まで走っていた)
             const RS = c.retreatS || (c.retreatS = { id: 'fogHide', t0: now - 3600, until: c.hideUntil, ph: 'go' });
             const rr = stratRun(stratActorP(c, hpF, null, null), RS, now);
             if (typeof rr === 'string') { c.hideUntil = now; comThinkEvent('p', '潜伏を終える (' + rr.slice(4) + ')'); }
@@ -18751,7 +18876,7 @@ function comPilotStep() {
         comThink('p', 'held', held + (b ? ' — 直交して測り直す (方針: ' + Math.round(D.perpLeg / 100) * 100 + 'u・止まって' + Math.round(D.perpWaitSec) + '秒)' : ''));
     } else if (player.state !== 'moving') {
         // 手掛かりが無い — 第41弾: 方針で探し方を変える
-        //   待ち伏せ (隠密・慎重): 自分のものでないコロニー/ノードの近くの霧か岩礁帯に入り、長く止まって聴く (相手が補給・部品・占有に来る所)
+        //   待ち伏せ (隠密・慎重): 自分のものでないコロニー/ノードの近くの霧か岩石帯に入り、長く止まって聴く (相手が補給・部品・占有に来る所)
         //   掃き出し (それ以外): まだ聴いていない海域へ走り、短く止まって聴く (第39弾の searchNext)
         const pause = (D.search === 'ambush' ? D.ambushSec : D.listenSec) * 60;
         if (c.srchArrF === undefined || c.srchArrF < 0) { c.srchArrF = now; }
@@ -18905,7 +19030,7 @@ function comPressStep(c, P, D, hpF, te, lk, retreat, held, contact) {
     const base = (dm.vx || dm.vy) ? Math.atan2(dm.vy, dm.vx) : Math.atan2(dm.y - player.y, dm.x - player.x) + Math.PI * (dm.n ? 0.6 : 0);
     const a2 = base + [0, 1.9, -1.9][dm.n] ;
     dm.n++; dm.pinged = omniSonarCooldown > 600; // 次の所でも (再充電が済んでいれば) 打つ
-    const cv = findCoverSpot(dm.x + Math.cos(a2) * 2500, dm.y + Math.sin(a2) * 2500, 1500); // 隠れていそうな所 (濃い霧・岩礁帯) を優先
+    const cv = findCoverSpot(dm.x + Math.cos(a2) * 2500, dm.y + Math.sin(a2) * 2500, 1500); // 隠れていそうな所 (濃い霧・岩石帯) を優先
     dm.sx = cv ? cv.x : dm.x + Math.cos(a2) * 2500; dm.sy = cv ? cv.y : dm.y + Math.sin(a2) * 2500;
     _comPressGo(c, dm.sx, dm.sy, fast);
     return true;
@@ -19093,7 +19218,7 @@ function _enemyThought(e) {
     let sig, act;
     if (e._hideT > 0) {
         if (e._hiding) { sig = 'hide'; act = '潜伏中 — 機関を止めて修復 (耐久' + hp + '・残り' + Math.ceil(e._hideT / 60) + '秒)'; }
-        else { sig = 'tohide'; act = '耐久' + hp + ' → 隠れ場所の' + (e._hideSpot.kind === 'fog' ? '濃い霧' : '岩礁帯') + 'へ (' + _dirTxt(e.x, e.y, e._hideSpot.x, e._hideSpot.y) + ')'; }
+        else { sig = 'tohide'; act = '耐久' + hp + ' → 隠れ場所の' + (e._hideSpot.kind === 'fog' ? '濃い霧' : '岩石帯') + 'へ (' + _dirTxt(e.x, e.y, e._hideSpot.x, e._hideSpot.y) + ')'; }
     } else if (e.postFireCooldown > 0) {
         sig = 'reloc'; act = '撃った位置から離れている (撃てば位置を教えるので留まらない)';
     } else if (e.aiState === 'combat') {
@@ -19156,7 +19281,7 @@ function xoEvaluate() {
     }
     if (player._weaponJamTimer > 0) return { tone: 'bad', text: '火器管制ダウン — 復旧まで撃てない。距離を取れ' };
     // 第21弾: 囮の地点選び / エンジン切替中
-    if (pendingLure) return { tone: 'info', text: '囮: ' + DRONE_SPEC[pendingLure].label + 'を射出する地点をタップ (もう一度押すと取りやめ)' };
+    if (pendingLure) return { tone: 'info', text: pendingLure === 'derelictfly' ? '難破船の偽装艦: 飛ばす方向 (地点) をタップ' : '囮: ' + DRONE_SPEC[pendingLure].label + 'を射出する地点をタップ (もう一度押すと取りやめ)' };
     if (engineSwitchT > 0) return { tone: 'info', text: ENGINE_JP[engineSwitchTo] + 'へ切替中 あと' + Math.ceil(engineSwitchT / 60) + '秒 — 推力ゼロ (惰性)・EMが漏れる' };
     // 第20弾: 補給中 / 弾が尽きた
     if (_resupply) return { tone: 'info', text: (_resupply.kind === 'station' ? '補給所' : 'コロニー') + 'で補給中 ' + Math.round(Math.min(1, _resupply.p) * 100) + '% — EMが漏れる。離れると中断' };
@@ -19170,7 +19295,7 @@ function xoEvaluate() {
         const pc = Math.round(Math.min(1, _capturing.p) * 100);
         return { tone: 'info', text: _capturing.kind === 'node'
             ? `ノード制圧中 ${pc}% — EMが漏れる。離れると中断 (制圧すると資材と聴音局が手に入る)`
-            : _capturing.kind === 'derelict' ? `難破船を回収中 ${pc}% — 弾と資材`
+            : _capturing.kind === 'derelict' ? (_capturing.hijack ? `難破船をハック中 ${pc}% — 偽装艦にする (EMが漏れる)` : `難破船を回収中 ${pc}% — 弾と資材`)
             : _capturing.contested ? `コロニーに敵艦が居る — 占有が進まない (追い払うか、待つか)`
             : `コロニーを占有中 ${pc}% — EMが漏れる。離れると中断 (1回の補給・敵の位置の手掛かり)` };
     }
@@ -20129,7 +20254,7 @@ function renderWorld() {
         // ── ランドマーク（ステーション・構造物・ヒッグスノード）— ヒッグスより手前に表示 ──
         // 未発見・未特定の構造物は非表示; 有視界発見(discovered)または信号特定(identified)時のみ表示
         if (_pov) prpSeat(_pov, () => prpSwapOwners(() => { // 敵の席: 持ち主を入れ替えて (敵の物=自分の物)・敵は拠点の位置を知っている物として描く
-            structures.forEach(s => { if (s.type !== 'derelict' || !s.salvaged) s.draw(ctx); }); drawNodesAndColonies(ctx, _vpX, _vpY, _vpW, _vpH);
+            structures.forEach(s => { if (s.type !== 'derelict' || !s.salvaged) s.draw(ctx); });
         })); else {
         stations.forEach(s => s.draw(ctx));
         structures.forEach(s => { if (s.discovered || s.identified) s.draw(ctx); });
