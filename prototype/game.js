@@ -2728,9 +2728,7 @@ canvas.addEventListener('dblclick', (e) => {
     const { x: worldX, y: worldY } = screenToWorld(e.clientX, e.clientY);
     const clickedEnemy = enemies.find(en => en.visible && Math.hypot(en.x - worldX, en.y - worldY) < en.radius * 2);
     if (!clickedEnemy) {
-        player.targetEntity = null;
-        player.manualTarget = false; // 手動ターゲット解除
-        player.setTarget(worldX, worldY);
+        orderMove(worldX, worldY, true); // 第156弾: 移動命令は1つの関数に (人の操作の記録・リプレイで拾う)
         createClickEffect(worldX, worldY, '#00ffaa');
         const dist = Math.hypot(worldX - player.x, worldY - player.y);
         const speedEst = Math.max(0.1, (genAlloc.engine / 100) * 3.0);
@@ -6965,6 +6963,14 @@ function toggleHiggsView(off) {
 
 function updateLandmarkBanner() { /* ランドマーク距離表示廃止 */ }
 
+// 第156弾 (オーナー「プレイヤーが完全操作した試合を記録して、実際の画面で再生できるように」): 人の操作の試合も 種つきの乱数で始め、操作を記録する
+function startHumanMatch(shipType) {
+    _frameCount = 0; _simSeed = (window.__rpSeed !== undefined ? window.__rpSeed : (_nativeRandom() * 4294967296)) >>> 0; _simRng = _mulberry(_simSeed);
+    window._gsSnap = JSON.parse(JSON.stringify(gameState));
+    const _enBtn = document.querySelector('.enemy-select-btn.active'); window._humanSnap = { ship: shipType, enemy: (_enBtn && _enBtn.dataset.type) || 'assault', mode: gameState.mode, vw: innerWidth, vh: innerHeight };
+    _gen++; _useCache.p = {}; _useCache.e = {};
+    withSimRng(() => startGame(shipType));
+}
 function startGame(shipType) {
     if (debugMode) toggleDebugMode(false); // 第73弾: 出撃のたびにデバッグ(無敵・凍結)を切る — 前の試合の無敵が次の試合に残っていた
     try { bgmMatchStart(); sfx('sys_battle_start', 0.9); } catch (e) {}
@@ -7010,7 +7016,7 @@ function startGame(shipType) {
     }
     let _briefed = false;
     try { _briefed = localStorage.getItem('darkEchoBriefed') === '1'; } catch (e) {}
-    if (!_briefed && !comDemo) showBriefing();
+    if (!_briefed && !comDemo && !playReplay) showBriefing();
 }
 
 // ゲームモード選択ボタン
@@ -7025,7 +7031,7 @@ document.querySelectorAll('.mode-card').forEach(card => {
 
 // 艦種選択ボタン
 document.querySelectorAll('.ship-select-btn').forEach(btn => {
-    btn.addEventListener('click', () => startGame(btn.dataset.type));
+    btn.addEventListener('click', () => startHumanMatch(btn.dataset.type));
 });
 // ═══ 第16弾: 積み込み画面 (ロビーの艦カード / ドックから) ═══
 const SHIP_JP = { assault: '攻撃型', stealth: '潜航型', carrier: '空母型' };
@@ -8787,6 +8793,7 @@ function takeLoot(o, src) { // 自機 (人が選んだ時・自機COMが選ん�
 function offerLoot(src) {
     const A = lootActor('p'), c = lootPick4(A);
     if (comDemo) { takeLoot(lootChoose(A, c), src); return; }
+    if (playReplay && playReplay.inp) return;
     if (_draft) { _draftQ.push({ src, loot: c }); return; }
     _draft = { src, loot: c };
     _openDraftUI();
@@ -8801,6 +8808,7 @@ function offerDraft(src) {
     const c = draftPick3(src);
     if (!c.length) { logMessage('部品: ' + _SRC_JP[src] + ' — 新しい部品は無かった (全部持っている)', 'system-msg'); return; }
     if (comDemo) { takePart(comPickPart(c)); return; }
+    if (playReplay && playReplay.inp) return; // 第156弾: 人の操作の再生では 選んだ内容を記録から入れる (画面は開かない)
     if (_draft) { _draftQ.push({ src, c }); return; }
     _draft = { src, c };
     _openDraftUI();
@@ -11094,12 +11102,12 @@ function hideLongPressMenu() {
     if (menu) menu.style.display = 'none';
 }
 // 長押しメニュー「移動」選択
+function orderMove(x, y, clearManual) { if (!player) return; player.targetEntity = null; if (clearManual) player.manualTarget = false; player.setTarget(x, y); }
 function lpmSelectMove() {
     hideLongPressMenu();
     if (!_lpmWorld || !player) return;
     if (comDemo) { logMessage('COM対戦デモ中は自機COMが操艦する (観戦のみ)', 'system-msg'); return; }
-    player.targetEntity = null;
-    player.setTarget(_lpmWorld.x, _lpmWorld.y);
+    orderMove(_lpmWorld.x, _lpmWorld.y, false);
     createClickEffect(_lpmWorld.x, _lpmWorld.y, '#00ffaa');
     const dist = Math.hypot(_lpmWorld.x - player.x, _lpmWorld.y - player.y);
     const speedEst = Math.max(0.1, (genAlloc.engine / 100) * 3.0);
@@ -13548,13 +13556,15 @@ function enemyUseFlash(e) {
 // 第121弾: 艦載機・設置物などの運用は 空母だけ (敵COMは戦艦から出せる物が空母の戦闘機・哨戒機だけ) — 自機COMの積み込みも同じ規則に (旧: 自機COMの攻撃型だけ戦闘機を積み、敵の攻撃型は積まなかった = 鏡合わせの非対称)
 // 第145弾 (オーナー): COM対戦の積荷と武器は「性格7割・ランダム3割」— 毎回同じにならないように。自機COMも敵も同じ関数
 const PERSONA_RANDOM_SHARE = 0.3;
+// 第156弾: 「全部ランダム」の側は 積荷・武器を性格に頼らず 100%無作為に (COM対戦の設定画面)
+function persShare(P) { return (comDemo && comCfg && comCfg.rndAll && P && comCfg.rndAll[P._side]) ? 1 : PERSONA_RANDOM_SHARE; }
 function blendPers(P, rnd) { // 各軸を 性格×0.7 + 乱数×0.3 に (積荷・武器の選び方にだけ使う。立ち回りの性格そのものは変えない)
-    const f = v => Math.max(0, Math.min(1, v * (1 - PERSONA_RANDOM_SHARE) + rnd() * PERSONA_RANDOM_SHARE));
+    const SH = persShare(P), f = v => Math.max(0, Math.min(1, v * (1 - SH) + rnd() * SH));
     return { aggression: f(P.aggression ?? 0.5), stealth: f(P.stealth ?? 0.4), greed: f(P.greed ?? 0.4), caution: f(P.caution ?? 0.4) };
 }
 function personaWset(ship, P, rnd) { // 武器の種類: 7割は性格どおり (潜航型は隠密/慎重ならミサイル+ビーム・他は既定) / 3割は無作為に 1〜上限 種類
     const cap = WEAPON_TYPE_CAP[ship] || 3;
-    if (rnd() < PERSONA_RANDOM_SHARE) { const pool = ALL_WEAPONS.slice().sort(() => rnd() - 0.5); return pool.slice(0, 1 + Math.floor(rnd() * cap)); }
+    if (rnd() < persShare(P)) { const pool = ALL_WEAPONS.slice().sort(() => rnd() - 0.5); return pool.slice(0, 1 + Math.floor(rnd() * cap)); }
     if (ship === 'stealth' && ((P.stealth ?? 0) >= 0.6 || (P.caution ?? 0) >= 0.6)) return ['missile', 'beam'];
     return DEFAULT_LOADOUT[ship].w.slice();
 }
@@ -13573,7 +13583,7 @@ function personaVariants(P0, rnd) { // 武器の種類違い: 性格で重みを
         beam: { std: 1, focus: 0.3 + 0.6 * P.aggression, wide: 0.2 + 0.4 * P.aggression, rapid: 0.2 + 0.4 * P.greed, ion: 0.2 + 0.7 * P.greed } };
     for (const k of ALL_WEAPONS) {
         const ids = Object.keys(w[k]);
-        if (rnd() < PERSONA_RANDOM_SHARE) { out[k] = ids[Math.floor(rnd() * ids.length)]; continue; }
+        if (rnd() < persShare(P0)) { out[k] = ids[Math.floor(rnd() * ids.length)]; continue; }
         let tot = 0; for (const id of ids) tot += w[k][id]; let r = rnd() * tot, pick = 'std';
         for (const id of ids) { r -= w[k][id]; if (r <= 0) { pick = id; break; } }
         out[k] = pick;
@@ -16106,10 +16116,10 @@ function skillOn(side, id) {
 function comDefaultCfg() {
     return { ship: 'assault', enemy: 'assault', mode: 'br', pPreset: 'standard', ePreset: 'standard',
              pp: Object.assign({}, COM_PRESETS.standard.p), ep: Object.assign({}, COM_PRESETS.standard.p), higgsView: true, think: true,
-             lo: { p: {}, e: {} }, sk: { p: {}, e: {} }, map: Object.assign({}, MAP_DEF) }; // 第155弾: map=マップの設定 // 第142弾: sk=スキルのオン・オフ // 第22弾: COM対戦の積み込み (自機/敵・艦種ごと。無ければ既定)
+             lo: { p: {}, e: {} }, sk: { p: {}, e: {} }, map: Object.assign({}, MAP_DEF), rndAll: { p: false, e: false } }; // 第155弾: map=マップの設定 // 第142弾: sk=スキルのオン・オフ // 第22弾: COM対戦の積み込み (自機/敵・艦種ごと。無ければ既定)
 }
 function loadComCfg() {
-    try { const c = JSON.parse(localStorage.getItem('darkEchoComDemo') || 'null'); if (c && c.pp && c.ep) { const r = Object.assign(comDefaultCfg(), c); for (const pk of ['pp', 'ep']) r[pk] = Object.assign({}, PERS_DEF, r[pk]); /* 第147弾: 新しい軸が無い古い保存は既定で埋める */ if (!r.lo || !r.lo.p || !r.lo.e) r.lo = { p: {}, e: {} }; if (!r.sk || !r.sk.p || !r.sk.e) r.sk = { p: {}, e: {} }; r.map = Object.assign({}, MAP_DEF, r.map); return r; } } catch (e) {}
+    try { const c = JSON.parse(localStorage.getItem('darkEchoComDemo') || 'null'); if (c && c.pp && c.ep) { const r = Object.assign(comDefaultCfg(), c); for (const pk of ['pp', 'ep']) r[pk] = Object.assign({}, PERS_DEF, r[pk]); /* 第147弾: 新しい軸が無い古い保存は既定で埋める */ if (!r.lo || !r.lo.p || !r.lo.e) r.lo = { p: {}, e: {} }; if (!r.sk || !r.sk.p || !r.sk.e) r.sk = { p: {}, e: {} }; r.map = Object.assign({}, MAP_DEF, r.map); r.rndAll = Object.assign({ p: false, e: false }, r.rndAll); return r; } } catch (e) {}
     return comDefaultCfg();
 }
 function saveComCfg() { if (playReplay || /[?&]replay=1/.test(location.search)) return; try { localStorage.setItem('darkEchoComDemo', JSON.stringify(comCfg)); } catch (e) {} }
@@ -17570,7 +17580,8 @@ function matchRecStart() {
     for (const st of structures) if (st.type === 'colony' || st.type === 'derelict') lm.push({ k: st.type, x: st.x, y: st.y });
     for (const st of stations) lm.push({ k: 'station', x: st.x, y: st.y });
     for (const n of resourceNodes) lm.push({ k: 'node', x: n.x, y: n.y });
-    matchRec = { f0: _frameCount, ship: gameState.shipType, enemy: gameState.enemyType, com: !!comDemo, lm, s: [], ev: [], th: [], x: [], prevAi: {}, prevExpo: 0 };
+    _recOn = !comDemo && !playReplay && !!window._humanSnap; _inputLog = [];
+    matchRec = { f0: _frameCount, inp: _inputLog, ship: gameState.shipType, enemy: gameState.enemyType, com: !!comDemo, lm, s: [], ev: [], th: [], x: [], prevAi: {}, prevExpo: 0 };
     try { // 2026-11-11 (リプレイモード): 霧の濃さの地図 (100×100マス・1マス700u・0〜255) を試合の始めに1回だけ残す — リプレイでヒッグスの層を描く
         const N = REC_HG_N, cell = (MAP_RADIUS * 2) / N, x0 = MAP_CX - MAP_RADIUS, y0 = MAP_CY - MAP_RADIUS, u = new Uint8Array(N * N);
         for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) u[j * N + i] = Math.max(0, Math.min(255, Math.round(higgsBaseAt(x0 + (i + 0.5) * cell, y0 + (j + 0.5) * cell) * 255)));
@@ -17582,7 +17593,7 @@ function matchRecStart() {
         matchRec.meta = { ver: sc ? (sc.getAttribute('src').split('?v=')[1] || '') : '', at: new Date().toISOString(), mode: gameState.mode, com: !!comDemo, ship: gameState.shipType, enemy: gameState.enemyType,
             pp: comDemo && _com && _com.pp ? Object.assign({}, _com.pp) : null, ep: E0 && E0.personality ? Object.assign({}, E0.personality) : null,
             pPre: _comMatchInfo ? _comMatchInfo.pPre : null, ePre: _comMatchInfo ? _comMatchInfo.ePre : null, theme: mapTheme ? mapTheme.name : '',
-            pEngine: gameState.engineType, eEngine: E0 ? E0.engine : null, pFocus: genFocusKey, seed: comDemo ? _simSeed : undefined, cfg: comDemo ? window._comCfgSnap : undefined, gs: comDemo ? window._gsSnap : undefined, pLoadout: gameState.loadout ? JSON.parse(JSON.stringify(gameState.loadout[gameState.shipType] || {})) : null };
+            pEngine: gameState.engineType, eEngine: E0 ? E0.engine : null, pFocus: genFocusKey, seed: (comDemo || window._humanSnap) ? _simSeed : undefined, cfg: comDemo ? window._comCfgSnap : undefined, gs: (comDemo || window._humanSnap) ? window._gsSnap : undefined, human: !comDemo && !!window._humanSnap ? window._humanSnap : undefined, pLoadout: gameState.loadout ? JSON.parse(JSON.stringify(gameState.loadout[gameState.shipType] || {})) : null };
     } catch (err) { matchRec.meta = { err: String(err) }; }
 }
 function matchRecEvent(kind, x, y, text) {
@@ -17650,7 +17661,7 @@ function matchRecordData() {
     const playerDead = !player || player.hp <= 0, e0 = enemies.find(q => q.type !== 'fighter');
     const res = { winner: playerDead ? 'enemy' : (sectorCleared ? 'player' : 'none'), sec: Math.round((matchRec.s.length ? matchRec.s[matchRec.s.length - 1].t : 0) / 60), pHp: player ? +(Math.max(0, player.hp) / player.maxHp).toFixed(3) : 0, eHp: e0 ? +(Math.max(0, e0.hp) / e0.maxHp).toFixed(3) : 0,
         cause: playerHitLog && playerHitLog.length ? playerHitLog[playerHitLog.length - 1] : null, stats: huntStats ? JSON.parse(JSON.stringify(huntStats)) : null, last: last.slice(-3) };
-    return { fmt: 2, meta: matchRec.meta, result: res, lm: matchRec.lm, hg: matchRec.hg || null, s: matchRec.s, x: matchRec.x, ev: matchRec.ev, th: matchRec.th };
+    return { fmt: 2, meta: matchRec.meta, inp: matchRec.inp && matchRec.inp.length ? matchRec.inp : undefined, result: res, lm: matchRec.lm, hg: matchRec.hg || null, s: matchRec.s, x: matchRec.x, ev: matchRec.ev, th: matchRec.th };
 }
 async function exportMatchRecord() {
     const d = matchRecordData(); if (!d) { logMessage('記録: 保存できる記録がありません', 'system-msg'); return; }
@@ -18000,7 +18011,7 @@ let playReplay = null;
 const PRP_KEY = 'darkEchoReplayJob';
 const _PRP_BAND_JP = { heat: '熱', optic: '光', em: '電磁波', higgs: 'ヒッグス' };
 const _PRP_BAND_COL = { heat: '#ff8a3c', optic: '#ffe066', em: '#c78bff', higgs: '#5fc8ff' };
-function prpCanPlay(R) { const m = R && R.meta; return !!(m && m.com && m.seed !== undefined && m.cfg && m.gs); }
+function prpCanPlay(R) { const m = R && R.meta; return !!(m && ((m.com && m.seed !== undefined && m.cfg && m.gs) || (m.human && m.seed !== undefined && m.gs && Array.isArray(R.inp)))); } // 第156弾: 人の操作の記録も再生できる (操作の記録 inp つき)
 // 失敗の理由は画面に出す (下部ログは廃止済みで logMessage は見えない — 以前は無反応に見えた)
 function prpNotice(msg) {
     let d = document.getElementById('prp-notice');
@@ -18008,9 +18019,9 @@ function prpNotice(msg) {
     d.textContent = msg; d.style.display = 'block'; clearTimeout(d._t); d._t = setTimeout(() => { d.style.display = 'none'; }, 6000);
 }
 function prpLaunch(R, title) {
-    if (!prpCanPlay(R)) { const m = R && R.meta; prpNotice(!m || !m.com ? 'この記録は通常プレイ (人の操作) の記録なので、プレイ画面では再生できません。再生できるのはCOM対戦の記録だけです。' : 'この記録は試合の種と設定が残っていない古い記録 (2026-11-11 より前) なので、プレイ画面では再生できません。新しくCOM対戦をすると再生できる記録になります。'); return; }
+    if (!prpCanPlay(R)) { const m = R && R.meta; prpNotice(!m || (!m.com && !m.human) ? 'この記録は 試合の種と操作が残っていない古い記録なので、プレイ画面では再生できません (第156弾より前の通常プレイの記録)。' : 'この記録は試合の種と設定が残っていない古い記録 (2026-11-11 より前) なので、プレイ画面では再生できません。新しくCOM対戦をすると再生できる記録になります。'); return; }
     const m = R.meta, tr = (R.s || []).map(q => [q.t, q.P ? q.P.x : null, q.P ? q.P.y : null, q.E && q.E[0] ? q.E[0].x : null, q.E && q.E[0] ? q.E[0].y : null]);
-    const job = { seed: m.seed, cfg: m.cfg, gs: m.gs, ver: m.ver || '', dbg: !!m.dbg, tr, title: title || '', res: R.result || null, view: 'e' };
+    const job = { seed: m.seed, cfg: m.cfg, gs: m.gs, human: m.human || null, inp: R.inp || null, ver: m.ver || '', dbg: !!m.dbg, tr, title: title || '', res: R.result || null, view: 'e' };
     try { localStorage.setItem(PRP_KEY, JSON.stringify(job)); } catch (err) { prpNotice('再生の準備ができませんでした (端末の保存容量が足りない可能性があります)。'); return; }
     location.href = location.pathname + '?replay=1';
 }
@@ -18018,6 +18029,7 @@ function prpPov() { if (!playReplay || playReplay.view !== 'e') return null; con
 function prpStart() {
     let job = null; try { job = JSON.parse(localStorage.getItem(PRP_KEY) || 'null'); } catch (err) { job = null; }
     if (!job) { prpNotice('再生する記録が見つかりませんでした。記録画面からもう一度「プレイ画面で再生」を押してください。'); return; }
+    if (job.human) { prpStartHuman(job); return; }
     playReplay = { job, view: job.view || 'e', drift: null, endT: job.tr && job.tr.length ? job.tr[job.tr.length - 1][0] : 0, verOk: true };
     const sc = document.querySelector('script[src*="game.js"]'), ver = sc ? (sc.getAttribute('src').split('?v=')[1] || '') : '';
     playReplay.verOk = !job.ver || job.ver === ver; playReplay.ver = ver;
@@ -18031,6 +18043,37 @@ function prpStart() {
     cameraFollowPlayer = true;
     prpBuildBar();
     logMessage('リプレイ: 記録した試合をもう一度動かしている (操作はできない)。上の帯で 敵の席/自機の席・ヒッグス表示・思考・倍速 を切り替える', 'system-msg');
+}
+// 第156弾: 人の操作の試合の再生 — 同じ種で試合を始め、記録した操作を その時刻 (フレーム) に 同じ関数で実行する。利用者の操作は受け付けない
+function prpStartHuman(job) {
+    const H = job.human || {};
+    playReplay = { job, view: 'p', drift: null, endT: job.tr && job.tr.length ? job.tr[job.tr.length - 1][0] : 0, verOk: true, inp: job.inp || [], ii: 0, live: false };
+    const sc = document.querySelector('script[src*="game.js"]'), ver = sc ? (sc.getAttribute('src').split('?v=')[1] || '') : '';
+    playReplay.verOk = !job.ver || job.ver === ver; playReplay.ver = ver;
+    playReplay.vwOk = !H.vw || (Math.abs(H.vw - innerWidth) < 60 && Math.abs(H.vh - innerHeight) < 60);
+    document.body.classList.add('play-replay');
+    Object.assign(gameState, JSON.parse(JSON.stringify(job.gs)));
+    document.querySelectorAll('.enemy-select-btn').forEach(b => b.classList.toggle('active', b.dataset.type === H.enemy));
+    gameState.mode = H.mode || gameState.mode;
+    window.__rpSeed = job.seed; comDemo = false;
+    startHumanMatch(H.ship || gameState.shipType);
+    playReplay.live = true;
+    toggleThinkLog(true);
+    cameraFollowPlayer = true;
+    prpBuildBar();
+    logMessage('リプレイ: 人の操作の試合を記録どおりに動かしている (操作はできない)。右下の丸ボタンで 倍速・席の切替', 'system-msg');
+}
+// 記録した操作を その時刻に実行する (stepWorld の頭から)
+function prpApplyInputs() {
+    const P = playReplay; if (!P || !P.inp || !P.live) return;
+    const L = P.inp;
+    while (P.ii < L.length && L[P.ii][0] <= _frameCount) {
+        const ev = L[P.ii++], name = ev[1], a = (ev[2] || []).map(_recDec);
+        _prpApplying = true;
+        try { if (name === '$setTarget') player.setTarget(a[0], a[1]); else if (typeof window[name] === 'function') window[name].apply(null, a); }
+        catch (err) { console.error('replay input', name, err); }
+        finally { _prpApplying = false; }
+    }
 }
 // 第89弾 (オーナー): 再生の操作は右下の丸いボタンを押した時に開く所 (倍速・一時停止・拡大縮小の並び) に入れる。上の帯と左のパネルは廃止
 function prpBuildBar() {
@@ -19208,7 +19251,8 @@ function _renderComCfg() {
         const box = document.querySelector('.com-side[data-side="' + side + '"]');
         if (!box) continue;
         const ship = side === 'p' ? c.ship : c.enemy, pre = side === 'p' ? c.pPreset : c.ePreset, pp = side === 'p' ? c.pp : c.ep;
-        const h = ['<div class="com-side-title ' + (side === 'p' ? 'cs-p' : 'cs-e') + '">' + (side === 'p' ? '自機COM' : '敵COM') + '</div><div class="com-row">'];
+        const ra = !!(c.rndAll && c.rndAll[side]);
+        const h = ['<div class="com-side-title ' + (side === 'p' ? 'cs-p' : 'cs-e') + '">' + (side === 'p' ? '自機COM' : '敵COM') + ' <button class="com-chip' + (ra ? ' on' : '') + '" data-act="rndall" title="ON: 試合ごとに 艦種・性格・積み込み・武器をすべて無作為に決める">🎲 全部ランダム ' + (ra ? 'ON' : 'OFF') + '</button></div>' + (ra ? '<div class="com-note">試合ごとに 艦種・性格(8軸)・積み込み・武器の種類をすべて無作為に決める (下の設定は使わない)</div>' : '') + '<div class="com-row">'];
         for (const k of ['assault', 'stealth', 'carrier']) h.push('<button class="com-chip' + (ship === k ? ' on' : '') + '" data-act="ship" data-v="' + k + '">' + SHIP_JP[k] + '</button>');
         h.push('</div><div class="com-row">');
         for (const k in COM_PRESETS) h.push('<button class="com-chip' + (pre === k ? ' on' : '') + '" data-act="preset" data-v="' + k + '">' + COM_PRESETS[k].label + '</button>');
@@ -19255,13 +19299,18 @@ const MAP_SL = [ // [キー, 表示名, 最小, 最大, 刻み, 単位, 説明]
     ['node', 'ノード', 0, 15, 1, '個', ''],
     ['cache', '漂流コンテナ', 0, 30, 1, '個', ''],
     ['derelict', '難破船', 0, 12, 1, '個', ''] ];
+function _rnd(lo, hi, rnd) { return lo + Math.floor((rnd ? rnd() : _nativeRandom()) * (hi - lo + 1)); }
+function rollMapCfg(rnd) { // 第156弾: マップの設定を無作為に (面積は 雲25〜70%・岩石帯0〜20%)
+    const r = rnd || _nativeRandom, cloud = _rnd(25, 70, r), rock = _rnd(0, Math.min(20, 95 - cloud), r);
+    return { cloud, rock, thermal: _rnd(0, 12, r), storm: _rnd(0, 10, r), wreck: _rnd(0, 8, r), fluct: _rnd(2, 14, r), colony: _rnd(3, 8, r), node: _rnd(3, 10, r), cache: _rnd(2, 10, r), derelict: _rnd(2, 8, r), convoy: [0, 0.5, 1, 2, 3][_rnd(0, 4, r)] };
+}
 const MAP_CONVOY = [[0, 'なし'], [0.5, '少なめ'], [1, '標準'], [2, '多め'], [3, '頻繁']];
 function _mapAreaRow(k, lbl, v, note) { return '<label class="com-sl"><span>' + lbl + '</span><input type="range" min="0" max="' + (k === 'rock' ? 40 : 100) + '" step="1" value="' + v + '" data-act="map" data-k="' + k + '"><b id="mp-' + k + '">' + v + '%</b></label>'; }
 function _renderMapCfg() {
     const box = document.getElementById('com-map'); if (!box || !comCfg) return;
     const m = comCfg.map = Object.assign({}, MAP_DEF, comCfg.map);
     const empty = Math.max(0, 100 - m.cloud - m.rock);
-    const h = ['<div class="com-sk-head"><button class="com-chip' + (_comMapOpen ? ' on' : '') + '" data-act="mapopen">マップの設定 ' + (_comMapOpen ? '▴' : '▾') + '</button><button class="com-chip" data-act="mapreset">初期値に戻す</button></div>'];
+    const h = ['<div class="com-sk-head"><button class="com-chip' + (_comMapOpen ? ' on' : '') + '" data-act="mapopen">マップの設定 ' + (_comMapOpen ? '▴' : '▾') + '</button><button class="com-chip" data-act="maprnd" title="マップの設定を今すぐ無作為に振る">🎲 ランダムに振る</button><button class="com-chip' + (m.rnd ? ' on' : '') + '" data-act="maprndon" title="ON: 試合ごとにマップの設定を無作為に決める">毎試合ランダム ' + (m.rnd ? 'ON' : 'OFF') + '</button><button class="com-chip" data-act="mapreset">初期値に戻す</button></div>'];
     if (_comMapOpen) {
         h.push('<div class="com-note">面積 (ヒッグス雲＋岩石帯＋何もない空間＝100%)。熱源・磁気嵐・残骸帯の円は「何もない空間」の中に、互いに重ならないように置く。雲と地形は被らない</div>');
         h.push(_mapAreaRow('cloud', 'ヒッグス雲 (濃い)', m.cloud));
@@ -19284,6 +19333,13 @@ function startComDemo() {
     if (comCfg.lo && comCfg.lo.p && comCfg.lo.p[comCfg.ship]) gameState.loadout = Object.assign({}, gameState.loadout, { [comCfg.ship]: Object.assign({}, comCfg.lo.p[comCfg.ship]) });
     else { const _lp = comLoadout('p', comCfg.ship); gameState.loadout = Object.assign({}, gameState.loadout, { [comCfg.ship]: _lp }); } // 偽コンテナ: 隠密/貪欲な自機COMは既定の積み込みに1個足す
     toggleThinkLog(comCfg.think);
+    // 第156弾: 「全部ランダム」「毎試合ランダム」は試合を始める時に具体的な値へ決める (決めた値は設定・記録に残る → リプレイで同じ試合になる)
+    for (const sd of ['p', 'e']) if (comCfg.rndAll && comCfg.rndAll[sd]) {
+        const ships = ['assault', 'stealth', 'carrier'], pick = ships[Math.floor(_nativeRandom() * 3)];
+        if (sd === 'p') { comCfg.ship = pick; comCfg.pPreset = 'random'; } else { comCfg.enemy = pick; comCfg.ePreset = 'random'; }
+        if (comCfg.lo) comCfg.lo[sd] = {}; // 積み込みは 性格に頼らない無作為 (persShare=1)
+    }
+    if (comCfg.map && comCfg.map.rnd) comCfg.map = Object.assign(rollMapCfg(), { rnd: true });
     window._comCfgSnap = JSON.parse(JSON.stringify(comCfg)); window._gsSnap = JSON.parse(JSON.stringify(gameState)); // プレイ画面のリプレイ: 同じ設定で同じ試合を作り直す
     _frameCount = 0; _simSeed = (window.__rpSeed !== undefined ? window.__rpSeed : (_nativeRandom() * 4294967296)) >>> 0; _simRng = _mulberry(_simSeed); // 試合の種 (記録に残す → 同じ試合を再生できる)
     _gen++; _useCache.p = {}; _useCache.e = {};
@@ -19309,6 +19365,7 @@ function exitComDemo() { location.reload(); }
             if (side === 'p') comCfg.pPreset = v; else comCfg.ePreset = v;
             if (COM_PRESETS[v].p) Object.assign(side === 'p' ? comCfg.pp : comCfg.ep, COM_PRESETS[v].p);
         }
+        else if (act === 'rndall') comCfg.rndAll[side] = !comCfg.rndAll[side];
         else if (act === 'skopen') _comSkOpen = !_comSkOpen;
         else if (act === 'skill' || act === 'skall' || act === 'skgrp') {
             const m = (comCfg.sk[side] = comCfg.sk[side] || {}), L = skillList();
@@ -19318,6 +19375,8 @@ function exitComDemo() { location.reload(); }
         }
         else if (act === 'mapopen') _comMapOpen = !_comMapOpen;
         else if (act === 'mapreset') comCfg.map = Object.assign({}, MAP_DEF);
+        else if (act === 'maprnd') comCfg.map = Object.assign(rollMapCfg(), { rnd: comCfg.map.rnd });
+        else if (act === 'maprndon') comCfg.map.rnd = !comCfg.map.rnd;
         else if (act === 'mapconvoy') comCfg.map.convoy = +v;
         else if (act === 'mode') comCfg.mode = v;
         else if (act === 'higgs') comCfg.higgsView = !comCfg.higgsView;
@@ -19951,7 +20010,7 @@ function initSfxVolumeUI() {
 let _simRng = null, _simSeed = 0;
 function _mulberry(seed) { let a = seed >>> 0; return function () { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 function withSimRng(fn) { if (!_simRng || Math.random === _simRng) return fn(); Math.random = _simRng; try { return fn(); } finally { Math.random = _nativeRandom; } }
-function stepWorld() { _inStep = true; try { withSimRng(_stepWorldCore); } finally { _inStep = false; } if (playReplay) prpCheckDrift(); } // 記録と比べるのは読むだけ
+function stepWorld() { if (playReplay && playReplay.inp) prpApplyInputs(); _inStep = true; try { withSimRng(_stepWorldCore); } finally { _inStep = false; } if (playReplay) prpCheckDrift(); } // 記録と比べるのは読むだけ
 function _stepWorldCore() {
         _frameCount++;
         if (debugMode) { if (_dbgGod && player && player.hp > 0 && !player._dying) player.hp = player.maxHp; if (_dbgInfoOn && _frameCount % 20 === 0) { const el = document.getElementById('dbg-info'); if (el) el.textContent = _dbgInfoText(); } }
@@ -20594,6 +20653,49 @@ document.getElementById('btn-game-speed')?.addEventListener('click', () => {
 });
 // ─────────────────────────────────────────────────────────────
 
+// ═══ 第156弾: 人の操作の記録 ═══
+//   人が押した 意味のある操作 (移動・出力・ソナー・射撃・ロック・搭載品・ハック・部品の選択…) を、関数単位で フレーム番号つきに残す。
+//   試合は種つきの乱数で動くので、同じ種・同じ操作を同じフレームに入れれば 同じ試合になる。再生中は 利用者の操作を受け付けない。
+//   ⚠️ 記録していない操作 (ドックでの積み込みの編集 など) があるとずれる → リプレイは記録の1秒ごとの位置と比べ、ずれたら表示する。
+var _recOn = false, _inputLog = [], _recDepth = 0, _prpApplying = false;
+const REC_FNS = ['orderMove', 'setStance', 'cycleStance', 'toggleCoast', 'useBoost', 'toggleBand', 'switchBand', 'setBandLevel', 'fireOmniSonar', 'fireDirectionalSonar', 'cycleSonarLevel', 'selectSonarBand',
+    'switchWeapon', 'setMissileMode', 'playerFireWeapon', 'issueFireOrder', 'freeFireAt', 'toggleAutoAttack', 'setCombatMode', 'lockEntity', 'lockSignalTarget', 'clearLockTarget', 'cycleLockTarget', 'trackNextSignal',
+    'deployDrone', 'launchLure', 'droneOrder', 'placeMine', 'fireHackPulse', 'selectHackWave', 'selectDroneHack', 'tryPickDroneHack', 'setGenFocus', 'setGenMT', 'requestEngineSwitch', 'cycleAiLevel',
+    'takePart', 'takeLoot', 'partInstall', 'partUninstall', 'hijackDerelict'];
+function _hReplay() { return !!(playReplay && playReplay.inp && playReplay.live); }
+function _recEnc(a) {
+    if (a === undefined) return null;
+    if (a && typeof a === 'object') {
+        if (typeof Event !== 'undefined' && a instanceof Event) return null;
+        if (a.uid !== undefined && a.hp !== undefined) return { $u: a.uid };
+        if (a.type === 'derelict' || a.type === 'colony') { const i = structures.indexOf(a); if (i >= 0) return { $s: i }; }
+        try { return JSON.parse(JSON.stringify(a)); } catch (e) { return null; }
+    }
+    if (typeof a === 'function') return null;
+    return a;
+}
+function _recDec(a) { if (a && typeof a === 'object') { if (a.$u !== undefined) return enemies.find(q => q.uid === a.$u) || null; if (a.$s !== undefined) return structures[a.$s] || null; } return a; }
+function _recGate(name, args, self) { // true = そのまま実行 / false = 受け付けない (再生中の利用者の操作)
+    if (_inStep) return true;
+    if (_hReplay() && !_prpApplying) return false;
+    if (_recOn && _recDepth === 0 && !comDemo && !playReplay) _inputLog.push([_frameCount, name, args.map(_recEnc)]);
+    return true;
+}
+(function installRecHooks() {
+    for (const name of REC_FNS) {
+        const o = window[name]; if (typeof o !== 'function') continue;
+        window[name] = function (...args) {
+            if (!_recGate(name, args, this)) return;
+            _recDepth++;
+            try { return (!_inStep && _simRng) ? withSimRng(() => o.apply(this, args)) : o.apply(this, args); } finally { _recDepth--; }
+        };
+    }
+    const ost = Ship.prototype.setTarget;
+    Ship.prototype.setTarget = function (...a) {
+        if (this === player && !_inStep) { if (_hReplay() && !_prpApplying) return; if (_recOn && _recDepth === 0 && !comDemo && !playReplay) _inputLog.push([_frameCount, '$setTarget', a.map(_recEnc)]); }
+        _recDepth++; try { return ost.apply(this, a); } finally { _recDepth--; }
+    };
+})();
 // gameLoop is started by startGame() after ship selection
 
 // Game Over / Restart
