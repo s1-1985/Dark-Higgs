@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261115a">
+    <link rel="stylesheet" href="style.css?v=20261115b">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -839,6 +839,7 @@
         var btn=document.getElementById('btn-qr'); if(!btn) return;
         btn.addEventListener('click',function(){
             var url=location.href.split('#')[0].split('?')[0];
+            if(/^(localhost|127\.|0\.0\.0\.0|\[::1\])/.test(location.hostname)) url='https://s1-1985.github.io/Dark-Higgs/prototype/';
             var ov=document.createElement('div');
             ov.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.82);display:flex;align-items:center;justify-content:center;pointer-events:auto';
             var box=document.createElement('div');
@@ -853,7 +854,7 @@
         });
     })();
     </script>
-    <script src="game.js?v=20261115a"></script>
+    <script src="game.js?v=20261115b"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
