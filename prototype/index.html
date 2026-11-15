@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261114k">
+    <link rel="stylesheet" href="style.css?v=20261115a">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -540,6 +540,7 @@
                 <div class="lobby-hero">
                     <div class="lobby-hero-fade"></div>
                     <button id="btn-ambient" onclick="toggleAmbient()">♪ SOUND ON</button>
+                    <button id="btn-qr" type="button" style="position:absolute;left:12px;top:44px;z-index:3;font-size:11px;color:#8fe;background:rgba(0,20,20,.6);border:1px solid #2a6;border-radius:4px;padding:4px 8px;cursor:pointer;pointer-events:auto">QRコード</button>
                     <label id="sfx-vol-wrap" style="position:absolute;right:12px;top:44px;font-size:11px;color:#8fe;z-index:3">SE <input id="sfx-vol" type="range" min="0" max="100" step="5" style="width:90px;vertical-align:middle"> <span id="sfx-vol-l"></span></label>
                     <label id="bgm-vol-wrap" style="position:absolute;right:12px;top:66px;font-size:11px;color:#8fe;z-index:3">BGM <input id="bgm-vol" type="range" min="0" max="100" step="5" style="width:90px;vertical-align:middle"> <span id="bgm-vol-l"></span></label>
                     <div class="lobby-hero-inner">
@@ -832,7 +833,27 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
-    <script src="game.js?v=20261114k"></script>
+    <script src="qrcode.min.js"></script>
+    <script>
+    (function(){
+        var btn=document.getElementById('btn-qr'); if(!btn) return;
+        btn.addEventListener('click',function(){
+            var url=location.href.split('#')[0].split('?')[0];
+            var ov=document.createElement('div');
+            ov.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.82);display:flex;align-items:center;justify-content:center;pointer-events:auto';
+            var box=document.createElement('div');
+            box.style.cssText='background:#0a1414;border:1px solid #2a6;border-radius:8px;padding:14px;text-align:center;color:#8fe;font-size:12px;max-width:90vw';
+            var img='';
+            try{var q=qrcode(0,'M');q.addData(url);q.make();img=q.createSvgTag({cellSize:4,margin:4,scalable:true});}catch(e){img='<div>QR生成に失敗</div>';}
+            box.innerHTML='<div style="margin-bottom:8px">別の端末で読み取るとこのゲームを開けます</div><div style="background:#fff;width:min(60vh,70vw,260px);margin:0 auto">'+img+'</div><div style="margin:8px 0;word-break:break-all;user-select:all">'+url+'</div><button type="button" style="font-size:12px;padding:4px 16px">閉じる</button>';
+            var sv=box.querySelector('svg'); if(sv){sv.style.width='100%';sv.style.height='auto';sv.style.display='block';}
+            ov.appendChild(box); document.body.appendChild(ov);
+            function close(){ov.remove();}
+            ov.addEventListener('click',function(e){if(e.target===ov||e.target.tagName==='BUTTON')close();});
+        });
+    })();
+    </script>
+    <script src="game.js?v=20261115a"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
