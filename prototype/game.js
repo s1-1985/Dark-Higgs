@@ -456,7 +456,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261117b';
+const SPRITE_VER = '20261118a';
 const SPRITE_FILES = {
     // 第163弾: 6勢力の完全リビルド (艦3種+戦闘機・哨戒機・Tech・ミサイル)
     f2_helios_assault: 'assets/f2_helios_assault.png',
@@ -501,6 +501,30 @@ const SPRITE_FILES = {
     f2_fogborn_scout: 'assets/f2_fogborn_scout.png',
     f2_fogborn_mech: 'assets/f2_fogborn_mech.png',
     f2_fogborn_missile: 'assets/f2_fogborn_missile.png',
+    f2_helios_mech_thrust: 'assets/f2_helios_mech_thrust.png',
+    f2_helios_mech_fire: 'assets/f2_helios_mech_fire.png',
+    f2_helios_mech_ready: 'assets/f2_helios_mech_ready.png',
+    f2_helios_mech_slash: 'assets/f2_helios_mech_slash.png',
+    f2_crow_mech_thrust: 'assets/f2_crow_mech_thrust.png',
+    f2_crow_mech_fire: 'assets/f2_crow_mech_fire.png',
+    f2_crow_mech_ready: 'assets/f2_crow_mech_ready.png',
+    f2_crow_mech_slash: 'assets/f2_crow_mech_slash.png',
+    f2_valkyr_mech_thrust: 'assets/f2_valkyr_mech_thrust.png',
+    f2_valkyr_mech_fire: 'assets/f2_valkyr_mech_fire.png',
+    f2_valkyr_mech_ready: 'assets/f2_valkyr_mech_ready.png',
+    f2_valkyr_mech_slash: 'assets/f2_valkyr_mech_slash.png',
+    f2_sanctum_mech_thrust: 'assets/f2_sanctum_mech_thrust.png',
+    f2_sanctum_mech_fire: 'assets/f2_sanctum_mech_fire.png',
+    f2_sanctum_mech_ready: 'assets/f2_sanctum_mech_ready.png',
+    f2_sanctum_mech_slash: 'assets/f2_sanctum_mech_slash.png',
+    f2_rustroad_mech_thrust: 'assets/f2_rustroad_mech_thrust.png',
+    f2_rustroad_mech_fire: 'assets/f2_rustroad_mech_fire.png',
+    f2_rustroad_mech_ready: 'assets/f2_rustroad_mech_ready.png',
+    f2_rustroad_mech_slash: 'assets/f2_rustroad_mech_slash.png',
+    f2_fogborn_mech_thrust: 'assets/f2_fogborn_mech_thrust.png',
+    f2_fogborn_mech_fire: 'assets/f2_fogborn_mech_fire.png',
+    f2_fogborn_mech_ready: 'assets/f2_fogborn_mech_ready.png',
+    f2_fogborn_mech_slash: 'assets/f2_fogborn_mech_slash.png',
     f_valkyr_assault: 'assets/ship_valkyr_assault.png', f_valkyr_stealth: 'assets/ship_valkyr_stealth.png', f_valkyr_carrier: 'assets/ship_valkyr_carrier.png', // 第162弾: 勢力のデザイン
     f_sanctum_assault: 'assets/ship_sanctum_assault.png', f_sanctum_stealth: 'assets/ship_sanctum_stealth.png', f_sanctum_carrier: 'assets/ship_sanctum_carrier.png',
     f_rustroad_assault: 'assets/ship_rustroad_assault.png', f_rustroad_stealth: 'assets/ship_rustroad_stealth.png', f_rustroad_carrier: 'assets/ship_rustroad_carrier.png',
