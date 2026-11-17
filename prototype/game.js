@@ -456,8 +456,51 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261117a';
+const SPRITE_VER = '20261117b';
 const SPRITE_FILES = {
+    // 第163弾: 6勢力の完全リビルド (艦3種+戦闘機・哨戒機・Tech・ミサイル)
+    f2_helios_assault: 'assets/f2_helios_assault.png',
+    f2_helios_stealth: 'assets/f2_helios_stealth.png',
+    f2_helios_carrier: 'assets/f2_helios_carrier.png',
+    f2_helios_fighter: 'assets/f2_helios_fighter.png',
+    f2_helios_scout: 'assets/f2_helios_scout.png',
+    f2_helios_mech: 'assets/f2_helios_mech.png',
+    f2_helios_missile: 'assets/f2_helios_missile.png',
+    f2_crow_assault: 'assets/f2_crow_assault.png',
+    f2_crow_stealth: 'assets/f2_crow_stealth.png',
+    f2_crow_carrier: 'assets/f2_crow_carrier.png',
+    f2_crow_fighter: 'assets/f2_crow_fighter.png',
+    f2_crow_scout: 'assets/f2_crow_scout.png',
+    f2_crow_mech: 'assets/f2_crow_mech.png',
+    f2_crow_missile: 'assets/f2_crow_missile.png',
+    f2_valkyr_assault: 'assets/f2_valkyr_assault.png',
+    f2_valkyr_stealth: 'assets/f2_valkyr_stealth.png',
+    f2_valkyr_carrier: 'assets/f2_valkyr_carrier.png',
+    f2_valkyr_fighter: 'assets/f2_valkyr_fighter.png',
+    f2_valkyr_scout: 'assets/f2_valkyr_scout.png',
+    f2_valkyr_mech: 'assets/f2_valkyr_mech.png',
+    f2_valkyr_missile: 'assets/f2_valkyr_missile.png',
+    f2_sanctum_assault: 'assets/f2_sanctum_assault.png',
+    f2_sanctum_stealth: 'assets/f2_sanctum_stealth.png',
+    f2_sanctum_carrier: 'assets/f2_sanctum_carrier.png',
+    f2_sanctum_fighter: 'assets/f2_sanctum_fighter.png',
+    f2_sanctum_scout: 'assets/f2_sanctum_scout.png',
+    f2_sanctum_mech: 'assets/f2_sanctum_mech.png',
+    f2_sanctum_missile: 'assets/f2_sanctum_missile.png',
+    f2_rustroad_assault: 'assets/f2_rustroad_assault.png',
+    f2_rustroad_stealth: 'assets/f2_rustroad_stealth.png',
+    f2_rustroad_carrier: 'assets/f2_rustroad_carrier.png',
+    f2_rustroad_fighter: 'assets/f2_rustroad_fighter.png',
+    f2_rustroad_scout: 'assets/f2_rustroad_scout.png',
+    f2_rustroad_mech: 'assets/f2_rustroad_mech.png',
+    f2_rustroad_missile: 'assets/f2_rustroad_missile.png',
+    f2_fogborn_assault: 'assets/f2_fogborn_assault.png',
+    f2_fogborn_stealth: 'assets/f2_fogborn_stealth.png',
+    f2_fogborn_carrier: 'assets/f2_fogborn_carrier.png',
+    f2_fogborn_fighter: 'assets/f2_fogborn_fighter.png',
+    f2_fogborn_scout: 'assets/f2_fogborn_scout.png',
+    f2_fogborn_mech: 'assets/f2_fogborn_mech.png',
+    f2_fogborn_missile: 'assets/f2_fogborn_missile.png',
     f_valkyr_assault: 'assets/ship_valkyr_assault.png', f_valkyr_stealth: 'assets/ship_valkyr_stealth.png', f_valkyr_carrier: 'assets/ship_valkyr_carrier.png', // 第162弾: 勢力のデザイン
     f_sanctum_assault: 'assets/ship_sanctum_assault.png', f_sanctum_stealth: 'assets/ship_sanctum_stealth.png', f_sanctum_carrier: 'assets/ship_sanctum_carrier.png',
     f_rustroad_assault: 'assets/ship_rustroad_assault.png', f_rustroad_stealth: 'assets/ship_rustroad_stealth.png', f_rustroad_carrier: 'assets/ship_rustroad_carrier.png',
@@ -561,20 +604,23 @@ const ENEMY_SPRITE_KEY = { corvette: 'e_corvette', fighter: 'e_fighter', destroy
 // 第162弾 (オーナー「同じ艦種なら別の勢力のスプライトに切り替えられるように」): 勢力のデザイン (見た目だけ・性能は変わらない)。デザイン案は docs/CAMPAIGN_DESIGN.md
 //   fam = ドローン・ミサイルの絵の系統 ('a' 味方系 白×水色 / 'b' 敵系 黒×赤)。新しい勢力の専用ドローンは未作成なので どちらかの系統を使う
 const FACTIONS = {
-    helios:   { jp: 'ヘリオス連邦', sub: '白×灰×シアン・対称で直線的 / 署名: 中央を走るシアンの発光ラインと青いエンジン', fam: 'a', ships: { assault: 'assault', stealth: 'stealth', carrier: 'carrier' } },
-    crow:     { jp: '鉄鴉団', sub: '黒×赤・角ばった装甲 / 署名: 赤い山形(逆V)の縞と赤く光るエンジン', fam: 'b', ships: { assault: 'e_destroyer', stealth: 'e_corvette', carrier: 'e_carrier' } },
-    valkyr:   { jp: 'ヴァルキュル重工', sub: 'チャコール×安全黄・箱型モジュール / 署名: 黄黒の山形縞と平らな刃の艦首', fam: 'a', ships: { assault: 'f_valkyr_assault', stealth: 'f_valkyr_stealth', carrier: 'f_valkyr_carrier' } },
-    sanctum:  { jp: 'サンクトゥム教団', sub: '紫×金・優雅な曲線 / 署名: 金の光輪アーチと三日月の艦首', fam: 'a', ships: { assault: 'f_sanctum_assault', stealth: 'f_sanctum_stealth', carrier: 'f_sanctum_carrier' } },
-    rustroad: { jp: 'ラストロード商船連合', sub: '錆茶×オリーブ×橙・つぎはぎ / 署名: 縛ったコンテナと大きな投光器', fam: 'b', ships: { assault: 'f_rustroad_assault', stealth: 'f_rustroad_stealth', carrier: 'f_rustroad_carrier' } },
-    fogborn:  { jp: 'フォグボーン', sub: '瓶緑×黒・有機的 / 署名: 青緑に光る脈とエラの噴射口', fam: 'b', ships: { assault: 'f_fogborn_assault', stealth: 'f_fogborn_stealth', carrier: 'f_fogborn_carrier' } },
+    helios:   { jp: 'ヘリオス連邦', sub: '白×灰×シアン / 形: 左右対称の細い槍・針 / 署名: 背骨のシアンの発光ライン' },
+    crow:     { jp: '鉄鴉団', sub: '黒×赤 / 形: 非対称・片側に大きなかぎ爪 / 署名: 赤く光る排気とトゲ' },
+    valkyr:   { jp: 'ヴァルキュル重工', sub: 'チャコール×安全黄 / 形: 箱を積んだブロック状・平らな刃の艦首 / 署名: 黄黒の山形縞' },
+    sanctum:  { jp: 'サンクトゥム教団', sub: '紫×金 / 形: 三日月と弧 / 署名: 浮かぶ金の光輪' },
+    rustroad: { jp: 'ラストロード商船連合', sub: '錆茶×オリーブ×橙 / 形: 継ぎはぎの歪んだ船体 / 署名: 縛ったコンテナと大きな投光器' },
+    fogborn:  { jp: 'フォグボーン', sub: '瓶緑×黒 / 形: 直線のない生き物(エイ・クジラ) / 署名: 青緑に光る脈とエラの噴射口' },
 };
+for (const k in FACTIONS) FACTIONS[k].ships = { assault: 'f2_' + k + '_assault', stealth: 'f2_' + k + '_stealth', carrier: 'f2_' + k + '_carrier' };
 function skinOf(side) { const c = cfgMatch(); const k = c && c.skin && c.skin[side]; return FACTIONS[k] ? k : (side === 'p' ? 'helios' : 'crow'); }
 function factionShipKey(side, cls) { return FACTIONS[skinOf(side)].ships[cls] || FACTIONS[skinOf(side)].ships.assault; }
-function droneFam(side) { return FACTIONS[skinOf(side)].fam; }
-// ドローン・ミサイルの絵を 味方系 ⇄ 敵系 で入れ替える
-const DRONE_A2B = { drone_attack: 'e_fighter', drone_scout: 'drone_scout_e', drone_mech: 'drone_mech_e', drone_mech_thrust: 'drone_mech_e_thrust', drone_mech_fire: 'drone_mech_e_fire', drone_mech_ready: 'drone_mech_e_ready', drone_mech_slash: 'drone_mech_e_slash', drone_missile: 'drone_missile_e' };
-const DRONE_B2A = {}; for (const k in DRONE_A2B) DRONE_B2A[DRONE_A2B[k]] = k;
-function dsk(key, side) { const want = droneFam(side); if (want === 'b') return (DRONE_A2B[key] && !DRONE_B2A[key]) ? DRONE_A2B[key] : key; return DRONE_B2A[key] || key; }
+// ドローン・ミサイルの絵は勢力ごとのセット (第163弾)。呼び出し側の旧キー (味方系/敵系) を役割に直して 勢力の絵を返す
+const DRONE_ROLE = { drone_attack: 'fighter', e_fighter: 'fighter', drone_scout: 'scout', drone_scout_e: 'scout', drone_mech: 'mech', drone_mech_e: 'mech', drone_missile: 'missile', drone_missile_e: 'missile' };
+function dsk(key, side) {
+    let role = DRONE_ROLE[key];
+    if (!role) { const m = /^drone_mech(?:_e)?_(thrust|fire|ready|slash)$/.exec(key); if (m) role = 'mech_' + m[1]; }
+    return role ? 'f2_' + skinOf(side) + '_' + role : key; // 姿勢の絵 (mech_thrust など) は無い → 呼び出し側が読み込み失敗として通常の絵へ戻す
+}
 function spriteReady(img) { return img && img.complete && img.naturalWidth > 0; }
 // 既に translate(x,y)+rotate(angle) 済みのコンテキストへ、中心合わせ・最長辺=targetLen で描画
 function drawSpriteCentered(ctx, img, targetLen) {
@@ -5647,7 +5693,7 @@ class Ship {
                     const ecp = ENGINE_THRUST[gameState.engineType] || ENGINE_THRUST.thermonuclear;
                     const tpz = 0.6 + Math.sin(Date.now() * 0.008) * 0.4;
                     const vr  = this.radius * 2.8;
-                    const slots = THRUSTER_DEFS[_pstype] || THRUSTER_DEFS.assault;
+                    const slots = []; // 第163弾: 新しい絵は噴射口が絵に描かれている (勢力ごとに位置が違うので手続きの光は出さない)
                     slots.forEach(([lxF, lyF]) => {
                         const tx = lxF * vr - vr * 0.10; // バーニア口から後方へ
                         const ty = lyF * vr;
