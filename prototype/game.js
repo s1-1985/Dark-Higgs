@@ -18112,10 +18112,10 @@ const _PRP_BAND_JP = { heat: '熱', optic: '光', em: '電磁波', higgs: 'ヒ�
 const _PRP_BAND_COL = { heat: '#ff8a3c', optic: '#ffe066', em: '#c78bff', higgs: '#5fc8ff' };
 function prpCanPlay(R) { const m = R && R.meta; return !!(m && ((m.com && m.seed !== undefined && m.cfg && m.gs) || (m.human && m.seed !== undefined && m.gs && Array.isArray(R.inp)))); } // 第156弾: 人の操作の記録も再生できる (操作の記録 inp つき)
 // 失敗の理由は画面に出す (下部ログは廃止済みで logMessage は見えない — 以前は無反応に見えた)
-function prpNotice(msg) {
+function prpNotice(msg, ms) {
     let d = document.getElementById('prp-notice');
     if (!d) { d = document.createElement('div'); d.id = 'prp-notice'; d.style.cssText = 'position:fixed;left:50%;top:18%;transform:translateX(-50%);z-index:99999;max-width:80vw;padding:12px 16px;background:rgba(20,8,8,0.95);border:1px solid #ff6a5a;color:#ffd0c8;font:14px/1.5 sans-serif;border-radius:6px;pointer-events:none;text-align:center'; document.body.appendChild(d); }
-    d.textContent = msg; d.style.display = 'block'; clearTimeout(d._t); d._t = setTimeout(() => { d.style.display = 'none'; }, 6000);
+    d.textContent = msg; d.style.display = 'block'; clearTimeout(d._t); d._t = setTimeout(() => { d.style.display = 'none'; }, ms || 6000);
 }
 function prpLaunch(R, title) {
     if (!prpCanPlay(R)) { const m = R && R.meta; prpNotice(!m || (!m.com && !m.human) ? 'この記録は 試合の種と操作が残っていない古い記録なので、プレイ画面では再生できません (第156弾より前の通常プレイの記録)。' : 'この記録は試合の種と設定が残っていない古い記録 (2026-11-11 より前) なので、プレイ画面では再生できません。新しくCOM対戦をすると再生できる記録になります。'); return; }
@@ -18132,6 +18132,7 @@ function prpStart() {
     playReplay = { job, view: job.view || 'e', drift: null, endT: job.tr && job.tr.length ? job.tr[job.tr.length - 1][0] : 0, verOk: true };
     const sc = document.querySelector('script[src*="game.js"]'), ver = sc ? (sc.getAttribute('src').split('?v=')[1] || '') : '';
     playReplay.verOk = !job.ver || job.ver === ver; playReplay.ver = ver;
+    if (!playReplay.verOk) setTimeout(() => prpNotice('この記録はゲームの版 ' + job.ver + ' で保存されました (今は ' + ver + ')。版が違うと 動き方が変わっているため、同じ試合の進行にならないことがあります。', 12000), 1500);
     document.body.classList.add('play-replay');
     Object.assign(gameState, JSON.parse(JSON.stringify(job.gs)));
     comCfg = JSON.parse(JSON.stringify(job.cfg));
@@ -18149,6 +18150,7 @@ function prpStartHuman(job) {
     playReplay = { job, view: 'p', drift: null, endT: job.tr && job.tr.length ? job.tr[job.tr.length - 1][0] : 0, verOk: true, inp: job.inp || [], ii: 0, live: false };
     const sc = document.querySelector('script[src*="game.js"]'), ver = sc ? (sc.getAttribute('src').split('?v=')[1] || '') : '';
     playReplay.verOk = !job.ver || job.ver === ver; playReplay.ver = ver;
+    if (!playReplay.verOk) setTimeout(() => prpNotice('この記録はゲームの版 ' + job.ver + ' で保存されました (今は ' + ver + ')。版が違うと 動き方が変わっているため、同じ試合の進行にならないことがあります。', 12000), 1500);
     playReplay.vwOk = !H.vw || (Math.abs(H.vw - innerWidth) < 60 && Math.abs(H.vh - innerHeight) < 60);
     document.body.classList.add('play-replay');
     Object.assign(gameState, JSON.parse(JSON.stringify(job.gs)));
@@ -18220,7 +18222,7 @@ function prpCheckDrift() {
     const tr = P.job.tr, k = Math.round(t / 60); const r = tr && tr[k]; if (!r || r[0] !== t) return;
     const e0 = enemies.find(q => q.type !== 'fighter');
     const dp = r[1] !== null && player ? Math.hypot(player.x - r[1], player.y - r[2]) : 0, de = r[3] !== null && e0 ? Math.hypot(e0.x - r[3], e0.y - r[4]) : 0;
-    if (dp > 120 || de > 120) P.drift = { t, dp: Math.round(dp), de: Math.round(de) };
+    if (dp > 120 || de > 120) { P.drift = { t, dp: Math.round(dp), de: Math.round(de) }; prpNotice('記録とずれました (' + Math.floor(t / 3600) + ':' + String(Math.floor(t / 60) % 60).padStart(2, '0') + ' 付近・自艦 ' + P.drift.dp + 'u / 敵 ' + P.drift.de + 'u)。' + (P.verOk ? '版は同じなので、記録していない操作が入った可能性があります。' : '版が違うためです。'), 10000); }
 }
 function prpTick() { // 描画のたび (状態は読むだけ)
     const P = playReplay; if (!P) return;
