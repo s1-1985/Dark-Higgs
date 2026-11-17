@@ -2931,3 +2931,13 @@ body.play-replay #zoom-ctl #zoom-stack { flex-wrap: wrap-reverse; max-height: ca
 .com-trait { font-size: 12px; margin: 4px 0; color: #9fd; } .com-trait small { color: #789; font-size: 10px; }
 .com-aff { font-style: normal; font-size: 10px; font-weight: normal; color: #789; margin-left: 4px; } .com-aff.hi { color: #6f9; } .com-aff.lo { color: #a77; }
 .com-mapcfg{margin:6px 0 8px}.com-mapcfg .com-row{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:4px}
+
+/* 第161弾: タイトル画面 — 音・QR・音量はロゴの下 / モードを選んで試合の設定へ */
+.lobby-sound { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 12px; margin-top: 12px; font-size: 11px; color: #8fe; pointer-events: auto; }
+.lobby-sound #btn-ambient { position: static; top: auto; left: auto; right: auto; }
+#btn-qr { font-family: 'Orbitron', monospace; font-size: 9px; letter-spacing: 0.12em; padding: 5px 9px; border-radius: 3px; cursor: pointer; background: rgba(0,12,10,0.55); border: 1px solid rgba(0,255,170,0.25); color: #7fd8bb; pointer-events: auto; }
+.lobby-sound label { display: inline-flex; align-items: center; gap: 4px; }
+.lobby-sound input[type=range] { width: 84px; }
+.mode-card { position: relative; cursor: pointer; }
+.mode-go { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 18px; color: #00ffaa; opacity: 0.7; }
+@media (orientation: landscape) and (max-height: 600px) { .lobby-sound #btn-ambient { top: auto; left: auto; } .lobby-hero-inner { width: 100%; } }

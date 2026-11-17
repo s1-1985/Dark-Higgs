@@ -63,6 +63,9 @@ let higgsViewOff = false;
 // ═══ 第19弾: COM対戦デモ — 自機もCOMが操作する観戦モード (性格は自機/敵それぞれ設定) ═══
 let comDemo = false;     // 自機COMが操作中
 let thinkLogOn = true;   // 思考ログ欄を出すか
+var humanCfgOn = false; // 第161弾: プレイヤーが操作する試合でも 試合の設定 (敵の性格・積み込み・マップ・スキル) を使う
+function cfgMatch() { return (comDemo || humanCfgOn) && comCfg ? comCfg : null; }
+function swapOn() { return !!(cfgMatch() && comCfg.swap); } // 機体の見た目を入れ替える (自機=敵側デザイン)
 let comCfg = null;       // { ship, enemy, mode, pp, ep, pPreset, ePreset, higgsView, think } (ロビーの設定画面で決める)
 let _com = null;         // 自機COMの作業メモ (startGame/generateSector でリセット)
 // パッシブ方位ウェッジ: 計測時のワールド位置にアンカーした方位扇形。
@@ -805,7 +808,7 @@ function sfx(id, vol, opt) {
     if (playReplay && playReplay.view === 'e' && !_seatPass && !_SEAT_OK.test(id)) return true; // 敵の席: 自機側の音は鳴らさない
     const e = _sfxMan[id]; if (!e) return false;
     if (vol === undefined) vol = 1;
-    if (sfxVolume <= 0) return true;
+    if (sfxVolume <= 0 || !ambientOn) return true; // SOUND OFF = SE・BGM・環境音すべて止める
     if (/^(sonar_|alm_|hit_player|expl_|det_impact)/.test(id)) bgmDuck(id.charAt(0)==='s' ? 2.5 : 1.8);
     let fi = 0;
     if (e.f.length > 1) { fi = Math.floor(_nativeRandom() * e.f.length); if (fi === _sfxLastIdx[id]) fi = (fi + 1) % e.f.length; }
@@ -830,7 +833,7 @@ function sfxLoop(id, on, vol) {
     if (!audioCtx || !_sfxMan) return;
     if (playReplay && playReplay.view === 'e' && !_prpSeatBusy && on) return; // 敵の席: ループは敵の席の枠 (updateSfxLoops) の中だけ
     const e = _sfxMan[id]; if (!e) return;
-    const L = _sfxLoops[id], now = audioCtx.currentTime, tv = on ? Math.max(0, (vol === undefined ? 1 : vol)) * sfxVolume * (SFX_GAIN[id] ?? 1) : 0;
+    const L = _sfxLoops[id], now = audioCtx.currentTime, tv = on ? Math.max(0, (vol === undefined ? 1 : vol)) * (ambientOn ? sfxVolume : 0) * (SFX_GAIN[id] ?? 1) : 0;
     if (L) { L.g.gain.setTargetAtTime(tv, now, on ? 0.25 : 0.2); L.on = on; if (!on) { L.offAt = now; } return; }
     if (!on) return;
     const buf = _sfxBufs[e.f[0]]; if (!buf) { _sfxFetch(e.f[0]); return; }
@@ -974,7 +977,7 @@ function bgmFadeOut(sec) {
     d.dead = true; _bgmOld.push({ d, end: now + sec + 0.3 }); _bgmDeck = null; _bgmPlaying = '';
 }
 function bgmSting(id, vol) {
-    if (!audioCtx || !_bgmMan || !_bgmMan[id] || bgmVolume <= 0 || !_bgmInit()) return false;
+    if (!audioCtx || !_bgmMan || !_bgmMan[id] || bgmVolume <= 0 || !ambientOn || !_bgmInit()) return false;
     if (!_bgmReady(id)) { _bgmFetch(id); return false; }
     const now = audioCtx.currentTime; if (_bgmLastSt[id] !== undefined && now - _bgmLastSt[id] < 20) return false;
     _bgmLastSt[id] = now; if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -1014,8 +1017,8 @@ function bgmTick() {
     const now = audioCtx.currentTime;
     for (let i = _bgmOld.length - 1; i >= 0; i--) if (now > _bgmOld[i].end) { const d = _bgmOld[i].d; try { d.srcs.forEach(s => { try { s.stop(); } catch (e) {} }); d.g.disconnect(); } catch (e) {} _bgmOld.splice(i, 1); }
     if (_bgmDeck) _bgmSchedule(_bgmDeck);
-    _bgmBus.gain.setTargetAtTime(bgmVolume * BGM_TRIM * (now < _bgmDuckUntil ? 0.55 : 1), now, 0.2);
-    if (bgmVolume <= 0) { if (_bgmDeck) bgmFadeOut(0.5); return; }
+    _bgmBus.gain.setTargetAtTime((ambientOn ? bgmVolume : 0) * BGM_TRIM * (now < _bgmDuckUntil ? 0.55 : 1), now, 0.2);
+    if (bgmVolume <= 0 || !ambientOn) { if (_bgmDeck) bgmFadeOut(0.5); return; }
     if (now < _bgmHoldUntil) return;
     let want = '', inMatch = false;
     if (_bgmVisible('replay-overlay') || _bgmVisible('debrief-overlay') || _bgmVisible('game-over-overlay')) want = 'bgm_result_loop';
@@ -1078,7 +1081,7 @@ function stopAmbient() {
 function toggleAmbient() {
     ambientOn = !ambientOn;
     localStorage.setItem('darkEchoAmbient', ambientOn ? '1' : '0');
-    if (ambientOn) startAmbient(); else stopAmbient();
+    if (ambientOn) startAmbient(); else { stopAmbient(); try { Object.keys(_sfxLoops).forEach(k => sfxLoop(k, false)); } catch (e) {} try { if (_bgmDeck) bgmFadeOut(0.4); } catch (e) {} }
     const b = document.getElementById('btn-ambient');
     if (b) b.textContent = ambientOn ? '♪ SOUND ON' : '♪ SOUND OFF';
 }
@@ -5617,7 +5620,7 @@ class Ship {
         if (this.isPlayer) {
             // ── スプライト描画 (screen合成: 黒=背景と同化・hull正常表示・過飽和なし) ──
             const _pstype = gameState.shipType || 'assault';
-            const _psprite = SPRITES[_pstype];
+            const _psprite = SPRITES[swapOn() ? ({ assault: 'e_destroyer', stealth: 'e_corvette', carrier: 'e_carrier' }[_pstype] || _pstype) : _pstype];
             if (spriteReady(_psprite)) {
                 if (this.state === 'moving') {
                     // バーニア数連動スラスターグロー: THRUSTER_DEFS で艦種別位置を定義
@@ -5986,7 +5989,7 @@ class Ship {
         } else {
             // ── 敵スプライト描画 (読み込めていればベクターより優先) ──
             const _ep = this._kind === 'mech' ? techPose(this) : '', _eskey0 = _ep && spriteReady(SPRITES['drone_mech_e_' + _ep]) ? 'drone_mech_e_' + _ep : 'drone_mech_e';
-            const _eskey = this._kind === 'mech' ? _eskey0 : this._kind === 'scout' ? 'drone_scout_e' : this._kind === 'turret' ? 'drone_turret' : (ENEMY_SPRITE_KEY[this.type] || 'e_corvette');
+            const _eskey = this._kind === 'mech' ? _eskey0 : this._kind === 'scout' ? 'drone_scout_e' : this._kind === 'turret' ? 'drone_turret' : (swapOn() && this.type !== 'fighter' ? ({ destroyer: 'assault', corvette: 'stealth', carrier: 'carrier' }[this.type] || 'assault') : (ENEMY_SPRITE_KEY[this.type] || 'e_corvette'));
             if (this._kind === 'mech') ctx.rotate(Math.PI / 2); // Techの絵は上が前
             const _esprite = SPRITES[_eskey];
             if (spriteReady(_esprite)) {
@@ -6694,7 +6697,7 @@ function generateSector() {
 
     // 第155弾 (オーナー): マップの設定 (COM対戦の設定画面) どおりに、岩石帯・熱雲・磁気嵐・残骸帯を互いに重ならないように置き、
     //   ヒッグス雲 (濃い) は それらの外側に 面積 cloud% だけ。残りは うっすらした何もない空間。通常の試合は既定値 (MAP_DEF) に 傾向 (mapTheme) の振れを掛ける
-    const MC = Object.assign({}, MAP_DEF, (comDemo && comCfg && comCfg.map) ? comCfg.map : null), _custom = !!(comDemo && comCfg && comCfg.map);
+    const MC = Object.assign({}, MAP_DEF, (cfgMatch() && comCfg.map) ? comCfg.map : null), _custom = !!(cfgMatch() && comCfg.map);
     mapCfg = MC;
     rollMapTheme();
     const _th = _custom ? { t: 1, s: 1, d: 1, c: 1 } : mapTheme;
@@ -6792,7 +6795,7 @@ function generateSector() {
     // 第20弾: 敵も自機の同じ艦種の既定の積み方と同じ弾数 (攻撃型 実弾144斉射・ミサイル12 / 潜航型 48・6 / 空母型 48・9)
     { const _es = { destroyer: 'assault', corvette: 'stealth', carrier: 'carrier' }[boss.type] || 'assault';
       // 第22弾: COM対戦では設定画面の「敵の積み込み」を使う (無ければ同じ艦種の既定)
-      const _comLo = comDemo && comCfg && comCfg.lo && comCfg.lo.e && comCfg.lo.e[_es];
+      const _comLo = cfgMatch() && comCfg.lo && comCfg.lo.e && comCfg.lo.e[_es];
       const lo = _comLo || DEFAULT_LOADOUT[_es];
       boss._fullK = (lo.ammoK || 0) * AMMO_PER_SLOT.kinetic; boss._fullM = (lo.ammoM || 0) * AMMO_PER_SLOT.missile;
       boss.ammoK = boss._fullK; boss.ammoM = boss._fullM; boss._kMag = KINETIC_MAG;
@@ -6803,8 +6806,8 @@ function generateSector() {
     boss.lurking = true;
     enemies.push(boss);
     // 第19弾: COM対戦デモ — 敵の性格を設定どおりに (ランダムは試合ごとに艦種の範囲で振る)。自機COMの性格も試合ごとに決め直す
+    if (cfgMatch()) boss.personality = comPersonalityFor('e'); // 第161弾: プレイヤーが操作する試合でも 設定どおりの敵の性格
     if (comDemo && comCfg) {
-        boss.personality = comPersonalityFor('e');
         _com = comNewMemo(); _thinkLast = {};
         const _tl = document.getElementById('think-log'); if (_tl) _tl.textContent = '';
         const _th = document.getElementById('think-who');
@@ -6813,7 +6816,7 @@ function generateSector() {
     }
     // 第48弾: 敵の武器の種類も艦種の上限 (攻撃型3・潜航型2・空母1)。COM対戦は積み込みの設定どおり。通常の敵は性格で選ぶ (潜航型: 隠密/慎重ならビーム+ミサイル・他は実弾+ミサイル)
     { const _es2 = { destroyer: 'assault', corvette: 'stealth', carrier: 'carrier' }[boss.type] || 'assault';
-      const _cl2 = comDemo && comCfg && comCfg.lo && comCfg.lo.e && comCfg.lo.e[_es2];
+      const _cl2 = cfgMatch() && comCfg.lo && comCfg.lo.e && comCfg.lo.e[_es2];
       let _w2 = _cl2 && _cl2.w ? normalizeWset(_es2, _cl2.w) : normalizeWset(_es2, personaWset(_es2, boss.personality || {}, Math.random)); // 第145弾: 編集していなければ 性格7割・ランダム3割
       boss.wset = _w2;
       { const _s2 = _cl2 || DEFAULT_LOADOUT[_es2], [_rk, _rm] = rebalanceAmmo(_w2, _s2.ammoK || 0, _s2.ammoM || 0);
@@ -6825,7 +6828,7 @@ function generateSector() {
     boss._focus = null; setEnemyFocus(boss, comFocusPlan(boss.personality || {}, 'search', (boss.personality || {}).stealth >= 0.5)); boss._focusF = 0; // 第39弾: 敵も航行モードを持つ (自機と同じ効果)・第41弾: 場面ごとに選び直す
     boss.lureSOS = 1; boss.lureShip = 1; // 第21弾: 敵の囮 (各1個 — 実装で決めた数)
     { // 第60弾: 敵の武器の種類 (COM対戦は設定の積み込みどおり・通常は性格で選ぶ)
-      const _cl = comDemo && comCfg && comCfg.lo && comCfg.lo.e && comCfg.lo.e[ENEMY_CLASS[boss.type]];
+      const _cl = cfgMatch() && comCfg.lo && comCfg.lo.e && comCfg.lo.e[ENEMY_CLASS[boss.type]];
       boss.wvar = _cl && _cl.v ? normalizeVariants(_cl.v) : enemyPickVariants(boss);
       recomputeEnemyParts(boss);
       comThinkEvent('e', '武器の種類: ' + ALL_WEAPONS.filter(w => !boss.wset || boss.wset.includes(w)).map(w => _WPN_NAME[w] + '=' + variantInfo(w, boss.wvar[w]).name).join(' / '), 'e' + boss.uid); }
@@ -6946,7 +6949,7 @@ function updateLandmarkBanner() { /* ランドマーク距離表示廃止 */ }
 function startHumanMatch(shipType) {
     _frameCount = 0; _simSeed = (window.__rpSeed !== undefined ? window.__rpSeed : (_nativeRandom() * 4294967296)) >>> 0; _simRng = _mulberry(_simSeed);
     window._gsSnap = JSON.parse(JSON.stringify(gameState));
-    const _enBtn = document.querySelector('.enemy-select-btn.active'); window._humanSnap = { ship: shipType, enemy: (_enBtn && _enBtn.dataset.type) || 'assault', mode: gameState.mode, vw: innerWidth, vh: innerHeight };
+    const _enBtn = document.querySelector('.enemy-select-btn.active'); window._humanSnap = { ship: shipType, enemy: (_enBtn && _enBtn.dataset.type) || 'assault', mode: gameState.mode, cfg: humanCfgOn ? window._comCfgSnap : undefined, vw: innerWidth, vh: innerHeight };
     _gen++; _useCache.p = {}; _useCache.e = {};
     withSimRng(() => startGame(shipType));
 }
@@ -7008,6 +7011,8 @@ document.querySelectorAll('.mode-card').forEach(card => {
     });
 });
 
+// 第161弾: タイトルではモードだけ選び、試合の設定画面へ進む
+document.querySelectorAll('.mode-card').forEach(card => card.addEventListener('click', () => { if (typeof openMatchSetup === 'function') openMatchSetup(card.dataset.mode); }));
 // 艦種選択ボタン
 document.querySelectorAll('.ship-select-btn').forEach(btn => {
     btn.addEventListener('click', () => startHumanMatch(btn.dataset.type));
@@ -7039,7 +7044,7 @@ function comLoadout(side, ship) {
     const st = comCfg && comCfg.lo && comCfg.lo[side] && comCfg.lo[side][ship];
     const lo = Object.assign({ mat: 0 }, st || DEFAULT_LOADOUT[ship]);
     fixLoadoutWeapons(lo, ship); // 第48弾
-    if (side === 'p' && !st && comCfg && comCfg.pp) { const pl = personaLoadoutP(ship, comCfg.pp); fixLoadoutWeapons(pl, ship); return pl; } // 第112弾: 積み込みを編集していない自機COMは、敵と同じ関数で性格どおりに積む
+    if (side === 'p' && !st && comCfg && comCfg.pp && (comCfg.pCtl === 'com' || (comCfg.rndAll && comCfg.rndAll.p))) { const pl = personaLoadoutP(ship, Object.assign({}, comCfg.pp, { _side: 'p' })); /* 第161弾: 全部ランダムの時は積み込みも完全に無作為 (_side で persShare=1) */ fixLoadoutWeapons(pl, ship); return pl; } // 第112弾: 積み込みを編集していない自機COMは、敵と同じ関数で性格どおりに積む
     if (side === 'e') { // 敵が使わない物 (資材・設置物・人型など) は外す — 枠を空けて弾や消耗品に回せるように
         lo.mat = 0;
         for (const t of SHIP_DRONES[ship] || []) if (!(ENEMY_USES.includes(t) || (t === 'attack' && ship === 'carrier'))) lo[t] = 0;
@@ -7051,7 +7056,7 @@ function comLoadout(side, ship) {
 var _loPrevMemo = {};
 function _loPreview(side, ship, c) {
     const edited = !!(c.lo && c.lo[side] && c.lo[side][ship]);
-    if (edited || side === 'e') return loSummary(comLoadout(side, ship), ship, side === 'e');
+    if (edited || side === 'e' || (side === 'p' && c.pCtl !== 'com' && !(c.rndAll && c.rndAll.p))) return loSummary(comLoadout(side, ship), ship, side === 'e');
     const key = side + '|' + ship + '|' + JSON.stringify(c.pp) + '|' + (c.pPreset) + '|' + !!(c.rndAll && c.rndAll[side]);
     if (!_loPrevMemo[key]) _loPrevMemo[key] = loSummary(comLoadout(side, ship), ship, false) + ' ※目安 (試合ごとに無作為)';
     return _loPrevMemo[key];
@@ -7679,28 +7684,13 @@ document.getElementById('btn-hack').addEventListener('click', () => {
         logMessage(closest.hacked ? 'EW[コロニー]: ハック済み' : `EW[コロニー]: コロニーの${COLONY_HACK_R}u以内に${Math.round(COLONY_HACK_TIME / 60)}秒留まるとハックできる (EMが漏れる)`, 'system-msg');
         return;
     } else if (closest.type === 'derelict') {
-        // ── 難破船 ──
-        if (!closest.hacked) {
-            closest.hacked = true;
-            createClickEffect(closest.x, closest.y, '#00aaff');
-            // リソース回収 + ランダムLvアップ
-            const reward = 30 + gameState.sector * 15;
-            gameState.credits += reward;
-            updateTopUI();
-            // 第39弾: 難破船のハックでの強化 (武装/センサー/装甲のLvアップ) は撤去 — 自機だけの強化だった (敵はできない)。部品のドラフトは回収 (近くに3秒) で
-            logMessage(`EW[難破船]: ハッキング完了 — +${reward} SCR。`, 'system-msg');
-        }
-        // 熱源移動偽装発動 (ハック済みでも再発動可) — 最寄りウェイポイント方向へ
-        const decoyTarget = player.targetX && player.targetY
-            ? { x: player.targetX, y: player.targetY }
-            : { x: closest.x + (Math.random() - 0.5) * 8000, y: closest.y + (Math.random() - 0.5) * 8000 };
-        closest.decoyActive = true;
-        closest.decoyTimer = 1200; // 20秒
-        closest.decoyType = 'derelict';
-        closest.decoyMoveX = closest.x;
-        closest.decoyMoveY = closest.y;
-        closest.decoyWaypoint = decoyTarget;
-        logMessage(`EW[難破船]: 熱源偽装目標を発進。ウェイポイント方向へ移動する囮を展開 (20秒)。`, 'system-msg');
+        // 第161弾: 旧「報酬+熱源偽装」は廃止 — 第152弾の偽装艦ハックへ案内する (ボタンは状況の説明と、条件が揃っていればその場で開始)
+        const st = closest, dd = Math.hypot(player.x - st.x, player.y - st.y), H = hackPower('player');
+        if (st.salvaged) uiToast('難破船は使用済み', true);
+        else if (derelictSosOn(st)) uiToast('この難破船はSOS発信中 — ' + DERELICT_SALVAGE_R + 'u以内に3秒留まると物資を回収できる。偽装艦にするのはSOSが止まっている間 (あと約' + Math.ceil((DERELICT_SOS_ON - ((_frameCount + derelictPhase(st)) % DERELICT_SOS_PERIOD)) / 60) + '秒)', true);
+        else if (H < DERELICT_HIJACK_H) uiToast('難破船のハック: 演算力 ' + (Math.round(H * 10) / 10) + ' / ' + DERELICT_HIJACK_H + ' — 足りない。コロニーの占有や解析重視で上がる', true);
+        else if (dd > DERELICT_HIJACK_R) uiToast('難破船のハック: ' + DERELICT_HIJACK_R + 'u以内へ近づいて6秒留まる (今 ' + Math.round(dd) + 'u・EMが漏れる)', true);
+        else { st.discovered = true; uiToast('難破船をハック中 — 6秒そのまま留まる', false); }
     }
     saveGame();
 });
@@ -8394,6 +8384,7 @@ function updateNodesAndColonies() {
         } else if (n.capP > 0) n.capP = Math.max(0, n.capP - 0.004);
     }
     for (const st of structures) {
+        if (st.type === 'derelict' && !st.salvaged && st.discovered && !derelictSosOn(st) && !comDemo && Math.hypot(player.x - st.x, player.y - st.y) < DERELICT_HIJACK_R && hackPower('player') < DERELICT_HIJACK_H && _frameCount - (st._hjHintF || -9999) > 1800) { st._hjHintF = _frameCount; uiToast('難破船 (SOS停止中) — 偽装艦にするには演算力 ' + DERELICT_HIJACK_H + ' が要る (今 ' + (Math.round(hackPower('player') * 10) / 10) + ')。コロニーの占有・解析重視で上がる', true); }
         if (st.type === 'derelict' && !st.salvaged && st.discovered && !derelictSosOn(st) && Math.hypot(player.x - st.x, player.y - st.y) < DERELICT_HIJACK_R && hackPower('player') >= DERELICT_HIJACK_H && (!comDemo || skillUse('p', 'dc_hijack')) && !document.getElementById('hijack-pop') && pendingLure !== 'derelictfly') { // 第152弾: SOS が止まっている間は ハックして偽装艦に
             st._hjP = (st._hjP || 0) + gameSpeedFactor / DERELICT_HIJACK_TIME;
             _capturing = { kind: 'derelict', obj: st, p: st._hjP, hijack: true };
@@ -8713,6 +8704,8 @@ const _SRC_JP = { colony: 'コロニー', node: 'ノード', derelict: '難破�
 const LOOT_STOCK = { // 積み荷の種類 → 敵側の持ち物の名前 (自機は cargo.stock[種類])。敵が持てる物 = 候補になる物 (自機も同じ候補から)
     attack: 'droneStock', scout: 'scoutStock', build: 'turretStock', flash: 'itemFlash', noise: 'itemNoise', smoke: 'itemSmoke', fsos: 'lureSOS', lure: 'lureShip',
     fakecache: 'itemFake', fogspray: 'itemSpray', fogblow: 'itemBlow', linkcut: 'itemLinkcut', repair: 'itemRepair' };
+// 枠が足りない時に手放してよい消耗品 (リペアキット・ドローン・設置物は手放さない)
+const LOOT_SHED = ['flash', 'noise', 'smoke', 'fsos', 'lure', 'fakecache', 'fogspray', 'fogblow', 'linkcut'];
 function lootActor(side, e) {
     if (side === 'p') {
         return { side, cls: gameState.shipType, wset: _wset, P: (comDemo && _com && _com.pp) || null,
@@ -8720,7 +8713,10 @@ function lootActor(side, e) {
             used: () => cargoStockSlots() + Math.ceil((cargo.mat || 0) / MAT_PER_SLOT), cap: () => playerHoldCap(),
             count: k => cargo.stock[k] || 0, give(k) { cargo.stock[k] = (cargo.stock[k] || 0) + 1; },
             addAmmo(w) { if (w === 'kinetic') cargo.ammoK += AMMO_PER_SLOT.kinetic; else cargo.ammoM += AMMO_PER_SLOT.missile; },
-            addMat: n => addMaterials(n), dropMat: n => { cargo.mat = Math.max(0, (cargo.mat || 0) - n); }, mat: () => cargo.mat || 0 };
+            addMat: n => addMaterials(n), dropMat: n => { cargo.mat = Math.max(0, (cargo.mat || 0) - n); }, mat: () => cargo.mat || 0,
+            shedCap: () => { let n = 0; if (_wset.includes('kinetic')) n += Math.max(0, Math.ceil((cargo.ammoK || 0) / AMMO_PER_SLOT.kinetic) - 1); if (_wset.includes('missile')) n += Math.max(0, Math.ceil((cargo.ammoM || 0) / AMMO_PER_SLOT.missile) - 1); for (const t of LOOT_SHED) n += cargo.stock[t] || 0; return n; },
+            shed: () => { const k = Math.ceil((cargo.ammoK || 0) / AMMO_PER_SLOT.kinetic), m = Math.ceil((cargo.ammoM || 0) / AMMO_PER_SLOT.missile); if (k > 1 && k >= m) { cargo.ammoK = Math.max(0, cargo.ammoK - AMMO_PER_SLOT.kinetic); return true; } if (m > 1) { cargo.ammoM = Math.max(0, cargo.ammoM - AMMO_PER_SLOT.missile); return true; }
+                let bk = null, bn = 0; for (const t of LOOT_SHED) if ((cargo.stock[t] || 0) > bn) { bn = cargo.stock[t]; bk = t; } if (bk) { cargo.stock[bk]--; return true; } return false; } };
     }
     const cls = ENEMY_CLASS[e.type];
     return { side, cls, wset: e.wset || ['kinetic', 'missile', 'beam'], P: _enemyPersonality(e),
@@ -8730,16 +8726,20 @@ function lootActor(side, e) {
         cap: () => HOLD_CAP[cls] || 10, count: k => e[LOOT_STOCK[k]] || 0,
         give(k) { e[LOOT_STOCK[k]] = (e[LOOT_STOCK[k]] || 0) + 1; },
         addAmmo(w) { if (w === 'kinetic') e.ammoK = (e.ammoK || 0) + AMMO_PER_SLOT.kinetic; else e.ammoM = (e.ammoM || 0) + AMMO_PER_SLOT.missile; },
-        addMat: n => { const b = enemyMat; enemyAddMat(n); return enemyMat - b; }, dropMat: n => { enemyMat = Math.max(0, enemyMat - n); }, mat: () => enemyMat };
+        addMat: n => { const b = enemyMat; enemyAddMat(n); return enemyMat - b; }, dropMat: n => { enemyMat = Math.max(0, enemyMat - n); }, mat: () => enemyMat,
+        shedCap: () => { let n = Math.max(0, Math.ceil((e.ammoK || 0) / AMMO_PER_SLOT.kinetic) - 1) + Math.max(0, Math.ceil((e.ammoM || 0) / AMMO_PER_SLOT.missile) - 1); for (const t of LOOT_SHED) n += e[LOOT_STOCK[t]] || 0; return n; },
+        shed: () => { const k = Math.ceil((e.ammoK || 0) / AMMO_PER_SLOT.kinetic), m = Math.ceil((e.ammoM || 0) / AMMO_PER_SLOT.missile); if (k > 1 && k >= m) { e.ammoK = Math.max(0, e.ammoK - AMMO_PER_SLOT.kinetic); return true; } if (m > 1) { e.ammoM = Math.max(0, e.ammoM - AMMO_PER_SLOT.missile); return true; }
+            let bk = null, bn = 0; for (const t of LOOT_SHED) { const c = e[LOOT_STOCK[t]] || 0; if (c > bn) { bn = c; bk = t; } } if (bk) { e[LOOT_STOCK[bk]]--; return true; } return false; } };
 }
 function lootFreeSlots(A) { return A.cap() - A.used(); }
 function lootPick4(A) {
-    const pool = [], free = lootFreeSlots(A) + Math.ceil(A.mat() / MAT_PER_SLOT); // 資材の枠は譲れる
-    if (free >= 1 && A.wset.includes('kinetic')) pool.push({ k: 'ammoK', label: '実弾 ' + AMMO_PER_SLOT.kinetic + '斉射 (1枠)', w: 1 });
-    if (free >= 1 && A.wset.includes('missile')) pool.push({ k: 'ammoM', label: 'ミサイル ' + AMMO_PER_SLOT.missile + '発 (1枠)', w: 1 });
+    const pool = [], base = lootFreeSlots(A), free = base + Math.ceil(A.mat() / MAT_PER_SLOT) + (A.shedCap ? A.shedCap() : 0); // 資材の枠・弾の余り (各1枠は残す) は譲れる (旧: 資材が0で枠が満杯だと 資材しか出なかった)
+    const need = w => w > base ? ' ※枠が足りない分は資材・弾・消耗品を手放す' : '';
+    if (free >= 1 && A.wset.includes('kinetic')) pool.push({ k: 'ammoK', label: '実弾 ' + AMMO_PER_SLOT.kinetic + '斉射 (1枠)' + need(1), w: 1 });
+    if (free >= 1 && A.wset.includes('missile')) pool.push({ k: 'ammoM', label: 'ミサイル ' + AMMO_PER_SLOT.missile + '発 (1枠)' + need(1), w: 1 });
     for (const t of SHIP_DRONES[A.cls] || []) {
         const sp = DRONE_SPEC[t]; if (!sp || !LOOT_STOCK[t] || free < (sp.w || 1)) continue;
-        pool.push({ k: t, label: sp.label + ' (' + (sp.w || 1) + '枠)', w: sp.w || 1 });
+        pool.push({ k: t, label: sp.label + ' (' + (sp.w || 1) + '枠)' + need(sp.w || 1), w: sp.w || 1 });
     }
     const out = [];
     while (out.length < 3 && pool.length) out.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
@@ -8765,7 +8765,7 @@ function lootChoose(A, c) { // 選び方は双方同じ式 (傷→リペア / �
 }
 function lootTake(A, o) { // 受け取り (双方同じ式)。返り値=ログ用の文
     let msg = '';
-    if (o.k !== 'mat') { const over = (o.w || 1) - lootFreeSlots(A); if (over > 0) { A.dropMat(over * MAT_PER_SLOT); msg = '(資材を譲って) '; } }
+    if (o.k !== 'mat') { let over = (o.w || 1) - lootFreeSlots(A); if (over > 0) { const ms = Math.min(over, Math.ceil(A.mat() / MAT_PER_SLOT)); if (ms > 0) { A.dropMat(ms * MAT_PER_SLOT); over -= ms; msg = '(資材を譲って) '; } let sh = 0; while (over > 0 && A.shed && A.shed()) { over--; sh++; } if (sh) msg += '(' + sh + '枠分 弾・消耗品を手放して) '; } }
     if (o.k === 'mat') { const g = A.addMat(1); msg += g ? '資材+1個' : '資材 (積む場所がなかった)'; }
     else if (o.k === 'ammoK') { A.addAmmo('kinetic'); msg += '実弾+' + AMMO_PER_SLOT.kinetic; }
     else if (o.k === 'ammoM') { A.addAmmo('missile'); msg += 'ミサイル+' + AMMO_PER_SLOT.missile; }
@@ -13566,7 +13566,7 @@ function enemyUseFlash(e) {
 // 第145弾 (オーナー): COM対戦の積荷と武器は「性格7割・ランダム3割」— 毎回同じにならないように。自機COMも敵も同じ関数
 const PERSONA_RANDOM_SHARE = 0.3;
 // 第156弾: 「全部ランダム」の側は 積荷・武器を性格に頼らず 100%無作為に (COM対戦の設定画面)
-function persShare(P) { return (comDemo && comCfg && comCfg.rndAll && P && comCfg.rndAll[P._side]) ? 1 : PERSONA_RANDOM_SHARE; }
+function persShare(P) { return (cfgMatch() && comCfg.rndAll && P && comCfg.rndAll[P._side]) ? 1 : PERSONA_RANDOM_SHARE; }
 function blendPers(P, rnd) { // 各軸を 性格×0.7 + 乱数×0.3 に (積荷・武器の選び方にだけ使う。立ち回りの性格そのものは変えない)
     const SH = persShare(P), f = v => Math.max(0, Math.min(1, v * (1 - SH) + rnd() * SH));
     return { aggression: f(P.aggression ?? 0.5), stealth: f(P.stealth ?? 0.4), greed: f(P.greed ?? 0.4), caution: f(P.caution ?? 0.4) };
@@ -15331,7 +15331,7 @@ function drawNodesAndColonies(ctx, vpX, vpY, vpW, vpH) {
             ctx.globalAlpha = 0.85;
             ctx.fillStyle = mine ? '#9ffff0' : theirs ? '#ff9a9a' : '#80e8ff';
             ctx.font = 'bold ' + fontPx + 'px Orbitron, monospace';
-            ctx.fillText(mine ? '聴音局' : theirs ? '敵の聴音局' : 'ノード', n.x, n.y - rr - 10 * zc);
+            ctx.fillText(theirs ? '敵ノード' : 'ノード', n.x, n.y - rr - 10 * zc); // 第161弾: 制圧しても名札は「ノード」のまま
         }
         // 制圧の進み具合
         if (!mine && n.capP > 0) _drawHoldProgress(ctx, n.x, n.y, Math.max(76, 28 * zc), n.capP, '#ffe08a', '制圧', zc, fontPx);
@@ -16119,13 +16119,13 @@ function skillList() {
 }
 // そのCOMが そのスキルを使ってよいか。COM対戦以外 (人が操作する試合の敵) は全部ON
 function skillOn(side, id) {
-    if (!comDemo || !comCfg || !comCfg.sk) return true;
+    if (!cfgMatch() || !comCfg.sk) return true;
     const m = comCfg.sk[side]; return !(m && m[id] === false);
 }
 function comDefaultCfg() {
     return { ship: 'assault', enemy: 'assault', mode: 'br', pPreset: 'standard', ePreset: 'standard',
              pp: Object.assign({}, COM_PRESETS.standard.p), ep: Object.assign({}, COM_PRESETS.standard.p), higgsView: true, think: true,
-             lo: { p: {}, e: {} }, sk: { p: {}, e: {} }, map: Object.assign({}, MAP_DEF), rndAll: { p: false, e: false } }; // 第155弾: map=マップの設定 // 第142弾: sk=スキルのオン・オフ // 第22弾: COM対戦の積み込み (自機/敵・艦種ごと。無ければ既定)
+             lo: { p: {}, e: {} }, sk: { p: {}, e: {} }, map: Object.assign({}, MAP_DEF), rndAll: { p: false, e: false }, pCtl: 'human', swap: false }; // 第161弾: pCtl=自機の操作 (human/com)・swap=機体の見た目入れ替え // 第155弾: map=マップの設定 // 第142弾: sk=スキルのオン・オフ // 第22弾: COM対戦の積み込み (自機/敵・艦種ごと。無ければ既定)
 }
 function loadComCfg() {
     try { const c = JSON.parse(localStorage.getItem('darkEchoComDemo') || 'null'); if (c && c.pp && c.ep) { const r = Object.assign(comDefaultCfg(), c); for (const pk of ['pp', 'ep']) r[pk] = Object.assign({}, PERS_DEF, r[pk]); /* 第147弾: 新しい軸が無い古い保存は既定で埋める */ if (!r.lo || !r.lo.p || !r.lo.e) r.lo = { p: {}, e: {} }; if (!r.sk || !r.sk.p || !r.sk.e) r.sk = { p: {}, e: {} }; r.map = Object.assign({}, MAP_DEF, r.map); r.rndAll = Object.assign({ p: false, e: false }, r.rndAll); return r; } } catch (e) {}
@@ -18065,6 +18065,7 @@ function prpStartHuman(job) {
     document.querySelectorAll('.enemy-select-btn').forEach(b => b.classList.toggle('active', b.dataset.type === H.enemy));
     gameState.mode = H.mode || gameState.mode;
     window.__rpSeed = job.seed; comDemo = false;
+    if (H.cfg) { comCfg = JSON.parse(JSON.stringify(H.cfg)); humanCfgOn = true; window._comCfgSnap = JSON.parse(JSON.stringify(H.cfg)); } // 第161弾: 設定つきの試合の再生
     startHumanMatch(H.ship || gameState.shipType);
     playReplay.live = true;
     toggleThinkLog(true);
@@ -19260,10 +19261,16 @@ function _renderComCfg() {
         const box = document.querySelector('.com-side[data-side="' + side + '"]');
         if (!box) continue;
         const ship = side === 'p' ? c.ship : c.enemy, pre = side === 'p' ? c.pPreset : c.ePreset, pp = side === 'p' ? c.pp : c.ep;
-        const ra = !!(c.rndAll && c.rndAll[side]);
-        const h = ['<div class="com-side-title ' + (side === 'p' ? 'cs-p' : 'cs-e') + '">' + (side === 'p' ? '自機COM' : '敵COM') + ' <button class="com-chip' + (ra ? ' on' : '') + '" data-act="rndall" title="ON: 試合ごとに 艦種・性格・積み込み・武器をすべて無作為に決める">🎲 全部ランダム ' + (ra ? 'ON' : 'OFF') + '</button></div>' + (ra ? '<div class="com-note">試合ごとに 艦種・性格(8軸)・積み込み・武器の種類をすべて無作為に決める (下の設定は使わない)</div>' : '') + '<div class="com-row">'];
+        const ra = !!(c.rndAll && c.rndAll[side]), human = side === 'p' && c.pCtl !== 'com';
+        const h = ['<div class="com-side-title ' + (side === 'p' ? 'cs-p' : 'cs-e') + '">' + (side === 'p' ? (human ? '自機 (あなた)' : '自機COM') : '敵COM') + ' <button class="com-chip' + (ra ? ' on' : '') + '" data-act="rndall" title="ON: 試合ごとに 艦種・性格・積み込み・武器をすべて無作為に決める">🎲 全部ランダム ' + (ra ? 'ON' : 'OFF') + '</button></div>' + (side === 'p' ? '<div class="com-row"><span class="com-opt-lbl">操作</span><button class="com-chip' + (human ? ' on' : '') + '" data-act="ctl" data-v="human">プレイヤー</button><button class="com-chip' + (!human ? ' on' : '') + '" data-act="ctl" data-v="com">COM (観戦)</button></div>' : '') + (ra ? '<div class="com-note">試合ごとに 艦種' + (human ? '・積み込み・武器の種類' : '・性格(8軸)・積み込み・武器の種類') + 'を無作為に決める (下の設定は使わない)</div>' : '') + '<div class="com-row">'];
         for (const k of ['assault', 'stealth', 'carrier']) h.push('<button class="com-chip' + (ship === k ? ' on' : '') + '" data-act="ship" data-v="' + k + '">' + SHIP_JP[k] + '</button>');
-        h.push('</div><div class="com-row">');
+        h.push('</div>');
+        if (human) { // あなたが操作する側: 性格・スキルは無い (艦種と積み込みだけ)
+            h.push('<div class="com-note">あなたが操作する。性格・スキルは敵COMだけの設定。</div>');
+            h.push('<div class="com-row com-lo"><span class="com-lo-sum">積み込み: ' + _loPreview(side, ship, c) + '</span><button class="com-chip" data-act="loadout">編集</button></div>');
+            box.innerHTML = h.join(''); continue;
+        }
+        h.push('<div class="com-row">');
         for (const k in COM_PRESETS) h.push('<button class="com-chip' + (pre === k ? ' on' : '') + '" data-act="preset" data-v="' + k + '">' + COM_PRESETS[k].label + '</button>');
         h.push('</div>');
         const rnd = pre === 'random';
@@ -19292,9 +19299,14 @@ function _renderComCfg() {
     if (o) o.innerHTML = '<span class="com-opt-lbl">モード</span>'
         + '<button class="com-chip' + (c.mode === 'br' ? ' on' : '') + '" data-act="mode" data-v="br">バトルロワイアル</button>'
         + '<button class="com-chip' + (c.mode === 'sd' ? ' on' : '') + '" data-act="mode" data-v="sd">サーチ&amp;デストロイ</button>'
-        + '<span class="com-opt-lbl">ヒッグス表示</span><button class="com-chip' + (c.higgsView ? ' on' : '') + '" data-act="higgs">' + (c.higgsView ? 'ON' : 'OFF (全艦が見える)') + '</button>'
-        + '<span class="com-opt-lbl">思考ログ</span><button class="com-chip' + (c.think ? ' on' : '') + '" data-act="think">' + (c.think ? 'ON' : 'OFF') + '</button>'
-        + '<span class="com-opt-lbl com-sector">セクター' + gameState.sector + '・今の改修のまま</span>';
+        + (c.pCtl === 'com' ? '<span class="com-opt-lbl">ヒッグス表示</span><button class="com-chip' + (c.higgsView ? ' on' : '') + '" data-act="higgs">' + (c.higgsView ? 'ON' : 'OFF (全艦が見える)') + '</button>'
+        + '<span class="com-opt-lbl">思考ログ</span><button class="com-chip' + (c.think ? ' on' : '') + '" data-act="think">' + (c.think ? 'ON' : 'OFF') + '</button>' : '')
+        + '<span class="com-opt-lbl">機体の見た目</span><button class="com-chip' + (c.swap ? ' on' : '') + '" data-act="swap" title="ON: 自機が敵側のデザイン (黒×赤)・敵が味方側のデザイン (白×水色) になる。見た目だけ">' + (c.swap ? '入れ替え ON' : '入れ替え OFF') + '</button>';
+    { const hm = c.pCtl !== 'com', ml = c.mode === 'sd' ? 'サーチ&デストロイ' : 'バトルロワイアル';
+      const t1 = document.getElementById('com-title'), t2 = document.getElementById('com-lead'), bs = document.getElementById('com-start');
+      if (t1) t1.textContent = '試合の設定 — ' + ml;
+      if (t2) t2.innerHTML = hm ? '自機の艦種・積み込みと、<b>敵COMの艦種・性格・積み込み・スキル</b>、マップを決めて出撃する。操作は右の <b>COM (観戦)</b> に切り替えると、自機もCOMが動かす (戦歴には残らない)。' : '自機も敵もCOMが操作する観戦。どちらも<b>相手は見えない前提</b>で、方位と記録だけから判断する (戦歴・クレジットには残らない)。';
+      if (bs) bs.textContent = hm ? '出撃 ▶' : 'COM対戦を開始 ▶'; }
     _renderMapCfg();
 }
 // 第155弾 (オーナー): マップの設定 — 面積 (ヒッグス雲・岩石帯・何もない空間) は %、地形・信号・拠点は個数、輸送船は頻度
@@ -19330,7 +19342,42 @@ function _renderMapCfg() {
     }
     box.innerHTML = h.join('');
 }
+// 第156弾・第161弾: 「全部ランダム」「毎試合ランダム」は試合を始める時に具体的な値へ決める (決めた値は設定・記録に残る → リプレイで同じ試合になる)
+function _applyMatchRandoms() {
+    for (const sd of ['p', 'e']) if (comCfg.rndAll && comCfg.rndAll[sd]) {
+        const ships = ['assault', 'stealth', 'carrier'], pick = ships[Math.floor(_nativeRandom() * 3)];
+        if (sd === 'p') { comCfg.ship = pick; comCfg.pPreset = 'random'; } else { comCfg.enemy = pick; comCfg.ePreset = 'random'; }
+        if (comCfg.lo) comCfg.lo[sd] = {}; // 積み込みは 性格に頼らない無作為 (persShare=1)
+    }
+    if (comCfg.map && comCfg.map.rnd) comCfg.map = Object.assign(rollMapCfg(), { rnd: true });
+}
+// 試合の設定画面 (タイトルでモードを選ぶと開く)。自機をプレイヤーが操作するか COM が操作するかを選べる
+function openMatchSetup(mode) {
+    comCfg = loadComCfg();
+    if (mode) comCfg.mode = mode;
+    comCfg.pCtl = comCfg.pCtl === 'com' ? 'com' : 'human';
+    _renderComCfg();
+    document.getElementById('com-overlay').classList.remove('hidden');
+    sfxUI('ui_panel_open');
+}
+function startMatchFromSetup() { if (comCfg.pCtl === 'com') startComDemo(); else startHumanFromCfg(); }
+// プレイヤーが操作する試合を 設定どおりに始める (敵の艦種・性格・積み込み・スキル・マップ・自機の艦種と積み込み・機体の見た目)
+function startHumanFromCfg() {
+    saveComCfg();
+    document.getElementById('com-overlay').classList.add('hidden');
+    comDemo = false; humanCfgOn = true;
+    _applyMatchRandoms();
+    document.querySelectorAll('.enemy-select-btn').forEach(b => b.classList.toggle('active', b.dataset.type === comCfg.enemy));
+    document.querySelectorAll('.mode-card').forEach(m => m.classList.toggle('active', m.dataset.mode === comCfg.mode));
+    gameState.mode = comCfg.mode;
+    const sh = comCfg.ship;
+    if (comCfg.lo && comCfg.lo.p && comCfg.lo.p[sh]) gameState.loadout = Object.assign({}, gameState.loadout, { [sh]: Object.assign({}, comCfg.lo.p[sh]) });
+    else if (comCfg.rndAll && comCfg.rndAll.p) gameState.loadout = Object.assign({}, gameState.loadout, { [sh]: comLoadout('p', sh) }); // 全部ランダム: 積み込みも無作為
+    window._comCfgSnap = JSON.parse(JSON.stringify(comCfg));
+    startHumanMatch(sh);
+}
 function startComDemo() {
+    humanCfgOn = false;
     saveComCfg();
     document.getElementById('com-overlay').classList.add('hidden');
     comDemo = true;
@@ -19338,17 +19385,11 @@ function startComDemo() {
     document.querySelectorAll('.enemy-select-btn').forEach(b => b.classList.toggle('active', b.dataset.type === comCfg.enemy));
     document.querySelectorAll('.mode-card').forEach(m => m.classList.toggle('active', m.dataset.mode === comCfg.mode));
     gameState.mode = comCfg.mode;
+    _applyMatchRandoms(); // 第161弾: 「全部ランダム」は積み込みより先に決める (旧: 艦種が積み込みの後に変わり、自機側の積み込みがランダムにならなかった)
     // 第22弾: 自機COMの積み込み (デモは保存しないので、この試合の間だけ使う)
     if (comCfg.lo && comCfg.lo.p && comCfg.lo.p[comCfg.ship]) gameState.loadout = Object.assign({}, gameState.loadout, { [comCfg.ship]: Object.assign({}, comCfg.lo.p[comCfg.ship]) });
     else { const _lp = comLoadout('p', comCfg.ship); gameState.loadout = Object.assign({}, gameState.loadout, { [comCfg.ship]: _lp }); } // 偽コンテナ: 隠密/貪欲な自機COMは既定の積み込みに1個足す
     toggleThinkLog(comCfg.think);
-    // 第156弾: 「全部ランダム」「毎試合ランダム」は試合を始める時に具体的な値へ決める (決めた値は設定・記録に残る → リプレイで同じ試合になる)
-    for (const sd of ['p', 'e']) if (comCfg.rndAll && comCfg.rndAll[sd]) {
-        const ships = ['assault', 'stealth', 'carrier'], pick = ships[Math.floor(_nativeRandom() * 3)];
-        if (sd === 'p') { comCfg.ship = pick; comCfg.pPreset = 'random'; } else { comCfg.enemy = pick; comCfg.ePreset = 'random'; }
-        if (comCfg.lo) comCfg.lo[sd] = {}; // 積み込みは 性格に頼らない無作為 (persShare=1)
-    }
-    if (comCfg.map && comCfg.map.rnd) comCfg.map = Object.assign(rollMapCfg(), { rnd: true });
     window._comCfgSnap = JSON.parse(JSON.stringify(comCfg)); window._gsSnap = JSON.parse(JSON.stringify(gameState)); // プレイ画面のリプレイ: 同じ設定で同じ試合を作り直す
     _frameCount = 0; _simSeed = (window.__rpSeed !== undefined ? window.__rpSeed : (_nativeRandom() * 4294967296)) >>> 0; _simRng = _mulberry(_simSeed); // 試合の種 (記録に残す → 同じ試合を再生できる)
     _gen++; _useCache.p = {}; _useCache.e = {};
@@ -19363,7 +19404,7 @@ function exitComDemo() { location.reload(); }
     if (!ov) return;
     document.getElementById('btn-com-demo')?.addEventListener('click', openComDemo);
     document.getElementById('com-cancel').addEventListener('click', () => { saveComCfg(); ov.classList.add('hidden'); });
-    document.getElementById('com-start').addEventListener('click', startComDemo);
+    document.getElementById('com-start').addEventListener('click', startMatchFromSetup);
     ov.addEventListener('click', (ev) => {
         const b = ev.target.closest('button[data-act]');
         if (!b || !comCfg) return;
@@ -19375,6 +19416,8 @@ function exitComDemo() { location.reload(); }
             if (COM_PRESETS[v].p) Object.assign(side === 'p' ? comCfg.pp : comCfg.ep, COM_PRESETS[v].p);
         }
         else if (act === 'rndall') comCfg.rndAll[side] = !comCfg.rndAll[side];
+        else if (act === 'ctl') comCfg.pCtl = v === 'com' ? 'com' : 'human';
+        else if (act === 'swap') comCfg.swap = !comCfg.swap;
         else if (act === 'skopen') _comSkOpen = !_comSkOpen;
         else if (act === 'skill' || act === 'skall' || act === 'skgrp') {
             const m = (comCfg.sk[side] = comCfg.sk[side] || {}), L = skillList();

@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261115b">
+    <link rel="stylesheet" href="style.css?v=20261117a">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -539,21 +539,22 @@
                 <!-- タイトルヒーロー: キーアート + ロゴ -->
                 <div class="lobby-hero">
                     <div class="lobby-hero-fade"></div>
-                    <button id="btn-ambient" onclick="toggleAmbient()">♪ SOUND ON</button>
-                    <button id="btn-qr" type="button" style="position:absolute;left:12px;top:44px;z-index:3;font-size:11px;color:#8fe;background:rgba(0,20,20,.6);border:1px solid #2a6;border-radius:4px;padding:4px 8px;cursor:pointer;pointer-events:auto">QRコード</button>
-                    <label id="sfx-vol-wrap" style="position:absolute;right:12px;top:44px;font-size:11px;color:#8fe;z-index:3">SE <input id="sfx-vol" type="range" min="0" max="100" step="5" style="width:90px;vertical-align:middle"> <span id="sfx-vol-l"></span></label>
-                    <label id="bgm-vol-wrap" style="position:absolute;right:12px;top:66px;font-size:11px;color:#8fe;z-index:3">BGM <input id="bgm-vol" type="range" min="0" max="100" step="5" style="width:90px;vertical-align:middle"> <span id="bgm-vol-l"></span></label>
                     <div class="lobby-hero-inner">
                         <div class="lobby-sonar-ring"></div>
-                        <div class="lobby-logo-sub">HIGGS FOG &nbsp;//&nbsp; SILENT HUNT &nbsp;//&nbsp; DEEP SPACE</div>
                         <h1 class="lobby-logo">DARK <span>ECHO</span></h1>
+                        <div class="lobby-sound">
+                            <button id="btn-ambient" type="button" onclick="toggleAmbient()">♪ SOUND ON</button>
+                            <button id="btn-qr" type="button">QRコード</button>
+                            <label id="sfx-vol-wrap">SE <input id="sfx-vol" type="range" min="0" max="100" step="5"> <span id="sfx-vol-l"></span></label>
+                            <label id="bgm-vol-wrap">BGM <input id="bgm-vol" type="range" min="0" max="100" step="5"> <span id="bgm-vol-l"></span></label>
+                        </div>
                     </div>
                 </div>
                 <div class="lobby-container">
-                    <div class="lobby-title lobby-title-compact">SORTIE SETUP <span class="lobby-title-jp">出撃準備</span></div>
+                    <div class="lobby-title lobby-title-compact">GAME MODE <span class="lobby-title-jp">ゲームモード</span></div>
 
                     <!-- 戦歴 (第5弾: 出撃を跨いで積み重なる記録) -->
-                    <div id="career-panel">
+                    <div id="career-panel" style="display:none">
                         <div class="career-item"><span class="career-num" id="cr-sorties">0</span><span class="career-lbl">出撃</span></div>
                         <div class="career-item"><span class="career-num" id="cr-kills">0</span><span class="career-lbl">撃破</span></div>
                         <div class="career-item"><span class="career-num" id="cr-ambushes">0</span><span class="career-lbl">奇襲成功</span></div>
@@ -562,23 +563,23 @@
 
                     <!-- ゲームモード選択 -->
                     <div class="mode-select">
-                        <div class="mode-label">ゲームモード</div>
+                        <div class="mode-label">タップして試合の設定へ</div>
                         <div class="mode-cards">
                             <div class="mode-card active" id="mode-card-br" data-mode="br">
                                 <img src="assets/icon_atk.png" alt="" class="mode-icon-img">
                                 <div class="mode-name">バトルロワイアル</div>
-                                <div class="mode-desc">相手を先に殲滅した方の勝ち</div>
+                                <div class="mode-desc">相手を先に殲滅した方の勝ち</div><div class="mode-go">▶</div>
                             </div>
                             <div class="mode-card" id="mode-card-sd" data-mode="sd">
                                 <img src="assets/icon_ew.png" alt="" class="mode-icon-img">
                                 <div class="mode-name">サーチ&amp;デストロイ</div>
-                                <div class="mode-desc">全コロニーをハック、または相手を殲滅</div>
+                                <div class="mode-desc">全コロニーをハック、または相手を殲滅</div><div class="mode-go">▶</div>
                             </div>
                         </div>
                     </div>
 
                     <!-- 敵艦種選択 -->
-                    <div class="enemy-select" style="margin-bottom:18px;">
+                    <div class="enemy-select" style="margin-bottom:18px;display:none">
                         <div class="mode-label" style="margin-bottom:8px;">敵艦種</div>
                         <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
                             <button class="btn btn-small enemy-select-btn active" data-type="assault" style="border-color:#00ffaa;"><img src="assets/enemy_destroyer.png" alt="" class="enemy-thumb">攻撃型<br><span class="enemy-sub">高耐久・重装甲</span></button>
@@ -586,7 +587,7 @@
                             <button class="btn btn-small enemy-select-btn" data-type="carrier"><img src="assets/enemy_carrier.png" alt="" class="enemy-thumb">空母型<br><span class="enemy-sub">大型・ドローン</span></button>
                         </div>
                     </div>
-                    <div class="ship-cards">
+                    <div class="ship-cards" style="display:none">
                         <div class="ship-card" id="card-assault">
                             <img class="ship-card-img" src="assets/ship_assault.png" alt="攻撃型">
                             <div class="ship-name">攻撃型</div>
@@ -635,7 +636,7 @@
                     </div>
                     <!-- 第19弾: COM対戦デモ (自機もCOMが操作する観戦・調整用) -->
                     <div class="com-entry">
-                        <button class="btn btn-small" id="btn-com-demo">COM対戦デモ ▶ <span>自機もCOMが操作・性格を選んで観戦</span></button>
+                        <button class="btn btn-small" id="btn-com-demo" style="display:none">COM対戦デモ ▶ <span>自機もCOMが操作・性格を選んで観戦</span></button>
                         <button class="btn btn-small" id="btn-replay-lobby">リプレイ ▶ <span>試合の記録を敵の視点でも見直す</span></button>
                     </div>
                 </div>
@@ -688,8 +689,8 @@
             <!-- 第19弾: COM対戦デモの設定 — 双方の艦種・性格・表示 -->
             <div id="com-overlay" class="hidden">
                 <div class="brief-box com-box">
-                    <div class="brief-title">COM対戦デモ <span>COM vs COM</span></div>
-                    <div class="brief-lead">自機も敵もCOMが操作する。どちらも<b>相手は見えない前提</b>で、方位と記録だけから判断する。性格を変えて挙動を見比べるための観戦モード (戦歴・クレジットには残らない)。</div>
+                    <div class="brief-title"><span id="com-title">試合の設定</span> <span id="com-title-sub">MATCH SETUP</span></div>
+                    <div class="brief-lead" id="com-lead"></div>
                     <div class="com-cols">
                         <div class="com-side" data-side="p"></div>
                         <div class="com-side" data-side="e"></div>
@@ -698,7 +699,7 @@
                     <div class="com-mapcfg" id="com-map"></div>
                     <div class="db-btns">
                         <button class="btn btn-small" id="com-cancel">戻る</button>
-                        <button class="btn btn-primary" id="com-start">COM対戦を開始 ▶</button>
+                        <button class="btn btn-primary" id="com-start">出撃 ▶</button>
                     </div>
                 </div>
             </div>
@@ -854,7 +855,7 @@
         });
     })();
     </script>
-    <script src="game.js?v=20261115b"></script>
+    <script src="game.js?v=20261117a"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
