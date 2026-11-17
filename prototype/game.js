@@ -65,7 +65,6 @@ let comDemo = false;     // 自機COMが操作中
 let thinkLogOn = true;   // 思考ログ欄を出すか
 var humanCfgOn = false; // 第161弾: プレイヤーが操作する試合でも 試合の設定 (敵の性格・積み込み・マップ・スキル) を使う
 function cfgMatch() { return (comDemo || humanCfgOn) && comCfg ? comCfg : null; }
-function swapOn() { return !!(cfgMatch() && comCfg.swap); } // 機体の見た目を入れ替える (自機=敵側デザイン)
 let comCfg = null;       // { ship, enemy, mode, pp, ep, pPreset, ePreset, higgsView, think } (ロビーの設定画面で決める)
 let _com = null;         // 自機COMの作業メモ (startGame/generateSector でリセット)
 // パッシブ方位ウェッジ: 計測時のワールド位置にアンカーした方位扇形。
@@ -457,8 +456,12 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261114c';
+const SPRITE_VER = '20261117a';
 const SPRITE_FILES = {
+    f_valkyr_assault: 'assets/ship_valkyr_assault.png', f_valkyr_stealth: 'assets/ship_valkyr_stealth.png', f_valkyr_carrier: 'assets/ship_valkyr_carrier.png', // 第162弾: 勢力のデザイン
+    f_sanctum_assault: 'assets/ship_sanctum_assault.png', f_sanctum_stealth: 'assets/ship_sanctum_stealth.png', f_sanctum_carrier: 'assets/ship_sanctum_carrier.png',
+    f_rustroad_assault: 'assets/ship_rustroad_assault.png', f_rustroad_stealth: 'assets/ship_rustroad_stealth.png', f_rustroad_carrier: 'assets/ship_rustroad_carrier.png',
+    f_fogborn_assault: 'assets/ship_fogborn_assault.png', f_fogborn_stealth: 'assets/ship_fogborn_stealth.png', f_fogborn_carrier: 'assets/ship_fogborn_carrier.png',
     assault:    'assets/ship_assault.png',
     stealth:    'assets/ship_stealth.png',
     carrier:    'assets/ship_carrier.png',
@@ -555,6 +558,23 @@ setInterval(() => {
 }, 4000);
 // 敵タイプ → スプライトキー
 const ENEMY_SPRITE_KEY = { corvette: 'e_corvette', fighter: 'e_fighter', destroyer: 'e_destroyer', carrier: 'e_carrier' };
+// 第162弾 (オーナー「同じ艦種なら別の勢力のスプライトに切り替えられるように」): 勢力のデザイン (見た目だけ・性能は変わらない)。デザイン案は docs/CAMPAIGN_DESIGN.md
+//   fam = ドローン・ミサイルの絵の系統 ('a' 味方系 白×水色 / 'b' 敵系 黒×赤)。新しい勢力の専用ドローンは未作成なので どちらかの系統を使う
+const FACTIONS = {
+    helios:   { jp: 'ヘリオス連邦', sub: '白×灰×シアン・対称で直線的 / 署名: 中央を走るシアンの発光ラインと青いエンジン', fam: 'a', ships: { assault: 'assault', stealth: 'stealth', carrier: 'carrier' } },
+    crow:     { jp: '鉄鴉団', sub: '黒×赤・角ばった装甲 / 署名: 赤い山形(逆V)の縞と赤く光るエンジン', fam: 'b', ships: { assault: 'e_destroyer', stealth: 'e_corvette', carrier: 'e_carrier' } },
+    valkyr:   { jp: 'ヴァルキュル重工', sub: 'チャコール×安全黄・箱型モジュール / 署名: 黄黒の山形縞と平らな刃の艦首', fam: 'a', ships: { assault: 'f_valkyr_assault', stealth: 'f_valkyr_stealth', carrier: 'f_valkyr_carrier' } },
+    sanctum:  { jp: 'サンクトゥム教団', sub: '紫×金・優雅な曲線 / 署名: 金の光輪アーチと三日月の艦首', fam: 'a', ships: { assault: 'f_sanctum_assault', stealth: 'f_sanctum_stealth', carrier: 'f_sanctum_carrier' } },
+    rustroad: { jp: 'ラストロード商船連合', sub: '錆茶×オリーブ×橙・つぎはぎ / 署名: 縛ったコンテナと大きな投光器', fam: 'b', ships: { assault: 'f_rustroad_assault', stealth: 'f_rustroad_stealth', carrier: 'f_rustroad_carrier' } },
+    fogborn:  { jp: 'フォグボーン', sub: '瓶緑×黒・有機的 / 署名: 青緑に光る脈とエラの噴射口', fam: 'b', ships: { assault: 'f_fogborn_assault', stealth: 'f_fogborn_stealth', carrier: 'f_fogborn_carrier' } },
+};
+function skinOf(side) { const c = cfgMatch(); const k = c && c.skin && c.skin[side]; return FACTIONS[k] ? k : (side === 'p' ? 'helios' : 'crow'); }
+function factionShipKey(side, cls) { return FACTIONS[skinOf(side)].ships[cls] || FACTIONS[skinOf(side)].ships.assault; }
+function droneFam(side) { return FACTIONS[skinOf(side)].fam; }
+// ドローン・ミサイルの絵を 味方系 ⇄ 敵系 で入れ替える
+const DRONE_A2B = { drone_attack: 'e_fighter', drone_scout: 'drone_scout_e', drone_mech: 'drone_mech_e', drone_mech_thrust: 'drone_mech_e_thrust', drone_mech_fire: 'drone_mech_e_fire', drone_mech_ready: 'drone_mech_e_ready', drone_mech_slash: 'drone_mech_e_slash', drone_missile: 'drone_missile_e' };
+const DRONE_B2A = {}; for (const k in DRONE_A2B) DRONE_B2A[DRONE_A2B[k]] = k;
+function dsk(key, side) { const want = droneFam(side); if (want === 'b') return (DRONE_A2B[key] && !DRONE_B2A[key]) ? DRONE_A2B[key] : key; return DRONE_B2A[key] || key; }
 function spriteReady(img) { return img && img.complete && img.naturalWidth > 0; }
 // 既に translate(x,y)+rotate(angle) 済みのコンテキストへ、中心合わせ・最長辺=targetLen で描画
 function drawSpriteCentered(ctx, img, targetLen) {
@@ -3685,7 +3705,7 @@ class Projectile {
                 return;
             }
             // ミサイル弾体スプライト
-            const _mslImg = (this.isPlayer === false && spriteReady(SPRITES['drone_missile_e'])) ? SPRITES['drone_missile_e'] : SPRITES['drone_missile']; // 第49弾: 敵のミサイルは敵側のデザイン
+            const _mslImg = this.isPlayer === false ? (spriteReady(SPRITES[dsk('drone_missile_e', 'e')]) ? SPRITES[dsk('drone_missile_e', 'e')] : SPRITES['drone_missile']) : SPRITES[dsk('drone_missile', 'p')]; // 第49弾: 敵のミサイルは敵側のデザイン
             if (spriteReady(_mslImg)) {
                 ctx.drawImage(_mslImg, -16, -16, 32, 32); // 透過スプライト (第16弾)
             } else {
@@ -5620,7 +5640,7 @@ class Ship {
         if (this.isPlayer) {
             // ── スプライト描画 (screen合成: 黒=背景と同化・hull正常表示・過飽和なし) ──
             const _pstype = gameState.shipType || 'assault';
-            const _psprite = SPRITES[swapOn() ? ({ assault: 'e_destroyer', stealth: 'e_corvette', carrier: 'e_carrier' }[_pstype] || _pstype) : _pstype];
+            const _psprite = SPRITES[factionShipKey('p', _pstype)];
             if (spriteReady(_psprite)) {
                 if (this.state === 'moving') {
                     // バーニア数連動スラスターグロー: THRUSTER_DEFS で艦種別位置を定義
@@ -5988,8 +6008,8 @@ class Ship {
             }
         } else {
             // ── 敵スプライト描画 (読み込めていればベクターより優先) ──
-            const _ep = this._kind === 'mech' ? techPose(this) : '', _eskey0 = _ep && spriteReady(SPRITES['drone_mech_e_' + _ep]) ? 'drone_mech_e_' + _ep : 'drone_mech_e';
-            const _eskey = this._kind === 'mech' ? _eskey0 : this._kind === 'scout' ? 'drone_scout_e' : this._kind === 'turret' ? 'drone_turret' : (swapOn() && this.type !== 'fighter' ? ({ destroyer: 'assault', corvette: 'stealth', carrier: 'carrier' }[this.type] || 'assault') : (ENEMY_SPRITE_KEY[this.type] || 'e_corvette'));
+            const _ep = this._kind === 'mech' ? techPose(this) : '', _eskey0 = _ep && spriteReady(SPRITES[dsk('drone_mech_' + _ep, 'e')]) ? dsk('drone_mech_' + _ep, 'e') : dsk('drone_mech', 'e');
+            const _eskey = this._kind === 'mech' ? _eskey0 : this._kind === 'scout' ? dsk('drone_scout_e', 'e') : this._kind === 'turret' ? 'drone_turret' : (this.type === 'fighter' ? dsk('e_fighter', 'e') : factionShipKey('e', { destroyer: 'assault', corvette: 'stealth', carrier: 'carrier' }[this.type] || 'assault'));
             if (this._kind === 'mech') ctx.rotate(Math.PI / 2); // Techの絵は上が前
             const _esprite = SPRITES[_eskey];
             if (spriteReady(_esprite)) {
@@ -14764,7 +14784,7 @@ class Drone {
         // 第16弾: 縮小しても見失わないよう、画面上で最低限の大きさを保つ
         const _zs = Math.max(1, (6 / camera.zoom) / 32); // 第66弾 (オーナー「自艦側の戦闘機が自艦より大きく見える」): 最低の大きさを画面上の直径6pxに (旧: 半径14px=自艦の絵より大きかった)
         if (_zs > 1) ctx.scale(_zs, _zs);
-        if (this.type === 'mech' && spriteReady(SPRITES['drone_mech'])) {
+        if (this.type === 'mech' && spriteReady(SPRITES[dsk('drone_mech', 'p')])) {
             // 第20弾: 人型スプライト (上が前)。艦首方向へ向く
             // 第49弾 (オーナー「Techにアニメーション」): 手続きのアニメ — バックパックの推進炎 (速さで長く・ゆらぐ) ・浮遊の上下 ・進む向きへの傾き ・小銃/斬撃の閃光
             const _mt = _frameCount + this._id * 7, _mv = Math.hypot(this.vx || 0, this.vy || 0);
@@ -14772,7 +14792,7 @@ class Drone {
             const _lean = Math.max(-0.16, Math.min(0.16, ((this.vx || 0) * -Math.sin(this.angle) + (this.vy || 0) * Math.cos(this.angle)) * 0.12)); // 横へ動く向きへ傾く
             const _bob = Math.sin(_mt * 0.07) * 0.9 + (_mv < 0.3 ? Math.sin(_mt * 0.035) * 0.8 : 0);
             ctx.rotate(_rot + _lean);
-            const _pose = techPose(this), _psp = _pose ? SPRITES['drone_mech_' + _pose] : null, _posed = !!(_psp && spriteReady(_psp)); // 第78弾: 姿勢の絵 (絵の中に炎・刀身・閃光がある)
+            const _pose = techPose(this), _psp = _pose ? SPRITES[dsk('drone_mech_' + _pose, 'p')] : null, _posed = !!(_psp && spriteReady(_psp)); // 第78弾: 姿勢の絵 (絵の中に炎・刀身・閃光がある)
             // 推進炎 (機体の後ろ=画像の下側・左右2つ)
             if (!_posed || _pose === 'fire') { const fl = 5 + _mv * 4 + Math.sin(_mt * 0.7) * 1.6 + (this._dash > 0 ? 9 : 0);
               ctx.globalCompositeOperation = 'lighter';
@@ -14781,7 +14801,7 @@ class Drone {
                   ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(fx - 2.2, 12); ctx.lineTo(fx + 2.2, 12); ctx.lineTo(fx, 12 + fl); ctx.closePath(); ctx.fill(); }
               ctx.globalCompositeOperation = 'source-over'; }
             ctx.translate(0, _bob);
-            if (_posed) { const _ps = _pose === 'thrust' || _pose === 'slash' ? 52 : 44; ctx.drawImage(_psp, -_ps / 2, -_ps / 2, _ps, _ps); } else ctx.drawImage(SPRITES['drone_mech'], -20, -20, 40, 40);
+            if (_posed) { const _ps = _pose === 'thrust' || _pose === 'slash' ? 52 : 44; ctx.drawImage(_psp, -_ps / 2, -_ps / 2, _ps, _ps); } else ctx.drawImage(SPRITES[dsk('drone_mech', 'p')], -20, -20, 40, 40);
             if (!_posed && this._flashF && _frameCount - this._flashF < 4) { // 小銃の発砲の閃光
                 ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = 'rgba(255,230,140,0.9)'; ctx.beginPath(); ctx.arc(-13, -19, 3 + Math.random() * 2, 0, Math.PI * 2); ctx.fill(); ctx.globalCompositeOperation = 'source-over';
             }
@@ -14808,7 +14828,7 @@ class Drone {
         }
         // スプライトキー (各タイプに対応)
         const _droneSprite = {
-            attack: SPRITES['drone_attack'], scout: SPRITES['drone_scout'],
+            attack: SPRITES[dsk('drone_attack', 'p')], scout: SPRITES[dsk('drone_scout', 'p')],
             decoy:  SPRITES['drone_decoy'],  build: SPRITES['drone_turret'],
             buoy:   SPRITES['drone_buoy']
         }[this.type];
@@ -16125,10 +16145,10 @@ function skillOn(side, id) {
 function comDefaultCfg() {
     return { ship: 'assault', enemy: 'assault', mode: 'br', pPreset: 'standard', ePreset: 'standard',
              pp: Object.assign({}, COM_PRESETS.standard.p), ep: Object.assign({}, COM_PRESETS.standard.p), higgsView: true, think: true,
-             lo: { p: {}, e: {} }, sk: { p: {}, e: {} }, map: Object.assign({}, MAP_DEF), rndAll: { p: false, e: false }, pCtl: 'human', swap: false }; // 第161弾: pCtl=自機の操作 (human/com)・swap=機体の見た目入れ替え // 第155弾: map=マップの設定 // 第142弾: sk=スキルのオン・オフ // 第22弾: COM対戦の積み込み (自機/敵・艦種ごと。無ければ既定)
+             lo: { p: {}, e: {} }, sk: { p: {}, e: {} }, map: Object.assign({}, MAP_DEF), rndAll: { p: false, e: false }, pCtl: 'human', skin: { p: 'helios', e: 'crow' } }; // 第161弾: pCtl=自機の操作 (human/com) / 第162弾: skin=勢力のデザイン (自機/敵) // 第155弾: map=マップの設定 // 第142弾: sk=スキルのオン・オフ // 第22弾: COM対戦の積み込み (自機/敵・艦種ごと。無ければ既定)
 }
 function loadComCfg() {
-    try { const c = JSON.parse(localStorage.getItem('darkEchoComDemo') || 'null'); if (c && c.pp && c.ep) { const r = Object.assign(comDefaultCfg(), c); for (const pk of ['pp', 'ep']) r[pk] = Object.assign({}, PERS_DEF, r[pk]); /* 第147弾: 新しい軸が無い古い保存は既定で埋める */ if (!r.lo || !r.lo.p || !r.lo.e) r.lo = { p: {}, e: {} }; if (!r.sk || !r.sk.p || !r.sk.e) r.sk = { p: {}, e: {} }; r.map = Object.assign({}, MAP_DEF, r.map); r.rndAll = Object.assign({ p: false, e: false }, r.rndAll); return r; } } catch (e) {}
+    try { const c = JSON.parse(localStorage.getItem('darkEchoComDemo') || 'null'); if (c && c.pp && c.ep) { const r = Object.assign(comDefaultCfg(), c); for (const pk of ['pp', 'ep']) r[pk] = Object.assign({}, PERS_DEF, r[pk]); /* 第147弾: 新しい軸が無い古い保存は既定で埋める */ if (!r.lo || !r.lo.p || !r.lo.e) r.lo = { p: {}, e: {} }; if (!r.sk || !r.sk.p || !r.sk.e) r.sk = { p: {}, e: {} }; r.map = Object.assign({}, MAP_DEF, r.map); r.rndAll = Object.assign({ p: false, e: false }, r.rndAll); if (!r.skin) r.skin = r.swap ? { p: 'crow', e: 'helios' } : { p: 'helios', e: 'crow' }; /* 第161弾の「入れ替え」を引き継ぐ */ r.skin = Object.assign({ p: 'helios', e: 'crow' }, r.skin); delete r.swap; return r; } } catch (e) {}
     return comDefaultCfg();
 }
 function saveComCfg() { if (playReplay || /[?&]replay=1/.test(location.search)) return; try { localStorage.setItem('darkEchoComDemo', JSON.stringify(comCfg)); } catch (e) {} }
@@ -19255,6 +19275,12 @@ function openComDemo() {
     sfxUI('ui_panel_open');
 }
 var _comSkOpen = false;
+function _skinRow(side, c) {
+    const cur = (c.skin && c.skin[side]) || (side === 'p' ? 'helios' : 'crow');
+    let h = '<div class="com-row"><span class="com-opt-lbl">デザイン</span>';
+    for (const k in FACTIONS) h += '<button class="com-chip' + (cur === k ? ' on' : '') + '" data-act="skin" data-v="' + k + '">' + FACTIONS[k].jp + '</button>';
+    return h + '</div><div class="com-note">' + FACTIONS[cur].sub + ' (見た目だけ・性能は変わらない)</div>';
+}
 function _renderComCfg() {
     const c = comCfg;
     for (const side of ['p', 'e']) {
@@ -19265,6 +19291,7 @@ function _renderComCfg() {
         const h = ['<div class="com-side-title ' + (side === 'p' ? 'cs-p' : 'cs-e') + '">' + (side === 'p' ? (human ? '自機 (あなた)' : '自機COM') : '敵COM') + ' <button class="com-chip' + (ra ? ' on' : '') + '" data-act="rndall" title="ON: 試合ごとに 艦種・性格・積み込み・武器をすべて無作為に決める">🎲 全部ランダム ' + (ra ? 'ON' : 'OFF') + '</button></div>' + (side === 'p' ? '<div class="com-row"><span class="com-opt-lbl">操作</span><button class="com-chip' + (human ? ' on' : '') + '" data-act="ctl" data-v="human">プレイヤー</button><button class="com-chip' + (!human ? ' on' : '') + '" data-act="ctl" data-v="com">COM (観戦)</button></div>' : '') + (ra ? '<div class="com-note">試合ごとに 艦種' + (human ? '・積み込み・武器の種類' : '・性格(8軸)・積み込み・武器の種類') + 'を無作為に決める (下の設定は使わない)</div>' : '') + '<div class="com-row">'];
         for (const k of ['assault', 'stealth', 'carrier']) h.push('<button class="com-chip' + (ship === k ? ' on' : '') + '" data-act="ship" data-v="' + k + '">' + SHIP_JP[k] + '</button>');
         h.push('</div>');
+        h.push(_skinRow(side, c));
         if (human) { // あなたが操作する側: 性格・スキルは無い (艦種と積み込みだけ)
             h.push('<div class="com-note">あなたが操作する。性格・スキルは敵COMだけの設定。</div>');
             h.push('<div class="com-row com-lo"><span class="com-lo-sum">積み込み: ' + _loPreview(side, ship, c) + '</span><button class="com-chip" data-act="loadout">編集</button></div>');
@@ -19300,8 +19327,7 @@ function _renderComCfg() {
         + '<button class="com-chip' + (c.mode === 'br' ? ' on' : '') + '" data-act="mode" data-v="br">バトルロワイアル</button>'
         + '<button class="com-chip' + (c.mode === 'sd' ? ' on' : '') + '" data-act="mode" data-v="sd">サーチ&amp;デストロイ</button>'
         + (c.pCtl === 'com' ? '<span class="com-opt-lbl">ヒッグス表示</span><button class="com-chip' + (c.higgsView ? ' on' : '') + '" data-act="higgs">' + (c.higgsView ? 'ON' : 'OFF (全艦が見える)') + '</button>'
-        + '<span class="com-opt-lbl">思考ログ</span><button class="com-chip' + (c.think ? ' on' : '') + '" data-act="think">' + (c.think ? 'ON' : 'OFF') + '</button>' : '')
-        + '<span class="com-opt-lbl">機体の見た目</span><button class="com-chip' + (c.swap ? ' on' : '') + '" data-act="swap" title="ON: 自機が敵側のデザイン (黒×赤)・敵が味方側のデザイン (白×水色) になる。見た目だけ">' + (c.swap ? '入れ替え ON' : '入れ替え OFF') + '</button>';
+        + '<span class="com-opt-lbl">思考ログ</span><button class="com-chip' + (c.think ? ' on' : '') + '" data-act="think">' + (c.think ? 'ON' : 'OFF') + '</button>' : '');
     { const hm = c.pCtl !== 'com', ml = c.mode === 'sd' ? 'サーチ&デストロイ' : 'バトルロワイアル';
       const t1 = document.getElementById('com-title'), t2 = document.getElementById('com-lead'), bs = document.getElementById('com-start');
       if (t1) t1.textContent = '試合の設定 — ' + ml;
@@ -19417,7 +19443,7 @@ function exitComDemo() { location.reload(); }
         }
         else if (act === 'rndall') comCfg.rndAll[side] = !comCfg.rndAll[side];
         else if (act === 'ctl') comCfg.pCtl = v === 'com' ? 'com' : 'human';
-        else if (act === 'swap') comCfg.swap = !comCfg.swap;
+        else if (act === 'skin') { comCfg.skin = Object.assign({ p: 'helios', e: 'crow' }, comCfg.skin); comCfg.skin[side] = v; }
         else if (act === 'skopen') _comSkOpen = !_comSkOpen;
         else if (act === 'skill' || act === 'skall' || act === 'skgrp') {
             const m = (comCfg.sk[side] = comCfg.sk[side] || {}), L = skillList();

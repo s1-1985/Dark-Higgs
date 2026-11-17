@@ -2941,3 +2941,22 @@ body.play-replay #zoom-ctl #zoom-stack { flex-wrap: wrap-reverse; max-height: ca
 .mode-card { position: relative; cursor: pointer; }
 .mode-go { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 18px; color: #00ffaa; opacity: 0.7; }
 @media (orientation: landscape) and (max-height: 600px) { .lobby-sound #btn-ambient { top: auto; left: auto; } .lobby-hero-inner { width: 100%; } }
+
+/* 第162弾: タイトル — 左半分=背景イラストの切替 (8秒ごと・ゆっくりフェード) / ロゴは下 / 音・QR・音量は右半分の一番下にコンパクトに */
+#lobby-slides { position: absolute; inset: 0; z-index: 0; background: #010409; }
+#lobby-slides .ls { position: absolute; inset: 0; background-size: cover; background-position: center; opacity: 0; transition: opacity 2.6s ease-in-out; transform: scale(1.0); }
+#lobby-slides .ls.on { opacity: 1; animation: lsZoom 11s ease-out forwards; }
+@keyframes lsZoom { from { transform: scale(1.0); } to { transform: scale(1.07); } }
+.lobby-hero-inner { position: absolute; left: 0; right: 0; bottom: 5%; padding: 0 6%; z-index: 2; }
+.lobby-logo-img { display: block; width: min(86%, 560px); height: auto; margin: 0 auto; filter: drop-shadow(0 4px 18px rgba(0,0,0,0.85)); }
+.lobby-sonar-ring { display: none; }
+.lobby-foot { margin-top: auto; padding-top: 14px; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px 10px; font-size: 10px; color: #8fe; }
+.lobby-foot #btn-ambient, .lobby-foot #btn-qr { position: static; font-size: 9px; padding: 3px 7px; letter-spacing: 0.08em; }
+.lobby-foot label { display: inline-flex; align-items: center; gap: 4px; }
+.lobby-foot input[type=range] { width: 64px; height: 12px; }
+.lobby-container { display: flex; flex-direction: column; }
+@media (orientation: landscape) and (max-height: 600px) {
+    .lobby-hero { width: 50% !important; }
+    .lobby-container { min-height: 100%; }
+    .lobby-hero-inner { bottom: 6%; }
+}
