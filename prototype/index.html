@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261117a">
+    <link rel="stylesheet" href="style.css?v=20261117c">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -538,16 +538,11 @@
             <div id="ship-select-lobby">
                 <!-- タイトルヒーロー: キーアート + ロゴ -->
                 <div class="lobby-hero">
+                    <div id="lobby-slides"></div>
                     <div class="lobby-hero-fade"></div>
                     <div class="lobby-hero-inner">
-                        <div class="lobby-sonar-ring"></div>
-                        <h1 class="lobby-logo">DARK <span>ECHO</span></h1>
-                        <div class="lobby-sound">
-                            <button id="btn-ambient" type="button" onclick="toggleAmbient()">♪ SOUND ON</button>
-                            <button id="btn-qr" type="button">QRコード</button>
-                            <label id="sfx-vol-wrap">SE <input id="sfx-vol" type="range" min="0" max="100" step="5"> <span id="sfx-vol-l"></span></label>
-                            <label id="bgm-vol-wrap">BGM <input id="bgm-vol" type="range" min="0" max="100" step="5"> <span id="bgm-vol-l"></span></label>
-                        </div>
+                        <img class="lobby-logo-img" src="assets/title_logo.png?v=162" alt="DARK ECHO" onerror="this.style.display='none';document.getElementById('lobby-logo-text').style.display='block'">
+                        <h1 class="lobby-logo" id="lobby-logo-text" style="display:none">DARK <span>ECHO</span></h1>
                     </div>
                 </div>
                 <div class="lobby-container">
@@ -639,6 +634,13 @@
                         <button class="btn btn-small" id="btn-com-demo" style="display:none">COM対戦デモ ▶ <span>自機もCOMが操作・性格を選んで観戦</span></button>
                         <button class="btn btn-small" id="btn-replay-lobby">リプレイ ▶ <span>試合の記録を敵の視点でも見直す</span></button>
                     </div>
+                    <div class="lobby-foot">
+                        <button id="btn-ambient" type="button" onclick="toggleAmbient()">♪ SOUND ON</button>
+                        <button id="btn-qr" type="button">QRコード</button>
+                        <label id="sfx-vol-wrap">SE <input id="sfx-vol" type="range" min="0" max="100" step="5"> <span id="sfx-vol-l"></span></label>
+                        <label id="bgm-vol-wrap">BGM <input id="bgm-vol" type="range" min="0" max="100" step="5"> <span id="bgm-vol-l"></span></label>
+                    </div>
+                    
                 </div>
             </div>
 
@@ -834,6 +836,25 @@
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
+    <script>
+    (function(){
+        var N=10, box=document.getElementById('lobby-slides'); if(!box) return;
+        var els=[], cur=-1, timer=null;
+        for(var i=1;i<=N;i++){ var d=document.createElement('div'); d.className='ls'; d.dataset.src='assets/title_bg/bg'+(i<10?'0':'')+i+'.jpg?v=162'; box.appendChild(d); els.push(d); }
+        function load(d){ if(d && !d.dataset.on){ d.dataset.on='1'; d.style.backgroundImage="url('"+d.dataset.src+"')"; } }
+        function show(i){
+            i=(i+N)%N; load(els[i]); load(els[(i+1)%N]);
+            els.forEach(function(e,k){ e.classList.toggle('on',k===i); });
+            cur=i;
+        }
+        show(Math.floor(Math.random()*N));
+        timer=setInterval(function(){
+            var lobby=document.getElementById('ship-select-lobby');
+            if(!lobby || lobby.classList.contains('hidden') || document.hidden) return;
+            show(cur+1);
+        },8000);
+    })();
+    </script>
     <script src="qrcode.min.js"></script>
     <script>
     (function(){
@@ -855,7 +876,7 @@
         });
     })();
     </script>
-    <script src="game.js?v=20261117a"></script>
+    <script src="game.js?v=20261117c"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
