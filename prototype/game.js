@@ -6080,7 +6080,7 @@ class Ship {
             // ── 敵スプライト描画 (読み込めていればベクターより優先) ──
             const _ep = this._kind === 'mech' ? techPose(this) : '', _eskey0 = _ep && spriteReady(SPRITES[dsk('drone_mech_' + _ep, 'e')]) ? dsk('drone_mech_' + _ep, 'e') : dsk('drone_mech', 'e');
             const _eskey = this._kind === 'mech' ? _eskey0 : this._kind === 'scout' ? dsk('drone_scout_e', 'e') : this._kind === 'turret' ? 'drone_turret' : (this.type === 'fighter' ? dsk('e_fighter', 'e') : factionShipKey('e', { destroyer: 'assault', corvette: 'stealth', carrier: 'carrier' }[this.type] || 'assault'));
-            if (this._kind === 'mech') ctx.rotate(Math.PI / 2); // Techの絵は上が前
+            const _eFlip = this._kind === 'mech' && Math.cos(this.angle) < 0; // 第165弾: Techの絵は右が前・左へ向かう時は上下を反転
             const _esprite = SPRITES[_eskey];
             if (spriteReady(_esprite)) {
                 if (isFlashing) {
@@ -6093,15 +6093,17 @@ class Ship {
                 // 透過スプライト(第16弾)を不透明で描き、暗い艦体が霧に沈まないよう同じ絵を薄く加算して明るくする
                 const _eLen = this.radius * (isFlashing ? 6.2 : 5.6) * (_ep === 'thrust' || _ep === 'slash' ? 1.2 : _ep ? 1.1 : 1);
                 ctx.globalAlpha = 1;
+                ctx.save(); if (_eFlip) ctx.scale(1, -1);
                 drawSpriteCentered(ctx, _esprite, _eLen);
                 ctx.globalCompositeOperation = 'lighter';
                 ctx.globalAlpha = 0.3;
                 drawSpriteCentered(ctx, _esprite, _eLen);
                 ctx.globalCompositeOperation = 'source-over';
+                ctx.restore();
                 // HP bar below sprite (local space, counter-rotate for axis-aligned bar)
                 const _hpRatio = Math.max(0, this.hp / this.maxHp);
                 ctx.save();
-                ctx.rotate(-this.angle - (this._kind === 'mech' ? Math.PI / 2 : 0));
+                ctx.rotate(-this.angle);
                 const _bW = 36, _bH = 5, _bY = this.radius * 3.2 + 4;
                 ctx.globalAlpha = 0.9;
                 ctx.fillStyle = 'rgba(0,0,0,0.7)';
@@ -14858,20 +14860,24 @@ class Drone {
             // 第20弾: 人型スプライト (上が前)。艦首方向へ向く
             // 第49弾 (オーナー「Techにアニメーション」): 手続きのアニメ — バックパックの推進炎 (速さで長く・ゆらぐ) ・浮遊の上下 ・進む向きへの傾き ・小銃/斬撃の閃光
             const _mt = _frameCount + this._id * 7, _mv = Math.hypot(this.vx || 0, this.vy || 0);
-            const _rot = this.angle + Math.PI / 2;
+            const _rot = this.angle; // 第165弾: Techの絵は右が前 (旧: 上が前)
             const _lean = Math.max(-0.16, Math.min(0.16, ((this.vx || 0) * -Math.sin(this.angle) + (this.vy || 0) * Math.cos(this.angle)) * 0.12)); // 横へ動く向きへ傾く
             const _bob = Math.sin(_mt * 0.07) * 0.9 + (_mv < 0.3 ? Math.sin(_mt * 0.035) * 0.8 : 0);
             ctx.rotate(_rot + _lean);
+            const _left = Math.cos(this.angle) < 0; if (_left) ctx.scale(1, -1); // 左へ向かう時は上下を反転して 頭が下にならないようにする
             const _pose = techPose(this), _psp = _pose ? SPRITES[dsk('drone_mech_' + _pose, 'p')] : null, _posed = !!(_psp && spriteReady(_psp)); // 第78弾: 姿勢の絵 (絵の中に炎・刀身・閃光がある)
             // 推進炎 (機体の後ろ=画像の下側・左右2つ)
+            ctx.save(); ctx.rotate(Math.PI / 2); // 以下の手続きの炎・閃光・刃は 上が前の座標で書いてある
             if (!_posed || _pose === 'fire') { const fl = 5 + _mv * 4 + Math.sin(_mt * 0.7) * 1.6 + (this._dash > 0 ? 9 : 0);
               ctx.globalCompositeOperation = 'lighter';
               for (const fx of [-6, 6]) { const g = ctx.createLinearGradient(fx, 12, fx, 12 + fl);
                   g.addColorStop(0, 'rgba(160,240,255,0.85)'); g.addColorStop(0.5, 'rgba(60,170,255,0.45)'); g.addColorStop(1, 'rgba(0,80,255,0)');
                   ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(fx - 2.2, 12); ctx.lineTo(fx + 2.2, 12); ctx.lineTo(fx, 12 + fl); ctx.closePath(); ctx.fill(); }
               ctx.globalCompositeOperation = 'source-over'; }
+            ctx.restore();
             ctx.translate(0, _bob);
             if (_posed) { const _ps = _pose === 'thrust' || _pose === 'slash' ? 52 : 44; ctx.drawImage(_psp, -_ps / 2, -_ps / 2, _ps, _ps); } else ctx.drawImage(SPRITES[dsk('drone_mech', 'p')], -20, -20, 40, 40);
+            ctx.save(); ctx.rotate(Math.PI / 2);
             if (!_posed && this._flashF && _frameCount - this._flashF < 4) { // 小銃の発砲の閃光
                 ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = 'rgba(255,230,140,0.9)'; ctx.beginPath(); ctx.arc(-13, -19, 3 + Math.random() * 2, 0, Math.PI * 2); ctx.fill(); ctx.globalCompositeOperation = 'source-over';
             }
@@ -14881,7 +14887,9 @@ class Drone {
                 ctx.save(); ctx.translate(12, -6); ctx.rotate(sw); ctx.drawImage(SPRITES.fx_saber_blade, -4, -46, 8, 46); ctx.restore();
                 ctx.globalCompositeOperation = 'source-over';
             }
+            ctx.restore();
             ctx.translate(0, -_bob);
+            if (_left) ctx.scale(1, -1);
             ctx.rotate(-(_rot + _lean));
         } else if (this.type === 'mech') {
             // 人型 (スプライト読み込み前のベクター): 肩の重砲・胴・脚。艦首方向へ向く
