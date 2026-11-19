@@ -10869,6 +10869,7 @@ function drawPassiveBearings(ctx) {
             ctx.beginPath(); ctx.moveTo(b.ox + c0 * L0 * q / 3, b.oy + s0 * L0 * q / 3); ctx.lineTo(b.ox + c0 * L0 * (q + 1) / 3, b.oy + s0 * L0 * (q + 1) / 3); ctx.stroke();
         }
         drawRangeTicks(ctx, b.ox, b.oy, b.angle, L0, 0.5 * vis, invZoom);
+        drawFlow(ctx, b.ox, b.oy, b.angle, L0, 0.85 * vis, invZoom);
         // 起点の印: 聴音局 (ノード/コロニー) は輪＋名前 / 自艦起点は小さな菱形
         const dd = 5 * invZoom;
         ctx.globalAlpha = 0.85 * vis;
@@ -10910,6 +10911,7 @@ function drawPassiveBearings(ctx) {
         ctx.globalAlpha = base; ctx.beginPath(); ctx.moveTo(o.ox, o.oy - d); ctx.lineTo(o.ox + d, o.oy); ctx.lineTo(o.ox, o.oy + d); ctx.lineTo(o.ox - d, o.oy); ctx.closePath(); ctx.fill();
         // 第166弾 (オーナー「ノードの線は距離感が分からない」): 距離の目盛り (起点からの距離) と、聴音局 (自艦以外の起点) の印・名前・推定位置までの距離
         drawRangeTicks(ctx, o.ox, o.oy, o.ang, L, base * 0.8, invZoom);
+        if (newest) drawFlow(ctx, o.ox, o.oy, o.ang, L, 0.95, invZoom);
         if (o.src) {
             ctx.lineWidth = 1.4 * invZoom; ctx.globalAlpha = base; ctx.beginPath(); ctx.arc(o.ox, o.oy, d * 2, 0, Math.PI * 2); ctx.stroke();
             if (newest) queueTag(o.ox, o.oy, o.src === 'post' ? '聴音局' : '哨戒機', fmtDist(fx ? Math.hypot(fx.x - o.ox, fx.y - o.oy) : L) + 'u', _trkCol, 'right', 0.85);
@@ -10989,6 +10991,17 @@ function drawRangeTicks(ctx, ox, oy, ang, L, alpha, inv, fx, fy) {
     for (const q of lab) ctx.fillText(fmtDist(q[2]), q[0] + nx * 7 * inv + c0 * 2 * inv, q[1] + ny * 7 * inv);
     ctx.restore();
 }
+// 第167弾: 方位線の上を 起点 → 先へ流れる山形 (どちらから来ているか・生きている線に見える)。色は呼び出し側の strokeStyle
+function drawFlow(ctx, ox, oy, ang, L, alpha, inv) {
+    const c0 = Math.cos(ang), s0 = Math.sin(ang), nx = -s0, ny = c0, sp = Math.max(260, 70 / camera.zoom), ph = (Date.now() / 1000 * 0.7) % 1, hh = 4 * inv;
+    ctx.save(); ctx.lineWidth = 1.3 * inv; ctx.lineCap = 'round';
+    for (let d = ph * sp; d < L; d += sp) {
+        const f = Math.min(1, d / (sp * 0.6)) * Math.max(0, 1 - d / L);
+        ctx.globalAlpha = alpha * f; const px = ox + c0 * d, py = oy + s0 * d;
+        ctx.beginPath(); ctx.moveTo(px - c0 * hh + nx * hh, py - s0 * hh + ny * hh); ctx.lineTo(px, py); ctx.lineTo(px - c0 * hh - nx * hh, py - s0 * hh - ny * hh); ctx.stroke();
+    }
+    ctx.restore();
+}
 // SF調のロック照準 (ワールド座標・画面上一定の大きさ)。獲得の瞬間は外側から縮んで合わさり (0.45秒)、
 // その後は 欠けた輪 + 隅の括弧 + 回る走査弧 + 四方の目盛り。state: 'visual' (実線) / 'est' (破線)
 function drawLockOnMark(ctx, x, y, r, col, t0, state, spin) {
@@ -11063,23 +11076,25 @@ function _drawEstCircle(ctx, sid, sa, locked) {
     { const sp = worldToScreen(cx, cy); _circScreen.push({ sid, cx: sp.sx, cy: sp.sy, r: R * camera.zoom }); }
     ctx.save();
     // 第40弾: 塗りはごく薄く・縁は 未追跡=細い破線 / 追跡中=実線＋外側をゆっくり回る4つのかぎ (照準のように) ・四方の目盛り
-    ctx.globalAlpha = (locked ? 0.08 : 0.05) * fade;
-    ctx.fillStyle = sigColor(sid);
-    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
-    const idc = sigColor(sid); // 第166弾: 信号ごとの識別色 (リングの点・方位線・名札と同じ)
+    // 第167弾: ホログラムの球のように 縁へ向かって濃くなる塗り (中心は透ける)・細い実線の縁・目盛りの輪・ゆっくり回る弧
+    { const rgb = sigColorRgb(sid), g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
+      g.addColorStop(0, 'rgba(' + rgb + ',0)'); g.addColorStop(0.62, 'rgba(' + rgb + ',0.03)'); g.addColorStop(1, 'rgba(' + rgb + ',' + (locked ? 0.2 : 0.12) + ')');
+      ctx.globalAlpha = fade; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill(); }
+    const idc = sigColor(sid), tt = Date.now() / 1000;
     ctx.strokeStyle = idc;
+    ctx.globalAlpha = (locked ? 0.85 : 0.5) * fade; ctx.lineWidth = (locked ? 1.5 : 1) * inv;
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
+    if (R * camera.zoom > 26) { // 縁の内側の目盛り (画面上で一定の長さ)
+        ctx.globalAlpha = (locked ? 0.55 : 0.32) * fade; ctx.lineWidth = 1 * inv; ctx.beginPath();
+        for (let k = 0; k < 72; k++) { const a0 = k * Math.PI / 36, c0 = Math.cos(a0), s0 = Math.sin(a0), L = (k % 6 === 0 ? 9 : 4) * inv; ctx.moveTo(cx + c0 * R, cy + s0 * R); ctx.lineTo(cx + c0 * (R - L), cy + s0 * (R - L)); }
+        ctx.stroke();
+        ctx.globalAlpha = (locked ? 0.7 : 0.4) * fade; ctx.lineWidth = 2 * inv; const rb2 = R + 6 * inv, ro = tt * (locked ? 0.5 : 0.22);
+        for (let k = 0; k < 3; k++) { const a0 = ro + k * Math.PI * 2 / 3; ctx.beginPath(); ctx.arc(cx, cy, rb2, a0, a0 + 0.42); ctx.stroke(); }
+    }
     if (locked) {
         if (!sa._lockT0) sa._lockT0 = Date.now();
-        ctx.globalAlpha = 0.8 * fade; ctx.lineWidth = 1.6 * inv;
-        ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
         ctx.globalAlpha = fade; drawLockOnMark(ctx, cx, cy, Math.max(R * 1.04, 18 * inv), idc, sa._lockT0, 'visual', true);
-    } else {
-        sa._lockT0 = 0;
-        ctx.globalAlpha = 0.55 * fade; ctx.lineWidth = 1.1 * inv;
-        ctx.setLineDash([10 * inv, 9 * inv]);
-        ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
-        ctx.setLineDash([]);
-    }
+    } else sa._lockT0 = 0;
     // 四方の目盛りは 精度の色 (橙=広い → 水色=精密) — 円の色 (識別色) とは別に精度が読める
     ctx.strokeStyle = col; ctx.globalAlpha = (locked ? 0.9 : 0.65) * fade; ctx.lineWidth = 2 * inv;
     ctx.beginPath();
@@ -11861,40 +11876,61 @@ function flushTags(ctx) {
         const p = worldToScreen(t.x, t.y);
         ctx.font = 'bold 10px Orbitron, sans-serif';
         const wm = ctx.measureText(t.main).width;
-        let ws = 0; if (t.sub) { ctx.font = '9px Orbitron, sans-serif'; ws = ctx.measureText(t.sub).width; }
-        const w = 10 + wm + (t.sub ? 6 + ws : 0), h = 16;
-        let x = t.anchor === 'right' ? p.sx + 10 : p.sx - w / 2, y = t.anchor === 'top' ? p.sy - h - 6 + t.dy : p.sy - h / 2 + t.dy;
+        let ws = 0; if (t.sub) { ctx.font = '10px "Share Tech Mono", Orbitron, monospace'; ws = ctx.measureText(t.sub).width; }
+        const w = 14 + wm + (t.sub ? 8 + ws : 0), h = 17;
+        // 第167弾: 点から少し離して置き、細い引き出し線でつなぐ (映画のHUDの callout)
+        let x = t.anchor === 'right' ? p.sx + 18 : p.sx - w / 2, y = t.anchor === 'top' ? p.sy - h - 13 + t.dy : p.sy - h / 2 + t.dy - (t.anchor === 'right' ? 6 : 0);
         for (let k = 0; k < 6; k++) { // 重なったら上へずらす
             const hit = placed.find(q => x < q.x + q.w && x + w > q.x && y < q.y + q.h && y + h > q.y);
-            if (!hit) break; y = hit.y - h - 2;
+            if (!hit) break; y = hit.y - h - 3;
         }
         if (x + w < 0 || y + h < 0 || x > (cssW || 9999) || y > (cssH || 9999)) continue;
         placed.push({ x, y, w, h });
+        _leader(ctx, p.sx, p.sy, x, y, w, h, t.col, t.a);
         _tagBox(ctx, x, y, w, h, wm, t.main, t.sub, t.col, t.a, t.prog, t.gate);
     }
     ctx.restore();
     _tagQ.length = 0;
 }
+// 引き出し線: 点 (小さな輪) → 斜めに短く → 名札の縁へ。細く・色は名札と同じ
+function _leader(ctx, px, py, x, y, w, h, col, a) {
+    const ex = px < x ? x : px > x + w ? x + w : px, ey = py < y ? y : py > y + h ? y + h : y + h / 2; // 名札の縁で一番近い点
+    if (Math.hypot(ex - px, ey - py) < 5) return;
+    ctx.save(); ctx.strokeStyle = col || '#5fe0c4'; ctx.fillStyle = ctx.strokeStyle; ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.55 * a;
+    // 点から45°で折れて名札の高さへ
+    const dx = ex - px, dy = ey - py, adx = Math.abs(dx), ady = Math.abs(dy);
+    ctx.beginPath(); ctx.moveTo(px, py);
+    if (ady > 3 && adx > ady + 3) ctx.lineTo(px + Math.sign(dx) * ady, ey); // 45°で折れて名札の高さへ
+    ctx.lineTo(ex, ey); ctx.stroke();
+    ctx.globalAlpha = 0.9 * a; ctx.beginPath(); ctx.arc(px, py, 1.8, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+}
 function _tagBox(ctx, x, y, w, h, wm, main, sub, col, a, prog, gate) {
     ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
-    ctx.globalAlpha = 0.9 * a; ctx.fillStyle = TAG_BG; _chamfer(ctx, x, y, w, h, 4); ctx.fill();
-    if (prog != null) { // 第72弾 (オーナー): 名札の黒い背景を解析の進捗バーに — 進むほど蛍光グリーンに染まる (完了で全体が光る・信号が弱くて進まない間は縞が止まる)
+    col = col || '#5fe0c4';
+    // 透けた暗い下地 (濃いのは左→右へ薄れる)
+    ctx.globalAlpha = 0.82 * a; ctx.fillStyle = 'rgba(2,10,14,0.80)'; _chamfer(ctx, x, y, w, h, 5); ctx.fill();
+    if (prog != null) { // 第72弾: 解析の進捗 — 下地の中が蛍光グリーンに染まる (第167弾: 細い縁と先端の光で締める)
         const pw = Math.max(0, Math.min(1, prog)) * (w - 2);
-        if (pw > 0.5) { ctx.save(); _chamfer(ctx, x, y, w, h, 4); ctx.clip(); ctx.globalAlpha = (prog >= 0.995 ? 0.62 + Math.sin(Date.now() * 0.006) * 0.12 : 0.5) * a; ctx.fillStyle = '#2cff8a'; ctx.fillRect(x + 1, y + 1, pw, h - 2); ctx.globalAlpha = 0.5 * a; ctx.fillStyle = '#b8ffd8'; ctx.fillRect(x + 1 + Math.max(0, pw - 2), y + 1, 2, h - 2); ctx.restore(); }
-        if (gate) { ctx.save(); _chamfer(ctx, x, y, w, h, 4); ctx.clip(); ctx.globalAlpha = 0.22 * a; ctx.strokeStyle = '#ff8a5a'; ctx.lineWidth = 1; ctx.beginPath(); for (let k = -h; k < w; k += 6) { ctx.moveTo(x + k, y + h); ctx.lineTo(x + k + h, y); } ctx.stroke(); ctx.restore(); }
+        if (pw > 0.5) { ctx.save(); _chamfer(ctx, x, y, w, h, 5); ctx.clip(); ctx.globalAlpha = (prog >= 0.995 ? 0.5 + Math.sin(Date.now() * 0.006) * 0.12 : 0.36) * a; ctx.fillStyle = '#2cff8a'; ctx.fillRect(x + 1, y + 1, pw, h - 2); ctx.globalAlpha = 0.95 * a; ctx.fillStyle = '#b8ffd8'; ctx.fillRect(x + 1, y + h - 2.5, pw, 1.5); ctx.globalAlpha = 0.6 * a; ctx.fillRect(x + 1 + Math.max(0, pw - 1.5), y + 1, 1.5, h - 2); ctx.restore(); }
+        if (gate) { ctx.save(); _chamfer(ctx, x, y, w, h, 5); ctx.clip(); ctx.globalAlpha = 0.2 * a; ctx.strokeStyle = '#ff8a5a'; ctx.lineWidth = 1; ctx.beginPath(); for (let k = -h; k < w; k += 6) { ctx.moveTo(x + k, y + h); ctx.lineTo(x + k + h, y); } ctx.stroke(); ctx.restore(); }
     }
-    ctx.globalAlpha = a; ctx.fillStyle = col || '#5fe0c4'; ctx.fillRect(x, y + 2, 3, h - 4);
-    ctx.globalAlpha = 0.55 * a; ctx.strokeStyle = col || '#5fe0c4'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x + 4, y + h - 0.5); ctx.lineTo(x + w - 4, y + h - 0.5); ctx.stroke(); // 下の細い線 (SF調)
-    ctx.globalAlpha = a;
-    ctx.font = 'bold 10px Orbitron, sans-serif'; ctx.fillStyle = col || TAG_FG; ctx.fillText(main, x + 7, y + h / 2 + 0.5);
-    if (sub) { ctx.font = '9px Orbitron, sans-serif'; ctx.fillStyle = TAG_SUB; ctx.fillText(sub, x + 12 + wm, y + h / 2 + 0.5); }
+    // 縁: 細い1px・左上と右下だけ太い隅 (照準の括弧のように)
+    ctx.strokeStyle = col; ctx.globalAlpha = 0.45 * a; ctx.lineWidth = 1; _chamfer(ctx, x + 0.5, y + 0.5, w - 1, h - 1, 5); ctx.stroke();
+    ctx.globalAlpha = a; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x + 0.5, y + 11); ctx.lineTo(x + 0.5, y + 5); ctx.lineTo(x + 5.5, y + 0.5); ctx.lineTo(x + 12, y + 0.5);
+    ctx.moveTo(x + w - 0.5, y + h - 11); ctx.lineTo(x + w - 0.5, y + h - 0.5 - (w > 24 ? 0 : 0)); ctx.lineTo(x + w - 11, y + h - 0.5); ctx.stroke();
+    // 文字: 名前は帯域/識別の色・値は等幅で控えめ
+    ctx.font = 'bold 10px Orbitron, sans-serif'; ctx.fillStyle = col; ctx.fillText(main, x + 8, y + h / 2 + 0.5);
+    if (sub) { ctx.font = '10px "Share Tech Mono", Orbitron, monospace'; ctx.globalAlpha = 0.9 * a; ctx.fillStyle = TAG_SUB; ctx.fillText(sub, x + 14 + wm, y + h / 2 + 1); }
 }
 // 画面座標の名札 (自艦リングなど)。anchor: 'center' / 'left' (sx が左端) / 'right' (sx が右端)
 function screenTag(ctx, sx, sy, main, sub, col, a, anchor, prog, gate) {
     ctx.save();
     ctx.font = 'bold 10px Orbitron, sans-serif'; const wm = ctx.measureText(main).width;
-    let ws = 0; if (sub) { ctx.font = '9px Orbitron, sans-serif'; ws = ctx.measureText(sub).width; }
-    const w = 10 + wm + (sub ? 6 + ws : 0), h = 16;
+    let ws = 0; if (sub) { ctx.font = '10px "Share Tech Mono", Orbitron, monospace'; ws = ctx.measureText(sub).width; }
+    const w = 14 + wm + (sub ? 8 + ws : 0), h = 17;
     const x = anchor === 'left' ? sx : anchor === 'right' ? sx - w : sx - w / 2;
     _tagBox(ctx, x, sy - h / 2, w, h, wm, main, sub, col, a == null ? 1 : a, prog, gate);
     ctx.restore();
@@ -11931,13 +11967,22 @@ function drawShipRing(ctx) {
     ctx.strokeStyle = '#7fe8d0';
     ctx.lineWidth = 1;
     ctx.globalAlpha = 0.16; ctx.beginPath(); ctx.arc(cx, cy, R - 14, 0, Math.PI * 2); ctx.stroke();
-    for (let deg = 0; deg < 360; deg += 10) {
+    // 第167弾: 5°刻みの細かい目盛り (5°=極小・10°=短・30°=長・90°=最長)。外側にゆっくり回る弧・内側にレーダーの走査 (薄く)
+    for (let deg = 0; deg < 360; deg += 5) {
         const a = _degToScreen(deg), c = Math.cos(a), s2 = Math.sin(a);
-        const major = deg % 90 === 0, mid = deg % 30 === 0;
-        ctx.globalAlpha = major ? 0.75 : mid ? 0.45 : 0.2;
+        const major = deg % 90 === 0, mid = deg % 30 === 0, ten = deg % 10 === 0;
+        ctx.globalAlpha = major ? 0.8 : mid ? 0.5 : ten ? 0.26 : 0.12;
         ctx.lineWidth = major ? 1.6 : 1;
-        const r0 = R + 2, r1 = R + (major ? 9 : mid ? 6 : 3.5);
+        const r0 = R + 2, r1 = R + (major ? 10 : mid ? 7 : ten ? 4.5 : 2.5);
         ctx.beginPath(); ctx.moveTo(cx + c * r0, cy + s2 * r0); ctx.lineTo(cx + c * r1, cy + s2 * r1); ctx.stroke();
+    }
+    { // 外側の細い輪 + ゆっくり回る3つの弧 / 走査線の残光
+        ctx.globalAlpha = 0.1; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(cx, cy, R + 24, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = 0.32; ctx.lineWidth = 2; const ro = tSec * 0.25;
+        for (let k = 0; k < 3; k++) { const a0 = ro + k * Math.PI * 2 / 3; ctx.beginPath(); ctx.arc(cx, cy, R + 24, a0, a0 + 0.35); ctx.stroke(); }
+        const sw = tSec * 0.9 % (Math.PI * 2);
+        for (let k = 0; k < 14; k++) { ctx.globalAlpha = 0.07 * (1 - k / 14); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, R - 7, sw - (k + 1) * 0.055, sw - k * 0.055); ctx.stroke(); }
+        ctx.globalAlpha = 0.28; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(cx + Math.cos(sw) * (R - 14), cy + Math.sin(sw) * (R - 14)); ctx.lineTo(cx + Math.cos(sw) * (R - 2), cy + Math.sin(sw) * (R - 2)); ctx.stroke();
     }
     ctx.font = '8px Orbitron, monospace';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
