@@ -11008,37 +11008,39 @@ function drawFlow(ctx, ox, oy, ang, L, alpha, inv) {
 // SF調のロック照準 (ワールド座標・画面上一定の大きさ)。獲得の瞬間は外側から縮んで合わさり (0.45秒)、
 // その後は 欠けた輪 + 隅の括弧 + 回る走査弧 + 四方の目盛り。state: 'visual' (実線) / 'est' (破線)
 function drawLockOnMark(ctx, x, y, r, col, t0, state, spin) {
-    const now = Date.now(), age = Math.min(1, (now - t0) / 450), ease = 1 - Math.pow(1 - age, 3);
-    const k = 1 + (1 - ease) * 1.1, rr = r * k, zc = 1 / camera.zoom, tt = now / 1000;
-    ctx.save(); ctx.translate(x, y); ctx.strokeStyle = col; ctx.fillStyle = col;
-    if (state === 'est') ctx.setLineDash([7 * zc, 5 * zc]);
-    // 隅の括弧 (獲得の瞬間は大きく開いて縮む)
-    ctx.globalAlpha = 0.4 + 0.6 * ease; ctx.lineWidth = 3.4 * zc;
-    const b = rr * 0.42;
-    for (let q = 0; q < 4; q++) { const sx = (q & 1) ? 1 : -1, sy = (q & 2) ? 1 : -1; ctx.beginPath(); ctx.moveTo(sx * rr, sy * (rr - b)); ctx.lineTo(sx * rr, sy * rr); ctx.lineTo(sx * (rr - b), sy * rr); ctx.stroke(); }
-    ctx.setLineDash([]);
-    // 欠けた輪 (四方に切れ目)
-    ctx.globalAlpha = 0.8 * ease; ctx.lineWidth = 2 * zc;
-    const ri = rr * 0.78;
-    for (let q = 0; q < 4; q++) { const a0 = q * Math.PI / 2 + Math.PI / 4; ctx.beginPath(); ctx.arc(0, 0, ri, a0 - 0.52, a0 + 0.52); ctx.stroke(); }
-    // 回る走査弧 (2本・逆回り)
-    if (spin !== false) {
-        ctx.globalAlpha = 1 * ease; ctx.lineWidth = 3.2 * zc;
-        const ro = rr * 1.2;
-        ctx.beginPath(); ctx.arc(0, 0, ro, tt * 1.6, tt * 1.6 + 0.7); ctx.stroke();
-        ctx.beginPath(); ctx.arc(0, 0, ro, tt * 1.6 + Math.PI, tt * 1.6 + Math.PI + 0.7); ctx.stroke();
-        ctx.globalAlpha = 0.5 * ease; ctx.lineWidth = 1 * zc;
-        ctx.beginPath(); ctx.arc(0, 0, ri * 0.55, -tt * 2.2, -tt * 2.2 + 1.1); ctx.stroke();
+    // 第170弾 (オーナー「四隅の括弧は要らない・代わりにアニメーション」): 同心の回る輪・目盛りの輪・波紋・周回する光点。獲得の瞬間は外側の輪が渦を巻いて縮んで合わさる
+    const now = Date.now(), age = Math.min(1, (now - t0) / 650), ease = 1 - Math.pow(1 - age, 3);
+    const tt = now / 1000, zc = 1 / camera.zoom, TAU = Math.PI * 2;
+    ctx.save(); ctx.translate(x, y); ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineCap = 'butt';
+    const k = 1 + (1 - ease) * 1.6, spiral = (1 - ease) * 2.6;      // 獲得中: 大きく・回転しながら縮む
+    const dashed = state === 'est';
+    // 1) 外側のセグメントの輪 (12分割・時計回り)
+    { const ro = r * 1.2 * k, rot = tt * 0.75 + spiral;
+      ctx.globalAlpha = 0.25 + 0.75 * ease; ctx.lineWidth = 2.6 * zc;
+      for (let i = 0; i < 12; i++) { const a0 = rot + i * TAU / 12; ctx.beginPath(); ctx.arc(0, 0, ro, a0, a0 + TAU / 12 * (dashed ? 0.4 : 0.62)); ctx.stroke(); } }
+    // 2) 目盛りの輪 (反時計回りにゆっくり)
+    { const rm = r * k, rot = -tt * 0.35 - spiral * 0.6;
+      ctx.globalAlpha = 0.9 * ease; ctx.lineWidth = 1.2 * zc; ctx.beginPath(); ctx.arc(0, 0, rm, 0, TAU); ctx.stroke();
+      ctx.globalAlpha = 0.7 * ease; ctx.lineWidth = 1 * zc; ctx.beginPath();
+      for (let i = 0; i < 48; i++) { const a0 = rot + i * TAU / 48, c0 = Math.cos(a0), s0 = Math.sin(a0), L = (i % 4 === 0 ? 9 : 4.5) * zc; ctx.moveTo(c0 * rm, s0 * rm); ctx.lineTo(c0 * (rm - L), s0 * (rm - L)); }
+      ctx.stroke(); }
+    // 3) 内側の弧 2本 (速さが波打ちながら逆回り)
+    { const ri = r * 0.66 * k, ph = tt * 1.9 + Math.sin(tt * 0.9) * 1.3;
+      ctx.globalAlpha = 0.95 * ease; ctx.lineWidth = 2.2 * zc;
+      ctx.beginPath(); ctx.arc(0, 0, ri, -ph, -ph + 0.9); ctx.stroke(); ctx.beginPath(); ctx.arc(0, 0, ri, -ph + Math.PI, -ph + Math.PI + 0.9); ctx.stroke();
+      ctx.globalAlpha = 0.5 * ease; ctx.lineWidth = 1 * zc; ctx.beginPath(); ctx.arc(0, 0, ri * 0.55, ph * 0.8, ph * 0.8 + 2.2); ctx.stroke(); }
+    // 4) 波紋 (内から外へ広がって消える・2つ時間をずらして)
+    if (spin !== false) for (let j = 0; j < 2; j++) {
+        const f = ((tt / 1.9) + j * 0.5) % 1;
+        ctx.globalAlpha = (1 - f) * 0.55 * ease; ctx.lineWidth = 1.4 * zc; ctx.beginPath(); ctx.arc(0, 0, r * (0.5 + 1.0 * f), 0, TAU); ctx.stroke();
     }
-    // 四辺の中央に内向きの小さな三角 (獲得したことが一目で分かる印)
-    ctx.globalAlpha = ease; const tr = 6 * zc;
-    for (let q = 0; q < 4; q++) { ctx.save(); ctx.rotate(q * Math.PI / 2); ctx.beginPath(); ctx.moveTo(rr * 1.08 + tr, 0); ctx.lineTo(rr * 1.08 + tr * 2.2, -tr); ctx.lineTo(rr * 1.08 + tr * 2.2, tr); ctx.closePath(); ctx.fill(); ctx.restore(); }
-    // 中央の小さな十字 (点滅)
-    ctx.globalAlpha = (0.5 + 0.4 * Math.sin(tt * 7)) * ease; ctx.lineWidth = 1.2 * zc;
-    const cs = rr * 0.16;
-    ctx.beginPath(); ctx.moveTo(-cs, 0); ctx.lineTo(-cs * 0.35, 0); ctx.moveTo(cs * 0.35, 0); ctx.lineTo(cs, 0); ctx.moveTo(0, -cs); ctx.lineTo(0, -cs * 0.35); ctx.moveTo(0, cs * 0.35); ctx.lineTo(0, cs); ctx.stroke();
-    // 獲得の瞬間の閃光の輪
-    if (age < 1) { ctx.globalAlpha = (1 - age) * 0.8; ctx.lineWidth = 3 * zc; ctx.beginPath(); ctx.arc(0, 0, rr * (0.6 + 0.9 * age), 0, Math.PI * 2); ctx.stroke(); }
+    // 5) 周回する光点 (短い尾つき)
+    { const oa = tt * 2.6;
+      for (let i = 0; i < 7; i++) { const a0 = oa - i * 0.09; ctx.globalAlpha = (1 - i / 7) * 0.95 * ease; ctx.beginPath(); ctx.arc(Math.cos(a0) * r * 1.2 * k, Math.sin(a0) * r * 1.2 * k, (3.2 - i * 0.35) * zc, 0, TAU); ctx.fill(); } }
+    // 6) 獲得の瞬間の閃光の輪
+    if (age < 1) { ctx.globalAlpha = (1 - age) * 0.85; ctx.lineWidth = 3.5 * zc; ctx.beginPath(); ctx.arc(0, 0, r * (0.5 + 1.3 * age), 0, TAU); ctx.stroke(); }
+    // 7) 中心の呼吸する点
+    ctx.globalAlpha = (0.55 + 0.4 * Math.sin(tt * 6)) * ease; ctx.beginPath(); ctx.arc(0, 0, 2.2 * zc, 0, TAU); ctx.fill();
     ctx.restore();
 }
 // ═══ 第169弾 (オーナー): 受信強度で半透明に・ロック中だけ実線 / ロックした相手のAIの見解と状況の吹き出し ═══
@@ -12081,48 +12083,35 @@ function drawShipRing(ctx) {
     ctx.lineWidth = 1.3 + maxGaze;
     ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
     // 兆候の方角 (複数): 根拠ごとに形を変える。弧の広がり = 方角の不確かさ (AIの解析が浅いほど広く、ずれている)
-    ctx.font = 'bold 8px Orbitron, monospace';
+    // 第170弾 (オーナー「リングの脅威表示もSF調に」): 脅威は 細い弧 (幅=方角の不確かさ) + 外へ伸びる光条 + 流れる山形 + 括弧つきの名札 (引き出し線)。色=段階・形=種類
     for (const g of gazes) {
-        const pulse = 0.75 + Math.sin(tSec * (g.gaze > 0.8 ? 9 : g.gaze > 0.5 ? 6 : 2.5)) * 0.25;
+        const hot = g.gaze > 0.8, pulse = 0.78 + Math.sin(tSec * (hot ? 9 : g.gaze > 0.5 ? 6 : 2.5)) * 0.22;
         const c = Math.cos(g.ang), s2 = Math.sin(g.ang);
         const half = Math.max(0.1, Math.min(1.0, g.sig * 0.9));
-        const col = g.kind === 'sig' ? '#ffd27a' : g.gaze > 0.8 ? '#ff4a5a' : '#ffaa50';
-        ctx.strokeStyle = col; ctx.fillStyle = col;
-        if (g.kind === 'sig') { // AIが信号から割り出した方角: 細い破線の弧 (不確かさの幅)
-            ctx.setLineDash([5, 4]);
-            ctx.globalAlpha = (0.35 + 0.4 * g.conf) * g.fade; ctx.lineWidth = 2.2;
-            ctx.beginPath(); ctx.arc(cx, cy, R + 5, g.ang - half, g.ang + half); ctx.stroke();
-            ctx.setLineDash([]);
-            ctx.globalAlpha = (0.55 + 0.4 * g.conf) * g.fade; ctx.lineWidth = 1.6;
-            ctx.beginPath(); ctx.moveTo(cx + c * (R + 9), cy + s2 * (R + 9)); ctx.lineTo(cx + c * (R + 16), cy + s2 * (R + 16)); ctx.stroke();
-        } else {
-            for (let k = 0; k < 4; k++) {
-                const span = Math.max(0.12, 0.75 - k * 0.17) * (half > 0.2 ? half / 0.2 * 0.5 + 0.5 : 1);
-                ctx.globalAlpha = (0.16 + k * 0.17) * pulse * g.fade;
-                ctx.lineWidth = 3 + k * 1.5;
-                ctx.beginPath(); ctx.arc(cx, cy, R + 4, g.ang - span, g.ang + span); ctx.stroke();
-            }
-            ctx.globalAlpha = 0.9 * pulse * g.fade; ctx.lineWidth = 2;
-            if (g.kind === 'msl') { // 内向きの山形 (向かってくる)
-                for (let k = 0; k < 2; k++) {
-                    const r0 = R + 20 - k * 8;
-                    ctx.beginPath();
-                    ctx.moveTo(cx + c * r0 - s2 * 6, cy + s2 * r0 + c * 6); ctx.lineTo(cx + c * (r0 - 6), cy + s2 * (r0 - 6)); ctx.lineTo(cx + c * r0 + s2 * 6, cy + s2 * r0 - c * 6);
-                    ctx.stroke();
-                }
-            } else if (g.kind === 'kin') { // 実弾: 点が並ぶ
-                for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.arc(cx + c * (R + 12 + k * 5), cy + s2 * (R + 12 + k * 5), 1.6, 0, Math.PI * 2); ctx.fill(); }
-            } else { // ロック・艦載機・ビーム: 外向きの山形
-                for (let k = 0; k < 2; k++) {
-                    const r0 = R + 14 + k * 7;
-                    ctx.beginPath();
-                    ctx.moveTo(cx + c * r0 - s2 * 6, cy + s2 * r0 + c * 6); ctx.lineTo(cx + c * (r0 + 5), cy + s2 * (r0 + 5)); ctx.lineTo(cx + c * r0 + s2 * 6, cy + s2 * r0 - c * 6);
-                    ctx.stroke();
-                }
-            }
+        const col = g.kind === 'sig' ? '#ffd27a' : hot ? '#ff4a5a' : '#ffaa50';
+        ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineCap = 'butt';
+        // (a) 不確かさの弧: 細い実線 + 内側の薄い塗り (扇)。信号(AI)は点線
+        ctx.globalAlpha = (0.16 + 0.1 * pulse) * g.fade; ctx.beginPath(); ctx.arc(cx, cy, R + 4, g.ang - half, g.ang + half); ctx.arc(cx, cy, R - 12, g.ang + half, g.ang - half, true); ctx.closePath(); ctx.fill(); // リングの縁の帯だけ (中心まで塗らない)
+        ctx.globalAlpha = (0.55 + 0.35 * (g.kind === 'sig' ? g.conf : 1)) * g.fade; ctx.lineWidth = g.kind === 'sig' ? 1.2 : 1.8;
+        if (g.kind === 'sig') ctx.setLineDash([2, 4]);
+        ctx.beginPath(); ctx.arc(cx, cy, R + 5, g.ang - half, g.ang + half); ctx.stroke(); ctx.setLineDash([]);
+        // 弧の両端の短い刻み
+        for (const e2 of [-half, half]) { const ca = Math.cos(g.ang + e2), sa2 = Math.sin(g.ang + e2); ctx.beginPath(); ctx.moveTo(cx + ca * (R + 2), cy + sa2 * (R + 2)); ctx.lineTo(cx + ca * (R + 10), cy + sa2 * (R + 10)); ctx.stroke(); }
+        // (b) 方角の光条: 中心の方角へ細い線 (リングの外へ) + 種類ごとの記号
+        ctx.globalAlpha = 0.85 * pulse * g.fade; ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.moveTo(cx + c * (R + 5), cy + s2 * (R + 5)); ctx.lineTo(cx + c * (R + 24), cy + s2 * (R + 24)); ctx.stroke();
+        if (g.kind === 'msl') { // 内向きの山形が流れる (向かってくる)
+            for (let k = 0; k < 3; k++) { const f = ((tSec * 1.6) + k / 3) % 1, r0 = R + 24 - f * 18; ctx.globalAlpha = (1 - f) * 0.95 * g.fade; ctx.beginPath(); ctx.moveTo(cx + c * r0 - s2 * 5, cy + s2 * r0 + c * 5); ctx.lineTo(cx + c * (r0 - 5), cy + s2 * (r0 - 5)); ctx.lineTo(cx + c * r0 + s2 * 5, cy + s2 * r0 - c * 5); ctx.stroke(); }
+        } else if (g.kind === 'kin') { // 点が並んで流れる
+            for (let k = 0; k < 4; k++) { const f = ((tSec * 1.8) + k / 4) % 1; ctx.globalAlpha = (1 - f) * 0.95 * g.fade; ctx.beginPath(); ctx.arc(cx + c * (R + 24 - f * 18), cy + s2 * (R + 24 - f * 18), 1.7, 0, Math.PI * 2); ctx.fill(); }
+        } else if (g.kind === 'sig') { // AI: 小さなひし形
+            ctx.globalAlpha = (0.6 + 0.35 * g.conf) * g.fade; const rd = R + 28; ctx.beginPath(); ctx.moveTo(cx + c * (rd + 4), cy + s2 * (rd + 4)); ctx.lineTo(cx + c * rd - s2 * 3.5, cy + s2 * rd + c * 3.5); ctx.lineTo(cx + c * (rd - 4), cy + s2 * (rd - 4)); ctx.lineTo(cx + c * rd + s2 * 3.5, cy + s2 * rd - c * 3.5); ctx.closePath(); ctx.stroke();
+        } else { // ロック・艦載機・ビーム: 外向きの山形が流れる
+            for (let k = 0; k < 3; k++) { const f = ((tSec * (hot ? 2.2 : 1.4)) + k / 3) % 1, r0 = R + 8 + f * 18; ctx.globalAlpha = (1 - f) * 0.95 * g.fade; ctx.beginPath(); ctx.moveTo(cx + c * r0 - s2 * 5, cy + s2 * r0 + c * 5); ctx.lineTo(cx + c * (r0 + 5), cy + s2 * (r0 + 5)); ctx.lineTo(cx + c * r0 + s2 * 5, cy + s2 * r0 - c * 5); ctx.stroke(); }
         }
-        ctx.globalAlpha = 0.85 * g.fade; ctx.textAlign = 'center';
-        ctx.fillText(g.label ? g.label : (THR_TAG[g.kind] || ''), cx + c * (R + 34), cy + s2 * (R + 34));
+        // (c) 名札: 括弧つき (名前 + 方位°)
+        const deg = ((Math.round(g.ang * 180 / Math.PI + 90) % 360) + 360) % 360;
+        screenTag(ctx, cx + c * (R + 46), cy + s2 * (R + 46), g.label ? g.label : (THR_TAG[g.kind] || ''), String(deg).padStart(3, '0') + '°', col, 0.92 * g.fade, c > 0.35 ? 'left' : c < -0.35 ? 'right' : 'center');
     }
     // (3) 艦首: リングの内側に小さな三角。引いて艦が数px以下になったら中心にも小さな艦影の印
     if (camera.zoom * player.radius * 5.6 < 14) {
