@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261120d">
+    <link rel="stylesheet" href="style.css?v=20261120e">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -778,27 +778,35 @@
         <!-- Mobile Menu Modal -->
         <div id="mobile-menu-modal" class="hidden">
             <div class="mm-box">
-                <div class="mm-header">COMMAND</div>
-                <div class="mm-info">
-                    <div id="mm-sector" class="mm-row">セクター: 1</div>
-                    <div id="mm-credits" class="mm-row">クレジット: 0 SCR</div>
+                <!-- 第172弾 (オーナー「メニューが縦長で使いづらい・進行停止で画面全面に」): 全画面・グループ分けのグリッド・開いている間は進行停止 -->
+                <div class="mm-top">
+                    <div class="mm-header">COMMAND</div>
+                    <div class="mm-info"><span id="mm-sector" class="mm-row">セクター: 1</span><span id="mm-credits" class="mm-row">クレジット: 0 SCR</span><span class="mm-pause">◼ 進行停止中</span></div>
+                    <button class="btn btn-primary mm-resume" id="mm-close">▶ 再開</button>
                 </div>
-                <div class="mm-btns">
-                    <button class="btn btn-small" id="mm-briefing" onclick="showBriefing(true)">作戦要領 (遊び方)</button>
-                    <button class="btn btn-small" id="btn-higgs-view" onclick="toggleHiggsView()">ヒッグス表示: ON</button>
-                    <button class="btn btn-small" id="mm-autoatk" onclick="toggleAutoAttack()" title="有視界に入った敵を自動で撃つ">自動攻撃: ON</button>
-                    <button class="btn btn-small com-only" id="btn-think-log" onclick="toggleThinkLog()">思考ログ: ON</button>
-                    <button class="btn btn-small com-only" id="btn-com-exit" onclick="exitComDemo()">COM対戦を終えてロビーへ</button>
-                    <button class="btn btn-small" id="mm-fullscreen" onclick="toggleFullscreen()">全画面 切替</button>
-                    <label class="btn btn-small" style="display:inline-flex;gap:6px;align-items:center">SE <input id="sfx-vol-m" type="range" min="0" max="100" step="5" style="width:80px"><span id="sfx-vol-m-l"></span></label>
-                    <button class="btn btn-small" id="mm-bgmset" onclick="toggleBgmSet()" title="BGMの版を切り替える (第2版が気に入らなければ第1版へ戻せる)">BGM: 第2版</button>
-                    <button class="btn btn-small" id="mm-sfxset" onclick="toggleSfxSet()" title="効果音の版を切り替える (第3版が気に入らなければ第2版へ戻せる)">SE: 第3版</button>
-                    <label class="btn btn-small" style="display:inline-flex;gap:6px;align-items:center">BGM <input id="bgm-vol-m" type="range" min="0" max="100" step="5" style="width:80px"><span id="bgm-vol-m-l"></span></label>
-                    <button class="btn btn-small" id="mm-fps" onclick="toggleFpsDisplay()">FPS表示: OFF</button>
-                    <button class="btn btn-small" id="mm-debug" onclick="toggleDebugMode()">デバッグモード: OFF</button>
-                    <button class="btn btn-primary btn-small" id="mm-save">データ保存</button>
-                    <button class="btn btn-danger btn-small" id="mm-reset">リセット</button>
-                    <button class="btn btn-small" id="mm-close">閉じる</button>
+                <div class="mm-body">
+                    <section class="mm-sec"><h4>試合</h4><div class="mm-grid">
+                        <button class="btn btn-small" id="mm-briefing" onclick="showBriefing(true)">作戦要領 (遊び方)</button>
+                        <button class="btn btn-small" id="mm-autoatk" onclick="toggleAutoAttack()" title="有視界に入った敵を自動で撃つ">自動攻撃: ON</button>
+                        <button class="btn btn-small" id="mm-fullscreen" onclick="toggleFullscreen()">全画面 切替</button>
+                        <button class="btn btn-small com-only" id="btn-think-log" onclick="toggleThinkLog()">思考ログ: ON</button>
+                        <button class="btn btn-small com-only" id="btn-com-exit" onclick="exitComDemo()">COM対戦を終えてロビーへ</button>
+                    </div></section>
+                    <section class="mm-sec"><h4>表示</h4><div class="mm-grid">
+                        <button class="btn btn-small" id="btn-higgs-view" onclick="toggleHiggsView()">ヒッグス表示: ON</button>
+                        <button class="btn btn-small" id="mm-fps" onclick="toggleFpsDisplay()">FPS表示: OFF</button>
+                    </div></section>
+                    <section class="mm-sec"><h4>音</h4><div class="mm-grid">
+                        <label class="btn btn-small mm-slider">SE <input id="sfx-vol-m" type="range" min="0" max="100" step="5"><span id="sfx-vol-m-l"></span></label>
+                        <label class="btn btn-small mm-slider">BGM <input id="bgm-vol-m" type="range" min="0" max="100" step="5"><span id="bgm-vol-m-l"></span></label>
+                        <button class="btn btn-small" id="mm-sfxset" onclick="toggleSfxSet()" title="効果音の版を切り替える (第3版が気に入らなければ第2版へ戻せる)">SE: 第3版</button>
+                        <button class="btn btn-small" id="mm-bgmset" onclick="toggleBgmSet()" title="BGMの版を切り替える (第2版が気に入らなければ第1版へ戻せる)">BGM: 第2版</button>
+                    </div></section>
+                    <section class="mm-sec"><h4>開発・データ</h4><div class="mm-grid">
+                        <button class="btn btn-small" id="mm-debug" onclick="toggleDebugMode()">デバッグモード: OFF</button>
+                        <button class="btn btn-primary btn-small" id="mm-save">データ保存</button>
+                        <button class="btn btn-danger btn-small" id="mm-reset">リセット</button>
+                    </div></section>
                 </div>
             </div>
         </div>
@@ -808,9 +816,10 @@
 
     <!-- 第51弾: デバッグモード (オプション → デバッグモード。通常プレイ・COM対戦の両方) -->
     <div id="debug-panel" style="display:none">
-        <div class="dbg-head"><b>DEBUG</b><small>保存は無効</small><button onclick="toggleDebugMode(false)">✕</button></div>
+        <div class="dbg-head"><b>DEBUG</b><small>進行停止中・保存は無効</small><span class="dbg-sp"></span><button class="dbg-resume" onclick="dbgShow(false)">▶ 再開 (パネルを閉じる)</button><button class="dbg-off" onclick="toggleDebugMode(false)">デバッグ終了</button></div>
         <div class="dbg-body" id="dbg-body"></div>
     </div>
+    <button id="debug-chip" style="display:none" onclick="dbgShow(true)">◈ DEBUG パネルを開く</button>
 
     <!-- §4-4: シグネチャ解析パネル (右列 索敵 → SIG一覧 で開く) -->
     <div id="sig-analysis-panel" style="display:none; position:fixed; left:50%; top:12%; transform:translateX(-50%); width:340px; max-height:74vh; background:rgba(0,8,18,0.97); border:1px solid #00ffaa; border-radius:6px; padding:12px; z-index:600; font-family:'Orbitron',monospace; font-size:9px; color:#aaffdd; box-shadow:0 0 24px rgba(0,255,170,0.18); display:none; flex-direction:column;">
@@ -885,7 +894,7 @@
         });
     })();
     </script>
-    <script src="game.js?v=20261120d"></script>
+    <script src="game.js?v=20261120e"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
