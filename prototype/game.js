@@ -20432,7 +20432,7 @@ let _hitStop = 0; // 奇襲命中時のヒットストップ (ロジックだけ
 function gameLoop() {
     try {
         if (_hitStop > 0) _hitStop--;
-        else if (!gamePaused && !userPaused && !_orientPaused && !_draft) { // 第32弾: 部品を選んでいる間は止める
+        else if (!gamePaused && !userPaused && !_uiPause && !_orientPaused && !_draft) { // 第32弾: 部品を選んでいる間は止める
             // 第22弾: 倍速 = 1フレームにn回ロジックを進める。重くてフレームが詰まる時は打ち切る (固まらない)
             _speedAcc += gameSpeed;
             const t0 = performance.now();
@@ -21262,6 +21262,7 @@ document.getElementById('btn-db-dock')?.addEventListener('click', () => {
 
 // ═══ 第13弾: 作戦要領 (初回出撃時・メニューから) — 表示中はゲームを止める ═══
 let gamePaused = false;
+let _uiPause = false; // 第172弾: メニュー・デバッグパネルが開いている間は進行停止
 // 第36弾: 一時停止ボタン (倍速の隣)。止めている間も地図を見る・指示を出すことはできる
 let userPaused = false;
 function togglePause(on) {
@@ -21274,6 +21275,12 @@ function togglePause(on) {
     updateZoomFab();
 }
 document.getElementById('btn-pause')?.addEventListener('click', () => togglePause());
+(function initUiPause() { // 第172弾: メニュー・デバッグパネルが開いている間は進行を止める
+    const m = document.getElementById('mobile-menu-modal'), d = document.getElementById('debug-panel'); if (!m || !d) return;
+    const f = () => { _uiPause = !m.classList.contains('hidden') || d.style.display === 'flex'; };
+    new MutationObserver(f).observe(m, { attributes: true, attributeFilter: ['class'] });
+    new MutationObserver(f).observe(d, { attributes: true, attributeFilter: ['style'] });
+})();
 function showBriefing(fromMenu) {
     document.getElementById('briefing-overlay')?.classList.remove('hidden');
     document.getElementById('mobile-menu-modal')?.classList.add('hidden');
@@ -21294,10 +21301,16 @@ const _dbgBoss = () => enemies.find(e => e.type !== 'fighter' && e.hp > 0 && !e.
 function toggleDebugMode(on) {
     debugMode = on === undefined ? !debugMode : !!on;
     const b = document.getElementById('mm-debug'); if (b) { b.textContent = 'デバッグモード: ' + (debugMode ? 'ON' : 'OFF'); b.classList.toggle('btn-warn-on', debugMode); }
-    const p = document.getElementById('debug-panel'); if (p) p.style.display = debugMode ? 'flex' : 'none';
     if (debugMode && matchRec && matchRec.meta) matchRec.meta.dbg = true; // デバッグの操作が入った試合は、プレイ画面のリプレイで同じ試合にならない
-    if (debugMode) { _dbgBuild(); document.getElementById('mobile-menu-modal')?.classList.add('hidden'); logMessage('DEBUG: デバッグモードON — 保存は無効 (戦歴・クレジットに残らない)', 'warning-msg'); }
-    else { _dbgGod = false; _dbgFreeze = false; }
+    if (debugMode) { _dbgBuild(); document.getElementById('mobile-menu-modal')?.classList.add('hidden'); dbgShow(true); logMessage('DEBUG: デバッグモードON — 保存は無効 (戦歴・クレジットに残らない)', 'warning-msg'); }
+    else { _dbgGod = false; _dbgFreeze = false; dbgShow(false); }
+}
+// 第172弾 (オーナー「デバッグが使いづらい・進行停止で画面全面をメニューに」): パネルは全画面・開いている間は進行停止。閉じてもデバッグ自体は続く (右上のチップから開き直す)
+function dbgShow(on) {
+    const p = document.getElementById('debug-panel'), chip = document.getElementById('debug-chip');
+    if (p) p.style.display = on && debugMode ? 'flex' : 'none';
+    if (chip) chip.style.display = debugMode && !(on && debugMode) ? 'block' : 'none';
+    if (on && debugMode) _dbgBuild();
 }
 function _dbgOpts(list, lab) { return list.map(k => '<option value="' + k + '">' + (lab ? lab(k) : k) + '</option>').join(''); }
 function _dbgBuild() {
