@@ -2788,7 +2788,7 @@ canvas.addEventListener('mousedown', (e) => {
         }
 
         if (pendingLure) { const ty = pendingLure; pendingLure = null; deployDrone(ty, worldX, worldY); return; } // 第21弾: 囮の射出地点
-        { const _mcr = canvas.getBoundingClientRect(); if (tryTapBlip(e.clientX - _mcr.left, e.clientY - _mcr.top) || tryTapCircle(e.clientX - _mcr.left, e.clientY - _mcr.top)) return; }
+        { const _mcr = canvas.getBoundingClientRect(); if (tryTapSignals(e.clientX - _mcr.left, e.clientY - _mcr.top, e.clientX, e.clientY)) return; }
         // Find clicked enemy
         let clickedEnemy = pickEnemyAt(worldX, worldY, en => en.radius * 2 + 10 / camera.zoom);
 
@@ -3003,7 +3003,7 @@ canvas.addEventListener('touchend', (e) => {
     if (!touch.moved && !touch.waypointFired && !touch.isPinching && elapsed < TOUCH_WAYPOINT_DELAY && player) {
         const _tcr = canvas.getBoundingClientRect();
         { const _hw = screenToWorld(touch.startX, touch.startY); if (tryFireHackPending(_hw.x, _hw.y)) return; } // 第89弾: 電子戦のハック波
-        if (tryTapBlip(touch.startX - _tcr.left, touch.startY - _tcr.top) || tryTapCircle(touch.startX - _tcr.left, touch.startY - _tcr.top)) return;
+        if (tryTapSignals(touch.startX - _tcr.left, touch.startY - _tcr.top, touch.startX, touch.startY)) return;
         const { x: worldX, y: worldY } = screenToWorld(touch.startX, touch.startY);
         // タッチはロックオン判定を広く取る（指で画面を押すと視認が難しいため）
         const tapRadius = en => en.radius * 6 + 20;
@@ -6234,6 +6234,7 @@ class Ship {
         const zc = 1 / camera.zoom;
         const isLock = player.targetEntity === this;
         if (!isLock) { // 第49弾: ロックできる他の目標は細い印だけ (タップで切り替え)
+            this._lockT0 = 0;
             if (!this.inVision || Math.hypot(this.x - player.x, this.y - player.y) > 7000) return;
             const lr0 = Math.max(this.radius * 2.6 + 4, 12 * zc), b0 = lr0 * 0.4;
             ctx.save(); ctx.translate(this.x, this.y); ctx.strokeStyle = 'rgba(255,110,110,0.40)'; ctx.lineWidth = 1 * zc;
@@ -6244,32 +6245,16 @@ class Ship {
         if (!full && !(this.contactLife > 0)) return;
         const lx = full ? this.x : this.displayX, ly = full ? this.y : this.displayY;
         const manual = !!player.manualTarget;
-        const t = Date.now() / 1000, pulse = 1 + 0.06 * Math.sin(t * 5);
-        const lr = Math.max(this.radius * 3.2 + 6, 16 * zc) * pulse;
-        const col = full ? (manual ? 'rgba(255,90,90,0.95)' : 'rgba(0,255,170,0.9)') : 'rgba(255,170,0,0.9)';
-        ctx.save();
-        ctx.translate(lx, ly);
-        ctx.strokeStyle = col;
-        ctx.lineWidth = (manual ? 2.2 : 1.6) * zc;
-        if (!full) ctx.setLineDash([6 * zc, 6 * zc]);
-        const b = lr * 0.55; // コーナーブラケットの腕の長さ
-        for (let q = 0; q < 4; q++) {
-            const sx = (q & 1) ? 1 : -1;
-            const sy = (q & 2) ? 1 : -1;
-            ctx.beginPath();
-            ctx.moveTo(sx * lr, sy * (lr - b));
-            ctx.lineTo(sx * lr, sy * lr);
-            ctx.lineTo(sx * (lr - b), sy * lr);
-            ctx.stroke();
-        }
-        ctx.setLineDash([]);
-        if (manual) { // 手動ロックは外側をゆっくり回る十字 (自動と見分ける)
-            ctx.globalAlpha = 0.6; ctx.rotate(t * 0.8);
-            for (let q = 0; q < 4; q++) { ctx.rotate(Math.PI / 2); ctx.beginPath(); ctx.moveTo(lr * 1.18, 0); ctx.lineTo(lr * 1.42, 0); ctx.stroke(); }
-        }
-        ctx.restore();
+        if (!this._lockT0) this._lockT0 = Date.now(); // 第166弾: 獲得の演出の起点
+        const lr = Math.max(this.radius * 3.0 + 6, 17 * zc);
+        // 第166弾 (オーナー「ロックオンと分かりづらい・ダサい」): 手動=赤 / 自動=緑 / 推定=琥珀の破線。獲得時は縮んで合わさる
+        const col = full ? (manual ? '#ff5a5a' : '#2dffb0') : '#ffb000';
+        drawLockOnMark(ctx, lx, ly, lr, col, this._lockT0, full ? 'visual' : 'est', true);
+        // 目標へ向かう細い照準線 (自艦 → 目標。距離の感覚)
+        { const dx = lx - player.x, dy = ly - player.y, dd = Math.hypot(dx, dy);
+          if (dd > 400) { ctx.save(); ctx.globalAlpha = 0.22; ctx.strokeStyle = col; ctx.lineWidth = 1 * zc; ctx.setLineDash([3 * zc, 9 * zc]); ctx.beginPath(); ctx.moveTo(player.x + dx / dd * 120 * zc, player.y + dy / dd * 120 * zc); ctx.lineTo(lx - dx / dd * lr * 1.5, ly - dy / dd * lr * 1.5); ctx.stroke(); ctx.restore(); } }
         const d0 = Math.round(Math.hypot(lx - player.x, ly - player.y) / 100) * 100;
-        queueTag(lx, ly - lr * 1.5, (manual ? 'LOCK ' : '自動 ') + (_ENT_JP[this.type] || '敵'), (full ? '目視 ' : '推定 ') + d0 + 'u', full ? (manual ? '#ff6a6a' : '#00ffaa') : '#ffb000', 'top', 1);
+        queueTag(lx, ly - lr * 1.7, (manual ? '▶ LOCK ON ' : '▶ 自動 ') + (_ENT_JP[this.type] || '敵'), (full ? '目視 ' : '推定 ') + fmtDist(d0) + 'u', col, 'top', 1);
     }
 
     // センサー痕跡(不確実性サークル + AIロックオン候補) — フォグ/ヒッグスの「手前」に描く専用パス
@@ -10860,12 +10845,13 @@ function checkPassiveDetection() {
 const UNTRACKED_LINES = 2, TRACK_LINES_MAX = 8, TRACK_LINE_MERGE = 400; // 第18弾: 表示の整理 (オーナー合意 2026-10-25)
 function drawPassiveBearings(ctx) {
     const invZoom = 1 / camera.zoom;
-    // 追跡していない信号: 最新の方位を短い破線で1本だけ (「何かがあっちに居る」)。
+    // 追跡していない信号: 最新の方位を1本ずつ (「何かがあっちに居る」)。
     // 第18弾: 線を引くのは強い方から2つだけ (艦載機が群がると破線が飛び交って読めなかった)。残りは自艦リングの点で示す
+    // 第166弾: 線は信号ごとの識別色 (リングの点・名札と同じ)・距離の目盛りと端の番号札・聴音局 (ノード/コロニー) 起点の線は起点に印と名前
     const _seen = {}, _latest = [];
     for (let i = passiveBearings.length - 1; i >= 0; i--) {
         const b = passiveBearings[i];
-        if (b.life <= 0 || b.sourceId === lockedSignalId || _seen[b.sourceId] || b.relay) continue;
+        if (b.life <= 0 || b.sourceId === lockedSignalId || _seen[b.sourceId] || b.intel) continue;
         _seen[b.sourceId] = true;
         _latest.push(b);
     }
@@ -10873,16 +10859,25 @@ function drawPassiveBearings(ctx) {
     for (let k = 0; k < Math.min(UNTRACKED_LINES, _latest.length); k++) {
         const b = _latest[k];
         const vis = (b.life / b.maxLife) * Math.min(1, (b.maxLife - b.life) / 45);
-        // 第40弾: 根元が濃く先へ行くほど消える細い線 (3段)・先端に小さな菱形 (旧: 一様な破線)
+        const idc = sigColor(b.sourceId);
         ctx.save();
-        ctx.strokeStyle = b.cs || (b.cs = 'rgb(' + b.color + ')'); // 色文字列は1回だけ作る (GC抑制)
-        ctx.lineWidth = 1.2 * invZoom;
-        const L0 = b.range * 0.35, c0 = Math.cos(b.angle), s0 = Math.sin(b.angle);
+        ctx.strokeStyle = idc; ctx.fillStyle = idc;
+        ctx.lineWidth = 1.3 * invZoom;
+        const L0 = b.relay ? Math.min(b.range, 9000) * 0.6 : b.range * 0.35, c0 = Math.cos(b.angle), s0 = Math.sin(b.angle);
         for (let q = 0; q < 3; q++) {
-            ctx.globalAlpha = [0.5, 0.28, 0.12][q] * vis;
+            ctx.globalAlpha = [0.6, 0.36, 0.16][q] * vis;
             ctx.beginPath(); ctx.moveTo(b.ox + c0 * L0 * q / 3, b.oy + s0 * L0 * q / 3); ctx.lineTo(b.ox + c0 * L0 * (q + 1) / 3, b.oy + s0 * L0 * (q + 1) / 3); ctx.stroke();
         }
+        drawRangeTicks(ctx, b.ox, b.oy, b.angle, L0, 0.5 * vis, invZoom);
+        // 起点の印: 聴音局 (ノード/コロニー) は輪＋名前 / 自艦起点は小さな菱形
+        const dd = 5 * invZoom;
+        ctx.globalAlpha = 0.85 * vis;
+        if (b.relay) { ctx.lineWidth = 1.4 * invZoom; ctx.beginPath(); ctx.arc(b.ox, b.oy, dd * 1.6, 0, Math.PI * 2); ctx.stroke(); ctx.beginPath(); ctx.arc(b.ox, b.oy, dd * 0.5, 0, Math.PI * 2); ctx.fill(); }
+        else { ctx.beginPath(); ctx.moveTo(b.ox, b.oy - dd); ctx.lineTo(b.ox + dd, b.oy); ctx.lineTo(b.ox, b.oy + dd); ctx.lineTo(b.ox - dd, b.oy); ctx.closePath(); ctx.fill(); }
         ctx.restore();
+        // 線の先に番号札 (どの信号の線か) — 聴音局起点なら起点にも「聴音局」
+        queueTag(b.ox + c0 * L0, b.oy + s0 * L0, 'SIG-' + sigNo(b.sourceId), (b.relay ? null : (_RX_WORD[b.sensor] || null)), idc, 'right', 0.85 * vis);
+        if (b.relay) queueTag(b.ox, b.oy, b.sensorLabel || '聴音局', null, idc, 'right', 0.7 * vis);
     }
     // 追跡中の信号: 記録した方位線 (第15弾)。線が交わる所に相手が居る — 交わらなければ相手は動いている。
     // 第18弾: 近い場所(400u以内)で聴いた線は新しい1本で代表させ、最大8本。長さは推定位置の少し先まで
@@ -10898,13 +10893,14 @@ function drawPassiveBearings(ctx) {
         pick.push(o);
     }
     ctx.save();
+    const _trkCol = sigColor(lockedSignalId);
     for (let k = pick.length - 1; k >= 0; k--) {
         const o = pick[k];
         const rec = Math.exp(-(now - o.f) / TMA_TAU);
         const newest = k === 0;
         const L = fx ? Math.hypot(fx.x - o.ox, fx.y - o.oy) + Math.max(600, fx.r) : passiveRange() * 0.9;
         const base = (newest ? 0.8 : 0.12 + 0.4 * rec);
-        ctx.strokeStyle = o.cs || (o.cs = 'rgb(' + (o.c || '0,255,170') + ')'); ctx.fillStyle = ctx.strokeStyle;
+        ctx.strokeStyle = _trkCol; ctx.fillStyle = _trkCol; // 第166弾: 識別色 (旧: 観測点ごとの色)
         ctx.lineWidth = (newest ? 1.7 : 1) * invZoom;
         // 第40弾: 根元が濃く推定位置の先で消える (2段)。観測点は小さな菱形 (どこで聴いたか)
         const c0 = Math.cos(o.ang), s0 = Math.sin(o.ang), Lm = L * 0.7;
@@ -10912,6 +10908,12 @@ function drawPassiveBearings(ctx) {
         ctx.globalAlpha = base * 0.45; ctx.beginPath(); ctx.moveTo(o.ox + c0 * Lm, o.oy + s0 * Lm); ctx.lineTo(o.ox + c0 * L, o.oy + s0 * L); ctx.stroke();
         const d = 4 * invZoom;
         ctx.globalAlpha = base; ctx.beginPath(); ctx.moveTo(o.ox, o.oy - d); ctx.lineTo(o.ox + d, o.oy); ctx.lineTo(o.ox, o.oy + d); ctx.lineTo(o.ox - d, o.oy); ctx.closePath(); ctx.fill();
+        // 第166弾 (オーナー「ノードの線は距離感が分からない」): 距離の目盛り (起点からの距離) と、聴音局 (自艦以外の起点) の印・名前・推定位置までの距離
+        drawRangeTicks(ctx, o.ox, o.oy, o.ang, L, base * 0.8, invZoom);
+        if (o.src) {
+            ctx.lineWidth = 1.4 * invZoom; ctx.globalAlpha = base; ctx.beginPath(); ctx.arc(o.ox, o.oy, d * 2, 0, Math.PI * 2); ctx.stroke();
+            if (newest) queueTag(o.ox, o.oy, o.src === 'post' ? '聴音局' : '哨戒機', fmtDist(fx ? Math.hypot(fx.x - o.ox, fx.y - o.oy) : L) + 'u', _trkCol, 'right', 0.85);
+        }
     }
     ctx.restore();
 }
@@ -10962,6 +10964,67 @@ function drawIdentifiedTerrain(ctx, vpX, vpY, vpW, vpH) {
 // 低精度=赤大円 / 中=橙 / 高=緑 / 超高=シアン
 // 第26弾 (オーナー指示): 方角と距離がある程度割り出せた信号は全部「この円の中のどこか」で示す (追跡中以外も・複数同時)。
 // 円の中心に目標が居るわけではない — 中心の十字は描かない。追跡中の信号だけ針路の矢印と見越し点を足す
+// ═══ 第166弾 (オーナー「複数のシグネチャがどれがどれか分からない・ロックオンが分かりづらくダサい・ノードの線は距離感が分からない」): 識別色・距離目盛り・ロック照準 ═══
+// 信号ごとに「識別色」を割り当てる (番号で固定・8色)。リングの点・方位線・推定円・名札が全部同じ色になるので、どの線がどの信号か目で追える。帯域は別の記号 (リングの弧・言葉) で示す
+const SIG_PAL = ['#ff8a5c', '#4fd8ff', '#ffd54a', '#b894ff', '#58ffb4', '#ff6fc8', '#a6f04e', '#ffa63a'];
+function sigColor(sid) { const n = parseInt(sigNo(sid), 10) || 0; return SIG_PAL[(n + SIG_PAL.length - 1) % SIG_PAL.length]; }
+function sigColorRgb(sid) { const h = sigColor(sid); return parseInt(h.slice(1, 3), 16) + ',' + parseInt(h.slice(3, 5), 16) + ',' + parseInt(h.slice(5, 7), 16); }
+function fmtDist(d) { return d >= 1000 ? (d / 1000 >= 10 ? Math.round(d / 1000) : Math.round(d / 100) / 10) + 'k' : Math.round(d / 10) * 10 + ''; }
+// 方位線の上の距離目盛り: 起点から終点まで、今の縮尺で画面上60px以上あく切りのよい距離ごとに小さな横線、2つおきに距離の数字
+const _TICK_STEPS = [100, 250, 500, 1000, 2000, 5000, 10000, 20000];
+function drawRangeTicks(ctx, ox, oy, ang, L, alpha, inv, fx, fy) {
+    let step = _TICK_STEPS[_TICK_STEPS.length - 1];
+    for (const st of _TICK_STEPS) if (st * camera.zoom >= 58) { step = st; break; }
+    const c0 = Math.cos(ang), s0 = Math.sin(ang), nx = -s0, ny = c0, h = 4 * inv;
+    ctx.save(); ctx.globalAlpha = alpha; ctx.lineWidth = 1 * inv; ctx.font = (8.5 * inv) + 'px Orbitron, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.beginPath();
+    let k = 1; const lab = [];
+    for (let d = step; d < L && k < 14; d += step, k++) {
+        const px = ox + c0 * d, py = oy + s0 * d, big = k % 2 === 0;
+        const hh = big ? h * 1.6 : h;
+        ctx.moveTo(px - nx * hh, py - ny * hh); ctx.lineTo(px + nx * hh, py + ny * hh);
+        if (big) lab.push([px, py, d]);
+    }
+    ctx.stroke();
+    for (const q of lab) ctx.fillText(fmtDist(q[2]), q[0] + nx * 7 * inv + c0 * 2 * inv, q[1] + ny * 7 * inv);
+    ctx.restore();
+}
+// SF調のロック照準 (ワールド座標・画面上一定の大きさ)。獲得の瞬間は外側から縮んで合わさり (0.45秒)、
+// その後は 欠けた輪 + 隅の括弧 + 回る走査弧 + 四方の目盛り。state: 'visual' (実線) / 'est' (破線)
+function drawLockOnMark(ctx, x, y, r, col, t0, state, spin) {
+    const now = Date.now(), age = Math.min(1, (now - t0) / 450), ease = 1 - Math.pow(1 - age, 3);
+    const k = 1 + (1 - ease) * 1.1, rr = r * k, zc = 1 / camera.zoom, tt = now / 1000;
+    ctx.save(); ctx.translate(x, y); ctx.strokeStyle = col; ctx.fillStyle = col;
+    if (state === 'est') ctx.setLineDash([7 * zc, 5 * zc]);
+    // 隅の括弧 (獲得の瞬間は大きく開いて縮む)
+    ctx.globalAlpha = 0.4 + 0.6 * ease; ctx.lineWidth = 3.4 * zc;
+    const b = rr * 0.42;
+    for (let q = 0; q < 4; q++) { const sx = (q & 1) ? 1 : -1, sy = (q & 2) ? 1 : -1; ctx.beginPath(); ctx.moveTo(sx * rr, sy * (rr - b)); ctx.lineTo(sx * rr, sy * rr); ctx.lineTo(sx * (rr - b), sy * rr); ctx.stroke(); }
+    ctx.setLineDash([]);
+    // 欠けた輪 (四方に切れ目)
+    ctx.globalAlpha = 0.8 * ease; ctx.lineWidth = 2 * zc;
+    const ri = rr * 0.78;
+    for (let q = 0; q < 4; q++) { const a0 = q * Math.PI / 2 + Math.PI / 4; ctx.beginPath(); ctx.arc(0, 0, ri, a0 - 0.52, a0 + 0.52); ctx.stroke(); }
+    // 回る走査弧 (2本・逆回り)
+    if (spin !== false) {
+        ctx.globalAlpha = 1 * ease; ctx.lineWidth = 3.2 * zc;
+        const ro = rr * 1.2;
+        ctx.beginPath(); ctx.arc(0, 0, ro, tt * 1.6, tt * 1.6 + 0.7); ctx.stroke();
+        ctx.beginPath(); ctx.arc(0, 0, ro, tt * 1.6 + Math.PI, tt * 1.6 + Math.PI + 0.7); ctx.stroke();
+        ctx.globalAlpha = 0.5 * ease; ctx.lineWidth = 1 * zc;
+        ctx.beginPath(); ctx.arc(0, 0, ri * 0.55, -tt * 2.2, -tt * 2.2 + 1.1); ctx.stroke();
+    }
+    // 四辺の中央に内向きの小さな三角 (獲得したことが一目で分かる印)
+    ctx.globalAlpha = ease; const tr = 6 * zc;
+    for (let q = 0; q < 4; q++) { ctx.save(); ctx.rotate(q * Math.PI / 2); ctx.beginPath(); ctx.moveTo(rr * 1.08 + tr, 0); ctx.lineTo(rr * 1.08 + tr * 2.2, -tr); ctx.lineTo(rr * 1.08 + tr * 2.2, tr); ctx.closePath(); ctx.fill(); ctx.restore(); }
+    // 中央の小さな十字 (点滅)
+    ctx.globalAlpha = (0.5 + 0.4 * Math.sin(tt * 7)) * ease; ctx.lineWidth = 1.2 * zc;
+    const cs = rr * 0.16;
+    ctx.beginPath(); ctx.moveTo(-cs, 0); ctx.lineTo(-cs * 0.35, 0); ctx.moveTo(cs * 0.35, 0); ctx.lineTo(cs, 0); ctx.moveTo(0, -cs); ctx.lineTo(0, -cs * 0.35); ctx.moveTo(0, cs * 0.35); ctx.lineTo(0, cs); ctx.stroke();
+    // 獲得の瞬間の閃光の輪
+    if (age < 1) { ctx.globalAlpha = (1 - age) * 0.8; ctx.lineWidth = 3 * zc; ctx.beginPath(); ctx.arc(0, 0, rr * (0.6 + 0.9 * age), 0, Math.PI * 2); ctx.stroke(); }
+    ctx.restore();
+}
 const _circScreen = []; // 第27弾: 推定円のスクリーン座標 {sid, cx, cy, r} (タップで追跡)
 function drawTriangulationCircle(ctx) {
     _circScreen.length = 0;
@@ -11001,33 +11064,36 @@ function _drawEstCircle(ctx, sid, sa, locked) {
     ctx.save();
     // 第40弾: 塗りはごく薄く・縁は 未追跡=細い破線 / 追跡中=実線＋外側をゆっくり回る4つのかぎ (照準のように) ・四方の目盛り
     ctx.globalAlpha = (locked ? 0.08 : 0.05) * fade;
-    ctx.fillStyle = col;
+    ctx.fillStyle = sigColor(sid);
     ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = col;
+    const idc = sigColor(sid); // 第166弾: 信号ごとの識別色 (リングの点・方位線・名札と同じ)
+    ctx.strokeStyle = idc;
     if (locked) {
-        ctx.globalAlpha = 0.75 * fade; ctx.lineWidth = 1.4 * inv;
+        if (!sa._lockT0) sa._lockT0 = Date.now();
+        ctx.globalAlpha = 0.8 * fade; ctx.lineWidth = 1.6 * inv;
         ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
-        const rot = (_frameCount % 1440) / 1440 * Math.PI * 2, rb = R + 7 * inv;
-        ctx.globalAlpha = 0.95 * fade; ctx.lineWidth = 2.6 * inv;
-        for (let k = 0; k < 4; k++) { const a0 = rot + k * Math.PI / 2; ctx.beginPath(); ctx.arc(cx, cy, rb, a0 - 0.16, a0 + 0.16); ctx.stroke(); }
+        ctx.globalAlpha = fade; drawLockOnMark(ctx, cx, cy, Math.max(R * 1.04, 18 * inv), idc, sa._lockT0, 'visual', true);
     } else {
-        ctx.globalAlpha = 0.45 * fade; ctx.lineWidth = 1 * inv;
+        sa._lockT0 = 0;
+        ctx.globalAlpha = 0.55 * fade; ctx.lineWidth = 1.1 * inv;
         ctx.setLineDash([10 * inv, 9 * inv]);
         ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
         ctx.setLineDash([]);
     }
-    ctx.globalAlpha = (locked ? 0.8 : 0.5) * fade; ctx.lineWidth = 1.2 * inv;
+    // 四方の目盛りは 精度の色 (橙=広い → 水色=精密) — 円の色 (識別色) とは別に精度が読める
+    ctx.strokeStyle = col; ctx.globalAlpha = (locked ? 0.9 : 0.65) * fade; ctx.lineWidth = 2 * inv;
     ctx.beginPath();
-    for (let k = 0; k < 4; k++) { const a0 = k * Math.PI / 2, c0 = Math.cos(a0), s0 = Math.sin(a0); ctx.moveTo(cx + c0 * (R - 5 * inv), cy + s0 * (R - 5 * inv)); ctx.lineTo(cx + c0 * (R + 4 * inv), cy + s0 * (R + 4 * inv)); }
+    for (let k = 0; k < 4; k++) { const a0 = k * Math.PI / 2, c0 = Math.cos(a0), s0 = Math.sin(a0); ctx.moveTo(cx + c0 * (R - 7 * inv), cy + s0 * (R - 7 * inv)); ctx.lineTo(cx + c0 * (R + 5 * inv), cy + s0 * (R + 5 * inv)); }
     ctx.stroke();
     // 名札 (円の上): 「SIG-xx 艦n%」だけ (第28弾: 説明書きは消す — オーナー)。中心に居るとは限らない
-    { const idn = identInfo(sid); queueTag(cx, cy - R, (locked ? 'LOCK ' : '') + 'SIG-' + sigNo(sid), idn.known ? idn.short : '不明', locked ? '#ff7a6a' : col, 'top', (locked ? 1 : 0.75) * sa._fa * heldAlpha, 0, anaProgress(sa), !!sa._gate);
+    { const idn = identInfo(sid); const _dp = Math.hypot(cx - player.x, cy - player.y); queueTag(cx, cy - R, (locked ? '▶ LOCK ' : '') + 'SIG-' + sigNo(sid), (idn.known ? idn.short : '不明') + ' ' + fmtDist(_dp) + 'u', idc, 'top', (locked ? 1 : 0.8) * sa._fa * heldAlpha, 0, anaProgress(sa), !!sa._gate);
       // 第44弾 (オーナー): 解析で艦影と特定した (艦影75%以上・または確認) 信号は、推定の中心に艦のしるしを霧の上に描く (中心に居るとは限らない。囮を艦と誤認していればそのまま艦として出る)
       if (idn.known && idn.p >= 0.75 && !(inPlayerVision(cx, cy) || droneVisionSees(cx, cy))) { // 第65弾 (オーナー「有視界の中で近いのに居ない所にゴースト」): 中心が見えているのに艦のしるしは出さない
           const gs = Math.max(120, 11 * inv);
           ctx.globalAlpha = 0.9 * sa._fa; ctx.strokeStyle = '#ff6a5a'; ctx.fillStyle = 'rgba(255,106,90,0.25)'; ctx.lineWidth = 1.6 * inv; ctx.setLineDash([]);
           ctx.beginPath(); ctx.moveTo(cx + gs, cy); ctx.lineTo(cx - gs * 0.7, cy - gs * 0.6); ctx.lineTo(cx - gs * 0.4, cy); ctx.lineTo(cx - gs * 0.7, cy + gs * 0.6); ctx.closePath(); ctx.fill(); ctx.stroke();
       } }
+    if (_sigHint && _sigHint.sid === sid) { const pu = 0.6 + 0.4 * Math.sin(Date.now() / 120); ctx.globalAlpha = pu; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3 * inv; ctx.beginPath(); ctx.arc(cx, cy, R + 9 * inv, 0, Math.PI * 2); ctx.stroke(); } // 選択リストで触れている信号を強調
     if (!locked) { ctx.restore(); return; }
     ctx.globalAlpha = 0.85;
     ctx.font = 'bold ' + Math.round(11 * inv) + 'px Orbitron, monospace';
@@ -11602,6 +11668,59 @@ function tryTapCircle(sx, sy) {
     sfx('ui_tag_tap'); lockSignalTarget(best.sid); // 第49弾: 推定円もロックできる (追跡+射撃の目標)
     return true;
 }
+// 第166弾 (オーナー「複数重なると特定のシグネチャを選択しづらい」): タップ位置に当たる信号 (リングの点・推定円) を全部集める。
+// 1つならそのままロック、2つ以上なら その場に選択リスト (識別色・番号・識別・距離) を出して選ばせる。選択リストの項目を触っている間、その信号を地図で強調する
+let _sigHint = null; // {sid, t}
+function sigTapCandidates(sx, sy) {
+    const got = {};
+    for (const b of _blipScreen) {
+        if (b.sid === 'intel') continue;
+        const d = Math.hypot(b.sx - sx, b.sy - sy);
+        if (d < 34 && (!got[b.sid] || d < got[b.sid].score)) got[b.sid] = { sid: b.sid, score: d, kind: 'blip' };
+    }
+    for (const c of _circScreen) {
+        const d = Math.hypot(sx - c.cx, sy - c.cy);
+        const edge = Math.abs(d - c.r), onLabel = Math.abs(sx - c.cx) < 110 && sy > c.cy - c.r - 30 && sy < c.cy - c.r + 26;
+        const hit = edge < 24 || onLabel || d < Math.min(c.r, 44);
+        if (!hit) continue;
+        if (c.sid === lockedSignalId && !got[c.sid]) continue; // 追跡中の円は移動のタップに譲る
+        const score = onLabel ? 0 : Math.min(edge, d);
+        if (!got[c.sid] || score < got[c.sid].score) got[c.sid] = { sid: c.sid, score, kind: 'circle', cx: c.cx, cy: c.cy };
+    }
+    return Object.values(got).sort((a, b) => a.score - b.score);
+}
+function closeSigChooser() { const el = document.getElementById('sig-chooser'); if (el) el.remove(); _sigHint = null; }
+function showSigChooser(list, px, py) {
+    closeSigChooser();
+    const el = document.createElement('div'); el.id = 'sig-chooser';
+    let h = '<div class="sc-head">どの信号? (' + list.length + ')</div>';
+    for (const c of list.slice(0, 7)) {
+        const idn = identInfo(c.sid), sa = _signalAnalysis[c.sid], te = sa && sa.fix ? trackEstimate(sa, 0) : null;
+        const dist = te ? fmtDist(Math.hypot(te.x - player.x, te.y - player.y)) + 'u' : '';
+        const rad = te ? ' ±' + fmtDist(te.r) : '';
+        h += '<button data-sid="' + c.sid + '"><i style="background:' + sigColor(c.sid) + '"></i><b>SIG-' + sigNo(c.sid) + '</b><span>' + (idn.known ? idn.short : '不明') + '</span><em>' + dist + rad + '</em></button>';
+    }
+    el.innerHTML = h;
+    document.body.appendChild(el);
+    const W = el.offsetWidth || 200, H = el.offsetHeight || 120;
+    el.style.left = Math.max(6, Math.min(window.innerWidth - W - 6, px - W / 2)) + 'px';
+    el.style.top = Math.max(6, Math.min(window.innerHeight - H - 6, py - H - 14 < 6 ? py + 14 : py - H - 14)) + 'px';
+    el.addEventListener('pointerdown', ev => ev.stopPropagation());
+    el.querySelectorAll('button').forEach(btn => {
+        const sid = btn.dataset.sid;
+        btn.addEventListener('pointerenter', () => { _sigHint = { sid, t: Date.now() }; });
+        btn.addEventListener('click', ev => { ev.stopPropagation(); closeSigChooser(); sfx('ui_tag_tap'); lockSignalTarget(sid); if (typeof window.syncSigLockedBar === 'function') window.syncSigLockedBar(); });
+    });
+    setTimeout(() => { const off = ev => { if (!el.contains(ev.target)) { closeSigChooser(); document.removeEventListener('pointerdown', off, true); } }; document.addEventListener('pointerdown', off, true); }, 50);
+    sfxUI('ui_open');
+}
+function tryTapSignals(sx, sy, px, py) {
+    const list = sigTapCandidates(sx, sy);
+    if (!list.length) return false;
+    if (list.length === 1) { sfx('ui_tag_tap'); lockSignalTarget(list[0].sid); if (typeof window.syncSigLockedBar === 'function') window.syncSigLockedBar(); return true; }
+    showSigChooser(list, px, py);
+    return true;
+}
 // タップ位置の近くに受信ブリップがあればその信号を追跡する。処理したら true
 function tryTapBlip(sx, sy) {
     let best = null, bd = 30;
@@ -11653,14 +11772,16 @@ function flushTags(ctx) {
 }
 function _tagBox(ctx, x, y, w, h, wm, main, sub, col, a, prog, gate) {
     ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
-    ctx.globalAlpha = 0.9 * a; ctx.fillStyle = TAG_BG; _roundRect(ctx, x, y, w, h, 3); ctx.fill();
+    ctx.globalAlpha = 0.9 * a; ctx.fillStyle = TAG_BG; _chamfer(ctx, x, y, w, h, 4); ctx.fill();
     if (prog != null) { // 第72弾 (オーナー): 名札の黒い背景を解析の進捗バーに — 進むほど蛍光グリーンに染まる (完了で全体が光る・信号が弱くて進まない間は縞が止まる)
         const pw = Math.max(0, Math.min(1, prog)) * (w - 2);
-        if (pw > 0.5) { ctx.save(); _roundRect(ctx, x, y, w, h, 3); ctx.clip(); ctx.globalAlpha = (prog >= 0.995 ? 0.62 + Math.sin(Date.now() * 0.006) * 0.12 : 0.5) * a; ctx.fillStyle = '#2cff8a'; ctx.fillRect(x + 1, y + 1, pw, h - 2); ctx.globalAlpha = 0.5 * a; ctx.fillStyle = '#b8ffd8'; ctx.fillRect(x + 1 + Math.max(0, pw - 2), y + 1, 2, h - 2); ctx.restore(); }
-        if (gate) { ctx.save(); _roundRect(ctx, x, y, w, h, 3); ctx.clip(); ctx.globalAlpha = 0.22 * a; ctx.strokeStyle = '#ff8a5a'; ctx.lineWidth = 1; ctx.beginPath(); for (let k = -h; k < w; k += 6) { ctx.moveTo(x + k, y + h); ctx.lineTo(x + k + h, y); } ctx.stroke(); ctx.restore(); }
+        if (pw > 0.5) { ctx.save(); _chamfer(ctx, x, y, w, h, 4); ctx.clip(); ctx.globalAlpha = (prog >= 0.995 ? 0.62 + Math.sin(Date.now() * 0.006) * 0.12 : 0.5) * a; ctx.fillStyle = '#2cff8a'; ctx.fillRect(x + 1, y + 1, pw, h - 2); ctx.globalAlpha = 0.5 * a; ctx.fillStyle = '#b8ffd8'; ctx.fillRect(x + 1 + Math.max(0, pw - 2), y + 1, 2, h - 2); ctx.restore(); }
+        if (gate) { ctx.save(); _chamfer(ctx, x, y, w, h, 4); ctx.clip(); ctx.globalAlpha = 0.22 * a; ctx.strokeStyle = '#ff8a5a'; ctx.lineWidth = 1; ctx.beginPath(); for (let k = -h; k < w; k += 6) { ctx.moveTo(x + k, y + h); ctx.lineTo(x + k + h, y); } ctx.stroke(); ctx.restore(); }
     }
-    ctx.globalAlpha = a; ctx.fillStyle = col || '#5fe0c4'; ctx.fillRect(x, y + 2, 2, h - 4);
-    ctx.font = 'bold 10px Orbitron, sans-serif'; ctx.fillStyle = col || TAG_FG; ctx.fillText(main, x + 6, y + h / 2 + 0.5);
+    ctx.globalAlpha = a; ctx.fillStyle = col || '#5fe0c4'; ctx.fillRect(x, y + 2, 3, h - 4);
+    ctx.globalAlpha = 0.55 * a; ctx.strokeStyle = col || '#5fe0c4'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x + 4, y + h - 0.5); ctx.lineTo(x + w - 4, y + h - 0.5); ctx.stroke(); // 下の細い線 (SF調)
+    ctx.globalAlpha = a;
+    ctx.font = 'bold 10px Orbitron, sans-serif'; ctx.fillStyle = col || TAG_FG; ctx.fillText(main, x + 7, y + h / 2 + 0.5);
     if (sub) { ctx.font = '9px Orbitron, sans-serif'; ctx.fillStyle = TAG_SUB; ctx.fillText(sub, x + 12 + wm, y + h / 2 + 0.5); }
 }
 // 画面座標の名札 (自艦リングなど)。anchor: 'center' / 'left' (sx が左端) / 'right' (sx が右端)
@@ -11853,33 +11974,36 @@ function drawShipRing(ctx) {
     for (const sid in _sigBlips) {
         const bl = _sigBlips[sid], st = bl._st;
         const isLocked = sid === lockedSignalId;
-        const hex = S_HEX[bl.sensor] || '#cfe8e0';
+        const bandHex = S_HEX[bl.sensor] || '#cfe8e0'; // 帯域の色 (範囲の弧)
+        const hex = sigColor(sid);                       // 第166弾: 点・線・番号は信号ごとの識別色 (どの線・円と対応するかが色で分かる)
         const fade = Math.max(0.05, st.a);
         const c = Math.cos(bl.angle), s2 = Math.sin(bl.angle);
         const rr = gazeAt(bl.angle);
-        const tip = rr + (isLocked ? 14 : 9);
+        const tip = rr + (isLocked ? 15 : 11);
         { const ca = Math.cos(st.ang), sa2 = Math.sin(st.ang); _blipScreen.push({ sid, sx: cx + ca * (tip + 4), sy: cy + sa2 * (tip + 4) }); } // タップの的は範囲の中央 (往復するサインを追わなくてよい)
-        // 来ていそうな方角の範囲 (薄い弧)
+        // 来ていそうな方角の範囲 (帯域の色の弧)
         if (st.hw > 0.035) {
-            ctx.globalAlpha = fade * (isLocked ? 0.35 : 0.2); ctx.strokeStyle = hex; ctx.lineWidth = isLocked ? 4 : 3;
+            ctx.globalAlpha = fade * (isLocked ? 0.5 : 0.3); ctx.strokeStyle = bandHex; ctx.lineWidth = isLocked ? 4 : 3;
             ctx.beginPath(); ctx.arc(cx, cy, rr + 5, st.ang - st.hw, st.ang + st.hw); ctx.stroke();
         }
-        ctx.globalAlpha = fade * (isLocked ? 1 : 0.75);
+        // 第166弾: 点を「外向きの山形 ▲」に・大きく・識別色。細い導線 → 山形 → 番号札 (追跡中は大きな札)
+        ctx.globalAlpha = fade * (isLocked ? 1 : 0.85);
         ctx.strokeStyle = hex; ctx.fillStyle = hex;
-        ctx.lineWidth = isLocked ? 2.4 : 1.5;
-        ctx.beginPath(); ctx.moveTo(cx + c * (rr + 2), cy + s2 * (rr + 2)); ctx.lineTo(cx + c * tip, cy + s2 * tip); ctx.stroke();
-        ctx.beginPath(); ctx.arc(cx + c * tip, cy + s2 * tip, isLocked ? 3.6 : 2.4, 0, Math.PI * 2); ctx.fill();
-        if (!isLocked) { // 第23弾: 「方位n° 熱源感知」— 何を感じたかを帯域の言葉で
-            ctx.font = '8px Orbitron, monospace';
-            ctx.fillText(_RX_WORD[bl.sensor] || '', cx + c * (tip + 16), cy + s2 * (tip + 16));
-            ctx.font = 'bold 9px Orbitron, monospace';
+        ctx.lineWidth = isLocked ? 2.2 : 1.4;
+        ctx.beginPath(); ctx.moveTo(cx + c * (rr + 2), cy + s2 * (rr + 2)); ctx.lineTo(cx + c * (tip - 5), cy + s2 * (tip - 5)); ctx.stroke();
+        { const ha = isLocked ? 7 : 5.5, nx = -s2, ny = c, bx = cx + c * (tip - 6), by = cy + s2 * (tip - 6);
+          ctx.beginPath(); ctx.moveTo(cx + c * (tip + ha * 0.5), cy + s2 * (tip + ha * 0.5)); ctx.lineTo(bx + nx * ha, by + ny * ha); ctx.lineTo(bx - nx * ha, by - ny * ha); ctx.closePath(); ctx.fill(); }
+        if (_sigHint && _sigHint.sid === sid) { ctx.globalAlpha = 0.6 + 0.4 * Math.sin(t * 0.008); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.2; ctx.beginPath(); ctx.arc(cx + c * tip, cy + s2 * tip, 13, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = fade * 0.9; ctx.strokeStyle = hex; }
+        if (!isLocked) { // 番号札 (どの信号か) + 帯域の言葉 (第23弾)
+            const lx0 = cx + c * (tip + 14), ly0 = cy + s2 * (tip + 14);
+            screenTag(ctx, lx0, ly0, sigNo(sid), _RX_WORD[bl.sensor] || '', hex, fade * 0.95, c > 0.3 ? 'left' : c < -0.3 ? 'right' : 'center');
         }
         if (isLocked) {
             ctx.lineWidth = 1.3;
-            ctx.beginPath(); ctx.arc(cx + c * tip, cy + s2 * tip, 7, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(cx + c * tip, cy + s2 * tip, 10, 0, Math.PI * 2); ctx.stroke();
             const _idn = identInfo(sid); // 第23弾: 識別 / 第40弾: 名札
-            const lx = cx + c * (tip + 14), ly = cy + s2 * (tip + 14);
-            screenTag(ctx, lx, ly, 'SIG-' + sigNo(sid), _idn.txt, _idn.low ? '#ffcc66' : hex, fade, c > 0.3 ? 'left' : c < -0.3 ? 'right' : 'center', anaProgress(_signalAnalysis[sid]), !!(_signalAnalysis[sid] && _signalAnalysis[sid]._gate));
+            const lx = cx + c * (tip + 18), ly = cy + s2 * (tip + 18);
+            screenTag(ctx, lx, ly, '▶ SIG-' + sigNo(sid), _idn.txt, _idn.low ? '#ffcc66' : hex, fade, c > 0.3 ? 'left' : c < -0.3 ? 'right' : 'center', anaProgress(_signalAnalysis[sid]), !!(_signalAnalysis[sid] && _signalAnalysis[sid]._gate));
         }
     }
     // (6) 測量ガイド: 追跡中の方位線に直交する2方向 (そちらへ動くと交点が締まる)。推定が十分に絞れたら消える
@@ -12948,6 +13072,10 @@ function drawWeaponRange(ctx) {
 // ============================================================
 // HUDオーバーレイ描画 (スクリーン空間 — ズームに関わらず固定サイズ)
 // ============================================================
+// 第166弾: 角を斜めに落とした枠 (名札・照準のSF調)
+function _chamfer(ctx, x, y, w, h, c) {
+    ctx.beginPath(); ctx.moveTo(x + c, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + h - c); ctx.lineTo(x + w - c, y + h); ctx.lineTo(x, y + h); ctx.lineTo(x, y + c); ctx.closePath();
+}
 function _roundRect(ctx, x, y, w, h, r) {
     ctx.beginPath();
     ctx.moveTo(x + r, y);
