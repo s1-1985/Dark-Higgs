@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261119a">
+    <link rel="stylesheet" href="style.css?v=20261119b">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -349,8 +349,17 @@
                     <button id="zoom-in" onclick="zoomStep(1.6)" title="拡大 (+)">＋</button>
                     <button id="zoom-out" onclick="zoomStep(1 / 1.6)" title="縮小 (−)">－</button>
                 </div>
-                <button id="zoom-fab" title="倍速・一時停止・拡大縮小 (タップで開く)"><i class="ico" id="zoom-fab-ico" style="--ico:url(assets/icons/icon_speed.png)"></i><small id="zoom-fab-sub"></small></button>
+                <div id="zoom-row">
+                    <!-- 第167弾 (オーナー): 受信中でロックできる信号の一覧 — AIの評価・解析の進み・タップでロック -->
+                    <button id="btn-siglist" title="受信中の信号の一覧 (タップでロック)"><i class="ico" style="--ico:url(assets/icons/icon_siglist.png)"></i><small id="siglist-n"></small></button>
+                    <button id="zoom-fab" title="倍速・一時停止・拡大縮小 (タップで開く)"><i class="ico" id="zoom-fab-ico" style="--ico:url(assets/icons/icon_speed.png)"></i><small id="zoom-fab-sub"></small></button>
+                </div>
             </div>
+            <div id="sig-list" class="hidden">
+                    <div class="sl-head"><b>信号一覧</b><span id="sl-sub"></span><button id="sl-close" title="閉じる">✕</button></div>
+                    <div id="sl-rows"></div>
+                    <div class="sl-foot">背景の緑 = 解析の進み / 右の% = 解析 / AIの評価は 演算力と解析が進むほど細かく正確になる</div>
+                </div>
 
             <!-- GEN配分ドロワー (上帯のGENで開閉) — ゼロサム配分は「時々変える」設定なので常設しない -->
             <div id="gen-drawer" class="hidden">
@@ -876,7 +885,7 @@
         });
     })();
     </script>
-    <script src="game.js?v=20261119a"></script>
+    <script src="game.js?v=20261119b"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {

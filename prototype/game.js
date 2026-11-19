@@ -11721,6 +11721,111 @@ function tryTapSignals(sx, sy, px, py) {
     showSigChooser(list, px, py);
     return true;
 }
+// ═══ 第167弾 (オーナー「シグネチャが多すぎて訳が分からない」): 信号一覧 — 受信中でロックできる信号を一覧で。AIの評価・解析の進み・タップでロック ═══
+// AIの評価は「観測した手掛かり」だけから作る (真の正体は使わない)。解析の進みが浅いうちは「種別不明」・進むほど候補と%が出る。
+// 数字の細かさは解析量で変わる (35%未満=20%刻み・60%未満=10%刻み・それ以上=5%刻み)
+const _SL_NAT = { heat: '熱源', em: '電磁波源', optic: '発光体', higgs: '霧の乱れ' };
+function sigListSids() {
+    const out = [];
+    for (const sid in _signalAnalysis) {
+        const sa = _signalAnalysis[sid];
+        if (!sa || /^X-/.test(sid) || _srcKnown[sid]) continue;
+        const lo = sa.obs && sa.obs[sa.obs.length - 1];
+        if (sid !== lockedSignalId && (!lo || _frameCount - lo.f > TMA_KEEP)) continue;
+        out.push(sid);
+    }
+    return out;
+}
+function sigBandOf(sid) {
+    for (let i = passiveBearings.length - 1; i >= 0; i--) { const b = passiveBearings[i]; if (b.sourceId === sid && b.sensor && !b.relay) return b.sensor; }
+    return null;
+}
+// → {txt, pc(0-100 かつ 解析), ana, hyp:[[ラベル,%],...], known}
+function aiAssess(sid) {
+    const sa = _signalAnalysis[sid], ana = anaProgress(sa), apct = Math.round(ana * 100);
+    const idn = identInfo(sid), id = _sigIdent[sid], band = sigBandOf(sid);
+    if (!idn.known || ana < 0.18) return { txt: '種別不明 — 解析が足りない', apct, hyp: [], known: false };
+    const step = ana >= 0.6 ? 5 : ana >= 0.35 ? 10 : 20, rd = v => Math.max(0, Math.min(100, Math.round(v * 100 / step) * step));
+    const p = idn.p;
+    if (id && id.sure) {
+        return { txt: p > 0.5 ? '敵艦と確認' : (idn.short || '囮') + 'と確認', apct, hyp: [[p > 0.5 ? '敵艦' : idn.short, 100]], known: true, sure: true };
+    }
+    const why = (id && id.why) || {}, W = {};
+    const add = (lab, w) => { W[lab] = (W[lab] || 0) + w; };
+    for (const k in why) {
+        const w = why[k];
+        if (k === '帯域が平坦') add('囮・ビーコン', w);
+        else if (k === '遅く一定の動き') add('囮', w);
+        else if (k === '速すぎてまっすぐ') add('ノイズメーカー', w);
+        else if (k === '速すぎる') add('ドローン', w);
+        else if (k === '探信の反響が小さい') add('小型機・漂流物', w);
+        else if (k === '1つの帯域だけ') add((_SL_NAT[band] || '自然現象') + (band ? '(自然)' : ''), w);
+        else add('その他', w);
+    }
+    let tw = 0; for (const k in W) tw += W[k];
+    const hyp = [['敵艦', rd(p)]];
+    const q = 1 - p;
+    if (tw > 0) for (const k of Object.keys(W).sort((a, b) => W[b] - W[a])) hyp.push([k, rd(q * W[k] / tw)]);
+    else if (q > 0.04) hyp.push([band && ana >= 0.35 ? (_SL_NAT[band] || '不明') + 'の可能性' : '敵艦以外', rd(q)]);
+    const top = hyp.slice().sort((a, b) => b[1] - a[1]);
+    const t1 = top[0], t2 = top.find((h, i) => i > 0 && h[1] >= 10 && h[0] !== t1[0]);
+    let txt;
+    if (t1[0] === '敵艦') txt = '敵艦の可能性 ' + t1[1] + '%';
+    else if (/^(熱源|電磁波源|発光体|霧の乱れ)/.test(t1[0])) txt = t1[0] + 'と思われる ' + t1[1] + '%';
+    else txt = t1[0] + 'の可能性 ' + t1[1] + '%';
+    if (t2) txt += ' / ' + (t2[0] === '敵艦' ? '敵艦' : t2[0]) + ' ' + t2[1] + '%';
+    return { txt, apct, hyp, known: true };
+}
+let _slOpen = false;
+function toggleSigList(on) {
+    const el = document.getElementById('sig-list'), btn = document.getElementById('btn-siglist'); if (!el) return;
+    _slOpen = on === undefined ? !_slOpen : !!on;
+    el.classList.toggle('hidden', !_slOpen); btn && btn.classList.toggle('on', _slOpen);
+    if (_slOpen) { const rows = document.getElementById('sl-rows'); if (rows) rows.innerHTML = ''; renderSigList(); }
+    else _sigHint = null;
+    sfxUI(_slOpen ? 'ui_panel_open' : 'ui_panel_close');
+}
+function renderSigList() {
+    const sids = sigListSids();
+    const n = document.getElementById('siglist-n'), btn = document.getElementById('btn-siglist');
+    if (n) n.textContent = sids.length ? String(sids.length) : ''; if (btn) btn.classList.toggle('has', sids.length > 0);
+    if (!_slOpen) return;
+    const rows = document.getElementById('sl-rows'); if (!rows) return;
+    const sub = document.getElementById('sl-sub'); if (sub) sub.textContent = sids.length + '件 / 演算力 ' + cpTotal().toFixed(1);
+    const items = sids.map(sid => { const A = aiAssess(sid); return { sid, A, key: A.known ? (identInfo(sid).p) : 0.5 }; });
+    items.sort((a, b) => ((b.sid === lockedSignalId) - (a.sid === lockedSignalId)) || (b.key - a.key) || (b.A.apct - a.A.apct));
+    const have = {};
+    for (const el of Array.from(rows.children)) { const sid = el.dataset && el.dataset.sid; if (!sid || !items.some(i => i.sid === sid)) el.remove(); else have[sid] = el; }
+    if (!items.length) { if (!rows.querySelector('.sl-empty')) rows.innerHTML = '<div class="sl-empty">いま受信していてロックできる信号はありません</div>'; return; }
+    rows.querySelectorAll('.sl-empty').forEach(e => e.remove());
+    items.forEach((it, idx) => {
+        const sid = it.sid, A = it.A, sa = _signalAnalysis[sid], band = sigBandOf(sid);
+        let el = have[sid];
+        if (!el) {
+            el = document.createElement('div'); el.className = 'sl-row'; el.dataset.sid = sid;
+            el.innerHTML = '<div class="sl-sw"></div><div class="sl-main"><div class="sl-l1"><b></b><i></i><em></em></div><div class="sl-ai"></div></div><div class="sl-pc"></div>';
+            el.addEventListener('pointerenter', () => { _sigHint = { sid, t: Date.now() }; });
+            el.addEventListener('pointerleave', () => { if (_sigHint && _sigHint.sid === sid) _sigHint = null; });
+            el.addEventListener('click', () => { sfx('ui_tag_tap'); if (sid === lockedSignalId) clearLockTarget(); else lockSignalTarget(sid); if (typeof window.syncSigLockedBar === 'function') window.syncSigLockedBar(); renderSigList(); });
+        }
+        const col = sigColor(sid), locked = sid === lockedSignalId, te = sa && sa.fix ? trackEstimate(sa, 0) : null;
+        el.classList.toggle('lk', locked); el.classList.toggle('gate', !!(sa && sa._gate));
+        el.style.setProperty('--p', A.apct + '%');
+        el.firstChild.style.background = col;
+        const l1 = el.querySelector('.sl-l1');
+        l1.children[0].textContent = (locked ? '▶ ' : '') + 'SIG-' + sigNo(sid);
+        l1.children[1].textContent = band ? _RX_WORD[band] : ''; l1.children[1].style.color = band ? ({ heat: '#ffa03c', optic: '#3cffb4', em: '#e664ff', higgs: '#3cf0ff' })[band] : '';
+        l1.children[2].textContent = te ? fmtDist(Math.hypot(te.x - player.x, te.y - player.y)) + 'u ±' + fmtDist(te.r) : '方位のみ';
+        const ai = el.querySelector('.sl-ai'); ai.textContent = 'AI: ' + A.txt; ai.classList.toggle('dim', !A.known);
+        el.querySelector('.sl-pc').innerHTML = A.apct + '%<small>解析</small>';
+        if (rows.children[idx] !== el) rows.insertBefore(el, rows.children[idx] || null);
+    });
+}
+(() => {
+    const b = document.getElementById('btn-siglist'), c = document.getElementById('sl-close');
+    if (b) b.addEventListener('click', e => { e.stopPropagation(); toggleSigList(); });
+    if (c) c.addEventListener('click', e => { e.stopPropagation(); toggleSigList(false); });
+})();
 // タップ位置の近くに受信ブリップがあればその信号を追跡する。処理したら true
 function tryTapBlip(sx, sy) {
     let best = null, bd = 30;
@@ -20818,6 +20923,7 @@ function renderWorld() {
         if (_rfc % 10 === 0) updateEnvInfo();
         if (_rfc % 8 === 0) updateTacStrip();
         if (_rfc % 20 === 0) updateLandmarkBanner();
+        if (_rfc % 12 === 0 && !_pov) renderSigList(); // 第167弾: 信号一覧
 
         // FPS表示 (デバッグ用) — 左下コーナー・コンソール上方
         { // 第89弾 (オーナー): FPSは上帯のAIの助言の右端 (地図を広く)

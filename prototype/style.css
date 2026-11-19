@@ -2970,3 +2970,33 @@ body.play-replay #zoom-ctl #zoom-stack { flex-wrap: wrap-reverse; max-height: ca
 #sig-chooser button b { flex: none; font-size: 11px; }
 #sig-chooser button span { flex: 1; font-size: 10px; color: #9fc9c0; }
 #sig-chooser button em { flex: none; font-style: normal; font-size: 9px; color: #ffe08a; }
+
+/* 第167弾: 信号一覧 (右下の丸ボタンの左のボタン) */
+body.in-game #zoom-ctl #zoom-row { display: flex; align-items: center; gap: 8px; align-self: flex-end; }
+body.in-game #zoom-ctl #btn-siglist { width: 44px; height: 44px; position: relative; background: rgba(0,32,26,0.85); border-color: rgba(0,255,170,0.7); box-shadow: 0 0 10px rgba(0,255,170,0.25); }
+body.in-game #zoom-ctl #btn-siglist .ico { width: 22px; height: 22px; display: block; margin: -4px auto 0; }
+body.in-game #zoom-ctl #btn-siglist small { position: absolute; bottom: 2px; left: 0; right: 0; font-size: 9px; line-height: 1; color: #9fffe0; font-family: Orbitron, sans-serif; }
+body.in-game #zoom-ctl #btn-siglist.on { background: rgba(0,70,54,0.9); border-color: #00ffaa; }
+body.in-game #zoom-ctl #btn-siglist.has small { color: #ffe08a; }
+#sig-list { position: absolute; z-index: 31; right: calc(var(--hud-right) + 8px); bottom: 64px; width: min(380px, 58vw); max-height: calc(100% - var(--hud-top) - 84px); display: flex; flex-direction: column; background: rgba(2,12,16,0.94); border: 1px solid rgba(95,224,196,0.55); clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); font-family: Orbitron, sans-serif; pointer-events: auto; }
+#sig-list.hidden { display: none; }
+#sig-list .sl-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px 4px 14px; border-bottom: 1px solid rgba(95,224,196,0.25); color: #d6fff3; font-size: 11px; }
+#sig-list .sl-head span { flex: 1; font-size: 9px; color: #7fb8ac; }
+#sig-list .sl-head button { background: none; border: none; color: #9fffe0; font-size: 14px; cursor: pointer; padding: 2px 6px; }
+#sl-rows { overflow-y: auto; padding: 4px 6px 4px 8px; }
+#sl-rows .sl-row { position: relative; display: flex; align-items: stretch; gap: 8px; min-height: 46px; margin: 3px 0; padding: 4px 8px 4px 0; background: linear-gradient(90deg, rgba(44,255,138,0.32) var(--p, 0%), rgba(8,26,32,0.92) var(--p, 0%)); border: 1px solid rgba(95,224,196,0.2); cursor: pointer; overflow: hidden; }
+#sl-rows .sl-row.gate::after { content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(135deg, rgba(255,138,90,0.14) 0 4px, transparent 4px 10px); pointer-events: none; }
+#sl-rows .sl-row.lk { border-color: #ff7a6a; box-shadow: inset 0 0 12px rgba(255,90,90,0.25); }
+#sl-rows .sl-row:active { filter: brightness(1.4); }
+#sl-rows .sl-sw { width: 5px; flex: none; }
+#sl-rows .sl-main { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px; position: relative; z-index: 1; }
+#sl-rows .sl-l1 { display: flex; align-items: baseline; gap: 6px; font-size: 11px; color: #e6fbf5; white-space: nowrap; }
+#sl-rows .sl-l1 b { font-size: 11px; }
+#sl-rows .sl-l1 i { font-style: normal; font-size: 9px; }
+#sl-rows .sl-l1 em { font-style: normal; font-size: 9px; color: #ffe08a; margin-left: auto; }
+#sl-rows .sl-ai { font-size: 10px; color: #cfeee6; line-height: 1.25; white-space: normal; font-family: inherit; }
+#sl-rows .sl-ai.dim { color: #8fb5ac; }
+#sl-rows .sl-pc { flex: none; align-self: center; position: relative; z-index: 1; font-size: 13px; font-weight: bold; color: #b8ffd8; min-width: 38px; text-align: right; }
+#sl-rows .sl-pc small { font-size: 8px; display: block; color: #7fb8ac; font-weight: normal; }
+#sl-rows .sl-empty { padding: 14px 10px; font-size: 10px; color: #7fb8ac; text-align: center; }
+#sig-list .sl-foot { padding: 3px 12px 6px; font-size: 8px; color: #6f9d92; line-height: 1.4; }
