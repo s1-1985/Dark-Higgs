@@ -6250,6 +6250,7 @@ class Ship {
         // 第166弾 (オーナー「ロックオンと分かりづらい・ダサい」): 手動=赤 / 自動=緑 / 推定=琥珀の破線。獲得時は縮んで合わさる
         const col = full ? (manual ? '#ff5a5a' : '#2dffb0') : '#ffb000';
         drawLockOnMark(ctx, lx, ly, lr, col, this._lockT0, full ? 'visual' : 'est', true);
+        if (!_lockInfoQ.v) _lockInfoQ.v = { x: lx, y: ly, r: lr, sid: enemySid(this), e: this }; // 第169弾: 脇に AI の吹き出し
         // 目標へ向かう細い照準線 (自艦 → 目標。距離の感覚)
         { const dx = lx - player.x, dy = ly - player.y, dd = Math.hypot(dx, dy);
           if (dd > 400) { ctx.save(); ctx.globalAlpha = 0.22; ctx.strokeStyle = col; ctx.lineWidth = 1 * zc; ctx.setLineDash([3 * zc, 9 * zc]); ctx.beginPath(); ctx.moveTo(player.x + dx / dd * 120 * zc, player.y + dy / dd * 120 * zc); ctx.lineTo(lx - dx / dd * lr * 1.5, ly - dy / dd * lr * 1.5); ctx.stroke(); ctx.restore(); } }
@@ -10858,16 +10859,18 @@ function drawPassiveBearings(ctx) {
     _latest.sort((p, q) => (q.strength || 0) - (p.strength || 0));
     for (let k = 0; k < Math.min(UNTRACKED_LINES, _latest.length); k++) {
         const b = _latest[k];
-        const vis = (b.life / b.maxLife) * Math.min(1, (b.maxLife - b.life) / 45);
+        const vis = (b.life / b.maxLife) * Math.min(1, (b.maxLife - b.life) / 45) * sigRxK(b.sourceId); // 第169弾: 受信が弱いほど薄い
         const idc = sigColor(b.sourceId);
         ctx.save();
         ctx.strokeStyle = idc; ctx.fillStyle = idc;
         ctx.lineWidth = 1.3 * invZoom;
         const L0 = b.relay ? Math.min(b.range, 9000) * 0.6 : b.range * 0.35, c0 = Math.cos(b.angle), s0 = Math.sin(b.angle);
+        ctx.setLineDash([8 * invZoom, 7 * invZoom]); // ロック中の線だけ実線
         for (let q = 0; q < 3; q++) {
             ctx.globalAlpha = [0.6, 0.36, 0.16][q] * vis;
             ctx.beginPath(); ctx.moveTo(b.ox + c0 * L0 * q / 3, b.oy + s0 * L0 * q / 3); ctx.lineTo(b.ox + c0 * L0 * (q + 1) / 3, b.oy + s0 * L0 * (q + 1) / 3); ctx.stroke();
         }
+        ctx.setLineDash([]);
         drawRangeTicks(ctx, b.ox, b.oy, b.angle, L0, 0.5 * vis, invZoom);
         drawFlow(ctx, b.ox, b.oy, b.angle, L0, 0.85 * vis, invZoom);
         // 起点の印: 聴音局 (ノード/コロニー) は輪＋名前 / 自艦起点は小さな菱形
@@ -11038,6 +11041,80 @@ function drawLockOnMark(ctx, x, y, r, col, t0, state, spin) {
     if (age < 1) { ctx.globalAlpha = (1 - age) * 0.8; ctx.lineWidth = 3 * zc; ctx.beginPath(); ctx.arc(0, 0, rr * (0.6 + 0.9 * age), 0, Math.PI * 2); ctx.stroke(); }
     ctx.restore();
 }
+// ═══ 第169弾 (オーナー): 受信強度で半透明に・ロック中だけ実線 / ロックした相手のAIの見解と状況の吹き出し ═══
+// 受信強度 (直近の方位の強さ) → 0.3〜1 の濃さ。ロック中は常に1 (実線・不透明)
+function sigRxK(sid) {
+    let st = -1;
+    for (let i = passiveBearings.length - 1; i >= 0; i--) { const b = passiveBearings[i]; if (b.sourceId === sid && !b.relay && b.life > 0) { st = b.strength || 0; break; } }
+    if (st < 0) { const sa = _signalAnalysis[sid], lo = sa && sa.obs && sa.obs[sa.obs.length - 1]; st = lo ? (lo.st || 0.3) : 0.3; }
+    return 0.3 + 0.7 * Math.max(0, Math.min(1, st / 0.6));
+}
+const _lockInfoQ = { v: null };
+// ロックした相手について、AIが「今の演算力と解析」で言えることを 行 [[項目,値],...] にする。真の内部状態は使わない (目視で見える所だけ例外)
+function lockIntel(sid, e) {
+    const sa = _signalAnalysis[sid], vis = !!(e && e.inVision && e.hp > 0), ana = anaProgress(sa), cp = cpTotal();
+    const Q = Math.max(0, Math.min(1, ana * 0.7 + 0.3 * Math.min(1, (cp - 0.5) / 2.5) + (vis ? 0.3 : 0)));
+    const te = sa && sa.fix ? trackEstimate(sa, 0) : null, idn = identInfo(sid), band = sigBandOf(sid);
+    const rb = v => Q < 0.5 ? Math.round(v / 10) * 10 : Q < 0.75 ? Math.round(v / 5) * 5 : Math.round(v), rp = v => Q < 0.5 ? Math.round(v / 20) * 20 : Q < 0.8 ? Math.round(v / 10) * 10 : Math.round(v / 5) * 5;
+    const lines = [], px = vis ? e.x : te ? te.x : null, py = vis ? e.y : te ? te.y : null;
+    if (px != null) lines.push(['方位', String(rb(compassDeg(Math.atan2(py - player.y, px - player.x)))).padStart(3, '0') + '°  ' + fmtDist(Math.hypot(px - player.x, py - player.y)) + 'u' + (vis || !te ? '' : ' ±' + fmtDist(te.r))]);
+    if (Q >= 0.25) {
+        if (vis) lines.push(['動き', Math.round((e.currentSpeed || 0) * 60) + 'u/s  艦首' + String(compassDeg(e.angle)).padStart(3, '0') + '°']);
+        else if (te && te.moving) lines.push(['針路', String(rb(compassDeg(Math.atan2(te.vy, te.vx)))).padStart(3, '0') + '°  ' + Math.round(Math.hypot(te.vx, te.vy) * 60) + 'u/s']);
+        else if (te) lines.push(['動き', '停止か低速']);
+    }
+    if (Q >= 0.4 && band) lines.push(['推進', ({ heat: '熱核', em: 'EMエンジン', optic: 'フォトン', higgs: 'ヒッグス推進' })[band] + (Q >= 0.7 ? 'と推定' : 'の疑い')]);
+    if (Q >= 0.55) {
+        let ty;
+        if (vis) ty = _ENT_JP[e.type] || '不明';
+        else if (idn.known && idn.p < 0.35) ty = '艦ではない可能性';
+        else if (te && te.moving) { const v = Math.hypot(te.vx, te.vy) * 60; ty = (v >= 70 ? '潜航型か艦載機' : v >= 35 ? '攻撃型か潜航型' : '空母か攻撃型') + ' (速さから)'; }
+        if (ty) lines.push(['艦種', ty]);
+    }
+    if (Q >= 0.7) {
+        const dm = (huntStats && huntStats.dmgShip) || 0, cls = vis && ENEMY_CLASS[e.type], mx = (cls && PLAYER_HP_BASE[cls]) || 2500;
+        lines.push(['損傷', dm > 0 ? '約' + rp(Math.min(100, dm / mx * 100)) + '% (与えた損害から)' : '被害を確認していない']);
+    }
+    if (Q >= 0.85 || (vis && Q >= 0.7)) lines.push(['火器管制', THREATS.some(th => th.kind === 'lock') ? '自艦を照準中' : '照射なし']);
+    return { lines, Q, cp };
+}
+// 吹き出し (画面座標): 円の脇に・細い縁と括弧・上に「AI ANALYSIS」・下に確度と演算力。flushTags の最後に描く
+function drawLockBubble(ctx) {
+    const L = _lockInfoQ.v; _lockInfoQ.v = null;
+    if (!L || !player) return;
+    const I = lockIntel(L.sid, L.e); if (!I.lines.length) return;
+    const sp = worldToScreen(L.x, L.y), rpx = Math.max(24, L.r * camera.zoom);
+    ctx.save(); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+    const rowH = 14, w0 = 150;
+    ctx.font = '10px "Share Tech Mono", Orbitron, monospace';
+    let w = 100; for (const [k, v] of I.lines) w = Math.max(w, 56 + ctx.measureText(v).width);
+    w += 12; const h = 20 + I.lines.length * rowH + 28;
+    const ins = uiInsets(), big = rpx > 150; // 円が大きい (推定が粗い) 時は 画面の右上に固定 (引き出し線なし)
+    let bx, by, docked = false;
+    if (big) { docked = true; bx = (cssW || 1000) - ins.right - w - 10; by = ins.top + 8; }
+    else { bx = sp.sx + rpx * 0.75 + 22; if (bx + w > (cssW || 1000) - ins.right - 8) bx = sp.sx - rpx * 0.75 - 22 - w; by = Math.max(ins.top + 6, Math.min((cssH || 460) - h - 60, sp.sy - h / 2)); }
+    if (!docked) { // 引き出し線 (円の縁 → 吹き出し)
+        const ex = bx > sp.sx ? bx : bx + w, ax = sp.sx + (bx > sp.sx ? 1 : -1) * rpx * 0.72, ay = sp.sy - rpx * 0.3;
+        ctx.strokeStyle = '#ffd27a'; ctx.lineWidth = 1; ctx.globalAlpha = 0.6; ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ex, by + 10); ctx.stroke();
+        ctx.globalAlpha = 0.95; ctx.fillStyle = '#ffd27a'; ctx.beginPath(); ctx.arc(ax, ay, 2, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 0.88; ctx.fillStyle = 'rgba(2,10,14,0.86)'; _chamfer(ctx, bx, by, w, h, 6); ctx.fill();
+    ctx.globalAlpha = 0.5; ctx.strokeStyle = '#ffd27a'; ctx.lineWidth = 1; _chamfer(ctx, bx + 0.5, by + 0.5, w - 1, h - 1, 6); ctx.stroke();
+    ctx.globalAlpha = 1; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(bx + 0.5, by + 12); ctx.lineTo(bx + 0.5, by + 6); ctx.lineTo(bx + 6, by + 0.5); ctx.lineTo(bx + 14, by + 0.5); ctx.stroke();
+    ctx.font = 'bold 9px Orbitron, sans-serif'; ctx.fillStyle = '#ffd27a'; ctx.fillText('AI ANALYSIS', bx + 9, by + 10);
+    ctx.globalAlpha = 0.3; ctx.fillRect(bx + 8, by + 18, w - 16, 1);
+    I.lines.forEach(([k, v], i) => {
+        const y = by + 20 + rowH * i + rowH / 2 + 1;
+        ctx.globalAlpha = 0.65; ctx.font = '9px Orbitron, sans-serif'; ctx.fillStyle = '#7fb8ac'; ctx.fillText(k, bx + 9, y);
+        ctx.globalAlpha = 1; ctx.font = '10px "Share Tech Mono", Orbitron, monospace'; ctx.fillStyle = '#e6fbf5'; ctx.fillText(v, bx + 56, y);
+    });
+    // 確度の細いバー + 演算力
+    const yb = by + h - 9, bw = w - 18;
+    ctx.globalAlpha = 0.25; ctx.fillStyle = '#2cff8a'; ctx.fillRect(bx + 9, yb, bw, 2);
+    ctx.globalAlpha = 0.95; ctx.fillRect(bx + 9, yb, bw * I.Q, 2);
+    ctx.globalAlpha = 0.7; ctx.font = '8px "Share Tech Mono", monospace'; ctx.fillStyle = '#9fc9c0'; ctx.fillText('確度 ' + Math.round(I.Q * 100) + '%  演算力 ' + I.cp.toFixed(1), bx + 9, yb - 8);
+    ctx.restore();
+}
 const _circScreen = []; // 第27弾: 推定円のスクリーン座標 {sid, cx, cy, r} (タップで追跡)
 function drawTriangulationCircle(ctx) {
     _circScreen.length = 0;
@@ -11072,7 +11149,7 @@ function _drawEstCircle(ctx, sid, sa, locked) {
     const col = R > 2400 ? '#ff9a3c' : R > 900 ? '#ffd25a' : R > 350 ? '#5dff9a' : '#64dcff';
     const inv = 1 / camera.zoom;
     sa._fa = Math.min(1, (sa._fa || 0) + 0.035); // 第38弾: 円は突然出さずに0.5秒で浮かび上がる
-    const fade = (locked ? 1 : 0.6) * sa._fa * heldAlpha;
+    const fade = (locked ? 1 : 0.6 * sigRxK(sid)) * sa._fa * heldAlpha; // 第169弾: 受信が弱いほど薄く・ロック中だけ不透明
     { const sp = worldToScreen(cx, cy); _circScreen.push({ sid, cx: sp.sx, cy: sp.sy, r: R * camera.zoom }); }
     ctx.save();
     // 第40弾: 塗りはごく薄く・縁は 未追跡=細い破線 / 追跡中=実線＋外側をゆっくり回る4つのかぎ (照準のように) ・四方の目盛り
@@ -11082,8 +11159,9 @@ function _drawEstCircle(ctx, sid, sa, locked) {
       ctx.globalAlpha = fade; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill(); }
     const idc = sigColor(sid), tt = Date.now() / 1000;
     ctx.strokeStyle = idc;
-    ctx.globalAlpha = (locked ? 0.85 : 0.5) * fade; ctx.lineWidth = (locked ? 1.5 : 1) * inv;
-    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = (locked ? 0.9 : 0.55) * fade; ctx.lineWidth = (locked ? 1.7 : 1) * inv;
+    if (!locked) ctx.setLineDash([9 * inv, 7 * inv]); // 第169弾: ロック中だけ実線
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
     if (R * camera.zoom > 26) { // 縁の内側の目盛り (画面上で一定の長さ)
         ctx.globalAlpha = (locked ? 0.55 : 0.32) * fade; ctx.lineWidth = 1 * inv; ctx.beginPath();
         for (let k = 0; k < 72; k++) { const a0 = k * Math.PI / 36, c0 = Math.cos(a0), s0 = Math.sin(a0), L = (k % 6 === 0 ? 9 : 4) * inv; ctx.moveTo(cx + c0 * R, cy + s0 * R); ctx.lineTo(cx + c0 * (R - L), cy + s0 * (R - L)); }
@@ -11101,7 +11179,8 @@ function _drawEstCircle(ctx, sid, sa, locked) {
     for (let k = 0; k < 4; k++) { const a0 = k * Math.PI / 2, c0 = Math.cos(a0), s0 = Math.sin(a0); ctx.moveTo(cx + c0 * (R - 7 * inv), cy + s0 * (R - 7 * inv)); ctx.lineTo(cx + c0 * (R + 5 * inv), cy + s0 * (R + 5 * inv)); }
     ctx.stroke();
     // 名札 (円の上): 「SIG-xx 艦n%」だけ (第28弾: 説明書きは消す — オーナー)。中心に居るとは限らない
-    { const idn = identInfo(sid); const _dp = Math.hypot(cx - player.x, cy - player.y); queueTag(cx, cy - R, (locked ? '▶ LOCK ' : '') + 'SIG-' + sigNo(sid), (idn.known ? idn.short : '不明') + ' ' + fmtDist(_dp) + 'u', idc, 'top', (locked ? 1 : 0.8) * sa._fa * heldAlpha, 0, anaProgress(sa), !!sa._gate);
+    { const idn = identInfo(sid); const _dp = Math.hypot(cx - player.x, cy - player.y); queueTag(cx, cy - R, (locked ? '▶ LOCK ' : '') + 'SIG-' + sigNo(sid), (idn.known ? idn.short : '不明') + ' ' + fmtDist(_dp) + 'u', idc, 'top', (locked ? 1 : 0.8 * sigRxK(sid)) * sa._fa * heldAlpha, 0, anaProgress(sa), !!sa._gate);
+      if (locked) { const A = aiAssess(sid); queueTag(cx, cy - R, 'AI', A.txt.replace(/^種別不明 — /, ''), '#9fc9c0', 'top', 0.95 * sa._fa * heldAlpha, 21, null, null, true); _lockInfoQ.v = { x: cx, y: cy, r: R, sid, e: enemyBySid(sid) }; }
       // 第44弾 (オーナー): 解析で艦影と特定した (艦影75%以上・または確認) 信号は、推定の中心に艦のしるしを霧の上に描く (中心に居るとは限らない。囮を艦と誤認していればそのまま艦として出る)
       if (idn.known && idn.p >= 0.75 && !(inPlayerVision(cx, cy) || droneVisionSees(cx, cy))) { // 第65弾 (オーナー「有視界の中で近いのに居ない所にゴースト」): 中心が見えているのに艦のしるしは出さない
           const gs = Math.max(120, 11 * inv);
@@ -11865,9 +11944,9 @@ function sigNo(sid) { if (!sid) return '??'; if (!_contactLabels[sid]) _contactL
 const TAG_BG = 'rgba(2,10,14,0.78)', TAG_FG = '#e6fbf5', TAG_SUB = '#9fc9c0';
 const _tagQ = [];
 // x,y はワールド座標。anchor: 'top' (点の上に置く) / 'right' (点の右に置く) / 'center'
-function queueTag(x, y, main, sub, col, anchor, alpha, dy, prog, gate) { if (_tagQ.length > 120) return; _tagQ.push({ x, y, main, sub, col, anchor: anchor || 'top', a: alpha == null ? 1 : alpha, dy: dy || 0, prog: prog, gate: gate }); }
+function queueTag(x, y, main, sub, col, anchor, alpha, dy, prog, gate, noLeader) { if (_tagQ.length > 120) return; _tagQ.push({ x, y, main, sub, col, anchor: anchor || 'top', a: alpha == null ? 1 : alpha, dy: dy || 0, prog: prog, gate: gate, noLeader: !!noLeader }); }
 function flushTags(ctx) {
-    if (!_tagQ.length) return;
+    if (!_tagQ.length) { drawLockBubble(ctx); return; }
     const placed = [];
     ctx.save();
     ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
@@ -11886,11 +11965,12 @@ function flushTags(ctx) {
         }
         if (x + w < 0 || y + h < 0 || x > (cssW || 9999) || y > (cssH || 9999)) continue;
         placed.push({ x, y, w, h });
-        _leader(ctx, p.sx, p.sy, x, y, w, h, t.col, t.a);
+        if (!t.noLeader) _leader(ctx, p.sx, p.sy, x, y, w, h, t.col, t.a);
         _tagBox(ctx, x, y, w, h, wm, t.main, t.sub, t.col, t.a, t.prog, t.gate);
     }
     ctx.restore();
     _tagQ.length = 0;
+    drawLockBubble(ctx);
 }
 // 引き出し線: 点 (小さな輪) → 斜めに短く → 名札の縁へ。細く・色は名札と同じ
 function _leader(ctx, px, py, x, y, w, h, col, a) {
@@ -12126,7 +12206,7 @@ function drawShipRing(ctx) {
         const isLocked = sid === lockedSignalId;
         const bandHex = S_HEX[bl.sensor] || '#cfe8e0'; // 帯域の色 (範囲の弧)
         const hex = sigColor(sid);                       // 第166弾: 点・線・番号は信号ごとの識別色 (どの線・円と対応するかが色で分かる)
-        const fade = Math.max(0.05, st.a);
+        const fade = Math.max(0.05, st.a) * (isLocked ? 1 : sigRxK(sid)); // 第169弾: 受信が弱いほど薄く・ロック中だけ不透明
         const c = Math.cos(bl.angle), s2 = Math.sin(bl.angle);
         const rr = gazeAt(bl.angle);
         const tip = rr + (isLocked ? 15 : 11);
@@ -12154,6 +12234,7 @@ function drawShipRing(ctx) {
             const _idn = identInfo(sid); // 第23弾: 識別 / 第40弾: 名札
             const lx = cx + c * (tip + 18), ly = cy + s2 * (tip + 18);
             screenTag(ctx, lx, ly, '▶ SIG-' + sigNo(sid), _idn.txt, _idn.low ? '#ffcc66' : hex, fade, c > 0.3 ? 'left' : c < -0.3 ? 'right' : 'center', anaProgress(_signalAnalysis[sid]), !!(_signalAnalysis[sid] && _signalAnalysis[sid]._gate));
+            { const A = aiAssess(sid); screenTag(ctx, lx, ly + 19, 'AI', A.txt.replace(/^種別不明 — /, ''), '#9fc9c0', fade * 0.95, c > 0.3 ? 'left' : c < -0.3 ? 'right' : 'center'); }
         }
     }
     // (6) 測量ガイド: 追跡中の方位線に直交する2方向 (そちらへ動くと交点が締まる)。推定が十分に絞れたら消える
