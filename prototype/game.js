@@ -11275,6 +11275,10 @@ function showLongPressMenu(sx, sy) {
     }
     menu.style.display = '';
     const vw = window.innerWidth, vh = window.innerHeight, mw = menu.offsetWidth || 108, mh = menu.offsetHeight || 130;
+    try { // 第173弾: 見出しに 押した点の方位と距離 (自艦から)
+        const hp = document.getElementById('lpm-pos'), w = screenToWorld(sx, sy);
+        if (hp && player) hp.textContent = 'BRG ' + String(compassDeg(Math.atan2(w.y - player.y, w.x - player.x))).padStart(3, '0') + '° / RNG ' + fmtDist(Math.hypot(w.x - player.x, w.y - player.y)) + 'u';
+    } catch (e) {}
     let left = sx - mw / 2, top = sy - 90;
     if (left < 6) left = 6;
     if (left + mw > vw - 6) left = vw - mw - 6;

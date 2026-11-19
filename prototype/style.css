@@ -3172,3 +3172,55 @@ body.in-game #action-popover .act-icon-btn span { font-family: Orbitron, sans-se
 .mm-slider input { flex: 1; width: auto !important; min-width: 80px; }
 #debug-panel { background-color: #06060f; }
 #mobile-menu-modal { background-color: #01080a; }
+
+/* ═══ 第173弾 (オーナー「他のデザインもリビルド・長押しメニューが野暮ったい」) ═══ */
+/* 長押しメニュー: SF調の指令パネル */
+#long-press-menu {
+    position: fixed; z-index: 800; width: 232px; max-height: calc(100vh - 12px); overflow-y: auto; overscroll-behavior: contain; pointer-events: auto; user-select: none;
+    padding: 0 0 8px; font-family: Orbitron, sans-serif;
+    clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+    animation: lpmIn .16s ease-out;
+}
+@keyframes lpmIn { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
+#long-press-menu::before { content: ''; position: sticky; top: 0; display: block; height: 0; }
+.lpm-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 8px 12px 6px 16px; border-bottom: 1px solid rgba(95,224,196,0.3); background: linear-gradient(90deg, rgba(0,60,50,0.5), transparent); }
+.lpm-h b { font-size: 10px; letter-spacing: 3px; color: #5fe0c4; } .lpm-h b::before { content: '◈ '; }
+.lpm-h span { font-family: var(--mono, Orbitron, monospace); font-size: 10px; color: #ffe08a; letter-spacing: 0.5px; }
+.lpm-acts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 8px 10px 6px; }
+.lpm-a { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 48px; padding: 6px 4px; cursor: pointer; font-family: inherit; color: var(--c, #9fffe0); border: none; background: linear-gradient(180deg, rgba(12,34,40,0.9), rgba(2,10,14,0.95)); clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); box-shadow: inset 0 0 0 1px var(--c, rgba(95,224,196,0.35)); transition: filter .1s; }
+.lpm-a i { font-style: normal; font-size: 17px; line-height: 1; text-shadow: 0 0 8px var(--c, #5fe0c4); }
+.lpm-a span { font-size: 9px; letter-spacing: 1px; }
+.lpm-a:active { filter: brightness(1.7); }
+.lpm-a.mv { --c: #00ffaa; } .lpm-a.fire { --c: #ff5a6e; } .lpm-a.stop { --c: #ffb35a; } .lpm-a.snr { --c: #4fd8ff; } .lpm-a.list { --c: #9ab6d0; }
+.lpm-a.wide { flex-direction: row; gap: 8px; min-height: 34px; margin: 0 10px 4px; width: calc(100% - 20px); }
+.lpm-a.wide i { font-size: 14px; }
+.lpm-cancel { display: block; margin: 4px 10px 0; width: calc(100% - 20px); padding: 6px; font-family: inherit; font-size: 9px; letter-spacing: 2px; color: #7fa69a; background: none; border: 1px solid rgba(95,224,196,0.18); cursor: pointer; }
+#lpm-drones, #lpm-lures { padding: 0 10px; }
+#lpm-drones .lpm-dhead, #lpm-lures .lpm-dhead { font-size: 9px; letter-spacing: 2px; color: #5fe0c4; margin: 8px 0 4px; padding-top: 6px; border-top: 1px solid rgba(95,224,196,0.18); }
+#lpm-drones .lpm-dhead::before, #lpm-lures .lpm-dhead::before { content: '◈ '; }
+#lpm-drones .lpm-drow button, #lpm-lures .lpm-drow button { border: none; border-radius: 0; font-family: Orbitron, sans-serif; letter-spacing: 0.5px; clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px); box-shadow: inset 0 0 0 1px currentColor; background: rgba(2,12,16,0.9); }
+#lpm-drones .lpm-drow button[data-k="patrol"] { color: #6fc8ff; } #lpm-drones .lpm-drow button[data-k="attack"] { color: #ff9a6a; } #lpm-drones .lpm-drow button[data-k="return"] { color: #8fb5a8; } #lpm-lures .lpm-drow button { color: #d7b2ff; }
+#lpm-drones .lpm-drow span { font-family: Orbitron, sans-serif; letter-spacing: 0.5px; }
+
+/* 共通の .btn を斜めの角に (ロビー・ドック・積み込み・作戦報告など全部に効く) */
+.btn { border-radius: 0; clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px); background: linear-gradient(180deg, rgba(14,36,42,0.75), rgba(3,10,14,0.85)); }
+.btn:hover { background: linear-gradient(180deg, rgba(30,70,76,0.8), rgba(6,20,26,0.9)); }
+.btn-small { clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px); }
+/* パネル類 */
+#gen-drawer, #mt-panel, #briefing-overlay .brief-box, #draft-overlay .draft-box, #loadout-overlay .lo-box, .dock-window, #landmark-banner, #pause-ind {
+    border-radius: 0 !important;
+}
+#gen-drawer, #mt-panel { border: 1px solid rgba(95,224,196,0.35); background: repeating-linear-gradient(0deg, rgba(120,255,225,0.035) 0 1px, transparent 1px 3px), rgba(2,10,14,0.94); box-shadow: inset 0 0 22px rgba(0,255,200,0.05); clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+.brief-box { border-radius: 0; clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px); border: 1px solid rgba(95,224,196,0.4); background: repeating-linear-gradient(0deg, rgba(120,255,225,0.03) 0 1px, transparent 1px 3px), rgba(2,10,14,0.96); }
+.brief-title { letter-spacing: 3px; } .brief-title::before { content: '◈ '; color: #5fe0c4; }
+#recenter-chip { border-radius: 0 !important; clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%); border: none !important; box-shadow: inset 0 0 0 1px #00ffaa; letter-spacing: 1px; font-family: Orbitron, sans-serif; }
+#pause-ind { clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 100%, 0 100%); border: none !important; box-shadow: inset 0 0 0 1px #ffd27a; font-family: Orbitron, sans-serif; letter-spacing: 2px; }
+#landmark-banner, #map-mode-banner { clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 100%, 0 100%); border: none !important; box-shadow: inset 0 0 0 1px rgba(95,224,196,0.4); }
+/* 部品カード・アイテムカード */
+.part-card { border-radius: 0 !important; clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px); }
+#lpm-lures .lpm-drow { flex-wrap: wrap; } #lpm-lures .lpm-drow button { flex: 1 1 96px; min-height: 30px; }
+/* タイトルのモード選択カード・リプレイ */
+.mode-card { border: none !important; border-radius: 0 !important; clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px); background: linear-gradient(180deg, rgba(14,36,42,0.78), rgba(3,10,14,0.88)) !important; box-shadow: inset 0 0 0 1px rgba(95,224,196,0.3), inset 3px 0 0 rgba(95,224,196,0.25); transition: box-shadow .2s; }
+.mode-card.active, .mode-card:hover { box-shadow: inset 0 0 0 1px #00ffaa, inset 3px 0 0 #00ffaa, inset 0 0 22px rgba(0,255,170,0.15); }
+.mode-name { letter-spacing: 2px; }
+.mode-label, .mode-select .mode-label { letter-spacing: 3px; font-family: Orbitron, sans-serif; }

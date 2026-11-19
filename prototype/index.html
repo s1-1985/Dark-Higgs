@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261120e">
+    <link rel="stylesheet" href="style.css?v=20261120g">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -842,15 +842,19 @@
     </div>
 
     <!-- §4-4: 長押しラジアルメニュー (移動/射撃/キャンセル) -->
-    <div id="long-press-menu" style="display:none; position:fixed; max-height:calc(100vh - 12px); overflow-y:auto; overscroll-behavior:contain; z-index:800; pointer-events:auto; user-select:none; width:108px; background:rgba(0,8,18,0.96); border:1px solid rgba(0,255,170,0.5); border-radius:6px; padding:6px; font-family:'Orbitron',monospace; font-size:9px; box-shadow:0 0 14px rgba(0,255,170,0.12);">
-        <button onclick="lpmSelectMove()" style="display:block; width:100%; background:#001a0e; border:1px solid #00ffaa; color:#00ffaa; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">▶ 移動</button>
-        <button onclick="lpmSelectFire()" style="display:block; width:100%; background:#1a0008; border:1px solid #ff4466; color:#ff4466; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">⊕ 射撃</button>
-        <button onclick="lpmSelectStop()" style="display:block; width:100%; background:#140a00; border:1px solid #ffaa44; color:#ffbb66; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">■ 停止</button>
-        <button onclick="lpmSelectDirSonar()" style="display:block; width:100%; background:#001418; border:1px solid #00d4ff; color:#66e6ff; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">◎ 指向ソナー</button>
-        <button onclick="lpmSelectSigList()" style="display:block; width:100%; background:#0a0f14; border:1px solid #6b8aa8; color:#9ab6d0; padding:7px 4px; margin-bottom:4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">≡ 信号一覧</button>
+    <div id="long-press-menu" style="display:none">
+        <!-- 第173弾 (オーナー「長押しメニューが野暮ったい」): SF調の指令パネル — 押した点の方位・距離を見出しに・2列のアイコンボタン -->
+        <div class="lpm-h"><b>ORDER</b><span id="lpm-pos">BRG --- / RNG ---</span></div>
+        <div class="lpm-acts">
+            <button class="lpm-a mv" onclick="lpmSelectMove()"><i>▶</i><span>移動</span></button>
+            <button class="lpm-a fire" onclick="lpmSelectFire()"><i>⊕</i><span>射撃</span></button>
+            <button class="lpm-a stop" onclick="lpmSelectStop()"><i>■</i><span>停止</span></button>
+            <button class="lpm-a snr" onclick="lpmSelectDirSonar()"><i>◎</i><span>指向ソナー</span></button>
+        </div>
+        <button class="lpm-a wide list" onclick="lpmSelectSigList()"><i>≡</i><span>信号一覧</span></button>
         <div id="lpm-drones"></div>
         <div id="lpm-lures"></div>
-        <button onclick="hideLongPressMenu()" style="display:block; width:100%; background:#0a0a0a; border:1px solid #446655; color:#668877; padding:5px 4px; cursor:pointer; border-radius:3px; font-family:inherit; font-size:9px; letter-spacing:1px;">× キャンセル</button>
+        <button class="lpm-cancel" onclick="hideLongPressMenu()">× 閉じる</button>
     </div>
 
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
@@ -894,7 +898,7 @@
         });
     })();
     </script>
-    <script src="game.js?v=20261120e"></script>
+    <script src="game.js?v=20261120f"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
