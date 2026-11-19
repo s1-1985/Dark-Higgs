@@ -3034,3 +3034,33 @@ body.in-game #zoom-ctl #btn-siglist.has small { color: #ffe08a; }
 #status-strip, #status-strip * , #fps-ind, #hud-expo { font-variant-numeric: tabular-nums; }
 #ss-cp-val, #ss-spd-val, #ss-time-val, #ss-hp-text { font-family: var(--mono) !important; letter-spacing: 0.5px; }
 #xo-bar { box-shadow: inset 0 0 16px rgba(0,255,200,0.06); }
+
+/* ═══ 第170弾: 右列ボタンをSF調に — 角を斜めに落とした枠・薄い走査線・左の状態バー・光るアイコン ═══ */
+#hud-right { background: linear-gradient(90deg, rgba(0,255,200,0.05), rgba(1,8,9,0.9) 14%), rgba(1,8,9,0.86); border-left: 1px solid rgba(95,224,196,0.28); }
+.hud-act {
+    border: none; border-radius: 0; color: #8fc9bb;
+    clip-path: polygon(9px 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%, 0 9px);
+    background:
+        repeating-linear-gradient(0deg, rgba(120,255,225,0.04) 0 1px, transparent 1px 3px),
+        linear-gradient(180deg, rgba(12,34,40,0.88), rgba(2,10,14,0.92));
+    box-shadow: inset 0 0 0 1px rgba(95,224,196,0.26), inset 3px 0 0 0 rgba(95,224,196,0.12);
+    transition: box-shadow .2s, color .2s, background-color .2s;
+}
+.hud-act span { font-family: Orbitron, sans-serif; letter-spacing: 1px; text-transform: uppercase; font-size: 8.5px; }
+.hud-act .abar-icon, .hud-act .ico { filter: drop-shadow(0 0 3px rgba(95,224,196,0.55)); }
+.hud-act::after { content: ''; position: absolute; right: 3px; bottom: 3px; width: 8px; height: 8px; pointer-events: none; background: linear-gradient(135deg, transparent 50%, rgba(160,255,230,0.6) 50% 60%, transparent 60%); }
+.hud-act:active { transform: none; filter: brightness(1.5); }
+.hud-act.abar-active, .hud-act.on, #abar-track.on {
+    color: #e6fff7; background:
+        repeating-linear-gradient(0deg, rgba(120,255,225,0.05) 0 1px, transparent 1px 3px),
+        linear-gradient(180deg, rgba(0,90,70,0.55), rgba(2,30,26,0.85));
+    box-shadow: inset 0 0 0 1px rgba(0,255,170,0.85), inset 3px 0 0 0 #00ffaa, inset 0 0 16px rgba(0,255,170,0.2);
+}
+.hud-act.on { box-shadow: inset 0 0 0 1px rgba(102,204,255,0.9), inset 3px 0 0 0 #66ccff, inset 0 0 16px rgba(60,150,220,0.25); }
+.hud-act.hud-fire.on { box-shadow: inset 0 0 0 1px #ff4d4d, inset 3px 0 0 0 #ff4d4d, inset 0 0 16px rgba(255,60,60,0.25); }
+.hud-act em { font-family: var(--mono, Orbitron, monospace); font-size: 9px; }
+/* 展開パネル (ポップオーバー) のボタンも同じ言語に */
+body.in-game #action-popover { border: 1px solid rgba(95,224,196,0.35); border-radius: 0; background: repeating-linear-gradient(0deg, rgba(120,255,225,0.035) 0 1px, transparent 1px 3px), rgba(2,10,14,0.96); clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); box-shadow: inset 0 0 22px rgba(0,255,200,0.05); }
+body.in-game #action-popover .act-icon-btn { border-radius: 0; clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px); border: none; box-shadow: inset 0 0 0 1px rgba(95,224,196,0.25); background: linear-gradient(180deg, rgba(12,34,40,0.85), rgba(2,10,14,0.9)); }
+body.in-game #action-popover .act-icon-btn span { font-family: Orbitron, sans-serif; letter-spacing: 0.6px; }
+.hud-act img.abar-icon { mix-blend-mode: screen; filter: drop-shadow(0 0 3px rgba(95,224,196,0.55)) brightness(1.15); } /* 黒地の絵アイコンを地になじませる */
