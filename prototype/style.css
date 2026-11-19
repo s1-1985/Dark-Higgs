@@ -3064,3 +3064,51 @@ body.in-game #action-popover { border: 1px solid rgba(95,224,196,0.35); border-r
 body.in-game #action-popover .act-icon-btn { border-radius: 0; clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px); border: none; box-shadow: inset 0 0 0 1px rgba(95,224,196,0.25); background: linear-gradient(180deg, rgba(12,34,40,0.85), rgba(2,10,14,0.9)); }
 body.in-game #action-popover .act-icon-btn span { font-family: Orbitron, sans-serif; letter-spacing: 0.6px; }
 .hud-act img.abar-icon { mix-blend-mode: screen; filter: drop-shadow(0 0 3px rgba(95,224,196,0.55)) brightness(1.15); } /* 黒地の絵アイコンを地になじませる */
+
+/* ═══ 第171弾: 左列の帯域バーと上帯をSF調に — 斜めに落とした角・分割された目盛りのバー・薄い走査線・細い光る縁 ═══ */
+:root { --cham: 8px; }
+#hud-left { background: linear-gradient(270deg, rgba(0,255,200,0.05), rgba(1,8,9,0.9) 16%), rgba(1,8,9,0.86); border-right: 1px solid rgba(95,224,196,0.28); }
+/* ミニマップ: 縁を細く・四隅に印・走査線 */
+#hud-left #minimap-container { border: none; border-radius: 50%; box-shadow: 0 0 0 1px rgba(95,224,196,0.45), inset 0 0 14px rgba(0,255,200,0.12); }
+#hud-left #minimap-container::after { content: ''; position: absolute; inset: 0; border-radius: 50%; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(120,255,225,0.06) 0 1px, transparent 1px 3px), radial-gradient(circle, transparent 62%, rgba(0,255,200,0.1) 100%); }
+/* 帯域ボタン */
+#hud-left .band-btn {
+    border: none; border-radius: 0; background: linear-gradient(180deg, rgba(10,30,36,0.85), rgba(2,8,12,0.92));
+    clip-path: polygon(7px 0, 100% 0, 100% 100%, 0 100%, 0 7px);
+    box-shadow: inset 0 0 0 1px rgba(95,224,196,0.2);
+}
+#hud-left .band-btn.tuned { box-shadow: inset 0 0 0 1px var(--bc), inset 0 -22px 20px -18px var(--bc), inset 3px 0 0 var(--bc) !important; background: linear-gradient(180deg, rgba(14,40,46,0.9), rgba(2,10,14,0.95)) !important; }
+#hud-left .band-btn.hi { box-shadow: inset 0 0 0 1px var(--bc), inset 0 0 12px var(--bc) !important; }
+#hud-left .bt-label { font-family: Orbitron, sans-serif; letter-spacing: 1px; font-size: 7px; }
+/* 受信バーを目盛りで分割 (計器のように) + 方位が取れる刻み (notch) は光る */
+#hud-left .bt-bar { background: rgba(255,255,255,0.05); border-radius: 0; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08); }
+#hud-left .bt-bar::after { content: ''; position: absolute; inset: 0; z-index: 3; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(1,8,9,0.9) 0 1px, transparent 1px 5px); }
+#hud-left .bt-fill { border-radius: 0; }
+#hud-left .bt-notch { height: 1px; background: #fff; box-shadow: 0 0 4px #fff; }
+.bt-tx { border-radius: 0; }
+/* AI ボタン */
+#hud-left .ai-btn { border: none; border-radius: 0; clip-path: polygon(7px 0, 100% 0, 100% 100%, 0 100%, 0 7px); background: linear-gradient(180deg, rgba(10,30,26,0.85), rgba(2,8,10,0.92)); box-shadow: inset 0 0 0 1px rgba(160,255,200,0.3); }
+#hud-left .ai-btn .ai-seg i { border-radius: 0; }
+#hud-left .ai-btn.hot { box-shadow: inset 0 0 0 1px #ffb36b, inset 0 0 10px rgba(255,150,80,0.25); } #hud-left .ai-btn.low { box-shadow: inset 0 0 0 1px #7a8a9a; }
+#band-legend { font-family: var(--mono, Orbitron, monospace); letter-spacing: 0.5px; text-transform: uppercase; opacity: 0.8; }
+
+/* 上帯 */
+#hud-top { background: linear-gradient(180deg, rgba(0,26,22,0.97), rgba(0,10,10,0.94)), repeating-linear-gradient(0deg, rgba(120,255,225,0.04) 0 1px, transparent 1px 3px); border-bottom: 1px solid rgba(95,224,196,0.35); box-shadow: 0 1px 0 rgba(0,255,200,0.1), 0 4px 14px rgba(0,255,200,0.05); }
+#hud-top::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; pointer-events: none; background: linear-gradient(90deg, transparent, rgba(0,255,200,0.9) 12%, transparent 30%, transparent 70%, rgba(0,255,200,0.6) 88%, transparent); }
+#hud-top .tb-menu-btn, #hud-parts { border: none; border-radius: 0; clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px); background: linear-gradient(180deg, rgba(12,36,40,0.9), rgba(2,10,14,0.92)); box-shadow: inset 0 0 0 1px rgba(95,224,196,0.4); }
+#hud-parts { font-family: Orbitron, sans-serif; letter-spacing: 1px; font-size: 11px; padding: 0 12px; height: calc(var(--hud-top) - 14px); color: #bff6e6; }
+.hud-sector { border-radius: 0; clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%); padding: 3px 12px 3px 10px; letter-spacing: 2px; }
+#hud-hp .hud-hp-track { border-radius: 0; border: none; box-shadow: inset 0 0 0 1px rgba(95,224,196,0.35); background: repeating-linear-gradient(90deg, rgba(255,255,255,0.07) 0 3px, transparent 3px 4px); }
+#hud-hp-fill { background-image: repeating-linear-gradient(90deg, transparent 0 3px, rgba(0,12,10,0.85) 3px 4px) !important; }
+#hud-hp-text { font-family: var(--mono, Orbitron, monospace); }
+/* 兆候チップ: 丸いピル → 斜めの枠 + 点滅するランプ */
+#hud-expo { border: none; border-radius: 0; clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%); padding: 3px 14px 3px 12px; box-shadow: inset 0 0 0 1px currentColor; font-family: Orbitron, sans-serif; font-size: 10px; letter-spacing: 1.5px; }
+#hud-expo i { border-radius: 0; transform: rotate(45deg); box-shadow: 0 0 6px currentColor; }
+/* AIの助言バー */
+#hud-top #xo-bar { border-radius: 0; border: none; border-left: 3px solid rgba(0,255,170,0.6); clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px)); background: linear-gradient(90deg, rgba(0,40,34,0.6), rgba(0,9,13,0.78) 30%); box-shadow: inset 0 0 0 1px rgba(95,224,196,0.18); }
+#xo-label { font-family: Orbitron, sans-serif; font-weight: 700; letter-spacing: 2px; padding: 1px 5px; box-shadow: inset 0 0 0 1px rgba(95,224,196,0.5); }
+#xo-dot { border-radius: 0; transform: rotate(45deg); }
+#xo-text { font-family: Inter, sans-serif; letter-spacing: 0.2px; }
+#hud-top #xo-bar.xo-go { border-left-color: #ffd24a; } #hud-top #xo-bar.xo-bad { border-left-color: #ff3344; } #hud-top #xo-bar.xo-good { border-left-color: #00ffaa; }
+#xo-act { border-radius: 0; clip-path: polygon(6px 0, 100% 0, 100% 100%, 0 100%, 0 6px); }
+#fps-ind { font-family: var(--mono, Orbitron, monospace) !important; }
