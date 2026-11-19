@@ -3000,3 +3000,37 @@ body.in-game #zoom-ctl #btn-siglist.has small { color: #ffe08a; }
 #sl-rows .sl-pc small { font-size: 8px; display: block; color: #7fb8ac; font-weight: normal; }
 #sl-rows .sl-empty { padding: 14px 10px; font-size: 10px; color: #7fb8ac; text-align: center; }
 #sig-list .sl-foot { padding: 3px 12px 6px; font-size: 8px; color: #6f9d92; line-height: 1.4; }
+
+/* ═══ 第167弾 (オーナー「もっとSFのUIを参考にかっこよく」): パネルの質感 — 細い1px縁・四隅の括弧・薄い走査線・等幅の数値 ═══ */
+:root { --mono: 'Share Tech Mono', 'Orbitron', monospace; }
+#sig-list, #sig-chooser, #xo-history, #cp-pop, #long-press-menu {
+    background-image:
+        repeating-linear-gradient(0deg, rgba(120,255,225,0.035) 0 1px, transparent 1px 3px),
+        linear-gradient(180deg, rgba(8,26,32,0.55), rgba(2,10,14,0.0) 40%);
+    background-color: rgba(2,10,14,0.92);
+    border: 1px solid rgba(95,224,196,0.32);
+    box-shadow: 0 0 18px rgba(0,255,200,0.07), inset 0 0 22px rgba(0,255,200,0.04);
+    backdrop-filter: blur(2px);
+}
+/* 四隅の括弧 */
+#sig-list::before, #sig-chooser::before {
+    content: ''; position: absolute; inset: 3px; pointer-events: none; z-index: 2;
+    --c: rgba(120,255,225,0.85);
+    background:
+        linear-gradient(var(--c), var(--c)) left top / 10px 1px no-repeat, linear-gradient(var(--c), var(--c)) left top / 1px 10px no-repeat,
+        linear-gradient(var(--c), var(--c)) right top / 10px 1px no-repeat, linear-gradient(var(--c), var(--c)) right top / 1px 10px no-repeat,
+        linear-gradient(var(--c), var(--c)) left bottom / 10px 1px no-repeat, linear-gradient(var(--c), var(--c)) left bottom / 1px 10px no-repeat,
+        linear-gradient(var(--c), var(--c)) right bottom / 10px 1px no-repeat, linear-gradient(var(--c), var(--c)) right bottom / 1px 10px no-repeat;
+}
+#sig-chooser { position: fixed; }
+#sig-list .sl-head { letter-spacing: 2px; text-transform: uppercase; font-size: 10px; }
+#sig-list .sl-head b::before { content: '◈ '; color: #5fe0c4; }
+#sig-list .sl-head span, #sl-rows .sl-l1 em, #sl-rows .sl-pc, #sig-chooser button em, #sig-chooser .sc-head { font-family: var(--mono); letter-spacing: 0.5px; }
+#sl-rows .sl-pc { font-size: 15px; letter-spacing: 0; }
+#sl-rows .sl-ai { font-family: var(--mono); font-size: 11px; letter-spacing: 0.3px; }
+#sl-rows .sl-row { background: linear-gradient(90deg, rgba(44,255,138,0.30) var(--p, 0%), rgba(8,26,32,0.78) var(--p, 0%)); border: none; border-left: 1px solid rgba(95,224,196,0.15); border-bottom: 1px solid rgba(95,224,196,0.14); clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 0 100%); }
+#sl-rows .sl-row.lk { border-left-color: #ff7a6a; box-shadow: inset 0 0 0 1px rgba(255,122,106,0.55), inset 0 0 14px rgba(255,90,90,0.2); }
+/* 上帯・下の帯・左右列の数値は等幅に */
+#status-strip, #status-strip * , #fps-ind, #hud-expo { font-variant-numeric: tabular-nums; }
+#ss-cp-val, #ss-spd-val, #ss-time-val, #ss-hp-text { font-family: var(--mono) !important; letter-spacing: 0.5px; }
+#xo-bar { box-shadow: inset 0 0 16px rgba(0,255,200,0.06); }
