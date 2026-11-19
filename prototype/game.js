@@ -1336,6 +1336,15 @@ const gameSpeedFactor = 1.0; // 1ステップの時間 (常に1。式に残っ�
 let combatMode = { mode: 'manual', range: 'auto', prio: 'attack' };
 const PLAYER_TURN_RATE = 0.010; // 自機最大回頭レート (rad/frame) - assault基準
 const PLAYER_TURN_RATES = { assault: 0.010, stealth: 0.015, carrier: 0.004 }; // 艦種別回頭レート (重量感重視)
+// ═══ 第174弾 (オーナー「COMが止まった状態からくるっと向きを変える・実際の水上の船のように。速いほど旋回半径が大きく・がっつり慣性・加速にも時間」): 艦の運動を作り直し (自機も敵も同じ関数) ═══
+// 旋回の速さは「前へ進んでいる速さ」で決まる (舵は水の流れが無いと効かない): ω(v) = ω_max × g(v/v_opt)、g = x (x≤1・半径は一定=R_opt) / 1/x (x>1・半径は x² で大きくなる)。
+// 最も小回りが利くのは v_opt (巡航の6割ほど)。止まっていてもごくゆっくりしか向きを変えられない (TURN_FLOOR)。加速は ACCEL_SCALE 倍に遅く・止まるのも遅い (DECEL_SCALE)
+const SHIP_DYN = { assault: { vOpt: 0.5, w: 0.0042 }, stealth: { vOpt: 1.3, w: 0.0070 }, carrier: { vOpt: 0.25, w: 0.0022 } }; // vOpt=u/frame (巡航は 0.83 / 2.1 / 0.40)・w=rad/frame
+const TURN_FLOOR = 0.25, ACCEL_SCALE = 0.55, DECEL_SCALE = 1.2, COAST_BRAKE = 1.5, TURN_SLOW_K = 0.3; // TURN_SLOW_K: 旋回中の速度低下は旧の3割だけ (旧は大きく減速して小回りしていた＝その場で回れた)
+function shipTurnRate(cls, v) { const D = SHIP_DYN[cls] || SHIP_DYN.assault, x = Math.max(0, v) / D.vOpt; return D.w * Math.max(TURN_FLOOR, x <= 1 ? x : 1 / x); }
+function shipTurnRadius(cls, v) { const w = shipTurnRate(cls, v); return v / Math.max(1e-6, w); }
+// 半径 R の旋回円に収まる速さ (Rが小さすぎる時は最も小回りの利く v_opt の6割)
+function shipSpeedForRadius(cls, R) { const D = SHIP_DYN[cls] || SHIP_DYN.assault, Ro = D.vOpt / D.w; return R >= Ro ? D.vOpt * Math.sqrt(R / Ro) : D.vOpt * 0.6; }
 const ENEMY_TURN_RATES  = { corvette: 0.018, fighter: 0.025, destroyer: 0.009, carrier: 0.006 }; // 敵艦種別回頭レート
 // ── 敵センサー「間合い」チューニング (2026-06-23 レビュー: 探知が至近距離すぎて狩りが成立しない問題の解) ──
 // 探知を2層に分離: ①近接ハード探知=無音でも至近では見つかる ②シグネチャ探知=派手な機体ほど遠方から捕捉。
@@ -4301,7 +4310,7 @@ class Ship {
             this._v = desired;
         } else {
             const _ag = engineAgility(this.engine);
-            this.angle += Math.sign(d) * Math.min(Math.abs(d), PLAYER_TURN_RATES[cls] * epm(this).turn * _ag.turn);
+            this.angle += Math.sign(d) * Math.min(Math.abs(d), shipTurnRate(cls, this._v || 0) * epm(this).turn * _ag.turn); // 第174弾: 旋回は進んでいる速さで決まる (その場でくるっと回れない)
             if (this._engSwT > 0) { // 第42弾: エンジンの切替中は推力ゼロ — 自艦と同じく惰性で漂う (艦首だけ回る)
                 const ca = this._swAng ?? this.angle;
                 this._v = (this._v || 0) * Math.exp(-COAST_DECAY * (1 + COAST_FOG_DRAG * getHiggsIntensity(this.x, this.y)));
@@ -4310,9 +4319,9 @@ class Ship {
                 return d;
             }
             const tm = Math.min(1, Math.abs(d) / (Math.PI * 0.12));
-            const ts = Math.max(0, desired) * (1 - (SHIP_TURN_SLOW[cls] || 0.5) * tm);
-            const ar = SHIP_ACCEL_RATE[cls] * epm(this).accel * _ag.accel;
-            const brake = (this._sysEngineTimer || 0) > 0 ? 0.25 : 2.5;
+            const ts = Math.max(0, desired) * (1 - (SHIP_TURN_SLOW[cls] || 0.5) * tm * TURN_SLOW_K);
+            const ar = SHIP_ACCEL_RATE[cls] * ACCEL_SCALE * epm(this).accel * _ag.accel;
+            const brake = (this._sysEngineTimer || 0) > 0 ? 0.25 / ACCEL_SCALE : DECEL_SCALE / ACCEL_SCALE; // 止まる時は (旧 2.5倍→ 約1.2倍) ゆっくり
             const v = this._v || 0;
             this._v = v < ts ? Math.min(ts, v + ar) : Math.max(ts, v - ar * brake);
         }
@@ -4324,7 +4333,7 @@ class Ship {
     // 第80弾: 機関を止めて惰性で進む (推進の信号が出ない)。艦首だけ回せる。自艦の機関停止と同じ減速 (20秒で半分・霧が濃いほど早い)
     _drift(faceAng) {
         if (this._driftA === undefined || this._movedF === _frameCount - 1) this._driftA = this.angle;
-        if (faceAng !== undefined && faceAng !== null) { const d = _angDiff(faceAng, this.angle); this.angle += Math.sign(d) * Math.min(Math.abs(d), (PLAYER_TURN_RATES[ENEMY_CLASS[this.type]] || 0.01) * 0.6); }
+        if (faceAng !== undefined && faceAng !== null) { const d = _angDiff(faceAng, this.angle); this.angle += Math.sign(d) * Math.min(Math.abs(d), shipTurnRate(ENEMY_CLASS[this.type], this._v || 0) * 0.6); }
         this._v = (this._v || 0) * Math.exp(-COAST_DECAY * (1 + COAST_FOG_DRAG * getHiggsIntensity(this.x, this.y)));
         this.x += Math.cos(this._driftA) * this._v; this.y += Math.sin(this._driftA) * this._v;
         this.speed = this._v; this.currentSpeed = this._v; this._driftF = _frameCount;
@@ -4333,7 +4342,7 @@ class Ship {
     _coastIfIdle() {
         if (this._movedF === _frameCount || this._driftF === _frameCount || !(this._v > 0.005)) return;
         const cls = ENEMY_CLASS[this.type];
-        this._v = cls ? Math.max(0, this._v - SHIP_ACCEL_RATE[cls] * 3) : 0;
+        this._v = cls ? Math.max(0, this._v - SHIP_ACCEL_RATE[cls] * COAST_BRAKE * ACCEL_SCALE) : 0;
         this.x += Math.cos(this.angle) * this._v; this.y += Math.sin(this.angle) * this._v;
         this.speed = this._v; this.currentSpeed = this._v;
     }
@@ -4526,14 +4535,15 @@ class Ship {
                 let d = targetAng - this.angle;
                 while (d < -Math.PI) d += Math.PI * 2;
                 while (d > Math.PI) d -= Math.PI * 2;
-                const tr = (PLAYER_TURN_RATES[gameState.shipType] || PLAYER_TURN_RATE) * gameSpeedFactor * PM.turn * engineAgility(gameState.engineType).turn; // 第32弾: 部品 / 第42弾: EMは旋回×1.25
+                const tr = shipTurnRate(gameState.shipType, this.currentSpeed) * gameSpeedFactor * PM.turn * engineAgility(gameState.engineType).turn; // 第32弾: 部品 / 第42弾: EMは旋回×1.25 / 第174弾: 旋回は進んでいる速さで決まる
                 this.angle += Math.sign(d) * Math.min(Math.abs(d), tr);
                 if (playerCoasting) return d; // 第17弾: 機関停止中は艦首だけ回す (進路は変わらない)
                 const tm = Math.min(1, Math.abs(d) / (Math.PI * 0.12));
-                const ts = (this._haltTimer > 0 ? 0 : targetSpd) * (1 - (SHIP_TURN_SLOW[gameState.shipType] || 0.5) * tm); // 機関停止中は推力ゼロ
-                const ar = (SHIP_ACCEL_RATE[gameState.shipType] || 0.008) * gameSpeedFactor * (boostT > 0 ? BOOST_ACCEL : 1) * PM.accel * engineAgility(gameState.engineType).accel; // 第42弾: EMは加速×1.5
+                const ts = (this._haltTimer > 0 ? 0 : targetSpd) * (1 - (SHIP_TURN_SLOW[gameState.shipType] || 0.5) * tm * TURN_SLOW_K); // 機関停止中は推力ゼロ
+                const ar = (SHIP_ACCEL_RATE[gameState.shipType] || 0.008) * ACCEL_SCALE * gameSpeedFactor * (boostT > 0 ? BOOST_ACCEL : 1) * PM.accel * engineAgility(gameState.engineType).accel; // 第42弾: EMは加速×1.5 / 第174弾: 加速はゆっくり
                 // 第17弾: 機関が損傷・過熱している間は逆噴射も効かず、ゆっくりしか減速できない (噴射で稼いだ速度が残る)
-                const brake = (this._sysEngineTimer || 0) > 0 ? 0.25 : 2.5;
+                const brake = (this._sysEngineTimer || 0) > 0 ? 0.25 / ACCEL_SCALE : DECEL_SCALE / ACCEL_SCALE;
+                this._steerTs = ts; this._steerF = _frameCount; // 第174弾: 慣性の軌跡の予測に使う
                 this.currentSpeed = this.currentSpeed < ts ? Math.min(ts, this.currentSpeed + ar) : Math.max(ts, this.currentSpeed - ar * brake);
                 this.speed = this.currentSpeed;
                 this.x += Math.cos(this.angle) * this.currentSpeed;
@@ -4543,8 +4553,8 @@ class Ship {
             const _coast = () => {
                 if (playerCoasting) return;
                 if (boostT > 0) { _steer(this.angle, _baseTargetSpeed); return; } // 噴射中は艦首方向へ
-                const ar = (SHIP_ACCEL_RATE[gameState.shipType] || 0.008) * gameSpeedFactor;
-                this.currentSpeed = Math.max(0, this.currentSpeed - ar * 3);
+                const ar = (SHIP_ACCEL_RATE[gameState.shipType] || 0.008) * ACCEL_SCALE * gameSpeedFactor;
+                this.currentSpeed = Math.max(0, this.currentSpeed - ar * COAST_BRAKE);
                 this.speed = this.currentSpeed;
                 if (this.currentSpeed > 0.02) {
                     this.x += Math.cos(this.angle) * this.currentSpeed;
@@ -4625,8 +4635,7 @@ class Ship {
                     const _wa = Math.atan2(this.targetY - this.y, this.targetX - this.x), _ea = Math.abs(_angDiff(_wa, this.angle));
                     let _ts = _baseTargetSpeed;
                     if (_ea > 0.3) {
-                        const _tr = (PLAYER_TURN_RATES[gameState.shipType] || PLAYER_TURN_RATE) * gameSpeedFactor * PM.turn * engineAgility(gameState.engineType).turn;
-                        const _vMax = _wpDist * _tr / Math.max(0.5, Math.sin(Math.min(_ea, Math.PI / 2)) * 2); // この速さなら半径 _wpDist/(2 sin) の旋回円に収まる
+                        const _vMax = shipSpeedForRadius(gameState.shipType, _wpDist / Math.max(0.5, Math.sin(Math.min(_ea, Math.PI / 2)) * 2)); // この速さなら半径 _wpDist/(2 sin) の旋回円に収まる (第174弾: 旋回半径は速さで決まる)
                         _ts = Math.min(_ts, Math.max(_baseTargetSpeed * 0.12, _vMax));
                     }
                     _steer(_wa, _ts);
@@ -10844,7 +10853,32 @@ function checkPassiveDetection() {
 }
 
 const UNTRACKED_LINES = 2, TRACK_LINES_MAX = 8, TRACK_LINE_MERGE = 400; // 第18弾: 表示の整理 (オーナー合意 2026-10-25)
+// ═══ 第174弾: 慣性の軌跡 — 重い艦は舵を切っても すぐには曲がらない。今の速さ・旋回の速さ・加速のまま進路へ向かった時の軌跡を 点線で 約12秒先まで (2秒ごとに印) ═══
+function drawInertiaPath(ctx) {
+    if (!player || player.hp <= 0 || playerCoasting || !(player._steerF >= _frameCount - 3) || player.state !== 'moving' || comDemo) return;
+    const tx = player.targetX, ty = player.targetY; if (!(tx === tx) || !(ty === ty)) return;
+    const cls = gameState.shipType, inv = 1 / camera.zoom;
+    let x = player.x, y = player.y, a = player.angle, v = player.currentSpeed, tsv = player._steerTs || v;
+    const ar = (SHIP_ACCEL_RATE[cls] || 0.008) * ACCEL_SCALE * PM.accel * engineAgility(gameState.engineType).accel, mod = PM.turn * engineAgility(gameState.engineType).turn;
+    const N = 5, pts = [[x, y]];
+    let bent = false;
+    for (let i = 0; i < 144; i++) { // 12秒 (5フレームずつ)
+        const want = Math.atan2(ty - y, tx - x), d = _angDiff(want, a); if (Math.abs(d) > 0.06) bent = true;
+        const tr = shipTurnRate(cls, v) * mod * N; a += Math.sign(d) * Math.min(Math.abs(d), tr);
+        v = v < tsv ? Math.min(tsv, v + ar * N) : Math.max(tsv, v - ar * N * (DECEL_SCALE / ACCEL_SCALE));
+        x += Math.cos(a) * v * N; y += Math.sin(a) * v * N; pts.push([x, y]);
+        if (Math.hypot(tx - x, ty - y) < 60) break;
+    }
+    if (!bent && pts.length < 3) return;
+    ctx.save(); ctx.lineWidth = 1.6 * inv; ctx.strokeStyle = '#7fffd8'; ctx.lineCap = 'round';
+    ctx.setLineDash([5 * inv, 6 * inv]);
+    ctx.globalAlpha = 0.55; ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = '#7fffd8';
+    for (let k = 24; k < pts.length; k += 24) { ctx.globalAlpha = 0.75 * (1 - k / 160); ctx.beginPath(); ctx.arc(pts[k][0], pts[k][1], 2.4 * inv, 0, Math.PI * 2); ctx.fill(); }
+    ctx.restore();
+}
 function drawPassiveBearings(ctx) {
+    drawInertiaPath(ctx);
     const invZoom = 1 / camera.zoom;
     // 追跡していない信号: 最新の方位を1本ずつ (「何かがあっちに居る」)。
     // 第18弾: 線を引くのは強い方から2つだけ (艦載機が群がると破線が飛び交って読めなかった)。残りは自艦リングの点で示す
