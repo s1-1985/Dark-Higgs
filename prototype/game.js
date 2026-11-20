@@ -4004,10 +4004,10 @@ function pickEnemyAt(wx, wy, radFn) {
 // 目標に対するロック状態: full=有視界(またはその直後の保持) / assumed=センサー推定のみ
 function playerLockInfo(te) {
     const dist = Math.hypot(te.x - player.x, te.y - player.y);
-    if (te.inVision) te._wasLocked = true;
-    const persist = computeVisionRadius() * LOCK_PERSIST_BASE * (1 + aiPrec('sensor') * 2.5);
-    if (dist >= persist) te._wasLocked = false;
-    const full = !!te.inVision || (!!te._wasLocked && dist < persist);
+    // 第180弾: 完全ロック = 今見えている (と、見失ってから1秒の余韻) だけ — 敵の目視 (detectionTimer: 見えると120・毎フレーム1ずつ減って61未満で外れる) と同じ。
+    //   旧: 一度見えた相手は 有視界×2×(1+AI精度×2.5) ≈ 7000u 離れるまで完全ロックのまま (真の位置・ミサイルが追う・ビームが当たる) — 霧の外へ逃げた敵を見え続けていた
+    if (te.inVision) te._visF = _frameCount;
+    const full = !!te.inVision || (te._visF !== undefined && _frameCount - te._visF <= 59);
     const assumed = !full && te.contactLife > 0;
     const acc = full ? 1 : Math.max(0, Math.min(1, te.contactAccuracy || 0));
     // 第18弾: 想定ロックの距離は推定位置までの距離 (旧: 真の距離で射程外を判定していた = 見えない相手の距離が漏れていた)
@@ -5311,9 +5311,9 @@ class Ship {
                         if (_hc < fireThreshold(pers)) { if (window.__fdbg) window.__fdbg.hc = (window.__fdbg.hc || 0) + 1; wType = null; this.fireCooldown = Math.max(this.fireCooldown, 60); }
                     }
                     // 第22弾: 自機と同じく射角に入っていなければ撃たない (旧: 艦首の向きに関係なく撃てた)。ビームのチャージは射角の外でもできる
-                    if (wType && wType !== 'beam' && Math.abs(diff) > (WEAPON_FIRE_ARC[wType] || Math.PI / 4)) { wType = wType === 'missile' && this._usableWeapon('kinetic', distToBelief) === 'kinetic' && Math.abs(diff) < WEAPON_FIRE_ARC.kinetic ? 'kinetic' : null; if (!wType) { this.fireCooldown = 10; if (window.__fdbg) window.__fdbg.arc = (window.__fdbg.arc || 0) + 1; } }
+                    if (wType && wType !== 'beam' && Math.abs(diff) > (WEAPON_FIRE_ARC[wType] || Math.PI / 4)) { wType = wType === 'missile' && this._usableWeapon('kinetic', distToBelief) === 'kinetic' && Math.abs(diff) < WEAPON_FIRE_ARC.kinetic ? 'kinetic' : null; if (!wType) { this.fireCooldown = 1; if (window.__fdbg) window.__fdbg.arc = (window.__fdbg.arc || 0) + 1; } }
                     let _canShoot = !!wType;
-                    if (!wType) this.fireCooldown = Math.max(this.fireCooldown, 10);
+                    if (!wType) this.fireCooldown = Math.max(this.fireCooldown, 1); // 第180弾: 自機と同じく毎フレーム撃てるか見る (旧: 撃てなかったら10フレーム待った — 射角に入る競争で遅れた)
                     else if (wType === 'beam' && (this._eCharge || 0) < BEAM_CHARGE_DUR * epm(this).beamCharge) {
                         if (!(this._eCharge > 0) && comDemo) comThinkEvent('e', 'ビームをチャージ (2秒・熱/EM/ヒッグスが漏れる)', 'e' + this.uid);
                         this._eCharge = (this._eCharge || 0) + gameSpeedFactor; this._eChargeF = _frameCount;
@@ -14676,7 +14676,11 @@ const PD_RANGE = 450, PD_BASE = 0.25, PD_HEADON = 0.10, PD_SMART_MULT = 0.6, PD_
 function _pdReady(s, isPlayer) {
     if (!s || s.hp <= 0 || s._dying || (s._weaponJamTimer || 0) > 0) return false;
     if (isPlayer) return currentWeapon() === 'kinetic' && !s.kineticReloading && s.kineticAmmo > 0 && cargo.ammoK > 0;
-    return s.type !== 'fighter' && s.weaponType === 'kinetic' && !(s._kReload > 0) && (s._kMag ?? KINETIC_MAG) > 0 && (s.ammoK ?? 1) > 0;
+    // 第180弾: 敵の「今選んでいる兵装」= 自機COMと同じ選び方 (今の距離で撃てる物 → 無ければ弾が残る射程の短い物)。旧: 最後に撃った兵装のまま — ミサイルの装填中も
+    //   ミサイルを選んだままで実弾の迎撃が出なかった (決闘16回: 自機の迎撃8回・敵0回)
+    const lk = s.playerLastKnownPos, d = lk ? Math.hypot(lk.x - s.x, lk.y - s.y) : 1e9;
+    const sel = s._eCharge > 0 ? 'beam' : (actorPickWeapon(s, d) || actorFallbackWeapon(s));
+    return s.type !== 'fighter' && sel === 'kinetic' && !(s._kReload > 0) && (s._kMag ?? KINETIC_MAG) > 0 && (s.ammoK ?? 1) > 0;
 }
 function _pdSpend(s, isPlayer) {
     if (isPlayer) {
