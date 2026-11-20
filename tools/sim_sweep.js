@@ -22,7 +22,7 @@ async function worker(id, browser) {
     if (process.env.MIRROR) { const [sh, pre] = process.env.MIRROR.split(','); cfg = { ship: sh, enemy: sh, P: { pre }, E: { pre } }; } // 鏡合わせ: MIRROR=assault,standard
     const p = await browser.newPage({ viewport: { width: 1000, height: 560 } }); const errs = []; p.on('pageerror', e => errs.push(e.message));
     try {
-      await p.goto('http://localhost:8099/prototype/index.html?t=' + Date.now()); await p.waitForTimeout(1000);
+      await p.goto('http://localhost:' + (process.env.PORT || 8099) + '/prototype/index.html?t=' + Date.now()); await p.waitForTimeout(1000);
       const rec = await p.evaluate(async ([cfg, mins]) => {
         localStorage.setItem('darkEchoBriefed', '1');
         comCfg = loadComCfg(); comCfg.ship = cfg.ship; comCfg.enemy = cfg.enemy; comCfg.mode = 'br';
