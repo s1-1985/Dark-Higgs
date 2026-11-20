@@ -10891,31 +10891,13 @@ function drawPassiveBearings(ctx) {
         _latest.push(b);
     }
     _latest.sort((p, q) => (q.strength || 0) - (p.strength || 0));
+    // 第176弾 (オーナー「ロックしているシグネチャ以外は名札だけ」): 方位線は描かず、方位の先に名札だけ。推定円が出ている信号は推定の中心の名札に任せる
     for (let k = 0; k < Math.min(UNTRACKED_LINES, _latest.length); k++) {
-        const b = _latest[k];
-        const vis = (b.life / b.maxLife) * Math.min(1, (b.maxLife - b.life) / 45) * sigRxK(b.sourceId); // 第169弾: 受信が弱いほど薄い
-        const idc = sigColor(b.sourceId);
-        ctx.save();
-        ctx.strokeStyle = idc; ctx.fillStyle = idc;
-        ctx.lineWidth = 1.3 * invZoom;
-        const L0 = b.relay ? Math.min(b.range, 9000) * 0.6 : b.range * 0.35, c0 = Math.cos(b.angle), s0 = Math.sin(b.angle);
-        ctx.setLineDash([8 * invZoom, 7 * invZoom]); // ロック中の線だけ実線
-        for (let q = 0; q < 3; q++) {
-            ctx.globalAlpha = [0.6, 0.36, 0.16][q] * vis;
-            ctx.beginPath(); ctx.moveTo(b.ox + c0 * L0 * q / 3, b.oy + s0 * L0 * q / 3); ctx.lineTo(b.ox + c0 * L0 * (q + 1) / 3, b.oy + s0 * L0 * (q + 1) / 3); ctx.stroke();
-        }
-        ctx.setLineDash([]);
-        drawRangeTicks(ctx, b.ox, b.oy, b.angle, L0, 0.5 * vis, invZoom);
-        drawFlow(ctx, b.ox, b.oy, b.angle, L0, 0.85 * vis, invZoom);
-        // 起点の印: 聴音局 (ノード/コロニー) は輪＋名前 / 自艦起点は小さな菱形
-        const dd = 5 * invZoom;
-        ctx.globalAlpha = 0.85 * vis;
-        if (b.relay) { ctx.lineWidth = 1.4 * invZoom; ctx.beginPath(); ctx.arc(b.ox, b.oy, dd * 1.6, 0, Math.PI * 2); ctx.stroke(); ctx.beginPath(); ctx.arc(b.ox, b.oy, dd * 0.5, 0, Math.PI * 2); ctx.fill(); }
-        else { ctx.beginPath(); ctx.moveTo(b.ox, b.oy - dd); ctx.lineTo(b.ox + dd, b.oy); ctx.lineTo(b.ox, b.oy + dd); ctx.lineTo(b.ox - dd, b.oy); ctx.closePath(); ctx.fill(); }
-        ctx.restore();
-        // 線の先に番号札 (どの信号の線か) — 聴音局起点なら起点にも「聴音局」
-        queueTag(b.ox + c0 * L0, b.oy + s0 * L0, 'SIG-' + sigNo(b.sourceId), (b.relay ? null : (_RX_WORD[b.sensor] || null)), idc, 'right', 0.85 * vis);
-        if (b.relay) queueTag(b.ox, b.oy, b.sensorLabel || '聴音局', null, idc, 'right', 0.7 * vis);
+        const b = _latest[k], sa0 = _signalAnalysis[b.sourceId];
+        if (sa0 && (sa0.fix || sa0._lastEst) && sa0._fa > 0) continue;
+        const vis = (b.life / b.maxLife) * Math.min(1, (b.maxLife - b.life) / 45) * sigRxK(b.sourceId);
+        const L0 = b.relay ? Math.min(b.range, 9000) * 0.6 : b.range * 0.35;
+        queueTag(b.ox + Math.cos(b.angle) * L0, b.oy + Math.sin(b.angle) * L0, 'SIG-' + sigNo(b.sourceId), (_RX_WORD[b.sensor] || null) && ((_RX_WORD[b.sensor] || '') + ' 方位' + String(compassDeg(b.angle)).padStart(3, '0') + '°'), sigColor(b.sourceId), 'right', 0.8 * vis);
     }
     // 追跡中の信号: 記録した方位線 (第15弾)。線が交わる所に相手が居る — 交わらなければ相手は動いている。
     // 第18弾: 近い場所(400u以内)で聴いた線は新しい1本で代表させ、最大8本。長さは推定位置の少し先まで
@@ -11293,6 +11275,14 @@ function _drawEstCircle(ctx, sid, sa, locked) {
     const inv = 1 / camera.zoom;
     sa._fa = Math.min(1, (sa._fa || 0) + 0.035); // 第38弾: 円は突然出さずに0.5秒で浮かび上がる
     const fade = (locked ? 1 : 0.6 * sigRxK(sid)) * sa._fa * heldAlpha; // 第169弾: 受信が弱いほど薄く・ロック中だけ不透明
+    // 第176弾 (オーナー「ロックしているシグネチャ以外は名札だけ」): ロックしていない信号は円・目盛り・弧を描かず、推定の中心に名札だけ
+    if (!locked) {
+        const sp = worldToScreen(cx, cy); _circScreen.push({ sid, cx: sp.sx, cy: sp.sy, r: 0 }); // r=0: 名札と中心がタップの当たり
+        const idn = identInfo(sid), _dp = Math.hypot(cx - player.x, cy - player.y);
+        queueTag(cx, cy, 'SIG-' + sigNo(sid), (idn.known ? idn.short : '不明') + ' ' + fmtDist(_dp) + 'u ±' + fmtDist(R), sigColor(sid), 'top', 0.85 * sigRxK(sid) * sa._fa * heldAlpha, 0, anaProgress(sa), !!sa._gate);
+        if (_sigHint && _sigHint.sid === sid) { const pu = 0.6 + 0.4 * Math.sin(Date.now() / 120); ctx.save(); ctx.globalAlpha = pu; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3 * inv; ctx.beginPath(); ctx.arc(cx, cy, 16 * inv, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
+        sa._lockT0 = 0; return;
+    }
     { const sp = worldToScreen(cx, cy); _circScreen.push({ sid, cx: sp.sx, cy: sp.sy, r: R * camera.zoom }); }
     ctx.save();
     // 第40弾: 塗りはごく薄く・縁は 未追跡=細い破線 / 追跡中=実線＋外側をゆっくり回る4つのかぎ (照準のように) ・四方の目盛り
@@ -12354,8 +12344,8 @@ function drawShipRing(ctx) {
         const rr = gazeAt(bl.angle);
         const tip = rr + (isLocked ? 15 : 11);
         { const ca = Math.cos(st.ang), sa2 = Math.sin(st.ang); _blipScreen.push({ sid, sx: cx + ca * (tip + 4), sy: cy + sa2 * (tip + 4) }); } // タップの的は範囲の中央 (往復するサインを追わなくてよい)
-        // 来ていそうな方角の範囲 (帯域の色の弧)
-        if (st.hw > 0.035) {
+        // 第176弾 (オーナー「ロックしているシグネチャ以外は名札だけ」): 未ロックは範囲の弧・導線・山形を描かず、下の番号札だけ
+        if (isLocked && st.hw > 0.035) {
             ctx.globalAlpha = fade * (isLocked ? 0.5 : 0.3); ctx.strokeStyle = bandHex; ctx.lineWidth = isLocked ? 4 : 3;
             ctx.beginPath(); ctx.arc(cx, cy, rr + 5, st.ang - st.hw, st.ang + st.hw); ctx.stroke();
         }
@@ -12363,8 +12353,8 @@ function drawShipRing(ctx) {
         ctx.globalAlpha = fade * (isLocked ? 1 : 0.85);
         ctx.strokeStyle = hex; ctx.fillStyle = hex;
         ctx.lineWidth = isLocked ? 2.2 : 1.4;
-        ctx.beginPath(); ctx.moveTo(cx + c * (rr + 2), cy + s2 * (rr + 2)); ctx.lineTo(cx + c * (tip - 5), cy + s2 * (tip - 5)); ctx.stroke();
-        { const ha = isLocked ? 7 : 5.5, nx = -s2, ny = c, bx = cx + c * (tip - 6), by = cy + s2 * (tip - 6);
+        if (isLocked) { ctx.beginPath(); ctx.moveTo(cx + c * (rr + 2), cy + s2 * (rr + 2)); ctx.lineTo(cx + c * (tip - 5), cy + s2 * (tip - 5)); ctx.stroke(); }
+        if (isLocked) { const ha = isLocked ? 7 : 5.5, nx = -s2, ny = c, bx = cx + c * (tip - 6), by = cy + s2 * (tip - 6);
           ctx.beginPath(); ctx.moveTo(cx + c * (tip + ha * 0.5), cy + s2 * (tip + ha * 0.5)); ctx.lineTo(bx + nx * ha, by + ny * ha); ctx.lineTo(bx - nx * ha, by - ny * ha); ctx.closePath(); ctx.fill(); }
         if (_sigHint && _sigHint.sid === sid) { ctx.globalAlpha = 0.6 + 0.4 * Math.sin(t * 0.008); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.2; ctx.beginPath(); ctx.arc(cx + c * tip, cy + s2 * tip, 13, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = fade * 0.9; ctx.strokeStyle = hex; }
         if (!isLocked) { // 番号札 (どの信号か) + 帯域の言葉 (第23弾)
@@ -12377,7 +12367,7 @@ function drawShipRing(ctx) {
             const _idn = identInfo(sid); // 第23弾: 識別 / 第40弾: 名札
             const lx = cx + c * (tip + 18), ly = cy + s2 * (tip + 18);
             screenTag(ctx, lx, ly, '▶ SIG-' + sigNo(sid), _idn.txt, _idn.low ? '#ffcc66' : hex, fade, c > 0.3 ? 'left' : c < -0.3 ? 'right' : 'center', anaProgress(_signalAnalysis[sid]), !!(_signalAnalysis[sid] && _signalAnalysis[sid]._gate));
-            { const A = aiAssess(sid); screenTag(ctx, lx, ly + 19, 'AI', A.txt.replace(/^種別不明 — /, ''), '#9fc9c0', fade * 0.95, c > 0.3 ? 'left' : c < -0.3 ? 'right' : 'center'); }
+            // 第176弾: AIの見解は吹き出し (AI ANALYSIS) の1行目にあるのでリングでは出さない
         }
     }
     // (6) 測量ガイド: 追跡中の方位線に直交する2方向 (そちらへ動くと交点が締まる)。推定が十分に絞れたら消える
