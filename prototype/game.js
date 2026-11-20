@@ -5521,7 +5521,7 @@ class Ship {
                             const spot = findHidingSpot(this.x + Math.cos(a) * leg, this.y + Math.sin(a) * leg, 1500);
                             this.setTarget(spot.x, spot.y);
                         }
-                    } else if (this.type !== 'fighter' && (_bcs = beaconsFor('e').filter(b => !(this._bcSeen || []).includes(b))).length
+                    } else if (this.type !== 'fighter' && (_bcs = beaconsFor('e').filter(b => !(this._bcSeen || []).includes(b) && Math.hypot(b.x - this.x, b.y - this.y) / Math.max(0.5, (this._maxSpeeds() || {}).cruise || 0.8) < (b.life || 0) * 0.9)).length /* 第177弾: 消える前に着ける信号だけ (自機COMと同じ・旧: 4万u先の信号へ向かっていた) */
                                && ((this._bcSeen = (this._bcSeen || []).concat(_bcs).slice(-6)), Math.random() < (0.3 + _pers.greed * 0.6) * ((this._lureWary || 0) > _frameCount ? 0.3 : 1))) {
                         // 遭難信号へ向かう (貪欲な個体ほど食いつく) — プレイヤーと同じ海域へ収束
                         // 第20弾: 忍び足の速度で向かう (旧: 潜伏の0.08u/fのままで、着く前に信号が切れていた)
@@ -9332,7 +9332,7 @@ function updateConvoys() {
         if (_frameCount % 120 === 0) for (const e of enemies) {
             if (e.hp <= 0 || e._dying || e.type === 'fighter' || !ENEMY_CLASS[e.type]) continue;
             // 第37弾: 30秒ごとに「追うか」を考え直す (旧: 1隻につき1回だけ・潜伏中で自機の気配が無い時だけ → 4試合中3試合で一度も追わなかった)
-            if (e._cvT !== cv.sid && !(e.aiState === 'combat' && (e.contactFreshness || 0) > 0.3) && _frameCount - ((e._cvAsk || {})[cv.sid] || -1e9) > CONVOY_REASK) {
+            if (e._cvT !== cv.sid && !e._item && !(e.aiState === 'combat' && (e.contactFreshness || 0) > 0.3) && _frameCount - ((e._cvAsk || {})[cv.sid] || -1e9) > CONVOY_REASK) { // 第177弾: 取りに行くと決めた物がある間は輸送船へ寄り道しない (自機COMと同じ — 自機COMは拾い物の段が先)
                 const dH = Math.hypot(cv.x - e.x, cv.y - e.y);
                 if (CONVOY_SIG * Math.max(0, 1 - dH / ENEMY_PASSIVE_RANGE) >= 0.1) {
                     (e._cvAsk || (e._cvAsk = {}))[cv.sid] = _frameCount;
@@ -14280,7 +14280,7 @@ function itemFactsP(c, P, hpF) {
     const sa = lockedSignalId && _signalAnalysis[lockedSignalId], te = sa && sa.fix ? trackEstimate(sa, 0) : null;
     return { side: 'p', bcn: ['heat', 'optic', 'em', 'higgs'].find(b => drones.includes('bcn_' + b) && (cargo.stock['bcn_' + b] || 0) > 0) || null, estX: te ? te.x : 0, estY: te ? te.y : 0, estAng: te && Math.hypot(te.x - player.x, te.y - player.y) > 300 ? Math.atan2(te.y - player.y, te.x - player.x) : null, P, hpF, hitAgo: playerHitLog.length ? now - playerHitLog[playerHitLog.length - 1].f : 1e9,
         nearD: seenEn.length ? Math.min(...seenEn.map(q => Math.hypot(q.x - player.x, q.y - player.y))) : 1e9, seen: seenEn.length > 0, exposure: playerExposureLevel,
-        quietF: now - (c.lastContactF || 0), hHere: getHiggsIntensity(player.x, player.y), hiding: c.mode === 'hide' || !!(c.st && HIDE_STRATS[c.st.id] && (playerCoasting || player.currentSpeed < 0.3)), // 第150弾: 隠れて待つ戦略の最中も「隠れている」(旧: 退いた後の潜伏だけ) kit: (player._kitT || 0) > 0, missing: player.maxHp - player.hp,
+        quietF: now - (c.lastContactF || 0), busy: !!c.item, hHere: getHiggsIntensity(player.x, player.y), hiding: c.mode === 'hide' || !!(c.st && HIDE_STRATS[c.st.id] && (playerCoasting || player.currentSpeed < 0.3)), // 第150弾: 隠れて待つ戦略の最中も「隠れている」(旧: 退いた後の潜伏だけ) kit: (player._kitT || 0) > 0, missing: player.maxHp - player.hp,
         mslIn: THREATS.some(t => t.kind === 'msl'), estD: te ? Math.hypot(te.x - player.x, te.y - player.y) : 1e9,
         hacked: enemies.some(q => q._hackSess && q._hackSess.tgt === player && q._hackSess.p > 60),
         estR: te ? te.r : 1e9, ammoOut: ammoOutOf(player), dazed: statusDazed(player), lull: lullPhase !== 'none' || surgePhase === 'warn' || surgePhase === 'active', get: k => c[k], set: (k, v) => { c[k] = v; },
@@ -14292,7 +14292,7 @@ function itemFactsE(e) {
     if ((e.contactFreshness || 0) >= 0.05) e._quietStart = now; else if (e._quietStart === undefined) e._quietStart = now;
     const dBel = lk ? Math.hypot(lk.x - e.x, lk.y - e.y) : 1e9;
     return { side: 'e', bcn: e.itemBcn ? (['heat', 'optic', 'em', 'higgs'].find(b => e.itemBcn[b] > 0) || null) : null, estX: lk ? lk.x : 0, estY: lk ? lk.y : 0, estAng: lk && (e.contactFreshness || 0) > 0.25 && dBel > 300 ? Math.atan2(lk.y - e.y, lk.x - e.x) : null, P, hpF: e.hp / e.maxHp, hitAgo, nearD: dBel, seen: !!e.inVision, exposure: hitAgo < 480 ? 3 : (pingAgo < 900 || (e.detectionTimer || 0) > 60) ? 2 : heard ? 1 : 0,
-        quietF: now - e._quietStart, hHere: getHiggsIntensity(e.x, e.y), hiding: !!e._hiding || !!(e._strat && HIDE_STRATS[e._strat.id] && (e.currentSpeed || 0) < 0.3), kit: (e._kitT || 0) > 0, missing: e.maxHp - e.hp, mslIn: !!incomingMissile(e, true),
+        quietF: now - e._quietStart, busy: !!e._item, hHere: getHiggsIntensity(e.x, e.y), hiding: !!e._hiding || !!(e._strat && HIDE_STRATS[e._strat.id] && (e.currentSpeed || 0) < 0.3), kit: (e._kitT || 0) > 0, missing: e.maxHp - e.hp, mslIn: !!incomingMissile(e, true),
         estD: lk && (e.contactFreshness || 0) > 0.25 ? dBel : 1e9, hacked: !!(hackSessP && hackSessP.tgt === e && hackSessP.p > 60),
         estR: (() => { const t = e._sa && e._sa.fix ? trackEstimate(e._sa, 0) : null; return t ? t.r : 1e9; })(), ammoOut: ammoOutOf(e), dazed: statusDazed(e), lull: lullPhase !== 'none' || surgePhase === 'warn' || surgePhase === 'active', get: k => e['_' + k], set: (k, v) => { e['_' + k] = v; },
         n: k => cnt[k] || 0, cd: (k, sec) => now - (e['_' + k] || -1e9) > sec * 60, mark: k => { e['_' + k] = now; } };
@@ -14451,7 +14451,7 @@ function tacticRules(F, A, X, R) {
         F.mark('tcFixF'); if (X.sonar('std')) { say('ソナーで点にする — 推定が広い (幅' + Math.round(F.estR) + 'u) が近い → 全周囲ソナーで位置を確定する'); return true; }
     });
     // ピン&ステップ: 長く気配が無い時、弱いソナーを一度だけ打ち、返事が来る前に横へ離れる (打った所に来た相手の裏をかく)
-    R('tc_ping_step', () => (F.quietF > 5400 && F.exposure === 0 && F.hpF > 0.5 && F.cd('tcPingF', 480)), () => {
+    R('tc_ping_step', () => (F.quietF > 14400 && !F.busy && F.exposure === 0 && F.hpF > 0.5 && F.cd('tcPingF', 480)), () => {
         F.mark('tcPingF'); if (X.sonar('weak')) { say('ピン&ステップ — 弱いソナーを打ってすぐ横へ離れる'); X.slip(Math.random() * Math.PI * 2); return true; }
     });
     // 航行モードの切替: 推定が広い=解析 / 推定が絞れて近い=兵装 / 静かに待っている=探知。20〜40秒は自動の選び直しを止める
@@ -16953,13 +16953,20 @@ function huntTransitEngine(e, why) {
 }
 // 第97弾 (記録の解析: 鏡合わせ試合で敵は最初のコロニー占有が自機COMの約4倍遅い・占有数 10回/63回): 自機COMは「取りに行くと決めた物を取り終えるまで続ける」(c.item)が、
 //   敵は気配を聞くたびに行き先を忘れて戻っていた → 敵も同じ: 行き先 (コロニー・ノード・難破船) を決めたら、危険が無い限り取り終えるまで向かう
+// 第177弾: 取りに行く物の時間切れ (自機COMも敵も同じ)。旧: 一律5分 → 1万u先の拠点 (巡航30u/s で約5.5分) の手前で諦めていた (敵の取りに行った物の約4割)。
+//   5分たっても1分間に300u以上近づいていれば続ける・上限15分
+function itemStale(I, x, y, now) {
+    const d = Math.hypot(I.o.x - x, I.o.y - y);
+    if (I.bd === undefined || d < I.bd - 300) { I.bd = d; I.bf = now; }
+    return now - I.f > 54000 || (now - I.f > 18000 && now - I.bf > 3600);
+}
 function enemyItemStep(e) {
     const I = e._item; if (!I || e.type === 'fighter') return false;
     const now = _frameCount, o = I.o, isNode = !o.type, isDer = o.type === 'derelict';
     const gone = isDer ? !!o.salvaged : o.owner === 'enemy';
     const hpF = e.hp / e.maxHp, hitAgo = now - (e._lastHitF ?? -1e9);
     const danger = e.aiState === 'combat' || e._hiding || hpF < 0.4 || hitAgo < 600 || !!incomingMissile(e, true) || !!(e._hunt && e._hunt.k);
-    if (gone || danger || now - I.f > 18000) { comThinkEvent('e', gone ? '取りに行った物を取り終えた → 次へ' : danger ? '危険 (交戦・被弾・ミサイル・耐久) → 取るのを中断' : '時間切れ → 次へ', 'e' + e.uid); e._item = null; e._roamGoal = null; e._roam = null; return false; }
+    if (gone || danger || itemStale(I, e.x, e.y, now)) { comThinkEvent('e', gone ? '取りに行った物を取り終えた → 次へ' : danger ? '危険 (交戦・被弾・ミサイル・耐久) → 取るのを中断' : '時間切れ → 次へ', 'e' + e.uid); e._item = null; e._roamGoal = null; e._roam = null; return false; }
     const d = Math.hypot(o.x - e.x, o.y - e.y), near = (isNode ? NODE_CAP_R : isDer ? DERELICT_SALVAGE_R : COLONY_HACK_R) * 0.6;
     if (isNode && d < 600) { e.aiState = 'gathering'; e.gatherTarget = o; e._capT = e._capT || 0; return false; } // ノードは「収集」の状態が制圧する
     if (d > near) { const ms = e._maxSpeeds(); e._moveHeading(Math.atan2(o.y - e.y, o.x - e.x), ms ? ms.cruise : 1); e.state = 'moving'; e._roam = 'item'; }
@@ -18094,7 +18101,7 @@ function comGrabStep(c, P, hpF, retreat, te, lk) {
     const it = c.item, o = it.o;
     if (o._probe) { const f = fieldSignals.find(q => q.sid === o.sid); if (f && inPlayerVision(f.x, f.y)) { it.o = f; } else if (Math.hypot(o.x - player.x, o.y - player.y) < 300) { comThinkEvent('p', '近くの反応を確かめた — 何も無い → 次の行動へ'); c.item = null; return false; } }
     const gone = o.type === 'derelict' ? !!o.salvaged : o.type === 'colony' ? (o.owner === 'player' && !!o._partP) : o.kind === 'cache' ? !fieldSignals.some(q => q.sid === o.sid && !fcSkipP(q)) : (o.owner === 'player' && !!o._partP);
-    if (gone || now - it.f > 18000) { comThinkEvent('p', (gone ? '取り終えた' : '時間切れ') + ' → 次の行動へ'); c.item = null; return false; }
+    if (gone || itemStale(it, player.x, player.y, now)) { comThinkEvent('p', (gone ? '取り終えた' : '時間切れ') + ' → 次の行動へ'); c.item = null; return false; }
     c.mode = 'item'; _comGoTo(it.o, it.near, null); // 拾い物へは航路の保持時間に縛られず向ける (旧: 直前の航路を20秒変えられず、目の前の物から離れていった)
     comThink('p', 'item', '取りに行くと決めた物を先に取る (' + _dirTxt(player.x, player.y, o.x, o.y) + '・' + Math.round(Math.hypot(o.x - player.x, o.y - player.y) / 100) * 100 + 'u)');
     return true;
@@ -19552,7 +19559,7 @@ function comPilotStep() {
         const it = c.item, o = it.o;
         const gone = o.type === 'derelict' ? !!o.salvaged : o.type === 'colony' ? (o.owner === 'player' && !!o._partP) : o.kind === 'cache' ? !fieldSignals.some(q => q.sid === o.sid && !fcSkipP(q)) : (o.owner === 'player' && !!o._partP);
         const danger = playerExposureLevel >= 2 || (te && lk && lk.full) || hpF < retreat + 0.1 || !!incomingMissile(player, false);
-        if (gone || danger || now - it.f > 18000) { comThinkEvent('p', (gone ? '取り終えた' : danger ? '危険 (照射・敵が見えた・ミサイル・耐久) → 取るのを中断' : '時間切れ') + ' → 次の行動へ'); c.item = null; }
+        if (gone || danger || itemStale(it, player.x, player.y, now)) { comThinkEvent('p', (gone ? '取り終えた' : danger ? '危険 (照射・敵が見えた・ミサイル・耐久) → 取るのを中断' : '時間切れ') + ' → 次の行動へ'); c.item = null; }
         else { c.mode = 'item'; _comGoTo(o, it.near, c); comThink('p', 'item', '取りに行くと決めた物を先に取る (' + _dirTxt(player.x, player.y, o.x, o.y) + '・' + Math.round(Math.hypot(o.x - player.x, o.y - player.y) / 100) * 100 + 'u) — 信号を受信しても取り終えてから'); _comStance(c, P); return; }
     }
     const _early = comEarlyGather(partSlotsUsed(), partSlotsMax(), now, P);
