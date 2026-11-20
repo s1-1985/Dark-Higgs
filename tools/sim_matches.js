@@ -17,7 +17,7 @@ const [ship = 'assault', enemy = 'assault', pP = 'standard', eP = 'standard', mi
       comCfg = loadComCfg(); comCfg.ship = ship; comCfg.enemy = enemy; comCfg.mode = 'br'; comCfg.pPreset = pP; comCfg.ePreset = eP;
       if (COM_PRESETS[pP] && COM_PRESETS[pP].p) comCfg.pp = Object.assign({}, COM_PRESETS[pP].p);
       if (COM_PRESETS[eP] && COM_PRESETS[eP].p) comCfg.ep = Object.assign({}, COM_PRESETS[eP].p);
-      comCfg.higgsView = true; comCfg.think = false; comCfg.lo = null; gameLoopRunning = true; startComDemo();
+      comCfg.pCtl = 'com'; comCfg.higgsView = true; comCfg.think = false; comCfg.lo = null; gameLoopRunning = true; startComDemo();
       for (let t = 0; t < mins * 60; t++) { for (let k = 0; k < 6; k++) window.__simSteps(10); if (!player || player.hp <= 0 || sectorCleared) break; }
       return matchRecordData();
     }, [ship, enemy, pP, eP, mins]);
