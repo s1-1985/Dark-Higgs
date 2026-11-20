@@ -17993,7 +17993,7 @@ function enemyStratStep(e, P) {
         if (now < (e._stratCD || 0) || stratNearE(e)) return false;
         const x = stratFactsE(e), pk = stratPick(P, x, e._lastStrat, window.__stratForceE), pick = pk.pick;
         e._lastStrat = pick;
-        if (pick === 'gather') { e._stratCD = now + 1800 + Math.random() * 3600; return false; }
+        if (pick === 'gather') { e._stratCD = now + COM_STRAT_MIN + Math.random() * COM_STRAT_VAR + 600 + Math.random() * 1800; return false; } // 第180弾: 自機COMの「収集」と同じ長さ (戦略90〜300秒+間10〜40秒)。旧: 30〜90秒で選び直し、収集以外を自機COMの約3倍引いて序盤の占有が遅れた
         S = e._strat = { id: pick, t0: now, until: now + 5400 + Math.random() * 12600, ph: 'go' };
         if (pick === 'outpost') { // 第133弾: 占有した拠点の中継圏に艦載機・哨戒機を置いて見張らせる (自分は巡回を続ける)
             const site = outpostPick('enemy', e.x, e.y, e._siteUsed || (e._siteUsed = {}));
