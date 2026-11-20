@@ -4674,6 +4674,7 @@ class Ship {
                 return;
             }
             enemyItemsStep(this);
+            if (this.type !== 'fighter') enemyDeployStep(this); // 第180弾: 資材からの組み立て・ドローンの展開 (自機COMの _comDeploy と同じ条件)
             if (this.type === 'fighter') { enemyFighterStep(this); return; } // 第37弾: 敵の艦載機は自機の戦闘機と同じ一撃離脱 (旧: 戦艦と同じ交戦機動で止まって撃っていた)
             // 第21弾: 状況適応の性格 — 1秒ごとに 隠密/貪欲/攻撃的/慎重 を見直す (相手を掴んでいる=追跡か交戦で記憶が新しい)
             if (this.personality && this.personality._adaptive && (_frameCount + this.uid) % 60 === 0) {
@@ -5670,7 +5671,7 @@ class Ship {
                 quiet: !!this._hiding || !!this._quietRun, ff: _ff, ft: this._fireFlashType, launch: _lf,
                 charge: this._eCharge > 0 ? _em.chargeLeak : 0, beamCool: this._bReload > 0, mslReload: this._mReload > 0,
                 comms: _frameCount - (this._commsF || -99) < 3 || (this.aiState === 'gathering' && this._capT > 0) || _frameCount < (this._hackUntil || 0), hackPulse: _frameCount < (this._hackBurstUntil || 0) ? (epm(this).hackEm || 1) : 0, hackLink: this._hackSess ? (epm(this).hackEm || 1) : 0,
-                repair: (this._kitT || 0) > 0, sysEngine: this._sysEngineTimer > 0, leak: _lk,
+                repair: (this._kitT || 0) > 0, sysEngine: this._sysEngineTimer > 0, leak: _lk, assemble: !!this._asm,
                 hHere: higgsHere, storm: getStormIntensity(this.x, this.y), thermal: getThermalIntensity(this.x, this.y),
                 pm: _em, wounded: this.hp / this.maxHp < WOUNDED_HP_FRAC, pulsePh: this.uid * 37,
             });
@@ -15578,6 +15579,52 @@ function scoutLost(d) {
 // ═══ 第37弾 (オーナー): 敵空母の艦載機 — 自機の戦闘機と同じ機動・同じ数値 (機首の向きにだけ進む・一撃離脱・機首の前±12°だけ撃つ・後退/停止なし) ═══
 // 目: 自機の戦闘機と同じ有視界 (900u・霧で遮る) + 至近700uは霧に関係なく。見えない間は母艦が掴んでいる自艦の推定位置へ向かい、何も無ければ母艦の周りを周回
 // 第81弾: 艦載機・哨戒機・Techが見た自艦を母艦へ — 推定の材料 (点の観測 sa.ping) にもする (自機のドローンが見た敵を sa.ping に入れるのと同じ)
+// ═══ 第180弾: 敵も資材からドローンを組み立てて出す (自機COMの _comDeploy・deployDrone と同じ条件・同じ時間・同じ信号) ═══
+// 旧: 敵は 空母の既定の在庫 (戦闘機・哨戒機・砲台) と Tech だけ。攻撃型・潜航型の敵は ドローンを一度も出さず、拾った資材は使い道が無かった。
+//   鏡合わせの記録 (潜航型×潜航型 93試合): 自機COMは資材から哨戒機を72回出し (航跡の検出189回・目視の射撃が敵の約5倍)、敵は2回
+const ENEMY_DEPLOY_KINDS = ['attack', 'build', 'scout']; // 敵が飛ばせる種類 (デコイ・ブイ・バリア・散布は敵の実装が無い)
+function _eLive(e, k) { return enemies.filter(f => f.type === 'fighter' && f.hp > 0 && !f._dying && f._home === e && (k === 'attack' ? !f._kind : f._kind === (k === 'build' ? 'turret' : k))).length; }
+function _eLiveAll(e) { return enemies.filter(f => f.type === 'fighter' && f.hp > 0 && !f._dying && f._home === e).length; }
+function _eLaunch(e, k) {
+    if (k === 'scout') spawnEnemyDrone(e, 'scout');
+    else if (k === 'build') spawnEnemyDrone(e, 'turret');
+    else _eLaunchFighter(e, e.playerLastKnownPos || { x: e.x, y: e.y });
+}
+function enemyDeployStep(e) {
+    const cls = ENEMY_CLASS[e.type]; if (!cls) return;
+    if (e._asm) { // 組み立て中 (自機の cargo.asm と同じ: 時間がかかり、電磁波と熱が漏れる・完成で出す)
+        e._asm.t -= gameSpeedFactor;
+        if (e._asm.t <= 0) {
+            const k = e._asm.k; e._asm = null;
+            if (_eLiveAll(e) < (CARGO_CAP[cls] || 0)) { _eLaunch(e, k); comThinkEvent('e', DRONE_SPEC[k].label + 'の組み立てが完成 → 出す', 'e' + e.uid); }
+            else e[LOOT_STOCK[k]] = (e[LOOT_STOCK[k]] || 0) + 1;
+        }
+        return;
+    }
+    if ((_frameCount + e.uid) % COM_TICK !== 0 || e._techT > 0) return;
+    const P = _enemyPersonality(e) || {};
+    const contact = e.aiState === 'combat' || e.aiState === 'hunting' || (e.contactFreshness || 0) > 0.1;
+    const expo = (e._lastHitF && _frameCount - e._lastHitF < 480) || _frameCount - (e._pingHeardF ?? -1e9) < 900 || e.inVision; // 自機の「照射以上」と同じ (itemFactsE の兆候2以上)
+    if (!contact || !((P.aggression ?? 0.5) >= 0.5 || (P.caution ?? 0.4) >= 0.5 || expo)) return;
+    if (_frameCount - (e._deployF || -1e9) < COM_DEPLOY_GAP) return;
+    if (e._strat && (e._strat.id === 'ambush' || e._strat.id === 'bait' || e._strat.id === 'fogHide')) return; // 潜む戦略の間は出さない (自機COMと同じ)
+    if (_eLiveAll(e) >= (CARGO_CAP[cls] || 0)) return;
+    for (const k of ENEMY_DEPLOY_KINDS) {
+        if (!(SHIP_DRONES[cls] || []).includes(k) || !drOK('e', k)) continue;
+        if (k === 'build' && _eLive(e, 'build') > 0) continue;
+        const stock = e[LOOT_STOCK[k]] || 0;
+        if (stock > 0) {
+            if (cls === 'carrier') continue; // 空母の在庫は従来の射出の規則が出す
+            e[LOOT_STOCK[k]]--; _eLaunch(e, k); e._deployF = _frameCount;
+            comThinkEvent('e', '自機を掴んでいる → ' + DRONE_SPEC[k].label + 'を出す', 'e' + e.uid); return;
+        }
+        const need = DRONE_SPEC[k].mat;
+        if (enemyMat < need) continue;
+        if (cls === 'carrier' && enemyMat - need < DRONE_SPEC.mech.mat) continue; // 自機COMと同じ: 空母は Tech用の資材を残せる時だけ
+        enemyMat -= need; e._asm = { k, t: DRONE_SPEC[k].build }; e._deployF = _frameCount;
+        comThinkEvent('e', '自機を掴んでいる → 資材' + need + '個で' + DRONE_SPEC[k].label + 'を組み立てる (' + Math.round(DRONE_SPEC[k].build / 60) + '秒・電磁波が漏れる)', 'e' + e.uid); return;
+    }
+}
 function _eLaunchFighter(e, bel) {
     const d = new Ship(e.x + (Math.random() - 0.5) * 300, e.y + (Math.random() - 0.5) * 300, false, 'fighter');
     d.aiState = 'hunting'; d.huntTarget = { x: bel.x, y: bel.y }; d.huntTimer = 600; d.lurking = false; d._home = e;
@@ -15597,7 +15644,7 @@ function enemyFighterStep(f) {
     if (f.fireFlashTimer > 0) { f.fireFlashTimer--; f.visible = true; } else f.visible = false;
     if (f.fireCD > 0) f.fireCD--;
     if (f._v === undefined) f._v = 2.5;
-    const carrier = enemies.find(e => e.type === 'carrier' && e.hp > 0 && !e._dying);
+    const carrier = (f._home && f._home.hp > 0 && !f._home._dying) ? f._home : enemies.find(e => e.type === 'carrier' && e.hp > 0 && !e._dying); // 第180弾: 出した母艦 (攻撃型の敵も戦闘機を出す)
     // 見えている目標 (自艦・自機のドローン) — いちばん近いもの
     let tgt = null, td = Infinity;
     if (f._ammo === undefined) f._ammo = DRONE_AMMO.attack;
