@@ -1540,6 +1540,11 @@ function actorHas(s, w) { return s === player ? playerHasWeapon(w) : !(s.wset &&
 function actorAmmo(s, w) { if (w === 'beam') return true; if (s === player) return w === 'kinetic' ? cargo.ammoK > 0 : cargo.ammoM > 0; return w === 'kinetic' ? (s.ammoK === undefined || s.ammoK > 0) : (s.ammoM === undefined || s.ammoM > 0); }
 function actorReady(s, w) { if (s === player) return playerWeaponReady(player, w); return w === 'kinetic' ? !(s._kReload > 0) : w === 'missile' ? !(s._mReload > 0) : !(s._bReload > 0); }
 // 撃てるものから持ち替える: ミサイル (リロード済み) → 実弾 (射程内) → ビーム (遠くでだけ・溜まっていれば) → 届くもの。自機COMも敵もこの1つの関数
+// 第180弾: 今の距離で撃てる兵装が無い時に、間合いを決める兵装 = 弾が残っている物のうち射程の短い物 (旧: 敵は 'missile' 固定 — ミサイルが尽きても1800uを保ち実弾が届かなかった)
+function actorFallbackWeapon(s) {
+    const has = (w) => actorHas(s, w) && actorAmmo(s, w);
+    return has('kinetic') ? 'kinetic' : has('missile') ? 'missile' : actorHas(s, 'beam') ? 'beam' : 'missile';
+}
 function actorPickWeapon(s, dist) {
     const has = (w) => actorHas(s, w) && actorAmmo(s, w);
     const mOk = has('missile') && dist > 250 && dist < actorWeaponRange(s, 'missile') * 0.9;
@@ -5249,7 +5254,7 @@ class Ship {
                 // 自機の長距離射撃に一方的に削られていた。近接火器(kinetic)の間合いは従来どおり fireRange。
                 const engageRange = ENEMY_CLASS[this.type] ? Math.max(0, ...['kinetic', 'missile', 'beam'].filter(w => actorHas(this, w)).map(w => actorWeaponRange(this, w))) : Math.max(fireRange, ENEMY_MISSILE_ENGAGE); // 第98弾: 戦艦は持っている兵装の射程 (自機と同じ)
                 // ── 第22弾: 戦艦の戦闘機動 (毎フレーム・慣性つき)。機動の選び方は10秒続ける (相手の兵装が変わった時と耐久が半分を切った時は選び直す) ──
-                let _plannedW = ENEMY_CLASS[this.type] ? (actorPickWeapon(this, distToBelief) || 'missile') : this._wpref(gameState.sector <= 3 ? prof.weaponEarly : prof.weaponLate); // 第98弾: 戦艦は自機COMと同じ選び方
+                let _plannedW = ENEMY_CLASS[this.type] ? (actorPickWeapon(this, distToBelief) || actorFallbackWeapon(this)) : this._wpref(gameState.sector <= 3 ? prof.weaponEarly : prof.weaponLate); // 第98弾: 戦艦は自機COMと同じ選び方
                 if (!ENEMY_CLASS[this.type]) { if (this.predictedBehavior === 'kinetic' && _plannedW === 'kinetic') _plannedW = this._wpref('missile'); if (outmatched && _plannedW === 'kinetic') _plannedW = this._wpref('missile'); }
                 if (ENEMY_CLASS[this.type]) {
                     const _ms = this._maxSpeeds();
@@ -5275,7 +5280,8 @@ class Ship {
                     } else man = combatManeuver(this, aimX, aimY, tAng, pl.D, pl.mode, pl.prio, oppArc, pl.prio === 'evade' ? incomingMissile(this, true) : null);
                     // 撃てる兵装が射角に入るまで艦首を向ける (攻撃優先・射程内・間合いを保っている時)
                     if (!desperate && pl.prio === 'attack' && man.why === 'hold') man.ang = Math.atan2(aimY - this.y, aimX - this.x);
-                    this._moveHeading(man.ang, man.spd * (_ms ? _ms.flank : 1.5));
+                    const _cmSpd = !_ms ? 1.5 : (desperate || man.why === 'retreat' || man.why === 'dodge') ? _ms.flank : (pers.stealth ?? 0.3) >= 0.5 ? _ms.silent : _ms.cruise; // 第180弾: 自機COMと同じ出力 (_comStance: 隠密0.5以上=潜航・他=巡航・逃げる時だけ全速)。旧: 交戦中は常に全速 — 第174弾の運動では速いほど回頭が鈍く、射角に入れる競争で負けた
+                    this._moveHeading(man.ang, man.spd * _cmSpd);
                     _ct.mode = desperate ? 'retreat' : man.why;
                 }
                 const _wantFire = distToBelief < engageRange && this.fireCooldown <= 0 && this._weaponJamTimer <= 0 && player && player.hp > 0 && (!desperate || Math.random() < 0.25);
@@ -5328,7 +5334,14 @@ class Ship {
                         const tgY = this.y + Math.sin(sa) * baseRange;
                         const aimTarget = { x: tgX, y: tgY, hp: 1 };
                         let projTarget = aimTarget;
-                        if (wType === 'beam') {
+                        const _seeP = this.type !== 'fighter' && this.detectionTimer > 60; // 第180弾: 見えている相手 = 完全ロック (自機の lk.full と同じ: ミサイルは相手を追い、ビームは相手へ)
+                        if (_seeP && wType === 'missile') projTarget = player;
+                        if (wType === 'beam' && _seeP) { // 自機と同じ: 見えている相手へのビームは当たる (バリアは止める)
+                            beamRevealsShooter(this.x, this.y, false, this);
+                            const _blk = barrierBlocksBeam(this.x, this.y, player.x, player.y);
+                            if (_blk) { effects.push({ x: this.x, y: this.y, tx: _blk.x, ty: _blk.y, type: 'beam', a: 1, c: '#ff4d4d' }); leaveBeamChannel(this.x, this.y, _blk.x, _blk.y); continue; }
+                            projTarget = player;
+                        } else if (wType === 'beam') {
                             // beamは即着弾。照準点が実プレイヤーに十分近い時だけ実弾化、外れなら空撃ち(無害だがダークチャネルは残る)。
                             const missDist = Math.hypot(player.x - tgX, player.y - tgY);
                             beamRevealsShooter(this.x, this.y, false, this); // 第20弾: 霧に軌跡が残る → 自艦に射手の方位線
@@ -5358,7 +5371,7 @@ class Ship {
                         _eproj.owner = this; // kinetic/missile着弾時の奇襲被弾判定用
                         { const _m = epm(this); // 第33弾: 敵の部品
                           if (wType === 'kinetic') _eproj.dmg *= _m.kinDmg * _m.dmgAll;
-                          else if (wType === 'missile') { _eproj.dmg *= _m.mslDmg * _m.dmgAll; _eproj.maxDist *= _m.mslRange; _eproj.speed *= _m.mslSpeed; _eproj._locked = !!this.inVision; _eproj.quiet = !!_m.mslQuiet; _eproj.emp = !!_m.emp; _eproj._turnMul = _m.mslTurn; _eproj.seekR = _m.seeker ? 1300 : 900; } } // 第39弾: 終末シーカーは自機と同じ 900u (部品で1300u)
+                          else if (wType === 'missile') { _eproj.dmg *= _m.mslDmg * _m.dmgAll; _eproj.maxDist *= _m.mslRange; _eproj.speed *= _m.mslSpeed; _eproj._locked = this.detectionTimer > 60; /* 第180弾: 敵が自艦を目視している時 (旧: 自艦に見られている時) */ _eproj.quiet = !!_m.mslQuiet; _eproj.emp = !!_m.emp; _eproj._turnMul = _m.mslTurn; _eproj.seekR = _m.seeker ? 1300 : 900; } } // 第39弾: 終末シーカーは自機と同じ 900u (部品で1300u)
                         _beamShooter = null;
                         projectiles.push(_eproj);
                     }
@@ -16965,7 +16978,14 @@ function enemyShoot(e, wType, ax, ay, why) {
         const sp = shots > 1 ? (s - (shots - 1) / 2) * KINETIC_SPREAD * shipFx(e).spread : 0, a = ta + sp;
         const tgX = e.x + Math.cos(a) * d, tgY = e.y + Math.sin(a) * d;
         let projTarget = { x: tgX, y: tgY, hp: 1 };
-        if (wType === 'beam') {
+        const _seeP = e.detectionTimer > 60; // 第180弾: 見えている相手 = 完全ロック (自機の lk.full と同じ)
+        if (_seeP && wType === 'missile') projTarget = player;
+        if (_seeP && wType === 'beam') {
+            beamRevealsShooter(e.x, e.y, false, e);
+            const _blk = barrierBlocksBeam(e.x, e.y, player.x, player.y);
+            if (_blk) { effects.push({ x: e.x, y: e.y, tx: _blk.x, ty: _blk.y, type: 'beam', a: 1, c: '#ff4d4d' }); leaveBeamChannel(e.x, e.y, _blk.x, _blk.y); continue; }
+            projTarget = player;
+        } else if (wType === 'beam') {
             beamRevealsShooter(e.x, e.y, false, e);
             const _bL = WEAPON_RANGE.beam, _btx = player.x - e.x, _bty = player.y - e.y;
             const _bAl = _btx * Math.cos(a) + _bty * Math.sin(a), _bPp = Math.abs(-_btx * Math.sin(a) + _bty * Math.cos(a));
@@ -16984,7 +17004,7 @@ function enemyShoot(e, wType, ax, ay, why) {
         pr.owner = e;
         const m = epm(e);
         if (wType === 'kinetic') pr.dmg *= m.kinDmg * m.dmgAll;
-        else if (wType === 'missile') { pr.dmg *= m.mslDmg * m.dmgAll; pr.maxDist *= m.mslRange; pr.speed *= m.mslSpeed; pr._locked = !!e.inVision; pr.quiet = !!m.mslQuiet; pr.emp = !!m.emp; pr._turnMul = m.mslTurn; pr.seekR = m.seeker ? 1300 : 900; }
+        else if (wType === 'missile') { pr.dmg *= m.mslDmg * m.dmgAll; pr.maxDist *= m.mslRange; pr.speed *= m.mslSpeed; pr._locked = e.detectionTimer > 60; pr.quiet = !!m.mslQuiet; pr.emp = !!m.emp; pr._turnMul = m.mslTurn; pr.seekR = m.seeker ? 1300 : 900; }
         _beamShooter = null;
         projectiles.push(pr);
     }
@@ -17545,7 +17565,7 @@ function enemyHunterStep(e, heard, hard) {
         const D = Math.hypot(est.x - e.x, est.y - e.y);
         const sp = est && huntStrikePlan(e, est, H.force);
         if (!H.sawF) { H.sawF = now; say('【' + H.jp + '】自機を目視 (' + Math.round(D / 100) * 100 + 'u) — 先に撃つ'); }
-        if (sp && H.force === 'kinetic' && sp.w === 'kinetic' && D > 780) { // 第82弾: 肉薄は実弾の射程まで詰める (旧: 目視した途端に1000uからミサイルを撃っていた — 試合の記録で確認)
+        if (sp && sp.w === 'kinetic' && D > 780) { // 第180弾: 実弾しか撃てない時は肉薄でなくても実弾の射程まで詰める (旧: その場で漂い、8秒で交戦へ移っても間合いはミサイルのまま) // 第82弾: 肉薄は実弾の射程まで詰める (旧: 目視した途端に1000uからミサイルを撃っていた — 試合の記録で確認)
             H.w = 'kinetic'; e._moveHeading(Math.atan2(est.y - e.y, est.x - e.x), ms.cruise); H.sawF = Math.max(H.sawF, now - 60 * 4);
         } else if (sp) {
             H.w = (sp.w === 'beam' && D < 2500 && _eHas(e, 'kinetic') && (e.ammoK === undefined || e.ammoK > 0)) ? (D <= 760 ? 'kinetic' : sp.w) : sp.w;
@@ -19551,7 +19571,7 @@ function comPilotStep() {
             // 第20弾: 撃てるものから持ち替える — ミサイル(リロード済み) → 実弾(射程内) → ビーム(射程の外側・溜まっていれば) → 届くもの
             // (ビームは射角±10°で2秒溜めるので、至近の撃ち合いでは実弾を止めてしまう)
             const wNow = currentWeapon();
-            const wWant = actorPickWeapon(player, lk.dist) || _wset[0]; // 第98弾: 敵と同じ1つの関数 (ミサイル→実弾→遠くのビーム)
+            const wWant = actorPickWeapon(player, lk.dist) || actorFallbackWeapon(player); // 第98弾: 敵と同じ1つの関数 (ミサイル→実弾→遠くのビーム)
             if (wWant !== wNow && (wNow !== 'beam' || !(player._beamCharge > 0))) {
                 switchWeapon(wWant);
                 comThinkEvent('p', '有視界 ' + Math.round(lk.dist / 100) * 100 + 'u → ' + _WPN_JP[wWant] + 'に持ち替える');
