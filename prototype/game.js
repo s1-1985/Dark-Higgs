@@ -16996,6 +16996,8 @@ function enemyGrabStep(e) {
     for (const f of fieldSignals) { if (f.kind !== 'cache' || f.fake === 'e' || (f.fake === 'p' && enemySeesThroughFake(e, f))) continue; const d = Math.hypot(f.x - e.x, f.y - e.y); if ((d < 2500 && (e._fdSeen || {})[f.sid]) || canSee(f.x, f.y)) if (d < bd) { bd = d; best = { o: f, kind: 'cache' }; } }
     for (const st of structures) { if (st.type !== 'derelict' || st.salvaged) continue; const d = Math.hypot(st.x - e.x, st.y - e.y); if ((d < 2500 || canSee(st.x, st.y)) && d < bd) { bd = d; best = { o: st, kind: 'derelict' }; } }
     if (!best || bd > 3500) return false;
+    // 第177弾: 撃たれている間・ミサイルが来ている間・自機が見えている間は拾いに行かない (自機COMの comGrabStep と同じ「危険が無ければ」。旧: 拾い始めては5秒で諦めるのを1分に8回繰り返した)
+    if (now - (e._lastHitF ?? -1e9) < 600 || incomingMissile(e, true) || (e.detectionTimer || 0) > 60) return false;
     // 自機がそこに居ると分かっている (推定が近い) なら罠かもしれない — 慎重な性格は避ける
     const lk = e.playerLastKnownPos, P = e.personality || {};
     if (lk && e.contactFreshness > 0.3 && Math.hypot(lk.x - best.o.x, lk.y - best.o.y) < 2500 && Math.random() < (P.caution ?? 0.4)) return false;
