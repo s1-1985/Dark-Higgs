@@ -4610,10 +4610,12 @@ class Ship {
                 // 射角と射程に入っている兵装で撃つ (今の兵装が射角の外なら、入っている実弾/ミサイルで — 敵と同じ)
                 const da = _angDiff(Math.atan2(ty - this.y, tx - this.x), this.angle);
                 if (autoAttackEnabled && lk.full && this.fireCooldown <= 0 && this._weaponJamTimer <= 0) {
+                    let _fd = false;
                     for (const w of [wType, 'kinetic', 'missile']) {
                         if (!playerHasWeapon(w)) continue;
-                        if (lk.dist < weaponRange(w) && Math.abs(da) < (WEAPON_FIRE_ARC[w] || Math.PI / 4) && playerWeaponReady(this, w)) { playerFireWeapon(this, te, w, lk); break; }
+                        if (lk.dist < weaponRange(w) && Math.abs(da) < (WEAPON_FIRE_ARC[w] || Math.PI / 4) && playerWeaponReady(this, w)) { playerFireWeapon(this, te, w, lk); _fd = true; break; }
                     }
+                    if (window.__fdbgP) window.__fdbgP[_fd ? 'fire' : 'nofire'] = (window.__fdbgP[_fd ? 'fire' : 'nofire'] || 0) + 1;
                 }
             } else if (autoAttackEnabled && te && lk && lk.full && !playerCoasting && boostT <= 0 &&
                        !(this.state === 'moving' && (this._moveOrderF || 0) > (this._fullLockF || 0))) {
@@ -5288,7 +5290,7 @@ class Ship {
                         if (_hc < fireThreshold(pers)) { if (window.__fdbg) window.__fdbg.hc = (window.__fdbg.hc || 0) + 1; wType = null; this.fireCooldown = Math.max(this.fireCooldown, 60); }
                     }
                     // 第22弾: 自機と同じく射角に入っていなければ撃たない (旧: 艦首の向きに関係なく撃てた)。ビームのチャージは射角の外でもできる
-                    if (wType && wType !== 'beam' && Math.abs(diff) > (WEAPON_FIRE_ARC[wType] || Math.PI / 4)) { wType = wType === 'missile' && this._usableWeapon('kinetic', distToBelief) === 'kinetic' && Math.abs(diff) < WEAPON_FIRE_ARC.kinetic ? 'kinetic' : null; if (!wType) this.fireCooldown = 10; }
+                    if (wType && wType !== 'beam' && Math.abs(diff) > (WEAPON_FIRE_ARC[wType] || Math.PI / 4)) { wType = wType === 'missile' && this._usableWeapon('kinetic', distToBelief) === 'kinetic' && Math.abs(diff) < WEAPON_FIRE_ARC.kinetic ? 'kinetic' : null; if (!wType) { this.fireCooldown = 10; if (window.__fdbg) window.__fdbg.arc = (window.__fdbg.arc || 0) + 1; } }
                     let _canShoot = !!wType;
                     if (!wType) this.fireCooldown = Math.max(this.fireCooldown, 10);
                     else if (wType === 'beam' && (this._eCharge || 0) < BEAM_CHARGE_DUR * epm(this).beamCharge) {
@@ -14291,7 +14293,7 @@ function itemFactsE(e) {
     const heard = (e._rxOn || []).some(b => ((e._rxLv || {})[b] || 0) >= 0.5), cnt = { lure: e.lureShip, linkcut: e.itemLinkcut, repair: e.itemRepair, flash: e.itemFlash, noise: e.itemNoise, smoke: e.itemSmoke, sos: e.lureSOS, fake: e.itemFake, spray: e.itemSpray, blow: e.itemBlow };
     if ((e.contactFreshness || 0) >= 0.05) e._quietStart = now; else if (e._quietStart === undefined) e._quietStart = now;
     const dBel = lk ? Math.hypot(lk.x - e.x, lk.y - e.y) : 1e9;
-    return { side: 'e', bcn: e.itemBcn ? (['heat', 'optic', 'em', 'higgs'].find(b => e.itemBcn[b] > 0) || null) : null, estX: lk ? lk.x : 0, estY: lk ? lk.y : 0, estAng: lk && (e.contactFreshness || 0) > 0.25 && dBel > 300 ? Math.atan2(lk.y - e.y, lk.x - e.x) : null, P, hpF: e.hp / e.maxHp, hitAgo, nearD: dBel, seen: !!e.inVision, exposure: hitAgo < 480 ? 3 : (pingAgo < 900 || (e.detectionTimer || 0) > 60) ? 2 : heard ? 1 : 0,
+    return { side: 'e', bcn: e.itemBcn ? (['heat', 'optic', 'em', 'higgs'].find(b => e.itemBcn[b] > 0) || null) : null, estX: lk ? lk.x : 0, estY: lk ? lk.y : 0, estAng: lk && (e.contactFreshness || 0) > 0.25 && dBel > 300 ? Math.atan2(lk.y - e.y, lk.x - e.x) : null, P, hpF: e.hp / e.maxHp, hitAgo, nearD: dBel, seen: (e.detectionTimer || 0) > 60, /* 第177弾: 自分 (敵) が相手を目視している (自機COMの seen と同じ意味。旧: 相手に見られている e.inVision と取り違えていた) */ exposure: hitAgo < 480 ? 3 : (pingAgo < 900 || e.inVision) ? 2 : heard ? 1 : 0, /* 第177弾: 照射 = 探信を受けた・相手に目視でロックされている (自機COMと同じ意味) */
         quietF: now - e._quietStart, busy: !!e._item, hHere: getHiggsIntensity(e.x, e.y), hiding: !!e._hiding || !!(e._strat && HIDE_STRATS[e._strat.id] && (e.currentSpeed || 0) < 0.3), kit: (e._kitT || 0) > 0, missing: e.maxHp - e.hp, mslIn: !!incomingMissile(e, true),
         estD: lk && (e.contactFreshness || 0) > 0.25 ? dBel : 1e9, hacked: !!(hackSessP && hackSessP.tgt === e && hackSessP.p > 60),
         estR: (() => { const t = e._sa && e._sa.fix ? trackEstimate(e._sa, 0) : null; return t ? t.r : 1e9; })(), ammoOut: ammoOutOf(e), dazed: statusDazed(e), lull: lullPhase !== 'none' || surgePhase === 'warn' || surgePhase === 'active', get: k => e['_' + k], set: (k, v) => { e['_' + k] = v; },
@@ -14473,7 +14475,7 @@ function tacticRules(F, A, X, R) {
         F.mark('tcKiteF'); say('引き撃ち — 至近で撃たれている (' + Math.round(F.estD / 100) * 100 + 'u) → 下がって間合いを作る'); X.slip(eA + Math.PI + rr() * 0.3); return true;
     });
     // 探信回避: 照準波や探信は受けたが被弾はまだ — 直角へ動いて、必要ならノイズを置いて狙いを外す
-    R('tc_probe_evade', () => (F.exposure === 2 && hit > 1500 && F.cd('tcEvadeF', 60)), () => {
+    R('tc_probe_evade', () => (F.exposure === 2 && !F.seen && hit > 1500 && F.cd('tcEvadeF', 60)), /* 第177弾: 相手が見えている撃ち合いの最中は逃げない */ () => {
         F.mark('tcEvadeF'); const a = (eA !== null ? eA : Math.random() * Math.PI * 2) + rr() * Math.PI / 2; say('探信回避 — 照準波/探信を受けた → 直角へ動いて狙いを外す');
         if (F.n('noise') > 0 && F.hpF < 0.8) X.doI({ k: 'noise', why: '探信回避: ノイズを反対へ', aim: a + Math.PI, slip: a }); else X.slip(a); return true;
     });
@@ -17595,7 +17597,7 @@ function stratFactsE(e) {
     const lk = e.playerLastKnownPos, near = !!(e.inVision || (lk && (e.contactFreshness || 0) > 0.25 && Math.hypot(lk.x - e.x, lk.y - e.y) < 6500));
     const hitAgo = e._lastHitF ? now - e._lastHitF : 1e9, pingAgo = now - (e._pingHeardF ?? -1e9);
     return { side: 'e', px: e.x, py: e.y, estD: lk && (e.contactFreshness || 0) > 0.25 ? Math.hypot(lk.x - e.x, lk.y - e.y) : 1e9, ammoOut: ammoOutOf(e), raid: !!raidTarget('e', e.x, e.y), cls, relays: ownRelaySites('enemy').length, slotsFree: enemySlotsMax(e) - enemySlotsUsed(e), lures, owned: structures.filter(q => q.type === 'colony' && q.owner === 'enemy'), near,
-        expo: hitAgo < 480 ? 3 : (pingAgo < 900 || (e.detectionTimer || 0) > 60) ? 2 : 0, strong: (e.parts || []).length >= 3, early: comEarlyGather(enemySlotsUsed(e), enemySlotsMax(e), now, e.personality), hpF: e.hp / e.maxHp,
+        expo: hitAgo < 480 ? 3 : (pingAgo < 900 || e.inVision) ? 2 : 0, strong: (e.parts || []).length >= 3, early: comEarlyGather(enemySlotsUsed(e), enemySlotsMax(e), now, e.personality), hpF: e.hp / e.maxHp,
         hasScout: (e.scoutStock || 0) > 0 || liveK('scout'), hasFtr: (e.droneStock || 0) > 0 || liveK('attack'), hasTech: liveK('mech'), hasBuild: (e.turretStock || 0) > 0,
         canTech: cls === 'carrier' && !liveK('mech') && !(e._techT > 0) }; // 第135弾: 自機COMと同じく 作り直せる (旧: 敵は1試合に1回だけ)
 }
@@ -17857,7 +17859,7 @@ function stratActorP(c, hpF, te, lk) {
 function stratActorE(e) {
     const now = _frameCount, liveK = (k) => enemies.some(f => f.type === 'fighter' && f._kind === k && f.hp > 0 && !f._dying), liveF = () => enemies.some(f => f.type === 'fighter' && !f._kind && f.hp > 0 && !f._dying);
     const P = e.personality || {}, hitAgo = e._lastHitF ? now - e._lastHitF : 1e9, pingAgo = now - (e._pingHeardF ?? -1e9);
-    return { side: 'e', owner: 'enemy', engine: e.engine, x: e.x, y: e.y, hpF: e.hp / e.maxHp, expo: hitAgo < 480 ? 3 : (pingAgo < 900 || (e.detectionTimer || 0) > 60) ? 2 : 0, hHere: getHiggsIntensity(e.x, e.y), seen: !!e.inVision, ag: P.aggression ?? 0.5, partsN: (e.parts || []).length,
+    return { side: 'e', owner: 'enemy', engine: e.engine, x: e.x, y: e.y, hpF: e.hp / e.maxHp, expo: hitAgo < 480 ? 3 : (pingAgo < 900 || e.inVision) ? 2 : 0, hHere: getHiggsIntensity(e.x, e.y), seen: !!e.inVision, ag: P.aggression ?? 0.5, partsN: (e.parts || []).length,
         estName: '自機', est: () => e._sa && e._sa.fix ? trackEstimate(e._sa, 0) : null, next: () => searchNext(e, e.x, e.y), kit: () => (e._kitT || 0) > 0,
         go: (x, y, tol) => { if (!(e.state === 'moving' && Math.hypot(e.targetX - x, e.targetY - y) < tol)) { e.setTarget(x, y); e._roam = 'strat'; } },
         hold: () => { if (e.state === 'moving') e.setTarget(e.x, e.y); e._roam = null; },
