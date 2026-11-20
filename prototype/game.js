@@ -4814,14 +4814,16 @@ class Ship {
             const _clN = playerClutter(); // 第18弾: 混信 — 周りに発信源が多いほど自艦を見分けにくい
             // 第21弾: 至近の直接探知 = 自機の有視界と同じ式 (居る場所の濃度で最大半径・視線の先の霧で遮られる)
             // 第39弾: 敵だけの補正 (セクターごとの+5%・自艦のAI配分で伸び縮み・ノードでの強化) は撤去 — 自艦の有視界と同じ
-            let myDetectRange = (BASE_VISION_RADIUS + (LULL_VIS - BASE_VISION_RADIUS) * lullK) * Math.max(MIN_VISION_FACTOR, 1 - higgsHereDetect * (1 - MIN_VISION_FACTOR)) * (1 - jamDegrade) / (1 + CLUTTER_HARD * _clN);
+            // 第180弾: 自艦の有視界と同じ関数 (visionRadiusAt: 凪・サージ×0.6・センサー損傷×0.6・撹乱×0.7)。旧: 敵だけ 混信で ÷(1+0.25n)・サージ中×0.15・サージ後×1.5・撹乱×0.5 で、
+            //   至近の撃ち合いで敵だけ相手を見失いやすかった (鏡合わせの記録: 1500u以内の実弾の斉射のうち自機COMは全て目視・敵は4割が目視できず推定へ)
+            let myDetectRange = visionRadiusAt(this, this.x, this.y) * (1 - jamDegrade);
             // 第39弾: 受信の最大距離も自艦と同じ式 (15000u × 探知重視 × 居る場所の霧)。セクター補正は撤去
             let sigRange = PASSIVE_BASE * _efx.rxRange * epm(this).rxRange * (ENEMY_CLASS[this.type] === 'stealth' ? STEALTH_RX_MULT : 1) * (1 - higgsHereDetect * 0.3) * (1 - jamDegrade);
             // ヒッグスサージ: 敵の探知も対称に縮退/ブースト (プレイヤーと同じ物理法則)
-            if (surgePhase === 'active') { myDetectRange *= SURGE_DETECT_MULT; sigRange *= SURGE_DETECT_MULT; }
-            else if (surgePhase === 'after') { myDetectRange *= SURGE_CLARITY_MULT; sigRange *= SURGE_CLARITY_MULT; }
+            if (surgePhase === 'active') sigRange *= SURGE_DETECT_MULT;
+            else if (surgePhase === 'after') sigRange *= SURGE_CLARITY_MULT;
             if (this._sysSensorTimer > 0) sigRange *= SYS_SENSOR_RX; // センサー損傷 (自艦と同じ)
-            if (this._daze > 0) { myDetectRange *= DAZE_SENSOR_MULT; sigRange *= DAZE_SENSOR_MULT; } // 第20弾: センサー撹乱
+            if (this._daze > 0) sigRange *= DAZE_SENSOR_MULT; // 第20弾: センサー撹乱 (有視界の分は visionRadiusAt)
 
             // 第39弾: 聴くのは自艦と同じく1秒ごと (直近1秒の最大値)。至近の直接探知 (見える) は毎フレーム
             const _listen = (_frameCount + this.uid * 13) % 60 === 0;
@@ -4830,16 +4832,19 @@ class Ship {
             let _hardDetect = false; // 至近の直接探知 (位置誤差ほぼ無し)
             let detectedSigStrength = 0, _hBand = null, _hNoise = 1, _hNb = 0;
             let domSig = null; // 最も強く検知したシグネチャ種別 (行動推定用)
-            let _noiseSrc = null, _relayPost = null;
+            let _noiseSrc = null, _relayPost = null, _hP = null;
             if (player && player.hp > 0) {
                 if (_listen && this.type !== 'fighter' || _listen && distToPlayer < 2500) {
                     const h = hearSource(player, 'e' + this.uid, this.x, this.y, player.x, player.y, b => sigToward(player, b, this.x, this.y), sigRange, enemyBands(this), bandGainE(this)); // 第21弾: 敵も聴いている帯域だけ / 第43弾: 感度
                     { const lv = this._rxLv || (this._rxLv = {}); for (const b of BANDS) lv[b] = 0; hearLevels(player, 'e' + this.uid, this.x, this.y, player.x, player.y, b => sigToward(player, b, this.x, this.y), sigRange, lv, BANDS, bandGainE(this)); this._rxF = _frameCount; this._rxOn = enemyBands(this).slice(); this._rxBand = h ? h.band : null; this._sigRangeV = sigRange; } // 2026-11-11 (プレイ画面のリプレイ・敵の席): 敵が自艦の信号をどう受けていたか (帯域ごと・しきい値に対する比)
-                    if (h) { playerSigDetected = true; detectedSigStrength = h.sig; domSig = h.band; _hBand = h.band; _hNoise = h.noise; _hNb = h.nb; this._heardBand = h.band; this._heardBandF = _frameCount; } // 第41弾: 聞こえた帯域 (帯域の選び方に使う)
+                    if (h) { _hP = h; playerSigDetected = true; detectedSigStrength = h.sig; domSig = h.band; _hBand = h.band; _hNoise = h.noise; _hNb = h.nb; this._heardBand = h.band; this._heardBandF = _frameCount; } // 第41弾: 聞こえた帯域 (帯域の選び方に使う)
                 }
                 // 接近探知 (デブリ擬態中は岩塊に紛れて至近でも掴めない — 至近を通過されてもやり過ごせる)
                 if (!isBottomed && !(lullSheltered(player) && distToPlayer > BASE_VISION_RADIUS) && distToPlayer < Math.max(VIS_CLOSE, myDetectRange) && losReach(this.x, this.y, Math.atan2(player.y - this.y, player.x - this.x), Math.max(VIS_CLOSE, myDetectRange)) >= distToPlayer) { // 第22弾: 自機と同じ視線ルール (300u以内は必ず)
                     this.detectionTimer = Math.min(120, Math.max(this.detectionTimer + 1, 61)); // 第98弾: 見えた瞬間に目視ロック (旧: 1秒間見え続けるまで掴めなかった — 自機は見えたらすぐ撃てる)。見失った後の余韻も2秒までに
+                    playerSigDetected = true; _hardDetect = true;
+                } else if (this.type !== 'fighter' && (this._dSeenF || -99) >= _frameCount - 7) { // 第180弾: ドローンの有視界は艦の有視界と同じ (自機の第130弾と同じ)。旧: 点の観測だけで「見えている」にならなかった
+                    this.detectionTimer = Math.min(120, Math.max(this.detectionTimer + 1, 61));
                     playerSigDetected = true; _hardDetect = true;
                 } else {
                     this.detectionTimer = Math.max(0, this.detectionTimer - 1);
@@ -4851,28 +4856,37 @@ class Ship {
                 // 第21弾: 自機の偽艦影ブイも「自機の音」に見える (敵が聴いている帯域で一番強いもの)
                 // 第39弾: 見えた囮は正体が分かる (自機の「有視界で確定」と同じ) — 以後その囮の音は自艦と取り違えない
                 const _fk = this._fakeSeen || (this._fakeSeen = new Set());
+                const _heardF = [];
                 const _seeIt = (o) => { const dd = Math.hypot(o.x - this.x, o.y - this.y); return dd < Math.max(VIS_CLOSE, myDetectRange) && losReach(this.x, this.y, Math.atan2(o.y - this.y, o.x - this.x), Math.max(VIS_CLOSE, myDetectRange)) >= dd; };
                 for (const L of lures) {
                     if (L.owner !== 'p' || L.kind !== 'ship' || L.phase !== 'on' || _fk.has(L)) continue;
                     if (_seeIt(L)) { _fk.add(L); comThinkEvent('e', '偽艦影ブイを視認 — 囮だった', 'e' + this.uid); continue; }
                     const h = hearSource(L, 'e' + this.uid, this.x, this.y, L.x, L.y, lureSigOf(L), sigRange, enemyBands(this), bandGainE(this));
-                    if (h && h.sig > detectedSigStrength) { detectedSigStrength = h.sig; _noiseSrc = L; _hNoise = h.noise; _hBand = h.band; }
+                    if (h) _heardF.push([L, 'lure', h]);
                 }
                 for (const nm of noiseMakers) {
                     if (_fk.has(nm)) continue;
                     if (_seeIt(nm)) { _fk.add(nm); comThinkEvent('e', 'ノイズメーカーを視認 — 囮だった', 'e' + this.uid); continue; }
                     const h = hearSource(nm, 'e' + this.uid, this.x, this.y, nm.x, nm.y, b => b === 'heat' ? NOISE_HEAT * Math.min(1, nm.life / 60) : 0, sigRange, enemyBands(this), bandGainE(this));
-                    if (h && h.sig > detectedSigStrength) { detectedSigStrength = h.sig; _noiseSrc = nm; _hNoise = h.noise; _hBand = h.band; }
+                    if (h) _heardF.push([nm, 'noise', h]);
                 }
                 // 第50弾 (オーナー): 自機のドローンも音を出す — 敵には自艦かドローンか分からない。見えれば (視線が通れば) ドローンと分かる
                 for (const dr of playerDrones) {
                     if (dr.hp <= 0 || !dr.sigOf('heat') || _fk.has(dr)) continue;
                     if (_seeIt(dr)) continue;
                     const h = hearSource(dr, 'e' + this.uid, this.x, this.y, dr.x, dr.y, b => dr.sigOf(b), sigRange, enemyBands(this), bandGainE(this));
-                    if (h && h.sig > detectedSigStrength) { detectedSigStrength = h.sig; _noiseSrc = dr; _hNoise = h.noise; _hBand = h.band; }
+                    if (h) _heardF.push([dr, 'small', h]);
+                }
+                // 第180弾: 聞こえた音の主を自機と同じ手掛かりで見分ける。艦でないと判断した音は以後自艦と取り違えない
+                const _k = _heardF.length + (_hP ? 1 : 0);
+                for (const [o, tr, h] of _heardF) {
+                    if (identStepE(this, o, tr, h, _k)) { _fk.add(o); if (this.type !== 'fighter') comThinkEvent('e', (tr === 'noise' ? 'ノイズメーカー' : tr === 'lure' ? '偽艦影' : 'ドローン') + 'の音と判断 (帯域が平坦) — 自機ではない', 'e' + this.uid); continue; }
+                    if (h.sig > detectedSigStrength) { detectedSigStrength = h.sig; _noiseSrc = o; _hNoise = h.noise; _hBand = h.band; }
                 }
                 if (_noiseSrc) playerSigDetected = true;
             }
+            // 第180弾: 自艦の音そのものも同じ手掛かりで識別する (自機COMが艦の信号を艦影25%未満と誤判定して外すのと同じ — まれ)
+            if (_hP && !_hardDetect && !_noiseSrc && this.type !== 'fighter' && identStepE(this, player, 'ship', _hP, 1)) { playerSigDetected = false; detectedSigStrength = 0; }
             // 第16弾: 敵が制圧したノードは敵の聴音局 (自機と対称)。ノードの近くで音を立てれば、敵は遠くからでも位置を掴む
             if (_listen && !playerSigDetected && this.type !== 'fighter' && player && player.hp > 0) {
                 for (const post of listeningPosts('enemy')) { // 第31弾: 敵のコロニーも聴音局 (8000u)
@@ -10696,6 +10710,19 @@ function identStep(sid, tracked, nBands, sa, wOverride) {
         _identAdd(id, ship ? 1.6 : truth === 'small' || truth === 'cache' ? -1.2 : -1.6, 0.6, 1, '探信の反響が小さい');
     }
 }
+// 第180弾: 敵も音の主を見分ける (自機の identStep と同じ手掛かり・同じ重み)。旧: 敵は一番強い音をいつも自艦と思い込み、
+//   ノイズメーカー・偽艦影・ドローンの方位を自艦の記録に混ぜ続けた (自機は信号ごとに識別して艦影25%未満を気配から外す)。
+//   返り値: 艦でないと判断した (自機COMの「艦影25%未満」と同じ基準)
+function identStepE(e, obj, truth, h, k) {
+    const ids = e._eId || (e._eId = new Map());
+    let id = ids.get(obj); if (!id) { id = { L: 0, n: 0, why: {} }; ids.set(obj, id); }
+    const cp = analysisPower('enemy', e), conf = Math.max(0, Math.min(1, (h.sig - 0.075) / (1 - 0.075)));
+    const w = Math.max(0.05, Math.min(2, cp / Math.max(1, k) * 2 * Math.min(1, 0.25 + anaQf(cp, conf) * 1.2)));
+    const ship = truth === 'ship';
+    if ((h.nb || 1) >= 2) _identAdd(id, ship ? 0.22 : truth === 'small' ? -0.08 : -0.16, 0.40, w, truth === 'small' ? null : '帯域が平坦');
+    else _identAdd(id, ship ? 0.05 : -0.04, 0.2, w, null);
+    return id.n >= IDENT_MIN_N && 1 / (1 + Math.exp(-id.L)) < 0.25;
+}
 function identSure(sid, isShip) { const id = _sigIdent[sid] || (_sigIdent[sid] = { L: 0, n: 0, why: {}, pingF: -1, motF: -1 }); id.L = isShip ? 6 : -6; id.n = 99; id.sure = true; }
 // 表示: {p, txt:'不明'|'艦影70%'|'囮/小型? 理由', low}
 function identInfo(sid) {
@@ -15561,7 +15588,7 @@ function _eLaunchFighter(e, bel) {
 function _eDatalink(carrier, x, y, r, fresh) {
     carrier.playerLastKnownPos = { x, y, vx: 0, vy: 0 }; carrier.contactFreshness = Math.max(carrier.contactFreshness || 0, fresh); carrier._lkGuess = false;
     if (carrier._sa) { carrier._sa.ping = { x, y, r, f: _frameCount, src: 'dl' }; if (!(carrier._dlSolveF > _frameCount - 30)) { carrier._dlSolveF = _frameCount; solveFix(carrier._sa); } }
-    carrier._dlF = _frameCount; carrier._lastScentF = _frameCount;
+    carrier._dlF = _frameCount; carrier._lastScentF = _frameCount; carrier._dSeenF = _frameCount; // 第180弾: 自機の droneSeesStrong と同じ — 通信の届くドローンが見ている間は母艦も目視と同じ
 }
 function enemyFighterStep(f) {
     if (f._kind === 'scout') { enemyScoutStep(f); return; }
