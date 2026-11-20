@@ -11114,33 +11114,113 @@ function lockIntel(sid, e) {
     if (Q >= 0.85 || (vis && Q >= 0.7)) lines.push(['火器管制', THREATS.some(th => th.kind === 'lock') ? '自艦を照準中' : '照射なし']);
     return { lines, Q, cp };
 }
-// 吹き出し (画面座標): 円の脇に・細い縁と括弧・上に「AI ANALYSIS」・下に確度と演算力。flushTags の最後に描く
+// ═══ 第175弾 (オーナー「吹き出しが進行方向に出ると邪魔・臨機応変に・ドラッグで動かしたい」) ═══
+// 画面の「避ける所」: 自艦リング・艦首の前 (進む先)・移動の目標への線・下の帯/戦闘バー。名札と吹き出しが共通で使う
+const _koCache = { f: -1, v: null };
+function hudKeepOut() {
+    if (_koCache.f === _rfc && _koCache.v) return _koCache.v;
+    const K = { c: [], s: [], r: [], t: [] };
+    if (player && player.hp > 0) {
+        const te = player.targetEntity; if (te && te.hp > 0) { const q = worldToScreen(te.x, te.y); K.t.push({ x: q.sx, y: q.sy, r: Math.max(34, ((te.radius || 20) * 3 + 6) * camera.zoom * 1.4) }); } // ロックした敵の照準の輪 (名札が避ける)
+        const p = worldToScreen(player.x, player.y);
+        K.c.push({ x: p.sx, y: p.sy, r: RING_R + 48 }); // リングと脇の名札 (HIGGS n% など)
+        // 進む先: 速度の向き (止まっていれば艦首) に 360px の帯
+        const ha = playerCoasting && player._coastAng != null ? player._coastAng : player.angle;
+        const L = 360; K.s.push({ x1: p.sx + Math.cos(ha) * (RING_R * 0.6), y1: p.sy + Math.sin(ha) * (RING_R * 0.6), x2: p.sx + Math.cos(ha) * L, y2: p.sy + Math.sin(ha) * L, w: 36 });
+        if (player.state === 'moving' && player.targetX === player.targetX) { // 移動の目標への線 (画面内の部分)
+            const t = worldToScreen(player.targetX, player.targetY), dd = Math.hypot(t.sx - p.sx, t.sy - p.sy);
+            if (dd > RING_R) { const k = Math.min(1, 700 / dd); K.s.push({ x1: p.sx, y1: p.sy, x2: p.sx + (t.sx - p.sx) * k, y2: p.sy + (t.sy - p.sy) * k, w: 30 }); K.c.push({ x: t.sx, y: t.sy, r: 26 }); }
+        }
+    }
+    for (const id of ['status-strip', 'combat-bar', 'zoom-row']) { const el = document.getElementById(id); if (el && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden') { const r = el.getBoundingClientRect(); if (r.width > 2 && r.height > 2) K.r.push({ x: r.left, y: r.top, w: r.width, h: r.height }); } }
+    _koCache.f = _rfc; _koCache.v = K; return K;
+}
+function _segDist(px, py, s) { const dx = s.x2 - s.x1, dy = s.y2 - s.y1, l2 = dx * dx + dy * dy || 1; let t = ((px - s.x1) * dx + (py - s.y1) * dy) / l2; t = Math.max(0, Math.min(1, t)); return Math.hypot(px - s.x1 - dx * t, py - s.y1 - dy * t); }
+// 矩形が避ける所にどれだけ掛かるか (4×4点の標本で 0〜16)
+function keepOutHits(x, y, w, h, K) {
+    K = K || hudKeepOut(); let n = 0;
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+        const px = x + w * (i + 0.5) / 4, py = y + h * (j + 0.5) / 4;
+        if (K.c.some(c => Math.hypot(px - c.x, py - c.y) < c.r) || K.s.some(sg => _segDist(px, py, sg) < sg.w) || K.r.some(r => px > r.x && px < r.x + r.w && py > r.y && py < r.y + r.h)) n++;
+    }
+    return n;
+}
+// 吹き出しの状態: 表示位置 (なめらかに寄せる)・選んだ置き場所・利用者が置いた位置 (画面の割合)・畳んでいるか
+let _tagRects = []; // 第175弾: 直前に置いた名札 (吹き出しが避ける)
+const _bub = { x: null, y: null, cand: null, rect: null, drag: null, pin: null, mini: false, sid: null };
+try { const sv = JSON.parse(localStorage.getItem('darkEchoBubble') || 'null'); if (sv) { _bub.pin = sv.pin || null; _bub.mini = !!sv.mini; } } catch (e) {}
+function _bubSave() { try { localStorage.setItem('darkEchoBubble', JSON.stringify({ pin: _bub.pin, mini: _bub.mini })); } catch (e) {} }
+// 吹き出し (画面座標): 円の脇の 空いている所 (自艦リング・進む先・下の帯を避ける) に。ドラッグで好きな所へ・ダブルタップで自動に戻す・タップで畳む
 function drawLockBubble(ctx) {
     const L = _lockInfoQ.v; _lockInfoQ.v = null;
-    if (!L || !player) return;
-    const I = lockIntel(L.sid, L.e); if (!I.lines.length) return;
+    if (!L || !player) { _bub.rect = null; _bub.x = null; return; }
+    const I = lockIntel(L.sid, L.e); if (!I.lines.length) { _bub.rect = null; return; }
+    if (_bub.sid !== L.sid) { _bub.sid = L.sid; _bub.x = null; _bub.cand = null; }
+    const A = aiAssess(L.sid), ai = A.txt.replace(/^種別不明 — /, '');
     const sp = worldToScreen(L.x, L.y), rpx = Math.max(24, L.r * camera.zoom);
     ctx.save(); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
-    const rowH = 14, w0 = 150;
+    const rowH = 14;
     ctx.font = '10px "Share Tech Mono", Orbitron, monospace';
-    let w = 100; for (const [k, v] of I.lines) w = Math.max(w, 56 + ctx.measureText(v).width);
-    w += 12; const h = 20 + I.lines.length * rowH + 28;
-    const ins = uiInsets(), big = rpx > 150; // 円が大きい (推定が粗い) 時は 画面の右上に固定 (引き出し線なし)
-    let bx, by, docked = false;
-    if (big) { docked = true; bx = (cssW || 1000) - ins.right - w - 10; by = ins.top + 8; }
-    else { bx = sp.sx + rpx * 0.75 + 22; if (bx + w > (cssW || 1000) - ins.right - 8) bx = sp.sx - rpx * 0.75 - 22 - w; by = Math.max(ins.top + 6, Math.min((cssH || 460) - h - 60, sp.sy - h / 2)); }
-    if (!docked) { // 引き出し線 (円の縁 → 吹き出し)
-        const ex = bx > sp.sx ? bx : bx + w, ax = sp.sx + (bx > sp.sx ? 1 : -1) * rpx * 0.72, ay = sp.sy - rpx * 0.3;
-        ctx.strokeStyle = '#ffd27a'; ctx.lineWidth = 1; ctx.globalAlpha = 0.6; ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ex, by + 10); ctx.stroke();
-        ctx.globalAlpha = 0.95; ctx.fillStyle = '#ffd27a'; ctx.beginPath(); ctx.arc(ax, ay, 2, 0, Math.PI * 2); ctx.fill();
+    let w = 128; for (const [k, v] of I.lines) w = Math.max(w, 56 + ctx.measureText(v).width);
+    ctx.font = '9px Orbitron, sans-serif'; w = Math.max(w, 18 + ctx.measureText(ai).width);
+    w = Math.min(w + 12, 260);
+    const mini = _bub.mini, h = mini ? 32 : 34 + I.lines.length * rowH + 28;
+    const W = cssW || 1000, H = cssH || 460, ins = uiInsets(), K = hudKeepOut();
+    const minX = ins.left + 6, maxX = W - ins.right - w - 6, minY = ins.top + 6, maxY = H - h - 8;
+    const clampX = v => Math.max(minX, Math.min(maxX, v)), clampY = v => Math.max(minY, Math.min(maxY, v));
+    let tx, ty, docked = false;
+    if (_bub.drag) { tx = clampX(_bub.drag.x); ty = clampY(_bub.drag.y); }
+    else if (_bub.pin) { tx = clampX(_bub.pin.fx * W); ty = clampY(_bub.pin.fy * H); docked = true; }
+    else {
+        // 置き場所の候補: 円の右・左・下・上・斜め / 画面の四隅。避ける所に掛かるほど・円から遠いほど・今の場所から変えるほど 点が悪い
+        const g = rpx * 1.3 + 24, C = [];
+        if (rpx <= 150) {
+            // 目標の周り16方向 (箱の大きさぶん離す)
+            for (let k = 0; k < 16; k++) { const a = k * Math.PI / 8, ca = Math.cos(a), sa = Math.sin(a), d = g + Math.abs(ca) * w / 2 + Math.abs(sa) * h / 2;
+                C.push(['a' + k, sp.sx + ca * d - w / 2, sp.sy + sa * d - h / 2], ['b' + k, sp.sx + ca * (d + 55) - w / 2, sp.sy + sa * (d + 55) - h / 2]); }
+        }
+        let botY = maxY; for (const r of K.r) if (r.y > H * 0.5) botY = Math.min(botY, r.y - h - 8); // 下の帯・戦闘バーの上
+        C.push(['dTR', maxX, minY], ['dTL', minX, minY], ['dBR', maxX, botY], ['dBL', minX, botY]);
+        let best = null;
+        for (const [id, x0, y0] of C) {
+            const x = clampX(x0), y = clampY(y0), dock = id[0] === 'd';
+            let cost = keepOutHits(x, y, w, h, K) * 10 + (Math.abs(x - x0) + Math.abs(y - y0)) * 0.08;
+            // ロックの照準の輪と、すでに置いた名札 (LOCK ON の札など) にも重ねない
+            { const nx = Math.max(x, Math.min(x + w, sp.sx)), ny = Math.max(y, Math.min(y + h, sp.sy)); if (Math.hypot(nx - sp.sx, ny - sp.sy) < rpx * 1.3 + 14) cost += 25; }
+            for (const q of _tagRects) { const ox = Math.min(x + w, q.x + q.w + 4) - Math.max(x, q.x - 4), oy = Math.min(y + h, q.y + q.h + 4) - Math.max(y, q.y - 4); if (ox > 0 && oy > 0) cost += 10 + ox * oy / 150; }
+            if (sp.sx > x - 4 && sp.sx < x + w + 4 && sp.sy > y - 4 && sp.sy < y + h + 4) cost += 30; // 円の中心 (目標) を隠さない
+            cost += dock ? 22 + Math.hypot(x + w / 2 - sp.sx, y + h / 2 - sp.sy) * 0.004 : Math.hypot(x + w / 2 - sp.sx, y + h / 2 - sp.sy) * 0.01;
+            if (_bub.cand && _bub.cand !== id) cost += 4; // ころころ変えない
+            if (!best || cost < best.c) best = { c: cost, id, x, y, dock };
+        }
+        _bub.cand = best.id; tx = best.x; ty = best.y; docked = best.dock;
     }
-    ctx.globalAlpha = 0.88; ctx.fillStyle = 'rgba(2,10,14,0.86)'; _chamfer(ctx, bx, by, w, h, 6); ctx.fill();
-    ctx.globalAlpha = 0.5; ctx.strokeStyle = '#ffd27a'; ctx.lineWidth = 1; _chamfer(ctx, bx + 0.5, by + 0.5, w - 1, h - 1, 6); ctx.stroke();
+    if (_bub.x == null || _bub.drag) { _bub.x = tx; _bub.y = ty; } else { _bub.x += (tx - _bub.x) * 0.18; _bub.y += (ty - _bub.y) * 0.18; }
+    const bx = Math.round(_bub.x), by = Math.round(_bub.y);
+    _bub.rect = { x: bx, y: by, w, h };
+    // 引き出し線 (円の縁 → 吹き出し)。四隅/利用者の位置では薄く
+    { const cx = bx + w / 2, cy = by + h / 2, an = Math.atan2(cy - sp.sy, cx - sp.sx), ax = sp.sx + Math.cos(an) * rpx * 0.95, ay = sp.sy + Math.sin(an) * rpx * 0.95;
+      const ex = Math.max(bx, Math.min(bx + w, ax)), ey = Math.max(by, Math.min(by + h, ay));
+      if (Math.hypot(ex - ax, ey - ay) > 8 && sp.sx > -50 && sp.sx < W + 50 && sp.sy > -50 && sp.sy < H + 50) {
+        ctx.strokeStyle = '#ffd27a'; ctx.lineWidth = 1; ctx.globalAlpha = docked ? 0.22 : 0.55; ctx.setLineDash(docked ? [3, 5] : []);
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ex, ey); ctx.stroke(); ctx.setLineDash([]);
+        ctx.globalAlpha = 0.9; ctx.fillStyle = '#ffd27a'; ctx.beginPath(); ctx.arc(ax, ay, 2, 0, Math.PI * 2); ctx.fill(); } }
+    const dragging = !!_bub.drag;
+    ctx.globalAlpha = dragging ? 0.95 : 0.86; ctx.fillStyle = 'rgba(2,10,14,0.86)'; _chamfer(ctx, bx, by, w, h, 6); ctx.fill();
+    ctx.globalAlpha = dragging ? 0.95 : 0.5; ctx.strokeStyle = '#ffd27a'; ctx.lineWidth = 1; _chamfer(ctx, bx + 0.5, by + 0.5, w - 1, h - 1, 6); ctx.stroke();
     ctx.globalAlpha = 1; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(bx + 0.5, by + 12); ctx.lineTo(bx + 0.5, by + 6); ctx.lineTo(bx + 6, by + 0.5); ctx.lineTo(bx + 14, by + 0.5); ctx.stroke();
     ctx.font = 'bold 9px Orbitron, sans-serif'; ctx.fillStyle = '#ffd27a'; ctx.fillText('AI ANALYSIS', bx + 9, by + 10);
-    ctx.globalAlpha = 0.3; ctx.fillRect(bx + 8, by + 18, w - 16, 1);
+    // 右上の小さな印: 畳む(▾/▸)・固定中は ◆ (ダブルタップで自動へ)
+    ctx.globalAlpha = 0.75; ctx.font = '9px "Share Tech Mono", monospace'; ctx.textAlign = 'right';
+    ctx.fillText((_bub.pin ? '◆ ' : '') + (mini ? '▸' : '▾'), bx + w - 8, by + 10); ctx.textAlign = 'left';
+    if (mini) { // 畳んだ時は AIの見解の1行だけ
+        ctx.globalAlpha = 0.9; ctx.font = '9px Orbitron, sans-serif'; ctx.fillStyle = '#cfe9e2'; ctx.fillText(ai, bx + 9, by + 23);
+        ctx.restore(); return;
+    }
+    ctx.globalAlpha = 0.9; ctx.font = '9px Orbitron, sans-serif'; ctx.fillStyle = '#cfe9e2'; ctx.fillText(ai, bx + 9, by + 24);
+    ctx.globalAlpha = 0.3; ctx.fillStyle = '#ffd27a'; ctx.fillRect(bx + 8, by + 32, w - 16, 1);
     I.lines.forEach(([k, v], i) => {
-        const y = by + 20 + rowH * i + rowH / 2 + 1;
+        const y = by + 34 + rowH * i + rowH / 2 + 1;
         ctx.globalAlpha = 0.65; ctx.font = '9px Orbitron, sans-serif'; ctx.fillStyle = '#7fb8ac'; ctx.fillText(k, bx + 9, y);
         ctx.globalAlpha = 1; ctx.font = '10px "Share Tech Mono", Orbitron, monospace'; ctx.fillStyle = '#e6fbf5'; ctx.fillText(v, bx + 56, y);
     });
@@ -11151,6 +11231,33 @@ function drawLockBubble(ctx) {
     ctx.globalAlpha = 0.7; ctx.font = '8px "Share Tech Mono", monospace'; ctx.fillStyle = '#9fc9c0'; ctx.fillText('確度 ' + Math.round(I.Q * 100) + '%  演算力 ' + I.cp.toFixed(1), bx + 9, yb - 8);
     ctx.restore();
 }
+// 吹き出しのドラッグ・タップ (地図の操作より先に取る)。動かしたら その位置に固定 (画面の割合で保存)・動かさずにタップ=畳む/開く・ダブルタップ=自動の置き場所に戻す
+function _bubHit(cx, cy) { const r = _bub.rect; if (!r) return false; const cr = canvas.getBoundingClientRect(), x = cx - cr.left, y = cy - cr.top; return x >= r.x - 6 && x <= r.x + r.w + 6 && y >= r.y - 6 && y <= r.y + r.h + 6; }
+function _bubDown(cx, cy) {
+    const cr = canvas.getBoundingClientRect(), r = _bub.rect;
+    _bub.drag = { ox: cx - cr.left - r.x, oy: cy - cr.top - r.y, sx: cx, sy: cy, x: r.x, y: r.y, moved: false };
+}
+function _bubMove(cx, cy) {
+    const D = _bub.drag; if (!D) return; const cr = canvas.getBoundingClientRect();
+    if (!D.moved && Math.hypot(cx - D.sx, cy - D.sy) > 6) D.moved = true;
+    if (D.moved) { D.x = cx - cr.left - D.ox; D.y = cy - cr.top - D.oy; }
+}
+function _bubUp() {
+    const D = _bub.drag; if (!D) return; _bub.drag = null;
+    if (D.moved) { _bub.pin = { fx: D.x / (cssW || 1000), fy: D.y / (cssH || 460) }; _bub.x = D.x; _bub.y = D.y; _bubSave(); return; }
+    const now = Date.now();
+    if (_bub.lastTap && now - _bub.lastTap < 320) { _bub.lastTap = 0; _bub.mini = !_bub.mini; _bub.pin = null; _bub.cand = null; _bubSave(); uiToast && uiToast('吹き出しを自動の位置に戻した'); return; } // ダブルタップ: 1回目の畳み/開きを戻して 自動へ
+    _bub.lastTap = now; _bub.mini = !_bub.mini; _bubSave();
+}
+(function () {
+    const c = document.getElementById('gameCanvas'); if (!c) return;
+    c.addEventListener('mousedown', e => { if (e.button === 0 && _bubHit(e.clientX, e.clientY)) { _bubDown(e.clientX, e.clientY); e.stopImmediatePropagation(); e.preventDefault(); } }, true);
+    window.addEventListener('mousemove', e => { if (_bub.drag) _bubMove(e.clientX, e.clientY); }, true);
+    window.addEventListener('mouseup', e => { if (_bub.drag && e.button === 0) { _bubUp(); e.stopImmediatePropagation(); } }, true);
+    c.addEventListener('touchstart', e => { if (e.touches.length === 1 && _bubHit(e.touches[0].clientX, e.touches[0].clientY)) { _bubDown(e.touches[0].clientX, e.touches[0].clientY); e.stopImmediatePropagation(); e.preventDefault(); } }, { capture: true, passive: false });
+    c.addEventListener('touchmove', e => { if (_bub.drag) { _bubMove(e.touches[0].clientX, e.touches[0].clientY); e.stopImmediatePropagation(); e.preventDefault(); } }, { capture: true, passive: false });
+    c.addEventListener('touchend', e => { if (_bub.drag) { _bubUp(); e.stopImmediatePropagation(); e.preventDefault(); } }, { capture: true, passive: false });
+})();
 const _circScreen = []; // 第27弾: 推定円のスクリーン座標 {sid, cx, cy, r} (タップで追跡)
 function drawTriangulationCircle(ctx) {
     _circScreen.length = 0;
@@ -11216,7 +11323,7 @@ function _drawEstCircle(ctx, sid, sa, locked) {
     ctx.stroke();
     // 名札 (円の上): 「SIG-xx 艦n%」だけ (第28弾: 説明書きは消す — オーナー)。中心に居るとは限らない
     { const idn = identInfo(sid); const _dp = Math.hypot(cx - player.x, cy - player.y); queueTag(cx, cy - R, (locked ? '▶ LOCK ' : '') + 'SIG-' + sigNo(sid), (idn.known ? idn.short : '不明') + ' ' + fmtDist(_dp) + 'u', idc, 'top', (locked ? 1 : 0.8 * sigRxK(sid)) * sa._fa * heldAlpha, 0, anaProgress(sa), !!sa._gate);
-      if (locked) { const A = aiAssess(sid); queueTag(cx, cy - R, 'AI', A.txt.replace(/^種別不明 — /, ''), '#9fc9c0', 'top', 0.95 * sa._fa * heldAlpha, 21, null, null, true); _lockInfoQ.v = { x: cx, y: cy, r: R, sid, e: enemyBySid(sid) }; }
+      if (locked) { _lockInfoQ.v = { x: cx, y: cy, r: R, sid, e: enemyBySid(sid) }; }
       // 第44弾 (オーナー): 解析で艦影と特定した (艦影75%以上・または確認) 信号は、推定の中心に艦のしるしを霧の上に描く (中心に居るとは限らない。囮を艦と誤認していればそのまま艦として出る)
       if (idn.known && idn.p >= 0.75 && !(inPlayerVision(cx, cy) || droneVisionSees(cx, cy))) { // 第65弾 (オーナー「有視界の中で近いのに居ない所にゴースト」): 中心が見えているのに艦のしるしは出さない
           const gs = Math.max(120, 11 * inv);
@@ -11986,8 +12093,8 @@ const _tagQ = [];
 // x,y はワールド座標。anchor: 'top' (点の上に置く) / 'right' (点の右に置く) / 'center'
 function queueTag(x, y, main, sub, col, anchor, alpha, dy, prog, gate, noLeader) { if (_tagQ.length > 120) return; _tagQ.push({ x, y, main, sub, col, anchor: anchor || 'top', a: alpha == null ? 1 : alpha, dy: dy || 0, prog: prog, gate: gate, noLeader: !!noLeader }); }
 function flushTags(ctx) {
-    if (!_tagQ.length) { drawLockBubble(ctx); return; }
-    const placed = [];
+    if (!_tagQ.length) { _tagRects = []; drawLockBubble(ctx); return; }
+    const placed = [], _KO = hudKeepOut(), _KOT = { c: _KO.t, s: _KO.s, r: _KO.r };
     ctx.save();
     ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
     for (const t of _tagQ) {
@@ -11998,10 +12105,18 @@ function flushTags(ctx) {
         let ws = 0; if (t.sub) { ctx.font = '10px "Share Tech Mono", Orbitron, monospace'; ws = ctx.measureText(t.sub).width; }
         const w = 14 + wm + (t.sub ? 8 + ws : 0), h = 17;
         // 第167弾: 点から少し離して置き、細い引き出し線でつなぐ (映画のHUDの callout)
-        let x = t.anchor === 'right' ? p.sx + 18 : p.sx - w / 2, y = t.anchor === 'top' ? p.sy - h - 13 + t.dy : p.sy - h / 2 + t.dy - (t.anchor === 'right' ? 6 : 0);
-        for (let k = 0; k < 6; k++) { // 重なったら上へずらす
-            const hit = placed.find(q => x < q.x + q.w && x + w > q.x && y < q.y + q.h && y + h > q.y);
-            if (!hit) break; y = hit.y - h - 3;
+        const x0 = t.anchor === 'right' ? p.sx + 18 : p.sx - w / 2, y0 = t.anchor === 'top' ? p.sy - h - 13 + t.dy : p.sy - h / 2 + t.dy - (t.anchor === 'right' ? 6 : 0);
+        // 第175弾: 進む先・移動の線・下の帯に掛かる時は 下/右/左 へ逃がす (リングの近くの名札はそのまま)
+        const C = [[x0, y0], [p.sx - w / 2, p.sy + 13], [p.sx + 18, p.sy - h / 2], [p.sx - 18 - w, p.sy - h / 2], [p.sx - w / 2, p.sy - h - 42], [p.sx - w / 2, p.sy + 42]];
+        let x = x0, y = y0, ok = false;
+        for (const [cx0, cy0] of C) {
+            let cx = cx0, cy = cy0;
+            for (let k = 0; k < 6; k++) { // 重なったら上へずらす
+                const hit = placed.find(q => cx < q.x + q.w && cx + w > q.x && cy < q.y + q.h && cy + h > q.y);
+                if (!hit) break; cy = hit.y - h - 3;
+            }
+            if (!keepOutHits(cx, cy, w, h, _KOT)) { x = cx; y = cy; ok = true; break; }
+            if (cx0 === x0 && cy0 === y0) { x = cx; y = cy; }
         }
         if (x + w < 0 || y + h < 0 || x > (cssW || 9999) || y > (cssH || 9999)) continue;
         placed.push({ x, y, w, h });
@@ -12010,6 +12125,7 @@ function flushTags(ctx) {
     }
     ctx.restore();
     _tagQ.length = 0;
+    _tagRects = placed;
     drawLockBubble(ctx);
 }
 // 引き出し線: 点 (小さな輪) → 斜めに短く → 名札の縁へ。細く・色は名札と同じ
