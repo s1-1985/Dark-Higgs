@@ -9406,6 +9406,7 @@ function updateConvoys() {
 }
 // 敵: 聞こえた輸送船へ向かうか (輸送船ごとに一度だけ決める・貪欲/攻撃的ほど)。行き先は少し先回り
 function enemyConvoyPick(e, pers) {
+    if (e._item) return null; // 第180弾: 取りに行くと決めた物が先 (自機COMは c.item があれば拾い物の段が先) (自機COMは拾い物の段が輸送船より先 — 旧: 敵だけ序盤に輸送船へ逸れ、最初の占有が遅れた)
     const seen = e._cvSeen || (e._cvSeen = {});
     for (const cv of convoys) {
         if (seen[cv.sid]) continue;
@@ -10328,6 +10329,7 @@ function updateFieldSignals() {
 // 敵が聞いた自然/お宝の信号へ向かうか (信号ごとに一度だけ決める)。
 // 簡略: 敵はお宝 (帯域が平坦で止まっている) と自然の信号をおおよそ見分ける — お宝へは 30%+貪欲さ×60%、自然へは 12% (実装で決めた値)
 function enemyFieldPick(e, pers) {
+    if (e._item) return null; // 第180弾: 自機COMと同じく 取りに行くと決めた物が先
     const seen = e._fdSeen || (e._fdSeen = {});
     let best = null, bd = Infinity;
     for (const f of fieldSignals) {
