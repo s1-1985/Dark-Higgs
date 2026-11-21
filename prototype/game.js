@@ -14618,6 +14618,7 @@ function enemyItemsStep(e) {
     { const F = itemFactsE(e), act = itemReactPlan(F); // 第148弾: 反応の搭載品・複合・戦術を 全部候補にして 状況と性格の適性で点を付け、高い順に試す (固定の順序をやめた)
       const tur = () => enemies.find(f => f.type === 'fighter' && f._kind === 'turret' && f._home === e && f.hp > 0);
       if (tacticDecide(F, stratActorE(e), { doI: (a) => itemDoE(e, a), slip: (ang) => _skillSlipE(e, ang), bait: (k, x, y) => { if (k === 'sos' && e.lureSOS > 0) { e.lureSOS--; launchLure('e', 'sos', e.x, e.y, x, y); } else if (e.lureShip > 1) { e.lureShip--; launchLure('e', 'ship', e.x, e.y, x, y); } }, fake: (x, y) => { if (e.itemFake > 0) { e.itemFake--; placeFakeCache('e', x, y); } }, turret: tur, sonar: (pw) => { firePingFromEnemy(e, { omni: true, power: pw }); return true; }, focus: (k, sec) => { e._tacFocusUntil = _frameCount + sec * 60; setEnemyFocus(e, k); }, cover: () => findCoverSpot(e.x, e.y, 6000) }, act, (a) => itemDoE(e, a))) return; }
+    if (!window.__noEnemyAuto) enemyAutoPlay(e); // 第190弾: 自機AIと同じ手駒の自律運用
     // ビーコン: 潜伏を始める時、隠れ場所と反対へ1つ置く (敵の耳をそちらへ向ける)
     if (e._hideT > 0 && !e._beaconDone && e.itemBcn) {
         const k = Object.keys(e.itemBcn).find(b => e.itemBcn[b] > 0);
@@ -19631,20 +19632,70 @@ function capPlayList(c, P, te) {
 }
 // 第189弾 (オーナー「基本はAIが勝手に選ぶ・AIに多様性を」): QTE中のAIが、性格 (スキルの適性)・戦略・状況で 重みつきの乱数で手駒 (ドローン・アイテム・演算力) を自分の判断で使う。最大の一つを選ぶのでなく、直前と同じ物は避けて散らす
 var _capAutoF = 0, _capAutoLast = '';
+// 手駒の選び方は 自機AI・敵COMで同じ関数 (第190弾): 重み = 基本値 × スキル適性^1.2 × 乱数、直前と同じ物は×0.25。スキルをOFFにした物は選ばない
+function autoPlayChoose(A, P, side, last) {
+    A = A.filter(a => skillOn(side, a.skill));
+    if (!A.length) return null;
+    const W = A.map(a => Math.max(0.02, a.base * Math.pow(skillAff(P, a.skill), 1.2) * (a.id === last ? 0.25 : 1) * (['listen', 'sonar'].includes(a.id) ? 0.55 : 1) * (0.5 + Math.random())));
+    let r = Math.random() * W.reduce((x, y) => x + y, 0), pick = A[0];
+    for (let i = 0; i < A.length; i++) { r -= W[i]; if (r <= 0) { pick = A[i]; break; } }
+    if (pick.id === 'listen' && Math.random() < 0.5) return null; // 「聴く」ばかりにならないよう半分は見送る
+    return pick;
+}
+const AUTO_FIGHT_IDS = ['ftr_strike', 'ftr_escort', 'turret', 'decoy', 'noise', 'repair', 'flash', 'smoke', 'spray', 'recall'];
 function capAutoPlay(c, P, fight, te) {
     const now = _frameCount;
     if (now < _capAutoF) return false;
     _capAutoF = now + 1100 + Math.random() * 1100; // 18〜37秒に1回
-    const FIGHT = ['ftr_strike', 'ftr_escort', 'turret', 'decoy', 'noise', 'repair', 'flash', 'smoke', 'spray', 'recall'];
-    const A = capPlayList(c, P, te).filter(a => !fight || FIGHT.includes(a.id));
-    if (!A.length) return false;
-    const W = A.map(a => Math.max(0.02, a.base * Math.pow(skillAff(P, a.skill), 1.2) * (a.id === _capAutoLast ? 0.25 : 1) * (['analysis', 'sensor', 'weapon', 'listen', 'sonar'].includes(a.id) ? 0.55 : 1) * (0.5 + Math.random())));
-    let r = Math.random() * W.reduce((x, y) => x + y, 0), pick = A[0];
-    for (let i = 0; i < A.length; i++) { r -= W[i]; if (r <= 0) { pick = A[i]; break; } }
-    if (!pick || (pick.id === 'listen' && Math.random() < 0.5)) return false; // 「聴く」ばかりにならないよう半分は見送る
+    const A = capPlayList(c, P, te).filter(a => !['analysis', 'sensor', 'weapon'].includes(a.id) && (!fight || AUTO_FIGHT_IDS.includes(a.id))); // 演算力の切替は戦術 (tacticRules) の担当
+    const pick = autoPlayChoose(A, P, 'p', _capAutoLast);
+    if (!pick) return false;
     _capAutoLast = pick.id; pick.run();
     comThinkEvent('p', 'AI: ' + pick.label + (c.st && STRAT_REG[c.st.id] ? ' (方針「' + STRAT_REG[c.st.id].jp + '」)' : '') + ' — ' + pick.sub.replace(/^\S+ /, ''));
-    if (typeof uiToast === 'function') uiToast('AI: ' + pick.label, false);
+    if (capMode && typeof uiToast === 'function') uiToast('AI: ' + pick.label, false);
+    return true;
+}
+// 第190弾 (オーナー「敵COMにも同じ自律運用を」): 敵COMも 同じ選び方 (autoPlayChoose)・同じ頻度 (18〜37秒に1回)・同じ条件 (静かな間 / 相手が見えている間・取りに行く物の最中と隠れている間は除く) で
+// 手駒 (艦載機・哨戒機・砲台・偽信号・偽コンテナ・ビーコン・煙幕・散布・閃光・ノイズ・修理・呼び戻し・弱いソナー) を使う。持ち物と実行だけが敵の在庫・API
+function enemyAutoPlay(e) {
+    const now = _frameCount;
+    if (now < (e._autoPlayF || 0) || e.type === 'fighter' || e.hp <= 0 || e._dying || e._techT > 0 || e._asm) return false;
+    const A = stratActorE(e), P = _enemyPersonality(e) || {};
+    if (e._item || e._hideT > 0 || e._pursue) return false;
+    const hitAgo = e._lastHitF ? now - e._lastHitF : 1e9, vis = e.detectionTimer > 60 && !!player && player.hp > 0;
+    const calm = !vis && A.expo <= 2 && !A.engaged(), fightOk = vis && A.expo <= 3;
+    if (!calm && !fightOk) return false;
+    e._autoPlayF = now + 1100 + Math.random() * 1100;
+    const ang = () => Math.random() * Math.PI * 2, spot = (d) => { const a = ang(); return clampToMapCircle(e.x + Math.cos(a) * d, e.y + Math.sin(a) * d, 1500); };
+    const est = vis ? { x: player.x, y: player.y, vis: true } : (() => { const q = A.est(); return q && q.r < 4500 ? { x: q.x, y: q.y, vis: false } : null; })();
+    const out = [], add = (id, skill, label, sub, run, base) => out.push({ id, skill, label, sub, run, base: base || 1 });
+    const liveK = (k) => enemies.some(f => f.type === 'fighter' && f._kind === k && f.hp > 0 && !f._dying);
+    if (A.have('scout')) add('scout', 'dr_scout', '哨戒機を出す', '周りを見張らせる', () => A.launch('scout'));
+    if (liveK('scout') && skillOn('e', 'dr_order')) add('scout_far', 'tc_scout_ahead', '哨戒機を先へ送る', '7000u先を偵察', () => { const t = spot(7000); e._sendTo = { x: t.x, y: t.y, until: now + 3720 }; });
+    if (e.lureSOS > 0) add('fsos', 'it_sos', '偽SOSを置く', '遠くへ偽の遭難信号', () => { e.lureSOS--; const t = spot(5000); launchLure('e', 'sos', e.x, e.y, t.x, t.y); });
+    if (e.lureShip > 0) add('lure', 'dc_mirror', '偽艦影を流す', '偽の艦影信号', () => { e.lureShip--; const t = spot(4500); launchLure('e', 'ship', e.x, e.y, t.x, t.y); });
+    if (e.itemFake > 0) add('fake', 'it_fake', '偽コンテナを置く', '艦尾に罠の箱', () => { e.itemFake--; placeFakeCache('e', e.x + Math.cos(e.angle + Math.PI) * 700, e.y + Math.sin(e.angle + Math.PI) * 700); matchRecEvent('fakeE', e.x, e.y, '敵: 偽コンテナを置く'); });
+    const bk = e.itemBcn && Object.keys(e.itemBcn).find(b => e.itemBcn[b] > 0);
+    if (bk) add('bcn', 'dc_beacon', '帯域ビーコンを置く', '一つの帯域だけ強い偽信号', () => { e.itemBcn[bk]--; const t = spot(4500); launchLure('e', 'ship', e.x, e.y, t.x, t.y, bk); });
+    if (e.itemSmoke > 0) add('smoke', 'it_smoke', '煙幕を張って息を潜める', '霧を濃くして静かに待つ', () => { enemyUseSmoke(e); e.setTarget(e.x, e.y); e.postFireCooldown = 1800; });
+    if (e.itemSpray > 0) add('spray', 'it_spray', '霧を撒いて隠れる', '周囲の霧を濃くして待つ', () => { enemyUseSpray(e); e.setTarget(e.x, e.y); e.postFireCooldown = 1800; });
+    if (!(e._pingCD > 0) && !(now - (e._nudgeSonarF || -1e9) < 7200)) add('sonar', 'so_nudge', '弱いソナーを打つ', '周囲を探る', () => { e._nudgeSonarF = now; firePingFromEnemy(e, { omni: true, power: 'weak' }); }, 0.8);
+    add('listen', 'tc_listen', '止まって20秒聴く', '機関停止で耳をすます', () => itemDoE(e, { k: 'silent', why: '手駒: 止まって聴く' }), 0.9);
+    if (A.have('attack')) {
+        if (est) add('ftr_strike', 'cb_decoy_drone', '戦闘機を出して攻撃させる', '相手へ戦闘機を送る', () => { A.launch('attack'); e._sendTo = { x: est.x, y: est.y, until: now + 3720 }; }, 1.2);
+        else add('ftr_escort', 'dr_ftr', '戦闘機を出して護衛させる', '艦の周りを守らせる', () => A.launch('attack'), 0.9);
+    }
+    if (A.have('build')) add('turret', 'dr_turret', '砲台を据える', '艦の近くに設置', () => A.launch('build'), 0.9);
+    if (e.itemNoise > 0) add('noise', 'dc_silent', 'ノイズメーカーを流す', '偽の音源を走らせる', () => enemyUseNoise(e, est ? Math.atan2(e.y - est.y, e.x - est.x) + (Math.random() - 0.5) : e.angle), 0.9);
+    if (e.itemRepair > 0 && e.hp / e.maxHp < 0.85 && hitAgo > 600 && !((e._kitT || 0) > 0)) add('repair', 'it_repair', 'リペアキットで修理', '耐久+700', () => { e.itemRepair--; e._kitT = REPAIR_KIT_TIME; matchRecEvent('repairE', e.x, e.y, '敵: リペアキットを使う'); }, 1.6);
+    if (e.itemFlash > 0 && est && est.vis) add('flash', 'cb_flash_strike', '閃光弾で目を焼く', '半径2500uのセンサーを焼く', () => enemyUseFlash(e), 0.8);
+    if (e._sendTo && skillOn('e', 'dr_recall') && enemies.some(f => f.type === 'fighter' && f._home === e && f.hp > 0 && Math.hypot(f.x - e.x, f.y - e.y) > 3500)) add('recall', 'dr_recall', 'ドローンを呼び戻す', '遠くのドローンを母艦へ', () => A.recall(), 0.7);
+    const sid = e._strat && e._strat.id, B = CAP_STRAT_BOOST[sid];
+    if (B) for (const a of out) if (B[a.id]) a.base *= B[a.id];
+    const pick = autoPlayChoose(out.filter(a => vis ? AUTO_FIGHT_IDS.includes(a.id) : true), P, 'e', e._autoPlayLast);
+    if (!pick) return false;
+    e._autoPlayLast = pick.id; pick.run(); e._launchFlash = Math.max(e._launchFlash || 0, 30);
+    comThinkEvent('e', '手駒: ' + pick.label + (sid && STRAT_REG[sid] ? ' (方針「' + STRAT_REG[sid].jp + '」)' : '') + ' — ' + pick.sub, 'e' + e.uid);
     return true;
 }
 const CAP_STRAT_BOOST = { screen: { ftr_strike: 1.9, scout_far: 1.7, ftr_escort: 1.4 }, push: { ftr_strike: 2.0, flash: 1.5, sonar: 1.3 }, ambush: { smoke: 1.5, spray: 1.5, listen: 1.6, fake: 1.5, turret: 1.5, noise: 1.2 }, bait: { fsos: 1.9, lure: 1.9, bcn: 1.7, fake: 1.3 }, trap: { turret: 1.9, fake: 1.9, ftr_escort: 1.2 }, guard: { turret: 1.7, ftr_escort: 1.6, scout_far: 1.3 }, fogHide: { spray: 1.7, smoke: 1.7, listen: 1.4, noise: 1.3 }, fallback: { repair: 2.0, smoke: 1.4, recall: 1.5 }, tech: { turret: 1.6, fake: 1.3 }, hop: { sonar: 1.3, scout_far: 1.4 } };
@@ -19940,6 +19991,10 @@ function _comPilotStep0() {
         if (pg && pg.wait) return;
         if (pg && pg.act) { pg.act.run(); comThinkEvent('p', '艦長の判断: ' + pg.act.label); _comStance(c, P); return; }
         if (!pg && capAutoPlay(c, P, vis, te)) { _comStance(c, P); return; } // 第189弾: 普段はAIが自分の判断で手駒を使う
+    }
+    if (!capMode && comDemo && !c.item && !(c.capHoldUntil > now)) { // 第190弾: 通常のCOM対戦でも自機COMが同じ自律運用 (敵COMと同じ)
+        const vis = !!(te && lk && lk.full);
+        if (((playerExposureLevel <= 2 && !vis && !comEngaged()) || (vis && playerExposureLevel <= 3)) && capAutoPlay(c, P, vis, te)) { _comStance(c, P); return; }
     }
     let held = null;
     // ═══ 第137弾 (操縦の総括・オーナー「いつやるんだ」): 任務の優先順位は 自機COMも敵も同じ並び (PILOT_LADDER) を同じ走査 (pilotLadder) で通す。
