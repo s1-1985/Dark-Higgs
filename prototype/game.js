@@ -8901,7 +8901,7 @@ function takeLoot(o, src) { // 自機 (人が選んだ時・自機COMが選ん�
 }
 function offerLoot(src) {
     const A = lootActor('p'), c = lootPick4(A);
-    if (obsOnly()) { takeLoot(lootChoose(A, c), src); return; }
+    if (comDemo) { takeLoot(lootChoose(A, c), src); return; } // 第189弾: QTE中もAIが選ぶ (オーナー「基本はAIが勝手に選ぶ」)
     if (playReplay && playReplay.inp) return;
     const rec = capMode ? (lootChoose(A, c) || {}).label : null; // 第188弾: QTE中は自分で選ぶ (AIの推奨に ★)
     if (_draft) { _draftQ.push({ src, loot: c, rec }); return; }
@@ -8917,7 +8917,7 @@ function enemyOfferLoot(e, src) {
 function offerDraft(src) {
     const c = draftPick3(src);
     if (!c.length) { logMessage('部品: ' + _SRC_JP[src] + ' — 新しい部品は無かった (全部持っている)', 'system-msg'); return; }
-    if (obsOnly()) { takePart(comPickPart(c)); return; }
+    if (comDemo) { takePart(comPickPart(c)); return; }
     if (playReplay && playReplay.inp) return; // 第156弾: 人の操作の再生では 選んだ内容を記録から入れる (画面は開かない)
     const rec = capMode ? comPickPart(c) : null; // 第188弾: QTE中は自分で選ぶ (AIの推奨に ★)
     if (_draft) { _draftQ.push({ src, c, rec }); return; }
@@ -9006,7 +9006,7 @@ function updateParts() {
         }
     }
     // 自機COM: 自分のコロニーに居る時、予備の方が性格に合えば付け替える
-    if (comDemo && !capMode && partsSpare.length && _frameCount % 120 === 0 && partsDocked()) { // 第188弾: QTE中の付け替えは自分で
+    if (comDemo && partsSpare.length && _frameCount % 120 === 0 && partsDocked()) {
         const pp = (_com && _com.pp) || { aggression: 0.5, stealth: 0.3, greed: 0.4, caution: 0.4 };
         for (const sp of partsSpare.slice()) {
             let worst = null, ws = 9;
@@ -9486,7 +9486,7 @@ function _closeDraftUI() { const ov = document.getElementById('draft-overlay'); 
 function _nextDraft() { const q = _draftQ.shift(); if (q) { _draft = q; _openDraftUI(); } }
 function openPartsUI() {
     const ov = document.getElementById('parts-overlay'); if (!ov) return;
-    const edit = partsDocked() && !obsOnly();
+    const edit = partsDocked() && !comDemo;
     document.getElementById('parts-title').innerHTML = '部品 ' + _slotGauge() + '<small>' + partSlotsUsed() + ' / ' + partSlotsMax() + '</small>';
     document.getElementById('parts-sub').textContent = edit ? 'ドック: 外すと予備へ・予備から付けられる' : '付け替えは自分のコロニーのドック (600u以内) でだけ';
     const on = document.getElementById('parts-on'), sp = document.getElementById('parts-spare');
@@ -19629,6 +19629,24 @@ function capPlayList(c, P, te) {
     if (B) for (const a of out) if (B[a.id]) { a.base *= B[a.id]; a.strat = true; }
     return out;
 }
+// 第189弾 (オーナー「基本はAIが勝手に選ぶ・AIに多様性を」): QTE中のAIが、性格 (スキルの適性)・戦略・状況で 重みつきの乱数で手駒 (ドローン・アイテム・演算力) を自分の判断で使う。最大の一つを選ぶのでなく、直前と同じ物は避けて散らす
+var _capAutoF = 0, _capAutoLast = '';
+function capAutoPlay(c, P, fight, te) {
+    const now = _frameCount;
+    if (now < _capAutoF) return false;
+    _capAutoF = now + 1100 + Math.random() * 1100; // 18〜37秒に1回
+    const FIGHT = ['ftr_strike', 'ftr_escort', 'turret', 'decoy', 'noise', 'repair', 'flash', 'smoke', 'spray', 'recall'];
+    const A = capPlayList(c, P, te).filter(a => !fight || FIGHT.includes(a.id));
+    if (!A.length) return false;
+    const W = A.map(a => Math.max(0.02, a.base * Math.pow(skillAff(P, a.skill), 1.2) * (a.id === _capAutoLast ? 0.25 : 1) * (['analysis', 'sensor', 'weapon', 'listen', 'sonar'].includes(a.id) ? 0.55 : 1) * (0.5 + Math.random())));
+    let r = Math.random() * W.reduce((x, y) => x + y, 0), pick = A[0];
+    for (let i = 0; i < A.length; i++) { r -= W[i]; if (r <= 0) { pick = A[i]; break; } }
+    if (!pick || (pick.id === 'listen' && Math.random() < 0.5)) return false; // 「聴く」ばかりにならないよう半分は見送る
+    _capAutoLast = pick.id; pick.run();
+    comThinkEvent('p', 'AI: ' + pick.label + (c.st && STRAT_REG[c.st.id] ? ' (方針「' + STRAT_REG[c.st.id].jp + '」)' : '') + ' — ' + pick.sub.replace(/^\S+ /, ''));
+    if (typeof uiToast === 'function') uiToast('AI: ' + pick.label, false);
+    return true;
+}
 const CAP_STRAT_BOOST = { screen: { ftr_strike: 1.9, scout_far: 1.7, ftr_escort: 1.4 }, push: { ftr_strike: 2.0, flash: 1.5, sonar: 1.3 }, ambush: { smoke: 1.5, spray: 1.5, listen: 1.6, fake: 1.5, turret: 1.5, noise: 1.2 }, bait: { fsos: 1.9, lure: 1.9, bcn: 1.7, fake: 1.3 }, trap: { turret: 1.9, fake: 1.9, ftr_escort: 1.2 }, guard: { turret: 1.7, ftr_escort: 1.6, scout_far: 1.3 }, fogHide: { spray: 1.7, smoke: 1.7, listen: 1.4, noise: 1.3 }, fallback: { repair: 2.0, smoke: 1.4, recall: 1.5 }, tech: { turret: 1.6, fake: 1.3 }, hop: { sonar: 1.3, scout_far: 1.4 } };
 // 推定位置 (見えている相手 → 追跡中の信号 → 絞れている信号)。ドローンを送る・デコイを流す先
 function capEstPos(te) {
@@ -19644,7 +19662,7 @@ function capPlayGate(c, P, fight, te) {
     if (ranked.length < 2) return null;
     const opts = ranked.map(a => ({ id: a.id, label: a.label, sub: a.sub })); opts.push({ id: '_none', label: '何もしない', sub: '今は静かに進む' });
     const sj = c.st && STRAT_REG[c.st.id] ? '方針「' + STRAT_REG[c.st.id].jp + '」の最中 — ' : '';
-    const cg = capAsk(fight ? 'playf' : 'play', { title: fight ? '交戦中の一手' : 'いま打てる一手', sit: sj + _capVoice(P, ranked[0].label) + (fight ? '。相手が見えている — 手駒を使う？' : '。静かな間に仕掛ける？'), opts, rec: ranked[0].id }, fight ? 1500 : 1800);
+    const cg = capAsk(fight ? 'playf' : 'play', { title: fight ? '交戦中の一手' : 'いま打てる一手', sit: sj + _capVoice(P, ranked[0].label) + (fight ? '。相手が見えている — 手駒を使う？' : '。静かな間に仕掛ける？'), opts, rec: ranked[0].id }, fight ? 99999 : 10800);
     if (!cg || cg.wait) return cg;
     if (cg.id === '_none') return { none: true };
     const act = A.find(a => a.id === cg.id); return act ? { act } : { none: true };
@@ -19917,9 +19935,11 @@ function _comPilotStep0() {
         }
     }
     if (capMode && !c.item && !(c.capHoldUntil > now) && ((playerExposureLevel <= 2 && !(te && lk && lk.full) && !comEngaged()) || (te && lk && lk.full && playerExposureLevel <= 3))) { // 第185弾・第188弾: 静かな間と交戦中の「一手」(ドローン・アイテム)
-        const pg = capPlayGate(c, P, !!(te && lk && lk.full), te);
+        const vis = !!(te && lk && lk.full);
+        const pg = vis ? null : capPlayGate(c, P, false, te); // 艦長に尋ねるのは静かな間に時々だけ (交戦中は尋ねない)
         if (pg && pg.wait) return;
         if (pg && pg.act) { pg.act.run(); comThinkEvent('p', '艦長の判断: ' + pg.act.label); _comStance(c, P); return; }
+        if (!pg && capAutoPlay(c, P, vis, te)) { _comStance(c, P); return; } // 第189弾: 普段はAIが自分の判断で手駒を使う
     }
     let held = null;
     // ═══ 第137弾 (操縦の総括・オーナー「いつやるんだ」): 任務の優先順位は 自機COMも敵も同じ並び (PILOT_LADDER) を同じ走査 (pilotLadder) で通す。
