@@ -3306,3 +3306,4 @@ body.in-game #action-popover .act-icon-btn span { font-family: Orbitron, sans-se
 .com-mapgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; }
 .com-mapcol .com-sec.sub:first-child { margin-top: 4px; }
 @media (max-width: 760px) { .com-skgrid, .com-mapgrid { grid-template-columns: 1fr; } }
+.part-card.ai-rec { outline: 2px solid #ffd35c; box-shadow: 0 0 14px rgba(255,211,92,.45); }

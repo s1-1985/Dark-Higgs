@@ -8901,10 +8901,11 @@ function takeLoot(o, src) { // 自機 (人が選んだ時・自機COMが選ん�
 }
 function offerLoot(src) {
     const A = lootActor('p'), c = lootPick4(A);
-    if (comDemo) { takeLoot(lootChoose(A, c), src); return; }
+    if (obsOnly()) { takeLoot(lootChoose(A, c), src); return; }
     if (playReplay && playReplay.inp) return;
-    if (_draft) { _draftQ.push({ src, loot: c }); return; }
-    _draft = { src, loot: c };
+    const rec = capMode ? (lootChoose(A, c) || {}).label : null; // 第188弾: QTE中は自分で選ぶ (AIの推奨に ★)
+    if (_draft) { _draftQ.push({ src, loot: c, rec }); return; }
+    _draft = { src, loot: c, rec };
     _openDraftUI();
 }
 function enemyOfferLoot(e, src) {
@@ -8916,10 +8917,11 @@ function enemyOfferLoot(e, src) {
 function offerDraft(src) {
     const c = draftPick3(src);
     if (!c.length) { logMessage('部品: ' + _SRC_JP[src] + ' — 新しい部品は無かった (全部持っている)', 'system-msg'); return; }
-    if (comDemo) { takePart(comPickPart(c)); return; }
+    if (obsOnly()) { takePart(comPickPart(c)); return; }
     if (playReplay && playReplay.inp) return; // 第156弾: 人の操作の再生では 選んだ内容を記録から入れる (画面は開かない)
-    if (_draft) { _draftQ.push({ src, c }); return; }
-    _draft = { src, c };
+    const rec = capMode ? comPickPart(c) : null; // 第188弾: QTE中は自分で選ぶ (AIの推奨に ★)
+    if (_draft) { _draftQ.push({ src, c, rec }); return; }
+    _draft = { src, c, rec };
     _openDraftUI();
 }
 function takePart(id) {
@@ -9004,7 +9006,7 @@ function updateParts() {
         }
     }
     // 自機COM: 自分のコロニーに居る時、予備の方が性格に合えば付け替える
-    if (comDemo && partsSpare.length && _frameCount % 120 === 0 && partsDocked()) {
+    if (comDemo && !capMode && partsSpare.length && _frameCount % 120 === 0 && partsDocked()) { // 第188弾: QTE中の付け替えは自分で
         const pp = (_com && _com.pp) || { aggression: 0.5, stealth: 0.3, greed: 0.4, caution: 0.4 };
         for (const sp of partsSpare.slice()) {
             let worst = null, ws = 9;
@@ -9470,21 +9472,21 @@ function _openDraftUI() {
         document.getElementById('draft-title').textContent = '積み荷を拾った — ' + _SRC_JP[_draft.src];
         document.getElementById('draft-sub').textContent = '4つから1つ選ぶ (空き枠 ' + Math.max(0, lootFreeSlots(lootActor('p'))) + ')。積み込み用のアイテム。見送ることもできる';
         const bx = document.getElementById('draft-cards'); bx.innerHTML = '';
-        for (const o of _draft.loot) { const b = document.createElement('button'); b.className = 'btn'; b.style.cssText = 'min-width:130px;min-height:64px;margin:4px;font-size:14px'; b.textContent = o.label;
+        for (const o of _draft.loot) { const b = document.createElement('button'); b.className = 'btn'; b.style.cssText = 'min-width:130px;min-height:64px;margin:4px;font-size:14px'; b.textContent = (_draft.rec && o.label === _draft.rec ? '★ AIの推奨\n' : '') + o.label; if (_draft.rec && o.label === _draft.rec) b.style.whiteSpace = 'pre-line';
             b.addEventListener('click', () => { const d = _draft; _closeDraftUI(); takeLoot(o, d.src); _nextDraft(); }); bx.appendChild(b); }
         ov.classList.remove('hidden'); return;
     }
     document.getElementById('draft-title').textContent = '部品を拾った — ' + _SRC_JP[_draft.src];
     document.getElementById('draft-sub').textContent = '3つから1つ選ぶ (取り付け枠 ' + partSlotsUsed() + '/' + partSlotsMax() + (partsSpare.length ? '・予備' + partsSpare.length : '') + ')。枠が満杯なら予備に入り、自分のコロニーのドックで付け替えられる';
     const box = document.getElementById('draft-cards'); box.innerHTML = '';
-    for (const id of _draft.c) box.appendChild(_partCard(id, 'これにする', () => { const d = _draft; _closeDraftUI(); takePart(id); _nextDraft(); }));
+    for (const id of _draft.c) { const cd = _partCard(id, _draft.rec === id ? '★ AIの推奨 — これにする' : 'これにする', () => { const d = _draft; _closeDraftUI(); takePart(id); _nextDraft(); }); if (_draft.rec === id) cd.classList.add('ai-rec'); box.appendChild(cd); }
     ov.classList.remove('hidden');
 }
 function _closeDraftUI() { const ov = document.getElementById('draft-overlay'); if (ov) ov.classList.add('hidden'); _draft = null; }
 function _nextDraft() { const q = _draftQ.shift(); if (q) { _draft = q; _openDraftUI(); } }
 function openPartsUI() {
     const ov = document.getElementById('parts-overlay'); if (!ov) return;
-    const edit = partsDocked() && !comDemo;
+    const edit = partsDocked() && !obsOnly();
     document.getElementById('parts-title').innerHTML = '部品 ' + _slotGauge() + '<small>' + partSlotsUsed() + ' / ' + partSlotsMax() + '</small>';
     document.getElementById('parts-sub').textContent = edit ? 'ドック: 外すと予備へ・予備から付けられる' : '付け替えは自分のコロニーのドック (600u以内) でだけ';
     const on = document.getElementById('parts-on'), sp = document.getElementById('parts-spare');
@@ -19590,7 +19592,7 @@ function capTacticGate(F, cands) {
     return { cand: cands.find(c => c.id === cg.id), none: !cands.find(c => c.id === cg.id) };
 }
 // いま打てる一手: 静かな間に、持ち物と性格で選んだ「仕掛け」を提案する (各スキルの適性で並ぶ)
-function capPlayList(c, P) {
+function capPlayList(c, P, te) {
     const st = (k) => (cargo.stock && cargo.stock[k]) || 0, out = [], now = _frameCount;
     const ang = () => Math.random() * Math.PI * 2, spot = (d) => { const a = ang(); return clampToMapCircle(player.x + Math.cos(a) * d, player.y + Math.sin(a) * d, 1500); };
     const add = (id, skill, label, sub, run, base) => out.push({ id, skill, label, sub: _capTag(P, skill) + ' ' + sub, run, base: base || 1 });
@@ -19609,14 +19611,40 @@ function capPlayList(c, P) {
     add('analysis', 'tc_focus_scan', '解析に演算力を回す', '40秒 解析重視 — 信号の正体と位置が早く絞れる/速さは落ちる', () => _tacFocusP(c, 'analysis', 40), 0.8);
     add('sensor', 'tc_focus_sensor', '探知に演算力を回す', '40秒 探知重視 — 遠くまで聞こえる/漏れる信号も増える', () => _tacFocusP(c, 'sensor', 40), 0.7);
     add('weapon', 'tc_focus_weapon', '兵装に演算力を回す', '40秒 兵装重視 — 装填が速い/他が弱くなる', () => _tacFocusP(c, 'weapon', 40), 0.6);
+    // 第188弾: ドローン・アイテムを積極的に — 戦闘機・砲台・デコイ・ノイズ・リペア・呼び戻し。戦略に応じて重みが変わる
+    const est = capEstPos(te), hurt = player.hp / player.maxHp < 0.85;
+    if (st('attack') > 0 && drOK('p', 'attack')) {
+        if (est) add('ftr_strike', 'cb_decoy_drone', '戦闘機を出して攻撃させる', (est.vis ? '見えている相手' : '推定位置') + 'へ戦闘機を送る — 手数が増える/母艦の位置は変わらない・撃墜されることもある', () => { deployDrone('attack'); droneOrder('attack', 'attack', est.x, est.y); }, 1.2);
+        else add('ftr_escort', 'dr_ftr', '戦闘機を出して護衛させる', '艦の周りを守らせる — 近づく敵や艦載機を迎撃/信号が増える', () => deployDrone('attack'), 0.9);
+    }
+    if (st('build') > 0 && drOK('p', 'build')) add('turret', 'dr_turret', '砲台を据える', '艦の近くに設置 (射程2200u) — 近づく相手を撃つ/設置中は動けず信号が出る', () => deployDrone('build'), 0.9);
+    if (st('decoy') > 0 && est) add('decoy', 'dc_mirror', 'デコイを敵の方へ流す', '熱源を放って相手を引きつける — 狙いが逸れる/信号が増える', () => { const a = Math.atan2(est.y - player.y, est.x - player.x), t = clampToMapCircle(player.x + Math.cos(a + 0.5) * 2500, player.y + Math.sin(a + 0.5) * 2500, 1500); _comUseItem('decoy', t.x, t.y); }, 1.0);
+    if (st('noise') > 0) add('noise', 'dc_silent', 'ノイズメーカーを流す', '偽の音源を走らせる — 相手が音を取り違える/自分の位置は変わらない', () => { player.targetEntity = null; useNoise(est ? Math.atan2(player.y - est.y, player.x - est.x) + (Math.random() - 0.5) : undefined); }, 0.9);
+    if (st('repair') > 0 && hurt && !(_frameCount - (player._lastHitF ?? -1e9) < 600)) add('repair', 'it_repair', 'リペアキットで修理', '6秒かけて耐久+700 — 撃たれていない今のうちに/修理中は熱とEMが漏れる', () => _comUseItem('repair'), 1.6);
+    if (st('flash') > 0 && est && est.vis) add('flash', 'cb_flash_strike', '閃光弾で目を焼く', '半径2500uの敵のセンサーを5秒焼く — 先制のチャンス/自分の位置が見える', () => _comUseItem('flash'), 0.8);
+    const far = playerDrones.filter(d => d.hp > 0 && (d.type === 'attack' || d.type === 'mech' || d.type === 'scout') && Math.hypot(d.x - player.x, d.y - player.y) > 3500);
+    if (far.length && drOK('p', 'attack')) add('recall', 'dr_recall', 'ドローンを呼び戻す', '遠くのドローン' + far.length + '機を母艦へ — 通信が切れる前に/偵察は止まる', () => { for (const t of ['attack', 'mech', 'scout']) droneOrder(t, 'return', player.x, player.y); }, 0.7);
+    // 戦略に応じた重み
+    const sid = c.st && c.st.id, B = CAP_STRAT_BOOST[sid];
+    if (B) for (const a of out) if (B[a.id]) { a.base *= B[a.id]; a.strat = true; }
     return out;
 }
-function capPlayGate(c, P) {
-    const A = capPlayList(c, P);
+const CAP_STRAT_BOOST = { screen: { ftr_strike: 1.9, scout_far: 1.7, ftr_escort: 1.4 }, push: { ftr_strike: 2.0, flash: 1.5, sonar: 1.3 }, ambush: { smoke: 1.5, spray: 1.5, listen: 1.6, fake: 1.5, turret: 1.5, noise: 1.2 }, bait: { fsos: 1.9, lure: 1.9, bcn: 1.7, fake: 1.3 }, trap: { turret: 1.9, fake: 1.9, ftr_escort: 1.2 }, guard: { turret: 1.7, ftr_escort: 1.6, scout_far: 1.3 }, fogHide: { spray: 1.7, smoke: 1.7, listen: 1.4, noise: 1.3 }, fallback: { repair: 2.0, smoke: 1.4, recall: 1.5 }, tech: { turret: 1.6, fake: 1.3 }, hop: { sonar: 1.3, scout_far: 1.4 } };
+// 推定位置 (見えている相手 → 追跡中の信号 → 絞れている信号)。ドローンを送る・デコイを流す先
+function capEstPos(te) {
+    if (te && te.hp > 0 && te.inVision) return { x: te.x, y: te.y, vis: true };
+    const pick = (sid) => { const sa = _signalAnalysis[sid]; if (!sa || !sa.fix) return null; const e = trackEstimate(sa, 0); return e && e.r < 4500 ? { x: e.x, y: e.y, vis: false } : null; };
+    if (lockedSignalId) { const r = pick(lockedSignalId); if (r) return r; }
+    for (const sid in _signalAnalysis) { const r = pick(sid); if (r) return r; }
+    return null;
+}
+function capPlayGate(c, P, fight, te) {
+    const A = capPlayList(c, P, te).filter(a => !fight || ['ftr_strike', 'ftr_escort', 'turret', 'decoy', 'noise', 'repair', 'flash', 'smoke', 'spray', 'recall'].includes(a.id));
     const ranked = A.map(a => ({ a, sc: a.base * Math.pow(skillAff(P, a.skill), 1.2) * (0.75 + 0.5 * Math.random()) })).sort((x, y) => y.sc - x.sc).slice(0, 4).map(x => x.a);
     if (ranked.length < 2) return null;
     const opts = ranked.map(a => ({ id: a.id, label: a.label, sub: a.sub })); opts.push({ id: '_none', label: '何もしない', sub: '今は静かに進む' });
-    const cg = capAsk('play', { title: 'いま打てる一手', sit: _capVoice(P, ranked[0].label) + '。静かな間に仕掛ける？', opts, rec: ranked[0].id }, 3600);
+    const sj = c.st && STRAT_REG[c.st.id] ? '方針「' + STRAT_REG[c.st.id].jp + '」の最中 — ' : '';
+    const cg = capAsk(fight ? 'playf' : 'play', { title: fight ? '交戦中の一手' : 'いま打てる一手', sit: sj + _capVoice(P, ranked[0].label) + (fight ? '。相手が見えている — 手駒を使う？' : '。静かな間に仕掛ける？'), opts, rec: ranked[0].id }, fight ? 1500 : 1800);
     if (!cg || cg.wait) return cg;
     if (cg.id === '_none') return { none: true };
     const act = A.find(a => a.id === cg.id); return act ? { act } : { none: true };
@@ -19888,8 +19916,8 @@ function _comPilotStep0() {
             if (cg && cg.id === 'avoid') { const tp = clampToMapCircle(player.x - Math.cos(angc) * 5000, player.y - Math.sin(angc) * 5000, 1500); player.setTarget(tp.x, tp.y); _comSteered(c, 'free'); c.legF = now; c.capAvoidUntil = now + 2400; setStance('cruise', true); comThinkEvent('p', '艦長の判断: 距離を取る'); return; }
         }
     }
-    if (capMode && playerExposureLevel <= 1 && !(te && lk && lk.full) && !c.hunt && !c.item && !comEngaged() && !(c.capHoldUntil > now)) { // 第185弾: 静かな間の「一手」
-        const pg = capPlayGate(c, P);
+    if (capMode && !c.item && !(c.capHoldUntil > now) && ((playerExposureLevel <= 2 && !(te && lk && lk.full) && !comEngaged()) || (te && lk && lk.full && playerExposureLevel <= 3))) { // 第185弾・第188弾: 静かな間と交戦中の「一手」(ドローン・アイテム)
+        const pg = capPlayGate(c, P, !!(te && lk && lk.full), te);
         if (pg && pg.wait) return;
         if (pg && pg.act) { pg.act.run(); comThinkEvent('p', '艦長の判断: ' + pg.act.label); _comStance(c, P); return; }
     }
