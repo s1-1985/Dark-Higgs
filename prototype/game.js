@@ -19468,8 +19468,11 @@ function toggleQte(on) { // メニューのQTE (艦長の判断) のオン・オ
     uiToast('QTE (艦長の判断): ' + (capMode ? 'ON — 要所で選択を求められる' : 'OFF — AIが全部決める'), false);
 }
 function _syncQteBtn() { const b = document.getElementById('btn-qte'); if (b) b.textContent = 'QTE (艦長の判断): ' + (capMode ? 'ON' : 'OFF'); }
+// 第191弾 (オーナー「QTEはCOM同士の対戦の要所で選択を委ねるだけ。双方のダメージ・勝敗の趨勢に関わる場面だけ尋ねる」): 尋ねる場面は ダメージ・勝敗に直結する物だけ。
+// 方針・任務・戦術・拾い物・接触・静かな間の一手などは尋ねず、AI (COM) がこれまでどおり自分で決める (アルゴリズムはQTE用に変えていない)
+const CAP_ASK_KEYS = ['maneuver', 'strike', 'fire', 'missile', 'beam', 'retreat', 'hack'];
 function capAsk(key, spec, cd) { // null=聞かない (AIが続ける) / {wait:true}=選択待ち / {id}=選ばれた
-    if (!capMode || sectorCleared) return null;
+    if (!capMode || sectorCleared || !CAP_ASK_KEYS.includes(key)) return null;
     const r = _capRes[key]; if (r) { delete _capRes[key]; return r; }
     if (_capDec) return { wait: true };
     if (_frameCount - (_capLast[key] ?? -1e9) < cd) return null;
@@ -19652,7 +19655,6 @@ function capAutoPlay(c, P, fight, te) {
     if (!pick) return false;
     _capAutoLast = pick.id; pick.run();
     comThinkEvent('p', 'AI: ' + pick.label + (c.st && STRAT_REG[c.st.id] ? ' (方針「' + STRAT_REG[c.st.id].jp + '」)' : '') + ' — ' + pick.sub.replace(/^\S+ /, ''));
-    if (capMode && typeof uiToast === 'function') uiToast('AI: ' + pick.label, false);
     return true;
 }
 // 第190弾 (オーナー「敵COMにも同じ自律運用を」): 敵COMも 同じ選び方 (autoPlayChoose)・同じ頻度 (18〜37秒に1回)・同じ条件 (静かな間 / 相手が見えている間・取りに行く物の最中と隠れている間は除く) で
