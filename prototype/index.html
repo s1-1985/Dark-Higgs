@@ -790,6 +790,7 @@
                         <button class="btn btn-small" id="mm-autoatk" onclick="toggleAutoAttack()" title="有視界に入った敵を自動で撃つ">自動攻撃: ON</button>
                         <button class="btn btn-small" id="mm-fullscreen" onclick="toggleFullscreen()">全画面 切替</button>
                         <button class="btn btn-small com-only" id="btn-think-log" onclick="toggleThinkLog()">思考ログ: ON</button>
+                        <button class="btn btn-small com-only" id="btn-qte" onclick="toggleQte()" title="ON: 要所で艦長の判断を求められる (決断中は超スロー) / OFF: AIが全部決める">QTE (艦長の判断): OFF</button>
                         <button class="btn btn-small com-only" id="btn-com-exit" onclick="exitComDemo()">COM対戦を終えてロビーへ</button>
                     </div></section>
                     <section class="mm-sec"><h4>表示</h4><div class="mm-grid">
@@ -898,7 +899,7 @@
         });
     })();
     </script>
-    <script src="game.js?v=20261121b"></script>
+    <script src="game.js?v=20261121c"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {

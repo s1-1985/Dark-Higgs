@@ -19442,6 +19442,16 @@ function comReactItems(c, P, hpF, retreating) {
 //   選択はAIの上位の方針として一定時間効く (COMの目的に上書きされない)。画面に出す見込みは「AIの推定」から作る (真の状態・先読みは使わない)
 var capMode = false, _capDec = null, _capRes = {}, _capKick = false, _capLast = {}, _capLastT = 0, _capStats = { asked: 0, auto: 0 };
 const CAP_SLOW = 0.08, CAP_LIMIT = 7;
+function toggleQte(on) { // メニューのQTE (艦長の判断) のオン・オフ — COM対戦中だけ
+    if (!comDemo) return;
+    capMode = on === undefined ? !capMode : !!on;
+    if (comCfg) comCfg.cap = capMode;
+    if (!capMode && _capDec) capChoose(_capDec.spec.rec, true); // 出ている決断は推奨で閉じる
+    if (!capMode) { _capRes = {}; const b = document.getElementById('cap-dec'); if (b) b.classList.remove('on'); if (_com) { _com.capHoldUntil = 0; _com.capAvoidUntil = 0; _com.standUntil = 0; _com.noFireUntil = 0; } }
+    _syncQteBtn();
+    uiToast('QTE (艦長の判断): ' + (capMode ? 'ON — 要所で選択を求められる' : 'OFF — AIが全部決める'), false);
+}
+function _syncQteBtn() { const b = document.getElementById('btn-qte'); if (b) b.textContent = 'QTE (艦長の判断): ' + (capMode ? 'ON' : 'OFF'); }
 function capAsk(key, spec, cd) { // null=聞かない (AIが続ける) / {wait:true}=選択待ち / {id}=選ばれた
     if (!capMode || sectorCleared) return null;
     const r = _capRes[key]; if (r) { delete _capRes[key]; return r; }
@@ -20309,7 +20319,7 @@ function startComDemo() {
     saveComCfg();
     document.getElementById('com-overlay').classList.add('hidden');
     comDemo = true;
-    capMode = !!comCfg.cap; _capDec = null; _capRes = {}; _capLast = {}; _capStats = { asked: 0, auto: 0 }; _com = null;
+    capMode = !!comCfg.cap; _syncQteBtn(); _capDec = null; _capRes = {}; _capLast = {}; _capStats = { asked: 0, auto: 0 }; _com = null;
     { const b = document.getElementById('cap-dec'); if (b) b.classList.remove('on'); }
     document.body.classList.add('com-demo');
     document.querySelectorAll('.enemy-select-btn').forEach(b => b.classList.toggle('active', b.dataset.type === comCfg.enemy));
