@@ -14463,12 +14463,21 @@ function tacticDecide(F, A, X, act, doAct) {
     const R = (id, cond, run) => {
         const dbg = window.__tacDbg; // 検証用: スキルごとの 判定回数・適性で使える・条件成立 (通常は未定義)
         if (dbg) { const d = dbg[id] || (dbg[id] = { n: 0, on: 0, cond: 0, side: { p: 0, e: 0 } }); d.n++; if (skillUse(F.side, id)) { d.on++; if (cond()) { d.cond++; d.side[F.side]++; } } }
-        if (skillUse(F.side, id) && cond()) cands.push({ id, run, sc: tacScore(F, id) });
+        const capP = capMode && F.side === 'p'; // 第185弾: AI操艦では 条件が揃ったスキルを全部 候補にして艦長に見せる (使うかの乱数窓は通常の自動実行のときだけ)
+        if ((capP ? skillOn(F.side, id) : skillUse(F.side, id)) && cond()) cands.push({ id, run, sc: tacScore(F, id), use: capP ? skillUse(F.side, id) : true });
     };
-    if (act) cands.push({ id: '_item', run: () => { for (const k of (act._marks || [])) F.mark(k); doAct(act); return true; }, sc: 1.6 * (0.7 + 0.6 * Math.random()) * (0.7 + 0.35 * (F.exposure || 0)) });
+    if (act) cands.push({ id: '_item', act, use: true, run: () => { for (const k of (act._marks || [])) F.mark(k); doAct(act); return true; }, sc: 1.6 * (0.7 + 0.6 * Math.random()) * (0.7 + 0.35 * (F.exposure || 0)) });
     comboRules(F, A, X, R); tacticRules(F, A, X, R);
     cands.sort((a, b) => b.sc - a.sc);
-    for (const c of cands) if (c.run()) { F.set('tacLast', c.id); return true; } // 動かなかった(false)候補は飛ばして 次に点の高い候補へ
+    let list = cands;
+    if (capMode && F.side === 'p') {
+        const pr = capTacticGate(F, cands);
+        if (pr && pr.wait) return true;
+        if (pr && pr.cand) { if (pr.cand.run()) { F.set('tacLast', pr.cand.id); comThinkEvent('p', '艦長の判断: 戦術「' + ((_skillInfo(pr.cand.id) || {}).jp || pr.cand.id) + '」'); return true; } return false; }
+        if (pr && pr.none) return false;
+        list = cands.filter(c => c.use);
+    }
+    for (const c of list) if (c.run()) { F.set('tacLast', c.id); return true; } // 動かなかった(false)候補は飛ばして 次に点の高い候補へ
     return false;
 }
 function ammoOutOf(s) { // 弾を使う武器を積んでいて、その弾がほぼ尽きている (ビームだけの艦は false)
@@ -18098,6 +18107,7 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
             hitOrPing: _hitAgoP < 1800 || now - (threatObs.pingF ?? -1e9) < 1800, strike: myStrike > 0, kOk, bOk, holdRecent: now - (c.stratEndF ?? -1e9) < 900 });
         if (c.forceNext && w[c.forceNext] !== undefined) { for (const k in w) w[k] = k === c.forceNext ? 1 : 0; } c.forceNext = null; // 偽装退却/偽コンテナの罠の続き (敵と同じ)
         if (window.__huntForceP && w[window.__huntForceP] !== undefined) { for (const k in w) w[k] = k === window.__huntForceP ? 1 : 0; }
+        if (capMode && !window.__huntForceP) { const cg = capHuntGate(c, P, w, D); if (cg && cg.wait) return true; if (cg && cg.id) { for (const k in w) w[k] = k === cg.id ? 1 : 0; comThinkEvent('p', '艦長の判断: 作戦「' + (cg.id === 'charge' ? '突撃' : HUNT_REG[cg.id].jp) + '」'); } } // 第185弾: 作戦は艦長が選ぶ
         let tot = 0; for (const k in w) tot += w[k];
         let r = Math.random() * tot, pick = 'charge'; for (const k in w) { r -= w[k]; if (r <= 0) { pick = k; break; } }
         if (pick === 'charge') { c.huntCD = now + 1200 + Math.random() * 1200; say('【突撃】SIG-' + sigNo(lockedSignalId) + ' (推定' + Math.round(D / 100) * 100 + 'u) へまっすぐ詰める — 攻撃性' + _pct(ag)); return false; }
@@ -19348,6 +19358,7 @@ function comStratStep(c, P, D, hpF, contact, te, lk, r) {
     if (!S) {
         if (now < (c.stratCD || 0) || comEngaged()) return false; // 第73弾: 会敵中は新しい戦略 (ドローンを遠くへ出す物) を始めない
         const x = comStratCtx(c, P), pk = comPickStrat(c, P, x, hpF);
+        if (capMode) { const cg = capStratGate(c, P, pk); if (cg && cg.wait) return true; if (cg && cg.id) { pk.pick = cg.id; comThinkEvent('p', '艦長の判断: 方針「' + STRAT_REG[cg.id].jp + '」'); } } // 第185弾: 方針は艦長が決める
         S = c.st = { id: pk.pick, t0: now, until: now + COM_STRAT_MIN + Math.random() * COM_STRAT_VAR, ph: 'go', hp0: player.hp, x0: player.x, y0: player.y };
         const ws = Object.keys(pk.w).map(k => k + ' ' + pk.w[k].toFixed(1)).join(' / ');
         comThinkEvent('p', '戦略「' + COM_STRATS[S.id] + '」を選ぶ (約' + Math.round((S.until - now) / 60) + '秒) — 重み ' + ws);
@@ -19544,6 +19555,69 @@ function capHackGate(r, H) {
     const opts = [{ id: 'fire', label: (r.probe ? '探りのハック波' : HACK_EFFECTS[r.eff].jp + 'を狙う'), sub: r.probe ? '侵入はできないが応答で位置を暴く — こちらの位置も割れる' : '成功すれば相手の機能を止められる — 外れても数秒 大量の電磁波で位置が割れる' },
         { id: 'hold', label: '撃たない', sub: '電磁波を出さず静かに — 機会を待つ' }];
     return capAsk('hack', { title: 'ハック波の機会', sit: '演算力 ' + (Math.round(H * 10) / 10) + '。追跡中の相手へ撃てる', opts, rec: 'fire' }, 3000);
+}
+// ═══ 第185弾 (オーナー「選択肢が同じで退屈。スキルを生かせば色々な戦術が取れるのに。COMの性格で選択肢に性格が現れるように」): スキルから選択肢を作る ═══
+//   AIが自分の性格 (8軸・性格面) で各スキルの適性 skillAff を採点し、得意な順に 3〜4 つを「提案」する。苦手なものは並ばない・並んでも「苦手」の印。推奨 = AIの一番の提案。
+//   場面 3つ: 次の方針 (戦略) / 作戦の選択 (狩人の任務) / 戦術の機会 (戦術・複合・搭載品)
+function _skillInfo(id) { if (!window._skInfo) { window._skInfo = {}; for (const s of skillList()) window._skInfo[s.id] = s; } return window._skInfo[id]; }
+function _capTag(P, id) { const a = skillAff(P, id); return a >= 1.4 ? '【得意 ×' + (Math.round(a * 10) / 10) + '】' : a < 0.7 ? '【苦手 ×' + (Math.round(a * 10) / 10) + '】' : ''; }
+function _capVoice(P, recJp) { return 'AI (' + persTraitLabel(P) + ') の提案: ' + recJp; }
+function capStratGate(c, P, pk) {
+    const w = pk.w, ids = Object.keys(w).filter(k => w[k] > 0.02).sort((a, b) => w[b] - w[a]).slice(0, 4);
+    if (ids.length < 2) return null;
+    const rec = ids.includes(pk.pick) ? pk.pick : ids[0];
+    const opts = ids.map(k => ({ id: k, label: STRAT_REG[k].jp, sub: _capTag(P, 'st_' + k) + ' ' + String(STRAT_REG[k].desc || '').slice(0, 70) }));
+    return capAsk('strat', { title: '次の方針', sit: _capVoice(P, STRAT_REG[rec].jp) + '。しばらくの間 何をする？', opts, rec }, 600);
+}
+function capHuntGate(c, P, w, D) {
+    const ids = Object.keys(w).filter(k => w[k] > 0.05).sort((a, b) => w[b] - w[a]).slice(0, 4);
+    if (ids.length < 2) return null;
+    const jp = (k) => k === 'charge' ? '突撃' : HUNT_REG[k].jp;
+    const opts = ids.map(k => ({ id: k, label: jp(k), sub: _capTag(P, 'hu_' + k) + ' ' + (HUNT_DESC[k] || '') }));
+    return capAsk('hunt', { title: '作戦の選択', sit: '相手の推定 ' + Math.round(D / 100) * 100 + 'u。' + _capVoice(P, jp(ids[0])), opts, rec: ids[0] }, 1800);
+}
+function capTacticGate(F, cands) {
+    const L = cands.filter(c => !/^tc_focus_/.test(c.id)).slice(0, 3);
+    if (!L.length) return null;
+    const P = F.P || {};
+    const opts = L.map(c => { const info = _skillInfo(c.id); return { id: c.id, label: c.id === '_item' ? '搭載品で対処' : (info ? info.jp : c.id), sub: c.id === '_item' ? String((c.act && (c.act.why || c.act.k)) || '').slice(0, 70) : _capTag(P, c.id) + ' ' + String(info ? info.desc : '').slice(0, 70) }; });
+    opts.push({ id: '_none', label: '様子を見る', sub: '今は仕掛けず AI の通常行動に任せる' });
+    const cg = capAsk('tactic', { title: '戦術の機会', sit: _capVoice(P, opts[0].label) + '。条件が揃った — 仕掛ける？', opts, rec: L[0].id }, 1500);
+    if (!cg || cg.wait) return cg;
+    if (cg.id === '_none') return { none: true };
+    return { cand: cands.find(c => c.id === cg.id), none: !cands.find(c => c.id === cg.id) };
+}
+// いま打てる一手: 静かな間に、持ち物と性格で選んだ「仕掛け」を提案する (各スキルの適性で並ぶ)
+function capPlayList(c, P) {
+    const st = (k) => (cargo.stock && cargo.stock[k]) || 0, out = [], now = _frameCount;
+    const ang = () => Math.random() * Math.PI * 2, spot = (d) => { const a = ang(); return clampToMapCircle(player.x + Math.cos(a) * d, player.y + Math.sin(a) * d, 1500); };
+    const add = (id, skill, label, sub, run, base) => out.push({ id, skill, label, sub: _capTag(P, skill) + ' ' + sub, run, base: base || 1 });
+    const scouts = playerDrones.filter(d => d.hp > 0 && d.type === 'scout');
+    if (st('scout') > 0 && !scouts.length && drOK('p', 'scout')) add('scout', 'dr_scout', '哨戒機を出す', '周りを見張らせる — 信号が増える/先に相手を見つける', () => deployDrone('scout'));
+    if (scouts.length) add('scout_far', 'tc_scout_ahead', '哨戒機を先へ送る', '7000u先を偵察させる — 母艦は動かず先に情報を取る', () => { const t = spot(7000); droneOrder('scout', 'patrol', t.x, t.y); });
+    if (st('fsos') > 0) add('fsos', 'it_sos', '偽SOSを置く', '遠くへ偽の遭難信号 — 相手を引き寄せ/足止めする', () => { const t = spot(5000); _comUseItem('fsos', t.x, t.y); });
+    if (st('lure') > 0) add('lure', 'dc_mirror', '偽艦影を流す', '艦のような偽信号を遠くへ — 本物の位置をぼかす', () => { const t = spot(4500); _comUseItem('lure', t.x, t.y); });
+    if (st('fakecache') > 0) add('fake', 'it_fake', '偽コンテナを置く', '艦尾に罠の箱 — 開けた相手は爆発し位置が割れる', () => _comUseItem('fakecache', player.x - Math.cos(player.angle) * 700, player.y - Math.sin(player.angle) * 700));
+    const bk = ['bcn_heat', 'bcn_optic', 'bcn_em', 'bcn_higgs'].find(k => st(k) > 0);
+    if (bk) add('bcn', 'dc_beacon', '帯域ビーコンを置く', '一つの帯域だけ強い偽信号 — 相手の耳を逸らす', () => { const t = spot(4500); _comUseItem(bk, t.x, t.y); });
+    if (st('smoke') > 0) add('smoke', 'it_smoke', '煙幕を張って息を潜める', '霧を濃くして30秒 静かに待つ — 見つかりにくい', () => { _comUseItem('smoke'); c.capHoldUntil = now + 1800; });
+    if (st('fogspray') > 0) add('spray', 'it_spray', '霧を撒いて隠れる', '周囲3000uの霧を濃くして30秒 待つ', () => { _comUseItem('fogspray'); c.capHoldUntil = now + 1800; });
+    if (omniSonarCooldown <= 0) add('sonar', 'so_nudge', '弱いソナーを打つ', '周囲を探る — 返事が来る代わりに位置が割れる', () => fireOmniSonar('weak', comSonarBand(c)), 0.8);
+    add('listen', 'tc_listen', '止まって20秒聴く', '機関停止・潜航で耳をすます — 自分の音で聞こえなくなるのを避ける', () => { c.capHoldUntil = now + 1200; }, 0.9);
+    add('analysis', 'tc_focus_scan', '解析に演算力を回す', '40秒 解析重視 — 信号の正体と位置が早く絞れる/速さは落ちる', () => _tacFocusP(c, 'analysis', 40), 0.8);
+    add('sensor', 'tc_focus_sensor', '探知に演算力を回す', '40秒 探知重視 — 遠くまで聞こえる/漏れる信号も増える', () => _tacFocusP(c, 'sensor', 40), 0.7);
+    add('weapon', 'tc_focus_weapon', '兵装に演算力を回す', '40秒 兵装重視 — 装填が速い/他が弱くなる', () => _tacFocusP(c, 'weapon', 40), 0.6);
+    return out;
+}
+function capPlayGate(c, P) {
+    const A = capPlayList(c, P);
+    const ranked = A.map(a => ({ a, sc: a.base * Math.pow(skillAff(P, a.skill), 1.2) * (0.75 + 0.5 * Math.random()) })).sort((x, y) => y.sc - x.sc).slice(0, 4).map(x => x.a);
+    if (ranked.length < 2) return null;
+    const opts = ranked.map(a => ({ id: a.id, label: a.label, sub: a.sub })); opts.push({ id: '_none', label: '何もしない', sub: '今は静かに進む' });
+    const cg = capAsk('play', { title: 'いま打てる一手', sit: _capVoice(P, ranked[0].label) + '。静かな間に仕掛ける？', opts, rec: ranked[0].id }, 3600);
+    if (!cg || cg.wait) return cg;
+    if (cg.id === '_none') return { none: true };
+    const act = A.find(a => a.id === cg.id); return act ? { act } : { none: true };
 }
 // 撃ち合いの組み立て (相手が見えている間): 正対 / 回り込み / 回避優先
 function capManeuverGate(c, ch, lk, oppW) {
@@ -19782,6 +19856,11 @@ function comPilotStep() {
             if (cg && cg.id === 'hold') { c.capHoldUntil = now + 2400; comThinkEvent('p', '艦長の判断: 息を潜めて待つ (40秒)'); return; }
             if (cg && cg.id === 'avoid') { const tp = clampToMapCircle(player.x - Math.cos(angc) * 5000, player.y - Math.sin(angc) * 5000, 1500); player.setTarget(tp.x, tp.y); _comSteered(c, 'free'); c.legF = now; c.capAvoidUntil = now + 2400; setStance('cruise', true); comThinkEvent('p', '艦長の判断: 距離を取る'); return; }
         }
+    }
+    if (capMode && playerExposureLevel <= 1 && !(te && lk && lk.full) && !c.hunt && !c.item && !comEngaged() && !(c.capHoldUntil > now)) { // 第185弾: 静かな間の「一手」
+        const pg = capPlayGate(c, P);
+        if (pg && pg.wait) return;
+        if (pg && pg.act) { pg.act.run(); comThinkEvent('p', '艦長の判断: ' + pg.act.label); _comStance(c, P); return; }
     }
     let held = null;
     // ═══ 第137弾 (操縦の総括・オーナー「いつやるんだ」): 任務の優先順位は 自機COMも敵も同じ並び (PILOT_LADDER) を同じ走査 (pilotLadder) で通す。
