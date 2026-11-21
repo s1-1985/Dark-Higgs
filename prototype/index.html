@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261121a">
+    <link rel="stylesheet" href="style.css?v=20261121b">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -702,12 +702,15 @@
                 <div class="brief-box com-box">
                     <div class="brief-title"><span id="com-title">試合の設定</span> <span id="com-title-sub">MATCH SETUP</span></div>
                     <div class="brief-lead" id="com-lead"></div>
+                    <div class="com-panel">
+                        <div class="com-sec"><i>1</i>試合の条件</div>
+                        <div class="com-opts" id="com-opts"></div>
+                        <div class="com-mapcfg" id="com-map"></div>
+                    </div>
                     <div class="com-cols">
                         <div class="com-side" data-side="p"></div>
                         <div class="com-side" data-side="e"></div>
                     </div>
-                    <div class="com-opts" id="com-opts"></div>
-                    <div class="com-mapcfg" id="com-map"></div>
                     <div class="db-btns">
                         <button class="btn btn-small" id="com-cancel">戻る</button>
                         <button class="btn btn-primary" id="com-start">出撃 ▶</button>
@@ -899,7 +902,7 @@
         });
     })();
     </script>
-    <script src="game.js?v=20261121d"></script>
+    <script src="game.js?v=20261121e"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {

@@ -20266,9 +20266,17 @@ function openComDemo() {
 var _comSkOpen = false;
 function _skinRow(side, c) {
     const cur = (c.skin && c.skin[side]) || (side === 'p' ? 'helios' : 'crow');
-    let h = '<div class="com-row"><span class="com-opt-lbl">デザイン</span>';
+    let h = '<div class="com-row">';
     for (const k in FACTIONS) h += '<button class="com-chip' + (cur === k ? ' on' : '') + '" data-act="skin" data-v="' + k + '">' + FACTIONS[k].jp + '</button>';
     return h + '</div><div class="com-note">' + FACTIONS[cur].sub + ' (見た目だけ・性能は変わらない)</div>';
+}
+// 設定画面の説明文 (見やすさ・分かりやすさのため)
+const COM_SHIP_DESC = { assault: '耐久が高い・3連装の実弾・鈍重', stealth: '耐久が低い・高速で静か・一撃が命取り', carrier: '大型・ドローンを運用・最も鈍い' };
+const COM_PRESET_DESC = { standard: '偏りのない標準的な動き', aggressive: '積極的に詰めて撃ち合う', cautious: '早めに退き、守りを固める', stealthy: '隠れて静かに動き、不意を突く', greedy: '拠点や部品の確保を優先', schemer: '囮・罠・偽装でだまして倒す', hacker: 'ハック・解析・ソナーで追い詰める', commander: 'ドローン・艦載機を駆使する', sentinel: '拠点を守り、じっと待つ', hunter: '隠れて機会をうかがい、仕留める', adaptive: '状況に応じて性格が変わる', random: '試合ごとに艦種の範囲で無作為に決まる', custom: 'スライダーで自由に調整' };
+const COM_AXIS_HINT = { aggression: '積極的に詰めて撃つ', stealth: '静かに動き隠れる', greed: '拠点・部品を取りに行く', caution: '早めに退き身を守る', cunning: '囮・罠・偽装を使う', tech: 'ハック・解析・ソナー', command: 'ドローンの運用', patience: '待つ・焦らず機会を待つ' };
+function _shipCards(side, ship, c) {
+    const fac = (c.skin && c.skin[side]) || (side === 'p' ? 'helios' : 'crow');
+    return '<div class="com-ships">' + ['assault', 'stealth', 'carrier'].map(k => '<button class="com-ship' + (ship === k ? ' on' : '') + '" data-act="ship" data-v="' + k + '"><img src="assets/f2_' + fac + '_' + k + '.png?v=' + SPRITE_VER + '" alt=""><b>' + SHIP_JP[k] + '</b><small>' + COM_SHIP_DESC[k] + '</small></button>').join('') + '</div>';
 }
 function _renderComCfg() {
     const c = comCfg;
@@ -20277,31 +20285,35 @@ function _renderComCfg() {
         if (!box) continue;
         const ship = side === 'p' ? c.ship : c.enemy, pre = side === 'p' ? c.pPreset : c.ePreset, pp = side === 'p' ? c.pp : c.ep;
         const ra = !!(c.rndAll && c.rndAll[side]), human = side === 'p' && c.pCtl !== 'com';
-        const h = ['<div class="com-side-title ' + (side === 'p' ? 'cs-p' : 'cs-e') + '">' + (side === 'p' ? (human ? '自機 (あなた)' : c.cap ? '自機AI (あなたは艦長)' : '自機COM') : '敵COM') + ' <button class="com-chip' + (ra ? ' on' : '') + '" data-act="rndall" title="ON: 試合ごとに 艦種・性格・積み込み・武器をすべて無作為に決める">🎲 全部ランダム ' + (ra ? 'ON' : 'OFF') + '</button></div>' + (side === 'p' ? '<div class="com-row"><span class="com-opt-lbl">操作</span><button class="com-chip' + (human ? ' on' : '') + '" data-act="ctl" data-v="human">プレイヤー</button><button class="com-chip' + (!human && !c.cap ? ' on' : '') + '" data-act="ctl" data-v="com">COM (観戦)</button><button class="com-chip' + (c.cap ? ' on' : '') + '" data-act="ctl" data-v="cap" title="AIが操艦し、あなたは要所の意思決定だけを行う">AI操艦 (意思決定のみ)</button></div>' : '') + (ra ? '<div class="com-note">試合ごとに 艦種' + (human ? '・積み込み・武器の種類' : '・性格(8軸)・積み込み・武器の種類') + 'を無作為に決める (下の設定は使わない)</div>' : '') + '<div class="com-row">'];
-        for (const k of ['assault', 'stealth', 'carrier']) h.push('<button class="com-chip' + (ship === k ? ' on' : '') + '" data-act="ship" data-v="' + k + '">' + SHIP_JP[k] + '</button>');
-        h.push('</div>');
+        const sideName = side === 'p' ? (human ? '自機 (あなた)' : c.cap ? '自機AI (あなたは艦長)' : '自機COM') : '敵COM';
+        const h = ['<div class="com-side-title ' + (side === 'p' ? 'cs-p' : 'cs-e') + '"><span>' + sideName + '</span> <button class="com-chip' + (ra ? ' on' : '') + '" data-act="rndall" title="ON: 試合ごとに 艦種・性格・積み込み・武器をすべて無作為に決める">🎲 全部ランダム ' + (ra ? 'ON' : 'OFF') + '</button></div>'
+            + (side === 'p' ? '<div class="com-sec sub">操作</div><div class="com-row"><button class="com-chip lg' + (human ? ' on' : '') + '" data-act="ctl" data-v="human">プレイヤー</button><button class="com-chip lg' + (!human && !c.cap ? ' on' : '') + '" data-act="ctl" data-v="com">COM (観戦)</button><button class="com-chip lg' + (c.cap ? ' on' : '') + '" data-act="ctl" data-v="cap" title="AIが操艦し、あなたは要所の意思決定だけを行う">AI操艦 (意思決定のみ)</button></div>' : '')
+            + (ra ? '<div class="com-note warn">試合ごとに 艦種' + (human ? '・積み込み・武器の種類' : '・性格(8軸)・積み込み・武器の種類') + 'を無作為に決める。下の設定は使わない</div>' : '')
+            + '<div class="com-sec sub">艦種</div>' + _shipCards(side, ship, c)];
+        h.push('<div class="com-sec sub">デザイン</div>');
         h.push(_skinRow(side, c));
         if (human) { // あなたが操作する側: 性格・スキルは無い (艦種と積み込みだけ)
-            h.push('<div class="com-note">あなたが操作する。性格・スキルは敵COMだけの設定。</div>');
+            h.push('<div class="com-note">あなたが操作する。性格・スキルは敵COMだけの設定。</div><div class="com-sec sub">積み込み</div>');
             h.push('<div class="com-row com-lo"><span class="com-lo-sum">積み込み: ' + _loPreview(side, ship, c) + '</span><button class="com-chip" data-act="loadout">編集</button></div>');
             box.innerHTML = h.join(''); continue;
         }
-        h.push('<div class="com-row">');
+        h.push('<div class="com-sec sub">性格</div><div class="com-row">');
         for (const k in COM_PRESETS) h.push('<button class="com-chip' + (pre === k ? ' on' : '') + '" data-act="preset" data-v="' + k + '">' + COM_PRESETS[k].label + '</button>');
-        h.push('</div>');
+        h.push('</div><div class="com-note pre">' + (COM_PRESET_DESC[pre] || '') + '</div>');
         const rnd = pre === 'random';
-        for (const [k, lbl] of COM_AXES) {
+        COM_AXES.forEach(([k, lbl], i) => {
             const v = Math.round((pp[k] || 0) * 100);
-            h.push('<label class="com-sl"><span>' + lbl + '</span><input type="range" min="0" max="100" step="5" value="' + v + '" data-act="axis" data-v="' + k + '"' + (rnd ? ' disabled' : '') + '><b>' + (rnd ? '—' : v) + '</b></label>');
-        }
+            if (i === 4) h.push('<div class="com-axgrp">応用の軸 (複合の気質・スキルの得意不得意に効く)</div>');
+            h.push('<label class="com-sl"><span>' + lbl + '<small>' + COM_AXIS_HINT[k] + '</small></span><input type="range" min="0" max="100" step="5" value="' + v + '" data-act="axis" data-v="' + k + '"' + (rnd ? ' disabled' : '') + '><b>' + (rnd ? '—' : v) + '</b></label>');
+        });
         if (!rnd && pre !== 'adaptive') h.push('<div class="com-trait">性格面: <b>' + persTraitLabel(pp) + '</b> <small>(' + persTraits(pp).slice(0, 3).map(t => t.jp + Math.round(t.v * 100)).join(' / ') + ') — 軸の組み合わせで決まる気質。その気質のスキルが選ばれやすい</small></div>');
         if (rnd) h.push('<div class="com-note">ランダム: 試合ごとに' + SHIP_JP[ship] + 'の範囲で決まる (敵の通常の決め方と同じ)</div>');
         else if (pre === 'custom') h.push('<div class="com-note">カスタム (スライダーで調整)</div>');
         // 第22弾: 積み込み (自機/敵とも編集できる)
-        h.push('<div class="com-row com-lo"><span class="com-lo-sum">積み込み: ' + _loPreview(side, ship, c) + '</span><button class="com-chip" data-act="loadout">編集</button></div>');
+        h.push('<div class="com-sec sub">積み込み</div><div class="com-row com-lo"><span class="com-lo-sum">積み込み: ' + _loPreview(side, ship, c) + '</span><button class="com-chip" data-act="loadout">編集</button></div>');
         // 第142弾: スキルのオン・オフ
         { const L = skillList(), m = (c.sk && c.sk[side]) || {}, nOn = L.filter(x => m[x.id] !== false).length;
-          h.push('<div class="com-sk-head"><button class="com-chip' + (_comSkOpen ? ' on' : '') + '" data-act="skopen">スキル ' + nOn + '/' + L.length + ' ' + (_comSkOpen ? '▴' : '▾') + '</button><button class="com-chip" data-act="skall" data-v="on">全ON</button><button class="com-chip" data-act="skall" data-v="off">全OFF</button></div>');
+          h.push('<div class="com-sec sub">スキル <small>COMが使う戦術のオン・オフ</small></div><div class="com-sk-head"><button class="com-chip' + (_comSkOpen ? ' on' : '') + '" data-act="skopen">スキル ' + nOn + '/' + L.length + ' ' + (_comSkOpen ? '▴' : '▾') + '</button><button class="com-chip" data-act="skall" data-v="on">全ON</button><button class="com-chip" data-act="skall" data-v="off">全OFF</button></div>');
           if (_comSkOpen) {
               let g = '';
               for (const x of L) {
@@ -20312,7 +20324,7 @@ function _renderComCfg() {
         box.innerHTML = h.join('');
     }
     const o = document.getElementById('com-opts');
-    if (o) o.innerHTML = '<span class="com-opt-lbl">モード</span>'
+    if (o) o.innerHTML = '<span class="com-opt-lbl">ルール</span>'
         + '<button class="com-chip' + (c.mode === 'br' ? ' on' : '') + '" data-act="mode" data-v="br">バトルロワイアル</button>'
         + '<button class="com-chip' + (c.mode === 'sd' ? ' on' : '') + '" data-act="mode" data-v="sd">サーチ&amp;デストロイ</button>'
         + (c.pCtl === 'com' && !c.cap ? '<span class="com-opt-lbl">ヒッグス表示</span><button class="com-chip' + (c.higgsView ? ' on' : '') + '" data-act="higgs">' + (c.higgsView ? 'ON' : 'OFF (全艦が見える)') + '</button>'
