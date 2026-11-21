@@ -6954,6 +6954,7 @@ function generateSector() {
       const _es3 = { destroyer: 'assault', corvette: 'stealth', carrier: 'carrier' }[boss.type] || 'assault';
       const L = boss._eLo ? Object.assign({}, comLoadout('e', _es3)) : enemyPersonaLoadout(_es3, boss.personality || {});
       boss.itemFlash = L.flash || 0; boss.itemNoise = L.noise || 0; boss.itemSmoke = L.smoke || 0; boss.itemRepair = L.repair || 0;
+      enemyMat = (L.mat || 0) * MAT_PER_SLOT; // 第181弾: 敵の最初の資材は積み込みどおり (旧: 全艦種で8個 — 攻撃型・潜航型も資材から戦闘機を作れたが、同じ艦種の自機COMは積載が弾と消耗品で満杯で資材0だった)
       boss.lureSOS = L.fsos || 0; boss.lureShip = L.lure || 0; boss.itemSpray = L.fogspray || 0; boss.itemBlow = L.fogblow || 0; boss.itemFake = L.fakecache || 0; boss.itemLinkcut = L.linkcut || 0;
       boss.itemBcn = { heat: L.bcn_heat || 0, optic: L.bcn_optic || 0, em: L.bcn_em || 0, higgs: L.bcn_higgs || 0 };
       const _ln = []; for (const t of ['flash', 'noise', 'smoke', 'fsos', 'lure', 'bcn_heat', 'bcn_optic', 'bcn_em', 'bcn_higgs', 'fogspray', 'fogblow', 'fakecache', 'linkcut', 'repair']) if (L[t]) _ln.push(DRONE_SPEC[t].label + L[t]);

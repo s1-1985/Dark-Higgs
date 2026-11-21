@@ -11,7 +11,7 @@ const rnd = a => a[Math.floor(Math.random() * a.length)];
     const r = await p.evaluate(async ([cfg, mins]) => {
       localStorage.setItem('darkEchoBriefed', '1'); comCfg = loadComCfg(); comCfg.ship = cfg.s; comCfg.enemy = cfg.e; comCfg.mode = 'br'; comCfg.pPreset = cfg.p; comCfg.ePreset = cfg.q;
       for (const [k, pk, pre] of [['pPreset', 'pp', cfg.p], ['ePreset', 'ep', cfg.q]]) if (COM_PRESETS[pre] && COM_PRESETS[pre].p) comCfg[pk] = Object.assign({}, COM_PRESETS[pre].p);
-      comCfg.higgsView = true; comCfg.think = false; comCfg.lo = null; gameLoopRunning = true; startComDemo();
+      comCfg.pCtl = 'com'; comCfg.higgsView = true; comCfg.think = false; comCfg.lo = null; gameLoopRunning = true; startComDemo();
       const seen = { p: {}, e: {} }, last = { p: null, e: null };
       for (let t = 0; t < mins * 60; t++) { window.__simSteps(60); if (!player || player.hp <= 0 || sectorCleared) break;
         const e = enemies.find(q => q.type !== 'fighter'); const a = _com && _com.st ? _com.st.id + '@' + _com.st.t0 : null, c = e && e._strat ? e._strat.id + '@' + e._strat.t0 : null;

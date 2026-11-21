@@ -15,7 +15,7 @@ const rp = () => Math.random() < 0.5 ? { pre: rnd(PRES) } : { pre: 'custom', p: 
     const r = await p.evaluate(async ([cfg, mins]) => {
       localStorage.setItem('darkEchoBriefed', '1');
       comCfg = loadComCfg(); comCfg.ship = cfg.s; comCfg.enemy = cfg.e; comCfg.mode = 'br'; for (const [k, pk, c] of [['pPreset', 'pp', cfg.p], ['ePreset', 'ep', cfg.q]]) { comCfg[k] = c.pre; if (c.p) comCfg[pk] = c.p; else if (COM_PRESETS[c.pre] && COM_PRESETS[c.pre].p) comCfg[pk] = Object.assign({}, COM_PRESETS[c.pre].p); }
-      comCfg.higgsView = true; comCfg.think = false; comCfg.lo = null; gameLoopRunning = true; startComDemo();
+      comCfg.pCtl = 'com'; comCfg.higgsView = true; comCfg.think = false; comCfg.lo = null; gameLoopRunning = true; startComDemo();
       for (let t = 0; t < mins * 60; t++) { for (let k = 0; k < 6; k++) window.__simSteps(10); if (!player || player.hp <= 0 || sectorCleared) break; }
       return { facts: window.__facts, dbg: window.__tacDbg, over: !player || player.hp <= 0 || sectorCleared };
     }, [{ s: rnd(SHIPS), e: rnd(SHIPS), p: rp(), q: rp() }, +MIN]);

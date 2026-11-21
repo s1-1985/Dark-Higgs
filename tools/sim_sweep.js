@@ -29,7 +29,7 @@ async function worker(id, browser) {
         for (const [s, k, pk, ppk] of [['P', 'pPreset', 'pp'], ['E', 'ePreset', 'ep']].map(a => [a[0], a[1], a[2]])) {
           const c = cfg[s]; comCfg[k] = c.pre; if (c.p) comCfg[ppk || pk] = c.p; else if (COM_PRESETS[c.pre] && COM_PRESETS[c.pre].p) comCfg[pk] = Object.assign({}, COM_PRESETS[c.pre].p);
         }
-        comCfg.higgsView = true; comCfg.think = false; comCfg.lo = null; gameLoopRunning = true; startComDemo();
+        comCfg.pCtl = 'com'; comCfg.higgsView = true; comCfg.think = false; comCfg.lo = null; gameLoopRunning = true; startComDemo();
         for (let t = 0; t < mins * 60; t++) { for (let k = 0; k < 6; k++) window.__simSteps(10); if (!player || player.hp <= 0 || sectorCleared) break; }
         return matchRecordData();
       }, [cfg, +MIN]);
