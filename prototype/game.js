@@ -2017,7 +2017,9 @@ function computeVisionRadius() {
     return visionRadiusAt(player, player.x, player.y);
 }
 // 第21弾: 有視界の最大半径 (その艦の居る場所の濃度で決まる。自機/敵/ドローン共通の式)
+function visClose(s) { return s && s._opticBlind > 0 ? 0 : VIS_CLOSE; } // 第196弾: 光学妨害を受けると至近の必ず見える範囲も0
 function visionRadiusAt(s, x, y, base = BASE_VISION_RADIUS) {
+    if (s && s._opticBlind > 0) return 0; // 第196弾: 光学妨害 — 有視界0
     if (lullK > 0 && base === BASE_VISION_RADIUS) base += (LULL_VIS - BASE_VISION_RADIUS) * lullK; // 第34弾: 凪の間は有視界が5000uまで
     const h = getHiggsIntensity(x, y); // 0..1
     let factor = 1 - h * (1 - MIN_VISION_FACTOR);
@@ -2048,7 +2050,7 @@ function losReach(x, y, ang, maxR, h0) {
 // 自艦の有視界 (1フレームに1回、96本の視線)
 function updatePlayerVision() {
     _visRaysF = _frameCount;
-    playerVisionRadius = Math.max(VIS_CLOSE, computeVisionRadius()); // 第22弾: 300u以内は必ず見える
+    playerVisionRadius = Math.max(visClose(player), computeVisionRadius()); // 第22弾: 300u以内は必ず見える
     const h0 = getHiggsIntensity(player.x, player.y);
     for (let k = 0; k < VIS_RAYS; k++) _visRays[k] = losReach(player.x, player.y, k / VIS_RAYS * Math.PI * 2, playerVisionRadius, h0);
 }
@@ -2693,6 +2695,8 @@ function updateStatusStrip() {
     const chips = [], sec = (v) => Math.ceil(v / 60);
     if (player._weaponJamTimer > 0) chips.push(['火器管制ダウン', sec(player._weaponJamTimer), 'bad']);
     if (player._haltTimer > 0) chips.push(['機関停止', sec(player._haltTimer), 'bad']);
+    if (player._opticBlind > 0) chips.push(['光学妨害', sec(player._opticBlind), 'sen']);
+    if (player._guideJam > 0) chips.push(['誘導妨害', sec(player._guideJam), 'bad']);
     if (player._sysEngineTimer > 0) chips.push(['機関損傷', sec(player._sysEngineTimer), 'bad']);
     if (player._sysSensorTimer > 0) chips.push(['センサー損傷', sec(player._sysSensorTimer), 'sen']); else if (player._daze > 0) chips.push(['センサー撹乱', sec(player._daze), 'sen']);
     if (player._commJam > 0) chips.push(['通信障害', sec(player._commJam), 'sen']);
@@ -3606,7 +3610,8 @@ class Projectile {
                 }
             }
             // 第17弾: 閃光弾で誘導を失ったミサイルは直進するだけ
-            const _missileTurn = this._blind ? 0 : 0.05 * (this._turnMul || 1) * (1 - getStormIntensity(this.x, this.y) * STORM_MISSILE_DEGRADE) * _jamMissileFactor; // 第60弾: 高追尾型
+            const _gjam = this.isPlayer ? (player && player._guideJam > 0) : enemies.some(q => q._guideJam > 0); // 第196弾: 誘導妨害 — 撃った側が妨害されているミサイルは直進
+            const _missileTurn = (this._blind || _gjam) ? 0 : 0.05 * (this._turnMul || 1) * (1 - getStormIntensity(this.x, this.y) * STORM_MISSILE_DEGRADE) * _jamMissileFactor; // 第60弾: 高追尾型
             this.angle += diff * _missileTurn;
             // ミサイル接近警報: 敵ミサイルの推進波を探知。
             // 警告が出ることでデコイ射出/ジャミング/回避機動が「反応する道具」になる。
@@ -4848,7 +4853,7 @@ class Ship {
                     if (h) { _hP = h; playerSigDetected = true; detectedSigStrength = h.sig; domSig = h.band; _hBand = h.band; _hNoise = h.noise; _hNb = h.nb; this._heardBand = h.band; this._heardBandF = _frameCount; } // 第41弾: 聞こえた帯域 (帯域の選び方に使う)
                 }
                 // 接近探知 (デブリ擬態中は岩塊に紛れて至近でも掴めない — 至近を通過されてもやり過ごせる)
-                if (!isBottomed && !(lullSheltered(player) && distToPlayer > BASE_VISION_RADIUS) && distToPlayer < Math.max(VIS_CLOSE, myDetectRange) && losReach(this.x, this.y, Math.atan2(player.y - this.y, player.x - this.x), Math.max(VIS_CLOSE, myDetectRange)) >= distToPlayer) { // 第22弾: 自機と同じ視線ルール (300u以内は必ず)
+                if (!isBottomed && !(lullSheltered(player) && distToPlayer > BASE_VISION_RADIUS) && distToPlayer < Math.max(visClose(this), myDetectRange) && losReach(this.x, this.y, Math.atan2(player.y - this.y, player.x - this.x), Math.max(VIS_CLOSE, myDetectRange)) >= distToPlayer) { // 第22弾: 自機と同じ視線ルール (300u以内は必ず)
                     this.detectionTimer = Math.min(120, Math.max(this.detectionTimer + 1, 61)); // 第98弾: 見えた瞬間に目視ロック (旧: 1秒間見え続けるまで掴めなかった — 自機は見えたらすぐ撃てる)。見失った後の余韻も2秒までに
                     playerSigDetected = true; _hardDetect = true;
                 } else if (this.type !== 'fighter' && (this._dSeenF || -99) >= _frameCount - 7) { // 第180弾: ドローンの有視界は艦の有視界と同じ (自機の第130弾と同じ)。旧: 点の観測だけで「見えている」にならなかった
@@ -4865,7 +4870,7 @@ class Ship {
                 // 第39弾: 見えた囮は正体が分かる (自機の「有視界で確定」と同じ) — 以後その囮の音は自艦と取り違えない
                 const _fk = this._fakeSeen || (this._fakeSeen = new Set());
                 const _heardF = [];
-                const _seeIt = (o) => { const dd = Math.hypot(o.x - this.x, o.y - this.y); return dd < Math.max(VIS_CLOSE, myDetectRange) && losReach(this.x, this.y, Math.atan2(o.y - this.y, o.x - this.x), Math.max(VIS_CLOSE, myDetectRange)) >= dd; };
+                const _seeIt = (o) => { const dd = Math.hypot(o.x - this.x, o.y - this.y); return dd < Math.max(visClose(this), myDetectRange) && losReach(this.x, this.y, Math.atan2(o.y - this.y, o.x - this.x), Math.max(VIS_CLOSE, myDetectRange)) >= dd; };
                 for (const L of lures) {
                     if (L.owner !== 'p' || L.kind !== 'ship' || L.phase !== 'on' || _fk.has(L)) continue;
                     if (_seeIt(L)) { _fk.add(L); comThinkEvent('e', '偽艦影ブイを視認 — 囮だった', 'e' + this.uid); continue; }
@@ -4911,7 +4916,7 @@ class Ship {
             const _sa = this._sa || (this._sa = Object.assign(_newSignalAnalysis(), { who: this }));
             _sa.rMax = sigRange * 1.6;
             if (_listen && this.type !== 'fighter' && !_hardDetect && (_frameCount + this.uid) % 30 === 0 && _sa.fix) { // 第64弾: 敵も同じ — 自分の有視界で推定円の中に何も居ないと確認できたら、その円を除外する
-                const _R = Math.max(VIS_CLOSE, myDetectRange), _me = this;
+                const _R = Math.max(visClose(this), myDetectRange), _me = this;
                 const _see = (x, y) => { const d = Math.hypot(x - _me.x, y - _me.y); return d < _R && losReach(_me.x, _me.y, Math.atan2(y - _me.y, x - _me.x), _R) >= d; };
                 const _vm = visualNegative(_sa, _see, _see(player.x, player.y));
                 if (_vm) { recordMissSa(_sa, _vm); this._lkGuess = false; }
@@ -8753,6 +8758,7 @@ function enemyPickVariants(e) { return personaVariants(e.personality || { aggres
 const STATUS_DEF = {
     sensor: { jp: 'センサー損傷', dur: 900 }, engine: { jp: '機関損傷', dur: 900 }, fcs: { jp: '火器管制ダウン', dur: 600 },
     daze: { jp: 'センサー撹乱', dur: 600 }, comm: { jp: '通信障害', dur: 1200 }, burn: { jp: '延焼', dur: 720 },
+    optic: { jp: '光学妨害', dur: 600 }, guide: { jp: '誘導妨害', dur: 900 }, // 第196弾: 有視界0 / 相手のミサイルが誘導を失う
     halt: { jp: '機関停止', dur: 900 }, // ハックで機関を止められる (推力ゼロ・惰性で減速・艦首は回せる・噴射も不可)
 };
 function applyStatus(t, id, baseDur) {
@@ -8765,6 +8771,8 @@ function applyStatus(t, id, baseDur) {
     else if (id === 'daze') applyDaze(t, dur, '妨害弾頭');
     else if (id === 'comm') t._commJam = Math.max(t._commJam || 0, dur);
     else if (id === 'burn') t._burn = Math.max(t._burn || 0, dur);
+    else if (id === 'optic') t._opticBlind = Math.max(t._opticBlind || 0, dur);
+    else if (id === 'guide') t._guideJam = Math.max(t._guideJam || 0, dur);
     else if (id === 'halt') t._haltTimer = Math.max(t._haltTimer || 0, dur);
     effects.push({ x: t.x, y: t.y - 58, text: D.jp + '!', life: 1.3, type: 'floatText', c: '#ff9500' });
     if (t === player) sfxOr('alm_status_' + id, 'ui', 0.9);
@@ -8782,6 +8790,8 @@ function statusRecoverTick(s) {
     if (ex > 0) for (const k of ['_weaponJamTimer', '_sysEngineTimer', '_sysSensorTimer', '_daze']) if (s[k] > 0) s[k] -= ex;
     if (s._haltTimer > 0) s._haltTimer -= gameSpeedFactor + ex; // 機関停止も解析力が高いほど早く復旧
     if (s._commJam > 0) s._commJam -= gameSpeedFactor + ex;
+    if (s._opticBlind > 0) s._opticBlind -= gameSpeedFactor + ex;
+    if (s._guideJam > 0) s._guideJam -= gameSpeedFactor + ex;
     if (s._burn > 0) { s._burn -= gameSpeedFactor + ex; s.hp -= s.maxHp * 0.00005 * gameSpeedFactor; }
 }
 function recomputeParts() {
@@ -9856,7 +9866,7 @@ function enemyHackStep(e) {
     const H = skillOn('e', 'hk_drone') ? hackPower('enemy', e) : 0;
     if (H + 1e-6 < HACK_THR.fighter.s1) { e._hack = null; return; }
     if (player && player._linkGuard > _frameCount) { e._hack = null; return; } // 第89弾: 断線パルスで回線を閉じている間は侵入できない
-    const vr = Math.max(VIS_CLOSE, _visAt(e.x, e.y)), canSee = (x, y) => { const d = Math.hypot(x - e.x, y - e.y); return d < vr && losReach(e.x, e.y, Math.atan2(y - e.y, x - e.x), vr) >= d; };
+    const vr = Math.max(visClose(e), _visAt(e.x, e.y)), canSee = (x, y) => { const d = Math.hypot(x - e.x, y - e.y); return d < vr && losReach(e.x, e.y, Math.atan2(y - e.y, x - e.x), vr) >= d; };
     const now = _frameCount; let best = null, bd = Infinity, bk = 'fighter';
     for (const d of playerDrones) {
         if (d.hp <= 0 || (d.type !== 'attack' && d.type !== 'mech')) continue;
@@ -9911,7 +9921,7 @@ var HACK_ATTEMPT_H = 2.0; // 侵入を試みる演算力 (旧3.0 — コロニ�
 var _hackBanner = null; // 結果の表示 {ok,head,sub,until(ms),own}
 function hackBanner(ok, head, sub) { if (_seatOn && _seatOn()) return; _hackBanner = { ok, head, sub, until: performance.now() + 5200, t0: performance.now() }; }
 var HACK_RES_CLASS = { stealth: 2.2, assault: 2.8, carrier: 3.2 };
-var HACK_EFFECTS = { fcs: { jp: '火器管制ダウン', st: 'fcs', dur: 720 }, halt: { jp: '機関停止', st: 'halt', dur: 900 }, sensor: { jp: 'センサー損傷', st: 'sensor', dur: 900 }, comm: { jp: '通信障害', st: 'comm', dur: 1200 }, counter: { jp: '逆探知の反撃', st: 'comm', dur: 600 } };
+var HACK_EFFECTS = { fcs: { jp: '火器管制妨害', st: 'fcs', dur: 720 }, halt: { jp: '機関停止', st: 'halt', dur: 900 }, sensor: { jp: 'センサー妨害', st: 'sensor', dur: 900 }, optic: { jp: '光学妨害', st: 'optic', dur: 600 }, guide: { jp: '誘導妨害', st: 'guide', dur: 900 }, comm: { jp: '通信妨害', st: 'comm', dur: 1200 }, counter: { jp: '逆探知の反撃', st: 'comm', dur: 600 } };
 var _hackPulseCD = 0, _hackBurstUntil = 0, hackSessP = null, _hackWinP = null;
 function hackPulseRange(H, sh) { const m = sh ? (sh === player ? (PM.hackRange || 1) : (epm(sh).hackRange || 1)) : 1; return Math.min(HACK_RANGE_MAX * m, (HACK_RANGE_BASE + HACK_RANGE_PER_H * H) * m); } // 第89弾: 侵入演算機で×1.3
 function hackResist(sh) {
@@ -10045,7 +10055,9 @@ function hackDecide(A) {
         const aim = _hackAim(A.sa, A.x, A.y, A.H);
         if (aim) {
             let eff = null;
-            if (A.fleeing && aim.d !== null && aim.d < 3500 && on('hk_halt_flee') && (!on('hk_sensor') || Math.random() < 0.5)) eff = 'halt'; // 第146弾: 追っ手の機関を止めて振り切る
+            if (A.incomingMsl && on('hk_guide')) eff = 'guide'; // 第196弾: 迫るミサイルを撃った相手の誘導を妨害
+            else if (A.fleeing && on('hk_optic') && Math.random() < 0.5) eff = 'optic'; // 逃げる時は目潰しで見失わせる
+            else if (A.fleeing && aim.d !== null && aim.d < 3500 && on('hk_halt_flee') && (!on('hk_sensor') || Math.random() < 0.5)) eff = 'halt'; // 第146弾: 追っ手の機関を止めて振り切る
             else if (A.fleeing && on('hk_sensor')) eff = 'sensor';
             else if (!A.engaged && !A.fleeing && aim.d !== null && aim.d > 1500 && aim.d < 3500 && on('hk_opener')) eff = 'fcs'; // 第146弾: 交戦の前に火器管制を潰して先手を取る
             else if (aim.d !== null && (A.engaged || aim.d < 2200) && on('hk_fcs')) eff = 'fcs';
@@ -10068,7 +10080,7 @@ function enemyHackAI(e) {
     if (e.type === 'fighter' || e.hp <= 0 || e._dying || e._hackSess || _frameCount < (e._hackCD || 0) || !e._sa || !player || player.hp <= 0) return;
     const now = _frameCount, hitAgo = e._lastHitF ? now - e._lastHitF : 1e9;
     const r = hackDecide({ side: 'e', H: hackPower('enemy', e), sa: e._sa, x: e.x, y: e.y, credible: (e.contactFreshness || 0) >= 0.15, engaged: e.aiState === 'combat',
-        fleeing: !!(e._hiding || e._hideT > 0) || (e.hp / e.maxHp < 0.4 && hitAgo < 900), foeDrones: playerDrones.filter(d => d.hp > 0 && (d.type === 'attack' || d.type === 'mech' || d.type === 'scout')).length, probeOk: hitAgo > 1800 && now - (e._pingHeardF ?? -1e9) > 1800, probeCdOk: now - (e._probeF ?? -1e9) > 10800 });
+        fleeing: !!(e._hiding || e._hideT > 0) || (e.hp / e.maxHp < 0.4 && hitAgo < 900), foeDrones: playerDrones.filter(d => d.hp > 0 && (d.type === 'attack' || d.type === 'mech' || d.type === 'scout')).length, incomingMsl: !!incomingMissile(e, true), probeOk: hitAgo > 1800 && now - (e._pingHeardF ?? -1e9) > 1800, probeCdOk: now - (e._probeF ?? -1e9) > 10800 });
     if (r) { if (r.probe) { e._probeF = now; comThinkEvent('e', '探りのハック波 — 侵入はできないが応答で相手の位置を暴く', 'e' + e.uid); } fireHackPulse(e, r.ang, r.eff); }
 }
 // 自機COMのハック (同じ基準。追跡中の信号が艦影らしい時)
@@ -10078,7 +10090,7 @@ function comHackStep() {
     const idn = identInfo(lockedSignalId), now = _frameCount, hitAgo = playerHitLog.length ? now - playerHitLog[playerHitLog.length - 1].f : 1e9;
     const engaged = enemies.some(q => q.hp > 0 && q.type !== 'fighter' && q.inVision) || (playerHitLog.length && _frameCount - playerHitLog[playerHitLog.length - 1].f < 600);
     const r = hackDecide({ side: 'p', H: hackPower('player'), sa, x: player.x, y: player.y, credible: !!idn && !idn.low && !(idn.p !== undefined && idn.p < 0.5), engaged,
-        fleeing: !!(_com && _com.mode === 'hide') || (player.hp / player.maxHp < 0.4 && hitAgo < 900), foeDrones: enemies.filter(q => q.hp > 0 && q.type === 'fighter').length, probeOk: hitAgo > 1800 && playerExposureLevel < 2, probeCdOk: !_com || now - (_com.probeF ?? -1e9) > 10800 });
+        fleeing: !!(_com && _com.mode === 'hide') || (player.hp / player.maxHp < 0.4 && hitAgo < 900), foeDrones: enemies.filter(q => q.hp > 0 && q.type === 'fighter').length, incomingMsl: !!incomingMissile(player, false), probeOk: hitAgo > 1800 && playerExposureLevel < 2, probeCdOk: !_com || now - (_com.probeF ?? -1e9) > 10800 });
     if (!r) return;
     if (capMode) { const cg = capHackGate(r, hackPower('player')); if (cg && cg.wait) return; if (cg && cg.id === 'hold') { if (_com) _com.probeF = now; comThinkEvent('p', '艦長の判断: ハック波は撃たない'); return; } }
     if (r.probe && _com) _com.probeF = now;
@@ -10139,9 +10151,9 @@ function useLinkCut(who) {
 // 第89弾: 電子戦ボタンからハック波 — 効果を選ぶ → 地図で方向をタップ (旧: 地図の長押しメニュー)
 let hackPending = null; // 撃つ構え (地図で方向をタップすると撃つ)
 let hackSel = null;     // 第126弾 (オーナー): 選んだハックの項目 — 索敵ソナーの「種類」と同じ。選んだだけでは撃つ構えにならない
-const HACK_SEL_COL = { fcs: '#ff7a5a', halt: '#ffd24a', sensor: '#5fd0ff', comm: '#c48bff' };
+const HACK_SEL_COL = { fcs: '#ff7a5a', halt: '#ffd24a', sensor: '#5fd0ff', comm: '#c48bff', optic: '#7dffb0', guide: '#ff8fd0' };
 function _hackSelUi() {
-    document.querySelectorAll('.hackw-btn').forEach(b => b.classList.toggle('on', b.dataset.eff === hackSel));
+    document.querySelectorAll('.hackw-btn').forEach(b => b.classList.toggle('on', b.dataset.eff === hackPending));
     const fb = document.getElementById('btn-hackw-fire'); if (fb) { fb.classList.toggle('no-band', !hackSel); fb.classList.toggle('pending-fire', !!hackPending); }
 }
 function hackCancelPending(silent) {
@@ -10149,29 +10161,24 @@ function hackCancelPending(silent) {
     hackPending = null; canvas.style.cursor = 'default'; _hackSelUi();
     if (!silent) logMessage('HACK: ハック波 — キャンセル。', 'system-msg');
 }
-function selectHackWave(effect) { // 項目を選ぶ (もう一度押すと外す)
+function selectHackWave(effect) { // 第196弾: ハックの種類を押したら そのまま 電波を飛ばす方向の選択へ (もう一度同じ物を押すとキャンセル)
     if (!player || player.hp <= 0 || obsOnly() || playReplay) return;
-    hackSel = hackSel === effect ? null : effect;
-    if (hackPending) hackCancelPending(true);
-    _hackSelUi();
-    if (hackSel) { const H = hackPower('player'); logMessage('HACK: ' + HACK_EFFECTS[hackSel].jp + ' を選んだ — 「ハック」を押して、地図で電波を飛ばす方向をタップ (届く距離' + Math.round(hackPulseRange(H, player)) + 'u・半角±8°・外れても電磁波が出る)', 'system-msg'); }
-    sfxUI('ui_select');
+    if (hackPending === effect) { hackSel = null; hackCancelPending(); return; }
+    hackSel = effect; if (hackPending) hackCancelPending(true);
+    armHackWave();
 }
-function hackNeedSel() { logMessage('HACK: ハックする項目 (火器管制・機関停止・センサー・通信) を選んでから「ハック」を押す — 電子戦のポップオーバーで選ぶ', 'warning-msg'); const g = document.getElementById('action-popover'); if (g) { g.classList.add('shake'); setTimeout(() => g.classList.remove('shake'), 500); } sfxUI('ui_error'); }
-function armHackWave() { // 「ハック」ボタン: 撃つ構え (もう一度でキャンセル) — 索敵の指向性ソナーボタンと同じ
-    if (!player || player.hp <= 0 || obsOnly() || playReplay) return;
-    if (hackPending) { hackCancelPending(); return; }
-    if (_hackPulseCD > 0) { logMessage('HACK: ハック波は再使用まで' + Math.ceil(_hackPulseCD / 60) + '秒', 'warning-msg'); sfxUI('ui_error'); return; }
-    if (!hackSel) { hackNeedSel(); return; }
+function armHackWave() { // 選んだ種類で撃つ構え (地図で方向をタップ)
+    if (!player || player.hp <= 0 || obsOnly() || playReplay || !hackSel) return;
+    if (_hackPulseCD > 0) { logMessage('HACK: ハック波は再使用まで' + Math.ceil(_hackPulseCD / 60) + '秒', 'warning-msg'); sfxUI('ui_error'); hackSel = null; _hackSelUi(); return; }
     droneHackMode = false; document.getElementById('btn-hackw-drone')?.classList.remove('pending-fire');
     hackPending = hackSel; canvas.style.cursor = 'crosshair'; _hackSelUi();
-    if (window.closeActionPopover) setTimeout(() => window.closeActionPopover(), 60); // 第160弾 (Android): ポップオーバーが地図を覆い、方向をタップできなかった (ボタンが stopPropagation で、閉じる処理が走っていなかった)
+    if (window.closeActionPopover) setTimeout(() => window.closeActionPopover(), 60); // ポップオーバーが地図を覆わないよう閉じる
+    const H = hackPower('player');
     uiToast('ハック (' + HACK_EFFECTS[hackSel].jp + ') — 電波を飛ばす方向を地図でタップ', false);
     { const _h0 = getHiggsIntensity(player.x, player.y); if (_h0 >= HIGGS_DENSE) logMessage('HACK: 今は濃いヒッグス(' + Math.round(_h0 * 100) + '%)の中 — 電波が通らず当たらない。霧の薄い所へ出てから撃つ', 'warning-msg'); }
-    logMessage('HACK: ハック波 (' + HACK_EFFECTS[hackSel].jp + ') 待機中 — 電波を飛ばす方向を地図でタップ/クリックしてください。', 'system-msg');
+    logMessage('HACK: ' + HACK_EFFECTS[hackSel].jp + ' — 電波を飛ばす方向を地図でタップ (届く距離' + Math.round(hackPulseRange(H, player)) + 'u・半角±8°・外れても電磁波が出る)。同じ項目をもう一度押すとキャンセル', 'system-msg');
     sfxUI('ui_select');
 }
-document.getElementById('btn-hackw-fire')?.addEventListener('click', (e) => { e.stopPropagation(); armHackWave(); });
 function selectDroneHack() {
     if (!player || player.hp <= 0 || obsOnly() || playReplay) return;
     if (hackPending) hackCancelPending(true);
@@ -10199,7 +10206,7 @@ document.getElementById('btn-hackw-drone')?.addEventListener('click', (e) => { e
 function tryFireHackPending(wx, wy) {
     if (tryPickDroneHack(wx, wy)) return true;
     if (!hackPending || !player || player.hp <= 0) return false;
-    const eff = hackPending; hackPending = null; canvas.style.cursor = 'default'; _hackSelUi();
+    const eff = hackPending; hackPending = null; hackSel = null; canvas.style.cursor = 'default'; _hackSelUi();
     if (_hackPulseCD > 0) { logMessage('HACK: ハック波は再使用まで' + Math.ceil(_hackPulseCD / 60) + '秒', 'warning-msg'); return true; }
     const H = hackPower('player'), ang = Math.atan2(wy - player.y, wx - player.x);
     logMessage('HACK: ハック波を発射 — 方位' + compassDeg(ang) + '° (' + HACK_EFFECTS[eff].jp + '・演算力' + (Math.round(H * 10) / 10) + '・届く距離' + Math.round(hackPulseRange(H)) + 'u)', 'system-msg');
@@ -16816,6 +16823,8 @@ var SKILL_EXTRA = [
     { id: 'hk_halt', g: 'ハック', jp: '機関停止の奇襲', desc: '遠くからハック波で相手の機関を止め、動けないところへ忍び寄って撃つ' },
     { id: 'hk_fcs', g: 'ハック', jp: '火器管制潰し', desc: '交戦中・至近で相手の火器管制をダウンさせる (撃たれない時間を作る)' },
     { id: 'hk_sensor', g: 'ハック', jp: '目隠し (センサー潰し)', desc: '逃げる/隠れる時に追っ手のセンサーを焼いて見失わせる' },
+    { id: 'hk_optic', g: 'ハック', jp: '光学妨害 (目潰し)', desc: '逃げる時に追っ手の有視界を0にして見失わせる・目視で狙われる前に潰す' },
+    { id: 'hk_guide', g: 'ハック', jp: '誘導妨害 (ミサイル無力化)', desc: 'ミサイルが迫る時、撃った相手を妨害してミサイルを直進させる' },
     { id: 'hk_comm', g: 'ハック', jp: '通信妨害 (ドローン無力化)', desc: '相手がドローンを出している時、通信障害で自動制御に落として弱らせる' },
     { id: 'hk_probe', g: 'ハック', jp: '探りのハック波', desc: '侵入できない演算力でも、ハック波の応答で相手の位置を暴く (代わりにこちらの位置も割れる)' },
     { id: 'hk_pursuit', g: 'ハック', jp: 'ハック後の追い込み', desc: 'ハックが効いている間 (機関停止など) に全速で詰めて仕留める' },
@@ -16939,7 +16948,7 @@ const SKILL_AX = {
     // 搭載品・作戦
     it_linkcut: 'te1', it_repair: 'ca0.7', it_flash: 'ca0.5 cu0.3', it_noise: 'cu1 ca0.3', it_smoke: 'ca0.5 st0.5', it_sos: 'cu1.2', it_fake: 'cu1.5', it_spray: 'st0.5 te0.3', it_blow: 'ag0.5 te0.5', pl_decoy: 'cu1.5 pa0.7 st0.4', jam: 'te1.2',
     // ハック
-    hk_halt: 'te1 ag0.5', hk_fcs: 'te1 ag0.5', hk_sensor: 'te1 st0.5', hk_comm: 'te1 co0.5', hk_probe: 'te0.8 pa0.5', hk_pursuit: 'te0.8 ag0.5', hk_flee: 'te0.8 ca0.5', hk_drone: 'te1.2 co0.8', hk_counter: 'te1 ca0.5', hk_opener: 'te1 ag0.7 pa0.3', hk_halt_flee: 'te1 ca0.5',
+    hk_halt: 'te1 ag0.5', hk_fcs: 'te1 ag0.5', hk_sensor: 'te1 st0.5', hk_optic: 'te1 ca0.7', hk_guide: 'te1 pa0.3 st0.5', hk_comm: 'te1 co0.5', hk_probe: 'te0.8 pa0.5', hk_pursuit: 'te0.8 ag0.5', hk_flee: 'te0.8 ca0.5', hk_drone: 'te1.2 co0.8', hk_counter: 'te1 ca0.5', hk_opener: 'te1 ag0.7 pa0.3', hk_halt_flee: 'te1 ca0.5',
     // だまし
     dc_ghost: 'cu1.2 ca0.5', dc_trail: 'cu1.3 st0.4', dc_pivot: 'cu1 st0.5', dc_mirror: 'cu1.4', dc_wreck: 'cu1.4 gr0.5', dc_beacon: 'cu1.2 te0.4', dc_flashrun: 'cu1 ca0.5', dc_silent: 'pa1 st0.7 cu0.3',
     // ドローン
