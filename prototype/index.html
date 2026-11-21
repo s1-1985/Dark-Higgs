@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261121g">
+    <link rel="stylesheet" href="style.css?v=20261121i">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -217,6 +217,10 @@
                     <i class="ico" style="--ico:url(assets/icons/icon_mech.png)"></i>
                     <span>Tech</span><em class="cg-n"></em>
                 </button>
+                <button class="act-icon-btn btn-info drone-btn" id="btn-drone-boarder" data-dtype="boarder" title="強襲突撃艇 (2枠) — 艦影かゴーストを捉えている時だけ発進できる。自艦の後ろに付き従い、長押しメニューの「強襲」でその地点へ。本当に艦が居れば取り付いて艦内を破壊する" style="display:none">
+                    <i class="ico" style="--ico:url(assets/icons/icon_boarder.png)"></i>
+                    <span>強襲艇</span><em class="cg-n"></em>
+                </button>
                 <button class="act-icon-btn btn-info drone-btn" id="btn-drone-build" data-dtype="build" title="砲台 (2枠) — 設置・移動不可。近づく敵を撃つ" style="display:none">
                     <i class="ico" style="--ico:url(assets/icons/icon_turret.png)"></i>
                     <span>砲台</span><em class="cg-n"></em>
@@ -293,6 +297,10 @@
                     <span>霧偽</span><em class="cg-n"></em>
                 </button>
                 <!-- 第26弾: 修理はリペアキットだけ (出撃前の積み込みでしか積めない) -->
+                <button class="act-icon-btn btn-info drone-btn" id="btn-item-guard" data-dtype="guard" title="艦内護衛ドローン (1枠) — 強襲を受けている間に使うと、艦内で強襲部隊を迎え撃って撃退する (強襲を止める唯一の手段)。1回で1個使う。出撃前の積み込みでしか積めない" style="display:none">
+                    <i class="ico" style="--ico:url(assets/icons/icon_guard.png)"></i>
+                    <span>艦内護衛</span><em class="cg-n"></em>
+                </button>
                 <button class="act-icon-btn btn-info drone-btn" id="btn-item-repair" data-dtype="repair" title="リペアキット (1枠) — 6秒で耐久+700 (攻撃型なら5個で全回復)。出撃前の積み込みでしか積めず、補給も資材からの組み立てもできない">
                     <i class="ico" style="--ico:url(assets/icons/icon_repair.png)"></i>
                     <span>修理</span><em class="cg-n"></em>
@@ -903,7 +911,7 @@
         });
     })();
     </script>
-    <script src="game.js?v=20261121q"></script>
+    <script src="game.js?v=20261121t"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
@@ -942,10 +950,10 @@
             scan:  ['btn-sonar-band-heat', 'btn-sonar-band-optic', 'btn-sonar-band-em', 'btn-sonar-band-higgs', 'btn-sonar-power', 'btn-scan', 'btn-dir-sonar'],
             ew:    ['btn-hackw-halt', 'btn-hackw-fcs', 'btn-hackw-sensor', 'btn-hackw-optic', 'btn-hackw-guide', 'btn-hackw-comm', 'btn-hackw-drone', 'btn-item-linkcut', 'btn-jam-burst', 'btn-jam-cont', 'btn-jam-pulse', 'btn-drone-decoy', 'btn-drone-scout', 'btn-hack'],
             nav:   ['btn-cancel', 'btn-camera-follow', 'btn-attack-toggle', 'btn-game-speed'],
-            drone: ['btn-drone-recall','btn-drone-attack','btn-drone-mech','btn-drone-build','btn-drone-scout','btn-drone-decoy',
+            drone: ['btn-drone-recall','btn-drone-attack','btn-drone-mech','btn-drone-boarder','btn-drone-build','btn-drone-scout','btn-drone-decoy',
                     'btn-drone-buoy','btn-drone-barrier','btn-drone-higgs'],
             engine: ['btn-eng-thermonuclear', 'btn-eng-pulse', 'btn-eng-higgs', 'btn-eng-photon', 'btn-focus-balance', 'btn-focus-engine', 'btn-focus-sensor', 'btn-focus-weapon', 'btn-focus-analysis', 'btn-focus-mt'],
-            escape: ['btn-item-repair', 'btn-item-flash', 'btn-item-noise', 'btn-item-smoke', 'btn-item-fsos', 'btn-item-lure', 'btn-item-bcn_heat', 'btn-item-bcn_optic', 'btn-item-bcn_em', 'btn-item-bcn_higgs', 'btn-item-fogspray', 'btn-item-fogblow', 'btn-item-fakecache', 'btn-boost', 'btn-coast'],
+            escape: ['btn-item-guard', 'btn-item-repair', 'btn-item-flash', 'btn-item-noise', 'btn-item-smoke', 'btn-item-fsos', 'btn-item-lure', 'btn-item-bcn_heat', 'btn-item-bcn_optic', 'btn-item-bcn_em', 'btn-item-bcn_higgs', 'btn-item-fogspray', 'btn-item-fogblow', 'btn-item-fakecache', 'btn-boost', 'btn-coast'],
         };
         var _apop  = document.getElementById('action-popover');
         var _store = document.getElementById('action-store');

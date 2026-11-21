@@ -3313,3 +3313,27 @@ body.in-game #action-popover .act-icon-btn span { font-family: Orbitron, sans-se
 .com-mapcol .com-sec.sub:first-child { margin-top: 4px; }
 @media (max-width: 760px) { .com-skgrid, .com-mapgrid { grid-template-columns: 1fr; } }
 .part-card.ai-rec { outline: 2px solid #ffd35c; box-shadow: 0 0 14px rgba(255,211,92,.45); }
+/* 第197弾: 強襲を受けている間の「艦内護衛ドローン」ボタン (艦内カメラの下) */
+.board-guard-btn { position: fixed; z-index: 60; display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 6px; pointer-events: auto;
+  background: rgba(0, 28, 40, 0.94); border: 1px solid #66ddff; color: #d8f6ff; font: 12px sans-serif; cursor: pointer;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); animation: bgPulse 1s ease-in-out infinite; }
+.board-guard-btn img { width: 40px; height: 40px; object-fit: contain; }
+.board-guard-btn span { display: flex; flex-direction: column; text-align: left; }
+.board-guard-btn b { color: #66ddff; font-size: 13px; }
+.board-guard-btn small { font-size: 10px; opacity: 0.85; }
+.board-guard-btn.none { border-color: #884444; background: rgba(40, 6, 6, 0.9); color: #ffb0b0; animation: none; cursor: default; }
+.board-guard-btn.none b { color: #ff8080; }
+.board-guard-btn:active { transform: scale(0.96); }
+@keyframes bgPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(102, 221, 255, 0.0); } 50% { box-shadow: 0 0 14px 2px rgba(102, 221, 255, 0.55); } }
+#lpm-drones .lpm-drow button:disabled { opacity: 0.35; cursor: not-allowed; }
+/* 第198弾: ドローンが哨戒中に敵と遭遇した時の確認 (人が操作する時・QTE) */
+.drone-enc { position: fixed; z-index: 61; left: 50%; bottom: 96px; transform: translateX(-50%); min-width: 300px; max-width: 92vw; pointer-events: auto;
+  background: rgba(30, 14, 0, 0.94); border: 1px solid #ffb04a; color: #ffe2bc; font: 12px sans-serif; padding: 7px 10px 8px;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); }
+.drone-enc .de-h { font-weight: bold; color: #ffc46a; margin-bottom: 6px; }
+.drone-enc .de-h small { font-weight: normal; color: #e8c8a0; margin-left: 6px; font-family: var(--mono, monospace); }
+.drone-enc .de-b { display: flex; gap: 6px; }
+.drone-enc button { flex: 1; min-height: 32px; font: bold 12px sans-serif; cursor: pointer; background: #1a1004; border: 1px solid #a8743a; color: #ffd8a8; }
+.drone-enc button[data-dec="attack"] { border-color: #ff6a4a; color: #ffb8a8; background: #2a0a04; }
+.drone-enc button[data-dec="return"] { border-color: #4a8a6a; color: #a8e8c8; background: #04180e; }
+.drone-enc button:active { transform: scale(0.96); }
