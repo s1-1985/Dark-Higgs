@@ -6679,7 +6679,7 @@ let _logDedup = {};
 var _logHist = [], _xoHist = []; // var: 初期化中に logMessage が呼ばれても落ちない
 function uiToast(msg, warn) {
     let d = document.getElementById('ui-toast');
-    if (!d) { d = document.createElement('div'); d.id = 'ui-toast'; d.style.cssText = 'position:fixed;left:50%;top:76px;transform:translateX(-50%);z-index:9000;max-width:70vw;padding:8px 14px;border-radius:6px;font:13px/1.45 sans-serif;text-align:center;pointer-events:none'; document.body.appendChild(d); }
+    if (!d) { d = document.createElement('div'); d.id = 'ui-toast'; d.style.cssText = 'position:fixed;left:124px;bottom:46px;z-index:9000;max-width:46vw;padding:8px 14px;border-radius:6px;font:13px/1.45 sans-serif;text-align:center;pointer-events:none'; document.body.appendChild(d); }
     d.style.background = warn ? 'rgba(40,20,8,0.94)' : 'rgba(8,24,34,0.94)'; d.style.border = '1px solid ' + (warn ? '#ffb070' : '#66ddff'); d.style.color = warn ? '#ffe0c0' : '#c8f4ff';
     d.textContent = msg; d.style.display = 'block'; clearTimeout(d._t); d._t = setTimeout(() => { d.style.display = 'none'; }, 4200);
 }
@@ -19549,7 +19549,7 @@ function capOpen(key, spec) {
     box.innerHTML = '<div class="cap-head"><b>◈ 艦長の判断</b><span>' + spec.title + '</span></div>'
         + '<div class="cap-sit">' + spec.sit + '</div>'
         + '<div class="cap-opts">' + spec.opts.map((o, i) => '<button class="cap-opt' + (o.id === rec ? ' rec' : '') + '" data-id="' + o.id + '"><i>' + (i + 1) + '</i><b>' + o.label + (o.id === rec ? ' <u>AI推奨</u>' : '') + '</b><span>' + o.sub + '</span></button>').join('') + '</div>'
-        + '<div class="cap-time"><div class="cap-bar"></div><span>' + CAP_LIMIT + '秒で推奨を実行</span></div>';
+        + '<div class="cap-time"><b class="cap-sec">' + CAP_LIMIT + '</b><div class="cap-track"><div class="cap-bar"></div></div><span>秒後に AI推奨 を自動実行</span></div>';
     box.classList.add('on');
     box.querySelectorAll('.cap-opt').forEach(b => b.addEventListener('click', (ev) => { ev.stopPropagation(); capChoose(b.dataset.id, false); }));
     sfxUI('ui_panel_open');
@@ -19567,7 +19567,10 @@ function capTick(dt) { // 実時間 (一時停止中は数えない)。gameLoop 
     if (!_capDec) return;
     if (!player || player.hp <= 0 || sectorCleared) { const b = document.getElementById('cap-dec'); if (b) b.classList.remove('on'); _capDec = null; return; }
     _capDec.el += dt;
-    const bar = document.querySelector('#cap-dec .cap-bar'); if (bar) bar.style.width = Math.max(0, 100 * (1 - _capDec.el / CAP_LIMIT)) + '%';
+    const left = Math.max(0, CAP_LIMIT - _capDec.el), bar = document.querySelector('#cap-dec .cap-bar'), sec = document.querySelector('#cap-dec .cap-sec'), bx = document.getElementById('cap-dec');
+    if (bar) bar.style.width = (100 * left / CAP_LIMIT) + '%';
+    if (sec) sec.textContent = Math.ceil(left);
+    if (bx) { bx.classList.toggle('warn', left <= 4 && left > 2); bx.classList.toggle('crit', left <= 2); }
     if (_capDec.el >= CAP_LIMIT) capChoose(_capDec.spec.rec, true);
 }
 document.addEventListener('keydown', (ev) => {
