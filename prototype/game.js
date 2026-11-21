@@ -14618,7 +14618,7 @@ function enemyItemsStep(e) {
     { const F = itemFactsE(e), act = itemReactPlan(F); // 第148弾: 反応の搭載品・複合・戦術を 全部候補にして 状況と性格の適性で点を付け、高い順に試す (固定の順序をやめた)
       const tur = () => enemies.find(f => f.type === 'fighter' && f._kind === 'turret' && f._home === e && f.hp > 0);
       if (tacticDecide(F, stratActorE(e), { doI: (a) => itemDoE(e, a), slip: (ang) => _skillSlipE(e, ang), bait: (k, x, y) => { if (k === 'sos' && e.lureSOS > 0) { e.lureSOS--; launchLure('e', 'sos', e.x, e.y, x, y); } else if (e.lureShip > 1) { e.lureShip--; launchLure('e', 'ship', e.x, e.y, x, y); } }, fake: (x, y) => { if (e.itemFake > 0) { e.itemFake--; placeFakeCache('e', x, y); } }, turret: tur, sonar: (pw) => { firePingFromEnemy(e, { omni: true, power: pw }); return true; }, focus: (k, sec) => { e._tacFocusUntil = _frameCount + sec * 60; setEnemyFocus(e, k); }, cover: () => findCoverSpot(e.x, e.y, 6000) }, act, (a) => itemDoE(e, a))) return; }
-    if (!window.__noEnemyAuto) enemyAutoPlay(e); // 第190弾: 自機AIと同じ手駒の自律運用
+    if (!window.__noEnemyAuto) enemyAutoPlay(e); // 第190弾: 自機AIと同じドローン・アイテムの自律運用
     // ビーコン: 潜伏を始める時、隠れ場所と反対へ1つ置く (敵の耳をそちらへ向ける)
     if (e._hideT > 0 && !e._beaconDone && e.itemBcn) {
         const k = Object.keys(e.itemBcn).find(b => e.itemBcn[b] > 0);
@@ -19245,6 +19245,7 @@ function capWants(P) { return skillOn(P._side, 'gt_capture') && 0.5 + 0.5 * (P.g
 const CAP_RANGE = 16000;
 function gatherWants(P, used, max, now) {
     const D = comDoctrine(P), early = comEarlyGather(used, max, now, P);
+    if (P._side !== 'e' && capSeeking()) return { part: false, early: false, greed: false, range: 0 }; // 第192弾: 艦長が「まず敵艦を探す」と決めた間
     return { part: used < max && (D.partHunt || (early && skillOn(P._side, 'gt_part'))), early, greed: capWants(P), range: Math.max(D.partRange, early ? 12000 : 0) };
 }
 // 最寄りの拠点 (コロニー・ノード) と難破船。side 'p'|'e'。mode 'part' = 部品をまだ取っていない物 (難破船も) / 'any' = 自分のものでない拠点。難破船は自分が見つけた物だけ (自機は discovered・敵は 2500u 以内に入った物)
@@ -19262,7 +19263,7 @@ function gatherPick(side, x, y, mode, range) {
     for (const n of resourceNodes) { if (n.owner === me || (mode === 'part' && n[pk])) continue; const d = Math.hypot(n.x - x, n.y - y); if (d >= lim) continue; const sc = d * kd / kw.node; if (sc < bs) { bs = sc; best = n; } }
     return best;
 }
-function comEarlyGather(used, max, now, P) { const pl = earlyGatherPlan(P || PERS_DEF); return now < pl.dur && used < Math.min(pl.n, max); }
+function comEarlyGather(used, max, now, P) { if (P && P._side !== 'e' && capSeeking()) return false; const pl = earlyGatherPlan(P || PERS_DEF); return now < pl.dur && used < Math.min(pl.n, max); }
 // 第66弾 (オーナー「逃げ回るだけでは勝つ気がない・双方が隠密/慎重だと試合が終わらない」): 長く (10分) 相手の気配が無ければ痺れを切らし、性格が攻め寄りに傾く (20分で最大: 攻撃性+0.5・隠密性×0.3・慎重さ×0.6)
 function comStallPers(c, base, now, lastF) {
     const p = Math.max(0, Math.min(1, (now - Math.max(lastF || 0, 0) - stallStart(base)) / 36000));
@@ -19468,11 +19469,25 @@ function toggleQte(on) { // メニューのQTE (艦長の判断) のオン・オ
     uiToast('QTE (艦長の判断): ' + (capMode ? 'ON — 要所で選択を求められる' : 'OFF — AIが全部決める'), false);
 }
 function _syncQteBtn() { const b = document.getElementById('btn-qte'); if (b) b.textContent = 'QTE (艦長の判断): ' + (capMode ? 'ON' : 'OFF'); }
+// 第191弾・第192弾 (オーナー「QTEはCOM同士の対戦の要所で選択を委ねるだけ。COMをQTE用に組み直すな。ダメージ・勝敗の趨勢に関わる場面は必ず / プレイヤーがフルマニュアルで選ぶあらゆる内容も確率次第で聞いてよい。ただし受信のたびではフルマニュアルと変わらないので頻度は調整」):
+// 戦闘に直結する場面 (CAP_FIGHT_KEYS) は毎回尋ねる。それ以外 (CAP_PLAN_KEYS) は 確率 × 前回から一定時間 (CAP_PLAN_GAP) をあけて尋ねる。尋ねない時はAI (COM) がこれまでどおり自分で決める (アルゴリズムはQTE用に変えていない)
+const CAP_FIGHT_KEYS = ['maneuver', 'strike', 'fire', 'missile', 'beam', 'retreat', 'hack'];
+const CAP_PLAN_PROB = { search: 1, lock: 0.7, strat: 0.6, hunt: 0.5, grab: 0.5, contact: 0.45, tactic: 0.3, play: 0.45 };
+const CAP_PLAN_GAP = 2700; // 戦闘以外の質問どうしは 45秒以上あける
+var _capPlanLast = -1e9;
 function capAsk(key, spec, cd) { // null=聞かない (AIが続ける) / {wait:true}=選択待ち / {id}=選ばれた
     if (!capMode || sectorCleared) return null;
+    const fight = CAP_FIGHT_KEYS.includes(key);
+    if (!fight && CAP_PLAN_PROB[key] === undefined) return null;
     const r = _capRes[key]; if (r) { delete _capRes[key]; return r; }
     if (_capDec) return { wait: true };
     if (_frameCount - (_capLast[key] ?? -1e9) < cd) return null;
+    if (!fight) {
+        if (key !== 'search' && _com && !_com.searchAsked && _frameCount < 3600) return null; // 序盤は まず「何を探す？」を先に
+        if (_frameCount - _capPlanLast < CAP_PLAN_GAP && key !== 'search') return null; // 受信のたびに聞くとフルマニュアルと変わらない
+        if (Math.random() > CAP_PLAN_PROB[key]) { _capLast[key] = _frameCount - cd * 0.5; return null; } // 今回は聞かずAIが決める (半分の間隔でまた機会)
+        _capPlanLast = _frameCount;
+    }
     _capLast[key] = _frameCount; capOpen(key, spec);
     return { wait: true };
 }
@@ -19630,9 +19645,9 @@ function capPlayList(c, P, te) {
     if (B) for (const a of out) if (B[a.id]) { a.base *= B[a.id]; a.strat = true; }
     return out;
 }
-// 第189弾 (オーナー「基本はAIが勝手に選ぶ・AIに多様性を」): QTE中のAIが、性格 (スキルの適性)・戦略・状況で 重みつきの乱数で手駒 (ドローン・アイテム・演算力) を自分の判断で使う。最大の一つを選ぶのでなく、直前と同じ物は避けて散らす
+// 第189弾 (オーナー「基本はAIが勝手に選ぶ・AIに多様性を」): QTE中のAIが、性格 (スキルの適性)・戦略・状況で 重みつきの乱数でドローン・アイテム (ドローン・アイテム・演算力) を自分の判断で使う。最大の一つを選ぶのでなく、直前と同じ物は避けて散らす
 var _capAutoF = 0, _capAutoLast = '';
-// 手駒の選び方は 自機AI・敵COMで同じ関数 (第190弾): 重み = 基本値 × スキル適性^1.2 × 乱数、直前と同じ物は×0.25。スキルをOFFにした物は選ばない
+// ドローン・アイテムの選び方は 自機AI・敵COMで同じ関数 (第190弾): 重み = 基本値 × スキル適性^1.2 × 乱数、直前と同じ物は×0.25。スキルをOFFにした物は選ばない
 function autoPlayChoose(A, P, side, last) {
     A = A.filter(a => skillOn(side, a.skill));
     if (!A.length) return null;
@@ -19652,11 +19667,10 @@ function capAutoPlay(c, P, fight, te) {
     if (!pick) return false;
     _capAutoLast = pick.id; pick.run();
     comThinkEvent('p', 'AI: ' + pick.label + (c.st && STRAT_REG[c.st.id] ? ' (方針「' + STRAT_REG[c.st.id].jp + '」)' : '') + ' — ' + pick.sub.replace(/^\S+ /, ''));
-    if (capMode && typeof uiToast === 'function') uiToast('AI: ' + pick.label, false);
     return true;
 }
 // 第190弾 (オーナー「敵COMにも同じ自律運用を」): 敵COMも 同じ選び方 (autoPlayChoose)・同じ頻度 (18〜37秒に1回)・同じ条件 (静かな間 / 相手が見えている間・取りに行く物の最中と隠れている間は除く) で
-// 手駒 (艦載機・哨戒機・砲台・偽信号・偽コンテナ・ビーコン・煙幕・散布・閃光・ノイズ・修理・呼び戻し・弱いソナー) を使う。持ち物と実行だけが敵の在庫・API
+// ドローン・アイテム (艦載機・哨戒機・砲台・偽信号・偽コンテナ・ビーコン・煙幕・散布・閃光・ノイズ・修理・呼び戻し・弱いソナー) を使う。持ち物と実行だけが敵の在庫・API
 function enemyAutoPlay(e) {
     const now = _frameCount;
     if (now < (e._autoPlayF || 0) || e.type === 'fighter' || e.hp <= 0 || e._dying || e._techT > 0 || e._asm) return false;
@@ -19680,7 +19694,7 @@ function enemyAutoPlay(e) {
     if (e.itemSmoke > 0) add('smoke', 'it_smoke', '煙幕を張って息を潜める', '霧を濃くして静かに待つ', () => { enemyUseSmoke(e); e.setTarget(e.x, e.y); e.postFireCooldown = 1800; });
     if (e.itemSpray > 0) add('spray', 'it_spray', '霧を撒いて隠れる', '周囲の霧を濃くして待つ', () => { enemyUseSpray(e); e.setTarget(e.x, e.y); e.postFireCooldown = 1800; });
     if (!(e._pingCD > 0) && !(now - (e._nudgeSonarF || -1e9) < 7200)) add('sonar', 'so_nudge', '弱いソナーを打つ', '周囲を探る', () => { e._nudgeSonarF = now; firePingFromEnemy(e, { omni: true, power: 'weak' }); }, 0.8);
-    add('listen', 'tc_listen', '止まって20秒聴く', '機関停止で耳をすます', () => itemDoE(e, { k: 'silent', why: '手駒: 止まって聴く' }), 0.9);
+    add('listen', 'tc_listen', '止まって20秒聴く', '機関停止で耳をすます', () => itemDoE(e, { k: 'silent', why: 'ドローン・アイテム: 止まって聴く' }), 0.9);
     if (A.have('attack')) {
         if (est) add('ftr_strike', 'cb_decoy_drone', '戦闘機を出して攻撃させる', '相手へ戦闘機を送る', () => { A.launch('attack'); e._sendTo = { x: est.x, y: est.y, until: now + 3720 }; }, 1.2);
         else add('ftr_escort', 'dr_ftr', '戦闘機を出して護衛させる', '艦の周りを守らせる', () => A.launch('attack'), 0.9);
@@ -19695,7 +19709,7 @@ function enemyAutoPlay(e) {
     const pick = autoPlayChoose(out.filter(a => vis ? AUTO_FIGHT_IDS.includes(a.id) : true), P, 'e', e._autoPlayLast);
     if (!pick) return false;
     e._autoPlayLast = pick.id; pick.run(); e._launchFlash = Math.max(e._launchFlash || 0, 30);
-    comThinkEvent('e', '手駒: ' + pick.label + (sid && STRAT_REG[sid] ? ' (方針「' + STRAT_REG[sid].jp + '」)' : '') + ' — ' + pick.sub, 'e' + e.uid);
+    comThinkEvent('e', 'ドローン・アイテム: ' + pick.label + (sid && STRAT_REG[sid] ? ' (方針「' + STRAT_REG[sid].jp + '」)' : '') + ' — ' + pick.sub, 'e' + e.uid);
     return true;
 }
 const CAP_STRAT_BOOST = { screen: { ftr_strike: 1.9, scout_far: 1.7, ftr_escort: 1.4 }, push: { ftr_strike: 2.0, flash: 1.5, sonar: 1.3 }, ambush: { smoke: 1.5, spray: 1.5, listen: 1.6, fake: 1.5, turret: 1.5, noise: 1.2 }, bait: { fsos: 1.9, lure: 1.9, bcn: 1.7, fake: 1.3 }, trap: { turret: 1.9, fake: 1.9, ftr_escort: 1.2 }, guard: { turret: 1.7, ftr_escort: 1.6, scout_far: 1.3 }, fogHide: { spray: 1.7, smoke: 1.7, listen: 1.4, noise: 1.3 }, fallback: { repair: 2.0, smoke: 1.4, recall: 1.5 }, tech: { turret: 1.6, fake: 1.3 }, hop: { sonar: 1.3, scout_far: 1.4 } };
@@ -19713,7 +19727,7 @@ function capPlayGate(c, P, fight, te) {
     if (ranked.length < 2) return null;
     const opts = ranked.map(a => ({ id: a.id, label: a.label, sub: a.sub })); opts.push({ id: '_none', label: '何もしない', sub: '今は静かに進む' });
     const sj = c.st && STRAT_REG[c.st.id] ? '方針「' + STRAT_REG[c.st.id].jp + '」の最中 — ' : '';
-    const cg = capAsk(fight ? 'playf' : 'play', { title: fight ? '交戦中の一手' : 'いま打てる一手', sit: sj + _capVoice(P, ranked[0].label) + (fight ? '。相手が見えている — 手駒を使う？' : '。静かな間に仕掛ける？'), opts, rec: ranked[0].id }, fight ? 99999 : 10800);
+    const cg = capAsk(fight ? 'playf' : 'play', { title: fight ? '交戦中の一手' : 'いま打てる一手', sit: sj + _capVoice(P, ranked[0].label) + (fight ? '。相手が見えている — ドローン・アイテムを使う？' : '。静かな間に仕掛ける？'), opts, rec: ranked[0].id }, fight ? 99999 : 10800);
     if (!cg || cg.wait) return cg;
     if (cg.id === '_none') return { none: true };
     const act = A.find(a => a.id === cg.id); return act ? { act } : { none: true };
@@ -19753,6 +19767,38 @@ function capRetreatGate(c, hpF, retreat) {
         { id: 'retreat', label: '離脱する', sub: '隠れ場所へ・修理。追撃されるリスク/相手に主導権を渡す' },
         { id: 'stand', label: '踏みとどまる', sub: '40秒は退かず撃ち合う — 相手を沈めれば勝ち。次の被弾で沈むかもしれない' }];
     return capAsk('retreat', { title: '船体が危険域', sit: '耐久 ' + _pct(hpF) + ' (' + Math.round(player.hp) + ') — 退き際 ' + _pct(retreat) + ' を割った', opts, rec: 'retreat' }, 5400);
+}
+// 第192弾: 序盤の「何を探す？」(敵艦 / アイテム=部品 / コロニー・ノード)。選んだ内容は AI の既存の機構 (c.item・索敵行) にそのまま渡すだけ
+var _capSeekUntil = 0;
+function capSeeking() { return capMode && _capSeekUntil > _frameCount; }
+function capSearchGate(c, P) {
+    const now = _frameCount, ag = P.aggression ?? 0.5, gr = P.greed ?? 0.4, tc = persAx(P, 'tech'), cm = persAx(P, 'command');
+    const ps = gatherPick('p', player.x, player.y, 'part', 20000), bs = gatherPick('p', player.x, player.y, 'any', CAP_RANGE);
+    const nm = (o) => o.kind === 'cache' ? '漂流コンテナ' : o.type === 'derelict' ? '難破船' : o.type === 'colony' ? 'コロニー' : 'ノード';
+    const dd = (o) => Math.round(Math.hypot(o.x - player.x, o.y - player.y) / 100) * 100;
+    const opts = [{ id: 'enemy', label: '敵艦を探す', sub: '索敵に出る — 先に見つけて先に撃てるが、拠点・部品は後回し', sc: 0.35 + 0.6 * ag - 0.3 * gr }];
+    if (ps) opts.push({ id: 'item', label: 'アイテム (部品) を集める', sub: '最寄りは' + nm(ps) + ' (' + dd(ps) + 'u) — 強化してから戦える/その間に先に見つけられるかも', sc: 0.2 + 0.6 * gr + 0.3 * (1 - ag) });
+    if (bs) opts.push({ id: 'base', label: 'コロニー・ノードを取る', sub: '最寄りは' + nm(bs) + ' (' + dd(bs) + 'u) — 補給・聴音局・演算力が増える/動き回ると音が出る', sc: 0.3 + 0.4 * gr + 0.3 * Math.max(tc, cm) });
+    if (opts.length < 2) return null;
+    opts.sort((a, b) => b.sc - a.sc);
+    return capAsk('search', { title: '序盤の方針 — まず何を探す？', sit: _capVoice(P, opts[0].label) + '。', opts, rec: opts[0].id }, 600);
+}
+function capSearchApply(c, id) {
+    const now = _frameCount, P = c.pp || PERS_DEF;
+    if (id === 'enemy') { _capSeekUntil = now + 10800; c.item = null; comThinkEvent('p', '艦長の判断: まず敵艦を探す (3分は拠点・部品より索敵を優先)'); return; }
+    const o = id === 'item' ? gatherPick('p', player.x, player.y, 'part', 20000) : gatherPick('p', player.x, player.y, 'any', CAP_RANGE);
+    if (!o) return;
+    const near = o.kind === 'cache' ? CACHE_R * 0.5 : o.type === 'derelict' ? DERELICT_SALVAGE_R * 0.6 : o.type === 'colony' ? COLONY_HACK_R * 0.6 : NODE_CAP_R * 0.6;
+    _capSeekUntil = 0; c.item = { o, near, f: now }; _comGoTo(o, near, c);
+    comThinkEvent('p', '艦長の判断: ' + (id === 'item' ? 'アイテム (部品) を集める' : 'コロニー・ノードを取る') + ' → ' + (o.type === 'colony' ? 'コロニー' : o.type === 'derelict' ? '難破船' : o.kind === 'cache' ? '漂流コンテナ' : 'ノード') + 'へ');
+}
+// 第192弾: 追跡 (ロックオン) する信号の選択 — 候補が複数ある時、AIの推奨を添えて尋ねる
+function capLockGate(c, P, cands, best, sigs) {
+    const L = cands.slice(0, 3);
+    if (L.length < 2) return null;
+    const opts = L.map(x => { const d = identInfo(x.sid), b = sigs[x.sid], est = _signalAnalysis[x.sid] && _signalAnalysis[x.sid].fix ? trackEstimate(_signalAnalysis[x.sid], 0) : null;
+        return { id: x.sid, label: 'SIG-' + sigNo(x.sid) + ' を追跡', sub: (d.known ? '艦影の見込み ' + Math.round(d.p * 100) + '%' : '正体不明') + (est ? ' / 推定 ' + Math.round(Math.hypot(est.x - player.x, est.y - player.y) / 100) * 100 + 'u (±' + Math.round(est.r / 50) * 50 + 'u)' : ' / 方位のみ') + (b && b.relay ? ' / 聴音局の方位' : '') }; });
+    return capAsk('lock', { title: '追跡する信号', sit: '受信している信号が ' + cands.length + ' つ。' + _capVoice(P, 'SIG-' + sigNo(best) + ' を追う') + '。', opts, rec: best }, 900);
 }
 // 第187弾: QTE (AI操艦) 中の手動操艦 — プレイヤーが移動を命じたら、到着するか30秒たつか「AIに任せる」まで、AIは航路を引かない (撃つ・使う・QTEの判断は続く)
 var _capManualUntil = 0; const CAP_MANUAL_FRAMES = 1800;
@@ -19852,6 +19898,13 @@ function _comPilotStep0() {
         // 聞こえなくなっても すぐには乗り換えない (明滅する信号・霧の陰で途切れる) — 方針の秒数 (10〜40秒) 聞こえなければ
         const lostLong = lockedSignalId && !sigs[lockedSignalId] && now - (c.lockHeardF || 0) >= (10 + 30 * D.still) * 60;
         if (best && best !== lockedSignalId && (!lockedSignalId || lostLong || (now - c.lockF >= D.commitSec * 60 && bs > cur + D.switchMargin))) {
+            if (capMode) { // 第192弾: 追跡する信号の選択 (候補が複数ある時だけ・確率で)
+                const cands = []; for (const sid in sigs) { if (dud(sid) || (c.rej && c.rej[sid] && identInfo(sid).p < 0.45)) continue; cands.push({ sid, v: score(sid) }); }
+                cands.sort((a, b) => b.v - a.v);
+                const lg = capLockGate(c, P, cands, best, sigs);
+                if (lg && lg.wait) return;
+                if (lg && lg.id && sigs[lg.id]) { best = lg.id; bs = score(best); comThinkEvent('p', '艦長の判断: SIG-' + sigNo(best) + ' を追う'); }
+            }
             const why = !lockedSignalId ? '追跡を始める' : lostLong ? 'SIG-' + sigNo(lockedSignalId) + ' が聞こえなくなった' : 'SIG-' + sigNo(best) + ' の方が艦影らしい';
             window._lockSignal(best); c.lockSid = best; c.lockF = now;
             comThinkEvent('p', why + ' → SIG-' + sigNo(best) + ' を追跡 (乗り換えない時間 ' + Math.round(D.commitSec) + '秒)');
@@ -19985,12 +20038,17 @@ function _comPilotStep0() {
             if (cg && cg.id === 'avoid') { const tp = clampToMapCircle(player.x - Math.cos(angc) * 5000, player.y - Math.sin(angc) * 5000, 1500); player.setTarget(tp.x, tp.y); _comSteered(c, 'free'); c.legF = now; c.capAvoidUntil = now + 2400; setStance('cruise', true); comThinkEvent('p', '艦長の判断: 距離を取る'); return; }
         }
     }
+    if (capMode && !c.searchAsked && now >= 120 && !contact && playerExposureLevel <= 1 && !comEngaged()) { // 第192弾: 序盤に1回「まず何を探す？」
+        const sg = capSearchGate(c, P);
+        if (sg && sg.wait) return;
+        c.searchAsked = true; if (sg && sg.id) { capSearchApply(c, sg.id); _comStance(c, P); return; }
+    }
     if (capMode && !c.item && !(c.capHoldUntil > now) && ((playerExposureLevel <= 2 && !(te && lk && lk.full) && !comEngaged()) || (te && lk && lk.full && playerExposureLevel <= 3))) { // 第185弾・第188弾: 静かな間と交戦中の「一手」(ドローン・アイテム)
         const vis = !!(te && lk && lk.full);
         const pg = vis ? null : capPlayGate(c, P, false, te); // 艦長に尋ねるのは静かな間に時々だけ (交戦中は尋ねない)
         if (pg && pg.wait) return;
         if (pg && pg.act) { pg.act.run(); comThinkEvent('p', '艦長の判断: ' + pg.act.label); _comStance(c, P); return; }
-        if (!pg && capAutoPlay(c, P, vis, te)) { _comStance(c, P); return; } // 第189弾: 普段はAIが自分の判断で手駒を使う
+        if (!pg && capAutoPlay(c, P, vis, te)) { _comStance(c, P); return; } // 第189弾: 普段はAIが自分の判断でドローン・アイテムを使う
     }
     if (!capMode && comDemo && !c.item && !(c.capHoldUntil > now)) { // 第190弾: 通常のCOM対戦でも自機COMが同じ自律運用 (敵COMと同じ)
         const vis = !!(te && lk && lk.full);
@@ -20107,7 +20165,7 @@ function _comPilotStep0() {
         else { c.mode = 'item'; _comGoTo(o, it.near, c); comThink('p', 'item', '取りに行くと決めた物を先に取る (' + _dirTxt(player.x, player.y, o.x, o.y) + '・' + Math.round(Math.hypot(o.x - player.x, o.y - player.y) / 100) * 100 + 'u) — 信号を受信しても取り終えてから'); _comStance(c, P); return; }
     }
     const _early = comEarlyGather(partSlotsUsed(), partSlotsMax(), now, P);
-    if (!contact && (D.partHunt || _early) && partSlotsUsed() < partSlotsMax()) { // 第41弾: 寄り道は 貪欲さ − 隠密性×0.45 ≥ 0.05 の時だけ・距離も方針で (第66弾: 序盤は全員)
+    if (!contact && !capSeeking() && (D.partHunt || _early) && partSlotsUsed() < partSlotsMax()) { // 第41弾: 寄り道は 貪欲さ − 隠密性×0.45 ≥ 0.05 の時だけ・距離も方針で (第66弾: 序盤は全員)
         let pd = Math.max(D.partRange, _early ? 12000 : 0), ps = gatherPick('p', player.x, player.y, 'part', pd); // 第107弾: 最寄りを選ぶ関数は敵と共通
         if (ps) pd = Math.hypot(ps.x - player.x, ps.y - player.y);
         for (const sid in _srcKnown) { const k = _srcKnown[sid]; if (k.kind !== 'cache') continue; const f = fieldSignals.find(q => q.sid === sid); if (!f) continue; const q = srcDrawPos(sid, f); const d = Math.hypot(q.x - player.x, q.y - player.y); if (d < pd) { pd = d; ps = { kind: 'cache', x: q.x, y: q.y, sid }; } } // 第40弾: 目視か解析で分かったコンテナ (位置は分かっている所)
@@ -20120,7 +20178,7 @@ function _comPilotStep0() {
             return;
         }
     }
-    if (!c.shipLike && capWants(P)) { // 第141弾: 拠点の占拠は報酬 — 性格を問わず取りに行く (旧: 貪欲−隠密×0.45≥0.25 かつ 何か信号が聞こえていない時だけ)
+    if (!c.shipLike && !capSeeking() && capWants(P)) { // 第141弾: 拠点の占拠は報酬 — 性格を問わず取りに行く (旧: 貪欲−隠密×0.45≥0.25 かつ 何か信号が聞こえていない時だけ)
         const g = gatherPick('p', player.x, player.y, 'any', CAP_RANGE); // 第107弾: 最寄りを選ぶ関数は敵と共通
         if (g) {
             const isNode = !g.type;
@@ -20238,7 +20296,7 @@ function comStallTour(c, P, D, hpF, contact) { // 第125弾: 敵の索敵行と�
     if (!skillOn('p', 'gt_stall')) { c.prowl = null; return false; }
     if (c.shipLike || c.datum) { c.prowl = null; return false; }
     const quiet = now - Math.max(c.lastShipF || 0, c.prowlEndF || 0, (huntStats && huntStats.startFrame) || 0);
-    if (!c.prowl && (quiet < prowlQuietT(P) || c.item || now < (c.prowlCD || 0))) return false;
+    if (!c.prowl && ((quiet < prowlQuietT(P) && !capSeeking()) || c.item || now < (c.prowlCD || 0))) return false;
     if (!c.prowl) { const gw = gatherWants(P, partSlotsUsed(), partSlotsMax(), now); if (gw.part && gatherPick('p', player.x, player.y, 'part', gw.range)) return false; } // 第149弾: 部品の枠が空いていて取れる所があるうちは索敵行を始めない (敵と同じ — 第122弾。自機COMだけ抜けていて、静かな性格は序盤を漂って過ごした)
     // 第72弾 (オーナー「隠れ合うだけで接触しない」): 長く気配が無ければ、ごく弱いソナーを時々打つ = 「あえて少しだけ音を出す」(敵も firePingFromEnemy で同じ式)。
     if (prowlNudgeWants({ quiet, P, now, nudgeF: c.nudgeF, ready: omniSonarCooldown <= 0, exposed: playerExposureLevel >= 2 })) {
@@ -20553,7 +20611,7 @@ function startComDemo() {
     saveComCfg();
     document.getElementById('com-overlay').classList.add('hidden');
     comDemo = true;
-    capMode = !!comCfg.cap; _syncQteBtn(); _capDec = null; _capRes = {}; _capLast = {}; _capStats = { asked: 0, auto: 0 }; _com = null;
+    capMode = !!comCfg.cap; _capSeekUntil = 0; _capPlanLast = -1e9; _syncQteBtn(); _capDec = null; _capRes = {}; _capLast = {}; _capStats = { asked: 0, auto: 0 }; _com = null;
     { const b = document.getElementById('cap-dec'); if (b) b.classList.remove('on'); }
     document.body.classList.add('com-demo');
     document.querySelectorAll('.enemy-select-btn').forEach(b => b.classList.toggle('active', b.dataset.type === comCfg.enemy));
