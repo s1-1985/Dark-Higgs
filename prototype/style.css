@@ -3246,7 +3246,13 @@ body.in-game #action-popover .act-icon-btn span { font-family: Orbitron, sans-se
 #cap-dec .cap-opt b u { text-decoration: none; margin-left: 6px; font-size: 10px; padding: 0 4px; color: #1a1000; background: #ffbe50; }
 #cap-dec .cap-opt span { font-size: 10.5px; color: #8fc3b5; line-height: 1.3; }
 #cap-dec .cap-time { margin-top: 8px; display: flex; align-items: center; gap: 8px; font-size: 10px; color: #8fc3b5; }
-#cap-dec .cap-bar { flex: 1; height: 3px; background: #ffbe50; box-shadow: 0 0 8px rgba(255,190,80,0.6); }
+#cap-dec .cap-sec { font-family: Orbitron, sans-serif; font-size: 26px; line-height: 1; min-width: 26px; text-align: center; color: #7dffb0; }
+#cap-dec .cap-track { flex: 1; height: 10px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18); }
+#cap-dec .cap-bar { height: 100%; background: #7dffb0; box-shadow: 0 0 10px rgba(125,255,176,0.6); }
+#cap-dec.warn .cap-sec { color: #ffbe50; } #cap-dec.warn .cap-bar { background: #ffbe50; box-shadow: 0 0 10px rgba(255,190,80,0.7); }
+#cap-dec.crit .cap-sec { color: #ff5a4a; animation: capPulse .5s ease-in-out infinite; } #cap-dec.crit .cap-bar { background: #ff5a4a; box-shadow: 0 0 12px rgba(255,90,74,0.8); }
+#cap-dec.crit { box-shadow: 0 0 0 1px #ff5a4a, 0 0 22px rgba(255,90,74,0.45); }
+@keyframes capPulse { 50% { transform: scale(1.35); opacity: .7; } }
 
 /* 第186弾: 試合の設定画面を見やすく — 区画の見出し・艦種カード・性格の説明・大きめのタップ領域 */
 .com-box { width: min(920px, 100%); }
