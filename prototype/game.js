@@ -10038,6 +10038,7 @@ function comHackStep() {
     const r = hackDecide({ side: 'p', H: hackPower('player'), sa, x: player.x, y: player.y, credible: !!idn && !idn.low && !(idn.p !== undefined && idn.p < 0.5), engaged,
         fleeing: !!(_com && _com.mode === 'hide') || (player.hp / player.maxHp < 0.4 && hitAgo < 900), foeDrones: enemies.filter(q => q.hp > 0 && q.type === 'fighter').length, probeOk: hitAgo > 1800 && playerExposureLevel < 2, probeCdOk: !_com || now - (_com.probeF ?? -1e9) > 10800 });
     if (!r) return;
+    if (capMode) { const cg = capHackGate(r, hackPower('player')); if (cg && cg.wait) return; if (cg && cg.id === 'hold') { if (_com) _com.probeF = now; comThinkEvent('p', '艦長の判断: ハック波は撃たない'); return; } }
     if (r.probe && _com) _com.probeF = now;
     comThinkEvent('p', (r.probe ? '探りのハック波 — 侵入はできないが応答で相手の位置を暴く' : 'ハック波を撃つ — ' + (r.d !== null ? '推定の方向 (距離' + Math.round(r.d / 100) * 100 + 'u)' : '最新の方位の方向') + '・' + HACK_EFFECTS[r.eff].jp + 'を狙う (止めてから忍び寄る)'));
     fireHackPulse('p', r.ang, r.eff);
@@ -18205,6 +18206,12 @@ function comGrabStep(c, P, hpF, retreat, te, lk) {
             const d = Math.hypot(est.x - player.x, est.y - player.y); if (d < Math.min(bd, 2500)) { bd = d; best = { x: est.x, y: est.y, kind: 'cache', sid: f.sid, _probe: true }; }
         }
         if (!best) return false;
+        if (capMode) { // 第183弾: 拾い物の分かれ道は艦長が決める
+            if (c.grabBan > now) return false;
+            const cg = capGrabGate(c, P, best, bd);
+            if (cg && cg.wait) return true;
+            if (cg && cg.id === 'skip') { c.grabBan = now + 5400; comThinkEvent('p', '艦長の判断: 拾い物は見送る'); return false; }
+        }
         const near = best.kind === 'cache' ? CACHE_R * 0.5 : DERELICT_SALVAGE_R * 0.6;
         c.item = { o: best, near, f: now };
         comThinkEvent('p', '目の前に' + (best.kind === 'cache' ? '漂流コンテナ' : '難破船') + ' (' + Math.round(bd / 100) * 100 + 'u) → 先に拾う');
@@ -19496,6 +19503,38 @@ function capFireGate(c, te, w, hc, sa, lk, now) {
     if (!cg || cg.wait) return cg;
     return cg.id;
 }
+// 接触 (艦影らしい信号を掴んだ・まだ見えていない): 追う / 息を潜める / 避ける
+function capContactGate(c, P, D, ang, est) {
+    const opts = [
+        { id: 'track', label: '追って測量する', sub: '場所を変えて聴き位置を絞る — 動く分だけ自艦も聞かれる' },
+        { id: 'hold', label: '息を潜めて待つ', sub: '40秒 機関停止・潜航 — 気付かれにくいが相手が来なければ時間を使う' },
+        { id: 'avoid', label: '距離を取る', sub: '反対へ約5000u離れる — 接触を避ける/拠点集めに戻れる' }];
+    const rec = P.stealth >= 0.6 ? 'hold' : P.caution >= 0.7 && P.aggression < 0.5 ? 'avoid' : 'track';
+    return capAsk('contact', { title: '接触 — 艦影らしい信号', sit: '方位' + compassDeg(ang) + '°' + (est ? ' 推定 ' + Math.round(Math.hypot(est.x - player.x, est.y - player.y) / 100) * 100 + 'u (幅±' + Math.round(est.r / 50) * 50 + 'u)' : ' — 距離はまだ不明') + '。まだ見えていない', opts, rec }, 4800);
+}
+// ビームの高エネルギー反応 (チャージ中)
+function capBeamGate(c, th) {
+    const stock = (k) => (cargo.stock && cargo.stock[k]) || 0;
+    const opts = [{ id: 'evade', label: '照射線から外れる', sub: 'ビームは細い線 — 直角へ動けば外せる/熱と航跡が残る' }];
+    if (!(boostCD > 0)) opts.push({ id: 'boost', label: '緊急噴射', sub: '一気に線から離れる — 機関が過熱し熱が最大' });
+    if (stock('smoke') > 0) opts.push({ id: 'smoke', label: '煙幕を張る', sub: '濃い霧でビームが減衰する — 自分の視界も縮む' });
+    opts.push({ id: 'brace', label: '耐える', sub: '被弾 約' + BEAM_DMG + ' — 動かず信号を増やさない。当たれば大きい' });
+    return capAsk('beam', { title: 'ビームの高エネルギー反応', sit: '方位' + compassDeg(th.ang) + '°でチャージ中 — 数秒で照射される', opts, rec: 'evade' }, 1500);
+}
+// 拾い物の分かれ道
+function capGrabGate(c, P, best, bd) {
+    const isC = best.kind === 'cache';
+    const opts = [
+        { id: 'take', label: (isC ? 'コンテナを開ける' : '難破船を回収する'), sub: '部品・弾・資材が手に入る' + (isC ? ' — 偽コンテナの罠なら耐久30%の爆発＋位置が割れる' : ' — SOSが鳴っている間だけ') },
+        { id: 'skip', label: '見送る', sub: '90秒は取りに行かない — 安全だが戦力が増えない' }];
+    return capAsk('grab', { title: (isC ? '漂流コンテナ' : '難破船') + 'の分かれ道', sit: Math.round(bd / 100) * 100 + 'u 先に ' + (isC ? '漂流コンテナ' : '難破船') + '。拾えば戦力が上がる', opts, rec: P.caution >= 0.75 ? 'skip' : 'take' }, 3600);
+}
+// ハック波を撃つか
+function capHackGate(r, H) {
+    const opts = [{ id: 'fire', label: (r.probe ? '探りのハック波' : HACK_EFFECTS[r.eff].jp + 'を狙う'), sub: r.probe ? '侵入はできないが応答で位置を暴く — こちらの位置も割れる' : '成功すれば相手の機能を止められる — 外れても数秒 大量の電磁波で位置が割れる' },
+        { id: 'hold', label: '撃たない', sub: '電磁波を出さず静かに — 機会を待つ' }];
+    return capAsk('hack', { title: 'ハック波の機会', sit: '演算力 ' + (Math.round(H * 10) / 10) + '。追跡中の相手へ撃てる', opts, rec: 'fire' }, 3000);
+}
 // 撃ち合いの組み立て (相手が見えている間): 正対 / 回り込み / 回避優先
 function capManeuverGate(c, ch, lk, oppW) {
     const rec = ch.prio === 'evade' ? 'evade' : ch.mode === 'flank' ? 'flank' : 'face';
@@ -19628,6 +19667,32 @@ function comPilotStep() {
         const am = adaptPersonality(P, contact, hpF);
         if (am) comThinkEvent('p', '性格が変わる → ' + ADAPT_MODES[am].label + ' (' + (am === 'cautious' ? '耐久' + _pct(hpF) + ' < 40%' : am === 'aggressive' ? '相手を掴んだ' : am === 'greedy' ? '90秒手掛かりなし' : '見失って60秒') + ')');
     }
+    // 第183弾: 艦長が「息を潜める」「距離を取る」と決めた間は、危険が無ければその方針を続ける
+    if (capMode && (c.capHoldUntil > now || c.capAvoidUntil > now)) {
+        const seenE = enemies.some(q => q.hp > 0 && !q._dying && q.type !== 'fighter' && q.inVision);
+        if (playerExposureLevel >= 2 || seenE || hpF < retreat) { c.capHoldUntil = 0; c.capAvoidUntil = 0; if (playerCoasting) toggleCoast(false); }
+        else {
+            if (c.capHoldUntil > now) { c.mode = 'hide'; if (!playerCoasting) toggleCoast(true); if (powerStance !== 'silent') setStance('silent', true); comThink('p', 'caphold', '艦長の判断: 息を潜める (あと' + Math.ceil((c.capHoldUntil - now) / 60) + '秒)'); }
+            else comThink('p', 'capavoid', '艦長の判断: 距離を取る (あと' + Math.ceil((c.capAvoidUntil - now) / 60) + '秒)');
+            return;
+        }
+    }
+    // ビームの高エネルギー反応 (艦長が対処を選ぶ)
+    if (capMode) {
+        const bt = THREATS.find(t => t.kind === 'beam');
+        if (bt) {
+            const cg = capBeamGate(c, bt);
+            if (cg && cg.wait) return;
+            if (cg && cg.id) {
+                if (cg.id === 'evade') { _comCMOff(); xoEvade(bt.ang); _comSteered(c, 'free'); c.legF = -1e9; }
+                else if (cg.id === 'boost') { _comCMOff(); useBoost(); }
+                else if (cg.id === 'smoke') useEscapeItem('smoke');
+                comThinkEvent('p', '艦長の判断: ビームへの対処 → ' + ({ evade: '照射線から外れる', boost: '緊急噴射', smoke: '煙幕', brace: '耐える' })[cg.id]);
+                _comStance(c, P);
+                return;
+            }
+        }
+    }
     // 第182弾: 退き際を割った時、艦長が「離脱」か「踏みとどまる」を決める
     if (capMode && hpF < retreat) {
         const cg = capRetreatGate(c, hpF, retreat);
@@ -19698,6 +19763,16 @@ function comPilotStep() {
     // 3) 撃つ
     const te = bestFireTarget(), lk = te ? playerLockInfo(te) : null;
     comDatumNote(c, te, lk); // 第71弾: 相手を掴んだ位置を覚える
+    if (capMode && c.shipLike && lockedSignalId && playerExposureLevel < 2 && !(te && lk && lk.full) && !c.hunt && !c.item) { // 第183弾: 接触した時の方針は艦長が決める
+        const sac = _signalAnalysis[lockedSignalId], estc = sac && sac.fix ? trackEstimate(sac, 0) : null, loc = sac && sac.obs.length ? sac.obs[sac.obs.length - 1] : null;
+        const angc = estc ? Math.atan2(estc.y - player.y, estc.x - player.x) : loc ? loc.ang : null;
+        if (angc !== null) {
+            const cg = capContactGate(c, P, D, angc, estc);
+            if (cg && cg.wait) return;
+            if (cg && cg.id === 'hold') { c.capHoldUntil = now + 2400; comThinkEvent('p', '艦長の判断: 息を潜めて待つ (40秒)'); return; }
+            if (cg && cg.id === 'avoid') { const tp = clampToMapCircle(player.x - Math.cos(angc) * 5000, player.y - Math.sin(angc) * 5000, 1500); player.setTarget(tp.x, tp.y); _comSteered(c, 'free'); c.legF = now; c.capAvoidUntil = now + 2400; setStance('cruise', true); comThinkEvent('p', '艦長の判断: 距離を取る'); return; }
+        }
+    }
     let held = null;
     // ═══ 第137弾 (操縦の総括・オーナー「いつやるんだ」): 任務の優先順位は 自機COMも敵も同じ並び (PILOT_LADDER) を同じ走査 (pilotLadder) で通す。
     //   各段の実行は持ち主ごと (自機=このアダプタ・敵=Ship.update 側のアダプタ)。敵に無い段 (fire=見えている間の撃ち合いは aiState 'combat'・press=詰める・stall=拠点巡り) は null で、
