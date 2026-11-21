@@ -6695,7 +6695,7 @@ function logMessage(text, className) {
     // 第16弾: 方位を含むログは自艦リング上でその方位を点灯 (ズームアウトせずに方角が分かる)
     const _bm = /方位\s?(\d{1,3})°/.exec(text);
     if (_bm && typeof ringMarkBearing === 'function') ringMarkBearing(+_bm[1], className === 'warning-msg' ? '#ffb070' : '#ffe08a');
-    if (text.startsWith('HACK:') && !playReplay && !comDemo) uiToast(text.slice(5).trim(), className === 'warning-msg'); // 第159弾: ログ欄が無いので、ハックの結果・失敗の理由は画面中央にも出す
+    if (text.startsWith('HACK:') && !playReplay && !comDemo && !/応答あり|侵入|失敗|成功|防い|途切れ|応答なし/.test(text)) uiToast(text.slice(5).trim(), className === 'warning-msg'); // 第159弾: ログ欄が無いので、ハックの結果・失敗の理由は画面中央にも出す
     const msg = document.createElement('div');
     msg.className = `message ${className}`;
     const now = new Date();
@@ -9905,7 +9905,11 @@ function enemyHackTake(e, d, kind) {
 var HACK_PULSE_HALF = 0.14, HACK_PULSE_CD = 2400 /* 第89弾 (オーナー「20秒は短い」): 再使用40秒 */, HACK_RANGE_BASE = 2500, HACK_RANGE_PER_H = 1500, HACK_RANGE_MAX = 9000, HACK_BURST_F = 240;
 var HACK_SESS_BASE = 840, HACK_SESS_MIN = 180, HACK_SESS_MAX = 1440, HACK_BREAK = 1.0; // 第89弾: 届く距離の外へ出たら断線 (旧 ×1.3)
 // 第89弾: 侵入は確率で弾かれる — 成功率 = 0.4 + 0.35×(q−1) (q=演算力/耐性・最大0.9)。弾かれても相手には侵入を試みられたことが分かる
-function hackSuccessChance(q) { return Math.max(0.4, Math.min(0.9, 0.4 + 0.35 * (q - 1))); }
+// 第193弾 (オーナー「ハックされたことがあまり無い・ハックの流れを作り込む」): 電波が当たれば**侵入が始まり**(10〜15秒)、結果は 相手の行動(断線・離脱・濃い霧)か、演算力÷ハック耐性の確率で決まる。成功率 = 0.2+0.45×q (12〜92%)
+function hackSuccessChance(q) { return Math.max(0.12, Math.min(0.92, 0.2 + 0.45 * q)); }
+var HACK_ATTEMPT_H = 2.0; // 侵入を試みる演算力 (旧3.0 — コロニー3つ+解析重視が要り、ほとんど侵入されなかった)
+var _hackBanner = null; // 結果の表示 {ok,head,sub,until(ms),own}
+function hackBanner(ok, head, sub) { if (_seatOn && _seatOn()) return; _hackBanner = { ok, head, sub, until: performance.now() + 5200, t0: performance.now() }; }
 var HACK_RES_CLASS = { stealth: 2.2, assault: 2.8, carrier: 3.2 };
 var HACK_EFFECTS = { fcs: { jp: '火器管制ダウン', st: 'fcs', dur: 720 }, halt: { jp: '機関停止', st: 'halt', dur: 900 }, sensor: { jp: 'センサー損傷', st: 'sensor', dur: 900 }, comm: { jp: '通信障害', st: 'comm', dur: 1200 }, counter: { jp: '逆探知の反撃', st: 'comm', dur: 600 } };
 var _hackPulseCD = 0, _hackBurstUntil = 0, hackSessP = null, _hackWinP = null;
@@ -9914,7 +9918,8 @@ function hackResist(sh) {
     const isP = sh === player, cls = isP ? gameState.shipType : ENEMY_CLASS[sh.type];
     return (HACK_RES_CLASS[cls] || 2.6) + (isP ? (PM.hackRes || 0) : (epm(sh).hackRes || 0)) + 0.5 * hackPower(isP ? 'player' : 'enemy', isP ? null : sh);
 }
-function hackSessTime(H, R) { const r = R / H; return Math.max(HACK_SESS_MIN, Math.min(HACK_SESS_MAX, Math.round(HACK_SESS_BASE * r * r))); }
+function hackSessTime(H, R) { return 600 + Math.round(300 * Math.min(1, Math.max(0, (R / H - 0.6) / 1.2))); } // 第193弾: 10〜15秒 (相手の耐性が高いほど長い)
+function _hackSessTimeOld(H, R) { const r = R / H; return Math.max(HACK_SESS_MIN, Math.min(HACK_SESS_MAX, Math.round(HACK_SESS_BASE * r * r))); }
 function fireHackPulse(att, angle, effect) {
     const isP = att === 'p', A = isP ? player : att; if (!A || A.hp <= 0 || A._dying) return false;
     const E = HACK_EFFECTS[effect] || HACK_EFFECTS.halt, H = hackPower(isP ? 'player' : 'enemy', isP ? null : A), range = hackPulseRange(H, A), now = _frameCount;
@@ -9928,7 +9933,7 @@ function fireHackPulse(att, angle, effect) {
     else matchRecEvent('hackPulseE', A.x, A.y, '敵がハック波を発射 (' + E.jp + ')');
     if (!hit) {
         if (isP) sfx('ew_hack_miss'); else seatSfx('ew_hack_miss', 0.8);
-        if (isP) logMessage('HACK: ハック波 — 応答なし (外れ)。大量の電磁波を出した — 敵に方向を知られる', 'warning-msg');
+        if (isP) { logMessage('HACK: ハック波 — 応答なし (外れ)。大量の電磁波を出した — 敵に方向を知られる', 'warning-msg'); hackBanner(false, '✖ ハック失敗', '電波が相手に当たらなかった (応答なし) — 大量の電磁波で方向を知られた'); }
         else comThinkEvent('e', 'ハック波を撃ったが相手は居なかった (EMを出した)', 'e' + att.uid);
         return false;
     }
@@ -9941,47 +9946,58 @@ function fireHackPulse(att, angle, effect) {
     } else if (att._sa) { att._sa.ping = { x: player.x + (Math.random() - 0.5) * err, y: player.y + (Math.random() - 0.5) * err, r: err, f: now, src: 'hack' }; solveFix(att._sa); att.contactFreshness = Math.max(att.contactFreshness || 0, 0.6); }
     if (isP && hit === prpPov()) seatSfx('alm_hack_probe', 0.9); // 敵の席: 自機のハック波が当たった = 探られた
     if (effect === 'counter') { // 第143弾: 逆探知の反撃 — 自分へ侵入している回線の元に当たれば、その回線を切る (演算力の差は問わない)
-        if (isP) { if (hit._hackSess && hit._hackSess.tgt === A) { hit._hackSess = null; logMessage('HACK: 逆探知が当たり、侵入していた回線を切った', 'system-msg'); matchRecEvent('hackCounterP', hit.x, hit.y, '自艦: 逆探知の反撃で侵入を切った'); } else logMessage('HACK: 逆探知 — 応答あり (侵入は既に終わっていた)', 'warning-msg'); }
-        else { if (hackSessP && hackSessP.tgt === A) { hackSessP = null; comThinkEvent('e', '逆探知が当たり、侵入していた回線を切った', 'e' + att.uid); logMessage('HACK: 侵入が途切れた — 相手に逆探知を撃ち返された', 'warning-msg'); matchRecEvent('hackCounterE', hit.x, hit.y, '敵: 逆探知の反撃で侵入を切った'); } }
+        if (isP) { if (hit._hackSess && hit._hackSess.tgt === A) { hit._hackSess = null; logMessage('HACK: 逆探知が当たり、侵入していた回線を切った', 'system-msg'); hackBanner(true, '◇ 侵入を防いだ', '逆探知が当たり、侵入していた回線を切った'); matchRecEvent('hackCounterP', hit.x, hit.y, '自艦: 逆探知の反撃で侵入を切った'); } else logMessage('HACK: 逆探知 — 応答あり (侵入は既に終わっていた)', 'warning-msg'); }
+        else { if (hackSessP && hackSessP.tgt === A) { hackSessP = null; comThinkEvent('e', '逆探知が当たり、侵入していた回線を切った', 'e' + att.uid); logMessage('HACK: 侵入が途切れた — 相手に逆探知を撃ち返された', 'warning-msg'); hackBanner(false, '✖ ハック失敗', '相手に逆探知を撃ち返され、回線を切られた'); matchRecEvent('hackCounterE', hit.x, hit.y, '敵: 逆探知の反撃で侵入を切った'); } }
         return true;
     }
-    if (q < 1) {
-        if (isP) sfx('ew_hack_fail'); else seatSfx('ew_hack_fail', 0.8);
-        if (isP) logMessage('HACK: 応答あり — 艦影を捉えた (方位' + compassDeg(Math.atan2(hit.y - A.y, hit.x - A.x)) + '°・約' + Math.round(bd / 100) * 100 + 'u)。だが相手のハック耐性が演算力を上回り侵入できない (演算力' + (Math.round(H * 10) / 10) + ')', 'warning-msg');
-        else comThinkEvent('e', 'ハック波が当たったが耐性が高く侵入できない', 'e' + att.uid);
-        return false;
-    }
-    if (Math.random() > hackSuccessChance(q)) { // 第89弾: 防壁に弾かれた
-        sfx(isP ? 'ew_hack_fail' : 'alm_hack_probe'); if (!isP) seatSfx('ew_hack_fail', 0.8);
-        if (isP) logMessage('HACK: 応答あり — 侵入を試みたが防壁に弾かれた (成功率' + Math.round(hackSuccessChance(q) * 100) + '%・演算力' + (Math.round(H * 10) / 10) + ' / 相手の耐性 約' + (Math.round(R * 2) / 2) + ')', 'warning-msg');
-        else { comThinkEvent('e', 'ハック波が当たったが侵入に失敗 (弾かれた)', 'e' + att.uid); logMessage('WARN: ハック波を受けた — 防壁が侵入を弾いた (方位' + compassDeg(Math.atan2(att.y - player.y, att.x - player.x)) + '°から)', 'warning-msg'); }
-        return false;
-    }
     if (hit._linkGuard > now) { // 断線パルスの防護中
-        if (isP) logMessage('HACK: 応答あり — 相手は断線パルスで回線を閉じている (侵入できない)', 'warning-msg'); else comThinkEvent('e', 'ハック波が当たったが回線が閉じていた (断線パルス)', 'e' + att.uid);
+        if (isP) { logMessage('HACK: 応答あり — 相手は断線パルスで回線を閉じている (侵入できない)', 'warning-msg'); hackBanner(false, '✖ ハック失敗', '相手は断線パルスで回線を閉じていた'); sfx('ew_hack_fail'); }
+        else { comThinkEvent('e', 'ハック波が当たったが回線が閉じていた (断線パルス)', 'e' + att.uid); }
         return false;
     }
-    const S = { att, tgt: hit, effect, p: 0, need: hackSessTime(H, R), q, H };
-    if (isP) { hackSessP = S; logMessage('HACK: 応答あり — 侵入開始 (' + E.jp + '・約' + Math.round(S.need / 60) + '秒)。リンクの間は電磁波が漏れる。相手が' + Math.round(range * HACK_BREAK) + 'u以上離れると中断', 'system-msg'); }
-    else { att._hackSess = S; logMessage('WARN: ハック波を受けた — 侵入されている (約' + Math.round(S.need / 60) + '秒で機能を奪われる)。侵入元から' + Math.round(hackPulseRange(H) * HACK_BREAK) + 'u以上離れれば中断できる', 'warning-msg'); sfxOr('alm_status_comm', 'ui', 0.9); comThinkEvent('e', 'ハック侵入開始 (' + E.jp + ')', 'e' + att.uid); }
+    // 第193弾: 当たれば 必ず侵入が始まる (10〜15秒)。結果は 相手の行動 (断線パルス・離れる・濃い霧) か 演算力÷ハック耐性の確率で決まる — 確率で失敗する時は 防壁に弾かれる瞬間 (進みの45〜90%) が来る
+    const chance = hackSuccessChance(q), ok = Math.random() < chance, need = hackSessTime(H, R);
+    const S = { att, tgt: hit, effect, p: 0, need, q, H, R, chance, ok, failAt: ok ? Infinity : Math.round(need * (0.45 + 0.45 * Math.random())), stage: -1 };
+    if (isP) { hackSessP = S; logMessage('HACK: 応答あり — 侵入開始 (' + E.jp + '・約' + Math.round(need / 60) + '秒・成功の見込み ' + (chance >= 0.7 ? '高' : chance >= 0.45 ? '中' : '低') + ')。相手が届く距離の外へ出る・断線パルス・濃いヒッグスで中断される', 'system-msg'); }
+    else { att._hackSess = S; logMessage('WARN: ハック波を受けた — 侵入されている (約' + Math.round(need / 60) + '秒)。侵入元から' + Math.round(hackPulseRange(H) * HACK_BREAK) + 'u以上離れれば中断できる', 'warning-msg'); sfxOr('alm_status_comm', 'ui', 0.9); comThinkEvent('e', 'ハック侵入開始 (' + E.jp + ')', 'e' + att.uid); }
     return true;
 }
+const HACK_STAGES = ['回線確立', '防壁を解析', '認証を突破', '制御を奪取'];
 function _stepHackSess(S, att) {
-    const A = att === 'p' ? player : att, T = S.tgt, now = _frameCount;
-    const end = (why) => { if (att === 'p' || T === player) sfx('ew_hack_cut'); if (_seatOn() && (T === prpPov() || A === prpPov())) seatSfx('ew_hack_cut', 0.8); if (att === 'p') hackSessP = null; else att._hackSess = null; if (att === 'p') logMessage('HACK: 侵入が途切れた — ' + why, 'warning-msg'); else if (T === player) logMessage('HACK: 侵入が途切れた (' + why + ')', 'system-msg'); };
-    if (!A || A.hp <= 0 || A._dying) { if (att !== 'p') att._hackSess = null; else hackSessP = null; return; }
+    const A = att === 'p' ? player : att, T = S.tgt, now = _frameCount, mine = att === 'p', toMe = T === player;
+    // 結果の表示 (自艦が撃った側 / 撃たれた側のどちらかの時だけ)。失敗の理由は 相手の行動 (断線・離れる・濃い霧・沈む) か 防壁に弾かれた (確率)
+    const end = (why, sub) => {
+        if (mine || toMe) sfx('ew_hack_cut'); if (_seatOn() && (T === prpPov() || A === prpPov())) seatSfx('ew_hack_cut', 0.8);
+        if (mine) hackSessP = null; else att._hackSess = null;
+        if (mine) { logMessage('HACK: 侵入が途切れた — ' + why, 'warning-msg'); hackBanner(false, '✖ ハック失敗', sub || why); }
+        else if (toMe) { logMessage('HACK: 侵入を防いだ — ' + why, 'system-msg'); hackBanner(true, '◇ 侵入を防いだ', sub || why); }
+    };
+    if (!A || A.hp <= 0 || A._dying) { if (!mine) att._hackSess = null; else hackSessP = null; if (toMe) hackBanner(true, '◇ 侵入を防いだ', '侵入元が沈んだ'); return; }
     if (!T || T.hp <= 0 || T._dying) { end('相手が沈んだ'); return; }
-    const H = hackPower(att === 'p' ? 'player' : 'enemy', att === 'p' ? null : att);
+    const H = hackPower(mine ? 'player' : 'enemy', mine ? null : att);
     S.link = hackLinkStrength(A, T, hackPulseRange(H, A) * HACK_BREAK); // 第90弾: 回線の強さ (距離と間の霧・どちらかが濃いヒッグスの中なら0)
-    if (S.link <= 0) { end(getHiggsIntensity(T.x, T.y) >= HIGGS_DENSE || getHiggsIntensity(A.x, A.y) >= HIGGS_DENSE ? '濃いヒッグスの中に入られ回線が切れた' : '相手が遠く (または霧の向こう) になり回線が切れた'); return; }
-    if (T._linkGuard > now) { end('相手が断線パルスで回線を閉じた'); return; }
+    if (S.link <= 0) {
+        const dense = getHiggsIntensity(T.x, T.y) >= HIGGS_DENSE || getHiggsIntensity(A.x, A.y) >= HIGGS_DENSE;
+        end(dense ? '濃いヒッグスの中に入られ回線が切れた' : '相手が遠く (または霧の向こう) になり回線が切れた', dense ? '相手が濃いヒッグスに入り、電波が通らなくなった' : '相手が離脱し、回線が届く距離の外へ出た');
+        return;
+    }
+    if (T._linkGuard > now) { end('相手が断線パルスで回線を閉じた', '相手が断線パルスで回線を切った'); return; }
     S.p += gameSpeedFactor;
+    // 進みの段階 (回線確立 → 防壁を解析 → 認証を突破 → 制御を奪取)。段が変わった時に画面のパネルが光る・音を鳴らす
+    const st = Math.min(3, Math.floor(4 * S.p / S.need));
+    if (st !== S.stage) { S.stage = st; S.stageF = now; if (st > 0 && (mine || toMe)) sfxUI('ui_log_warn'); }
+    if (S.p >= S.failAt) { // 防壁に弾かれた (演算力÷ハック耐性の確率で失敗した)
+        if (mine || toMe) sfx('ew_hack_fail'); if (_seatOn() && (T === prpPov() || A === prpPov())) seatSfx('ew_hack_fail', 0.8);
+        if (mine) { hackSessP = null; logMessage('HACK: 失敗 — 防壁に弾かれた (成功率' + Math.round(S.chance * 100) + '%・演算力' + (Math.round(S.H * 10) / 10) + ' / 相手の耐性 約' + (Math.round(S.R * 2) / 2) + ')', 'warning-msg'); hackBanner(false, '✖ ハック失敗', '相手の防壁に弾かれた (演算力 ' + (Math.round(S.H * 10) / 10) + ' / 耐性 ' + (Math.round(S.R * 10) / 10) + ' → 成功率 ' + Math.round(S.chance * 100) + '%)'); matchRecEvent('hackFailP', T.x, T.y, '自艦のハックが防壁に弾かれた'); }
+        else { att._hackSess = null; comThinkEvent('e', 'ハック失敗 — 防壁に弾かれた', 'e' + att.uid); if (toMe) { logMessage('HACK: 侵入を防いだ — 自艦の防壁が弾いた', 'system-msg'); hackBanner(true, '◇ 侵入を防いだ', '自艦の防壁が侵入を弾いた (相手の演算力 ' + (Math.round(S.H * 10) / 10) + ' / 自艦の耐性 ' + (Math.round(S.R * 10) / 10) + ')'); matchRecEvent('hackDefendE', T.x, T.y, '敵のハックを防壁が弾いた'); } }
+        return;
+    }
     if (S.p < S.need) return;
     const E = HACK_EFFECTS[S.effect] || HACK_EFFECTS.halt, mult = Math.max(0.8, Math.min(1.8, 0.8 + 0.4 * (S.q - 1)));
     applyStatus(T, E.st, Math.round(E.dur * mult));
-    { const W = { until: now + Math.round(E.dur * mult), eff: S.effect }; if (att === 'p') _hackWinP = W; else att._hackWin = W; } // 第142弾: ハックが効いている間 (hk_pursuit が詰める)
-    if (att === 'p') { sfx('ew_hack_success'); if (T === prpPov()) seatSfx('alm_hack_probe', 1); logMessage('HACK: 成功 — 敵に' + E.jp + ' (約' + Math.round(E.dur * mult / 60) + '秒)。今が奇襲の好機', 'system-msg'); matchRecEvent('hackOkP', T.x, T.y, '敵をハック: ' + E.jp); hackSessP = null; }
-    else { seatSfx('ew_hack_success', 0.9); att._hackSess = null; comThinkEvent('e', 'ハック成功 — 自機に' + E.jp, 'e' + att.uid); matchRecEvent('hackOkE', T.x, T.y, '敵にハックされた: ' + E.jp); }
+    { const W = { until: now + Math.round(E.dur * mult), eff: S.effect }; if (mine) _hackWinP = W; else att._hackWin = W; } // 第142弾: ハックが効いている間 (hk_pursuit が詰める)
+    if (mine) { sfx('ew_hack_success'); if (T === prpPov()) seatSfx('alm_hack_probe', 1); logMessage('HACK: 成功 — 敵に' + E.jp + ' (約' + Math.round(E.dur * mult / 60) + '秒)。今が奇襲の好機', 'system-msg'); hackBanner(true, '◆ ハック成功', '敵に ' + E.jp + ' (約' + Math.round(E.dur * mult / 60) + '秒) — 今が奇襲の好機'); matchRecEvent('hackOkP', T.x, T.y, '敵をハック: ' + E.jp); hackSessP = null; }
+    else { seatSfx('ew_hack_success', 0.9); att._hackSess = null; comThinkEvent('e', 'ハック成功 — 自機に' + E.jp, 'e' + att.uid); matchRecEvent('hackOkE', T.x, T.y, '敵にハックされた: ' + E.jp); if (toMe) { sfx('alm_status_comm'); logMessage('WARN: 侵入された — ' + E.jp + ' (約' + Math.round(E.dur * mult / 60) + '秒)', 'warning-msg'); hackBanner(false, '⚠ 侵入された', E.jp + ' (約' + Math.round(E.dur * mult / 60) + '秒) — 相手が来るかもしれない'); } }
 }
 function updateHackSessions() {
     if (_hackPulseCD > 0) _hackPulseCD -= gameSpeedFactor;
@@ -10003,7 +10019,7 @@ function _hackAim(sa, ox, oy, H) {
 function hackDecide(A) {
     const on = (id) => skillUse(A.side, id);
     // 第142弾: ハックのスキル。効果の選び方 — 逃げる/隠れている=目隠し(センサー) / 交戦中・至近=火器管制潰し / 相手がドローンを出している=通信妨害 / それ以外=機関停止の奇襲。侵入できない演算力でも「探り」で位置を暴ける
-    if (A.H >= 3.0 && A.credible) {
+    if (A.H >= HACK_ATTEMPT_H && A.credible) {
         const aim = _hackAim(A.sa, A.x, A.y, A.H);
         if (aim) {
             let eff = null;
@@ -10020,7 +10036,7 @@ function hackDecide(A) {
     }
     // 探り: 侵入できない演算力 (H<3) で、推定が「届く距離の内」にあり (外すと位置だけ割れるので距離が分かっている時だけ)・十分絞れている (幅/距離 ≤0.45)・
     //   直近に撃たれていない時に、推定の方向へ。応答の位置を得る。第143弾: 撃ちすぎの調整 — 探り専用の再使用 180秒・最新の方位が新しい時だけ (旧: 方位だけで40秒ごとに外れても撃った)
-    if (A.H < 3.0 && A.credible && A.probeOk && A.probeCdOk && on('hk_probe')) {
+    if (A.H < HACK_ATTEMPT_H && A.credible && A.probeOk && A.probeCdOk && on('hk_probe')) {
         const te = A.sa && (A.sa.fix || A.sa.ping || A.sa.motion) ? trackEstimate(A.sa, 0) : null;
         if (te && te.r > 0) { const d = Math.hypot(te.x - A.x, te.y - A.y); if (d >= 600 && d <= hackPulseRange(A.H) * 0.9 && te.r / d <= 0.45) return { ang: Math.atan2(te.y - A.y, te.x - A.x), d, eff: 'comm', probe: true }; }
     }
@@ -10087,12 +10103,12 @@ function useLinkCut(who) {
     const isP = who === 'p', me = isP ? player : who, now = _frameCount; if (!me) return;
     me._linkGuard = now + LINKCUT_GUARD; let n = 0;
     if (isP) {
-        for (const e of enemies) { if (e._hackSess && e._hackSess.tgt === player) { e._hackSess = null; n++; } if (e._hack) { e._hack = null; n++; } }
+        for (const e of enemies) { if (e._hackSess && e._hackSess.tgt === player) { e._hackSess = null; n++; hackBanner(true, '◇ 侵入を防いだ', '断線パルスで回線を切った'); } if (e._hack) { e._hack = null; n++; } }
         for (const d of playerDrones) if (d._underHack) { d._underHack = null; n++; }
         logMessage('EW: 断線パルス — ' + (n ? '侵入されていた回線' + n + '本を切った' : '回線を閉じた') + '。' + Math.round(LINKCUT_GUARD / 60) + '秒はハック波で侵入されない (電磁波が1秒漏れた)', 'system-msg');
         matchRecEvent('linkcutP', player.x, player.y, '自艦: 断線パルス' + (n ? ' (侵入を切った)' : ''));
     } else {
-        if (hackSessP && hackSessP.tgt === me) { hackSessP = null; n++; logMessage('HACK: 侵入が途切れた — 相手が断線パルスで回線を閉じた', 'warning-msg'); }
+        if (hackSessP && hackSessP.tgt === me) { hackSessP = null; n++; logMessage('HACK: 侵入が途切れた — 相手が断線パルスで回線を閉じた', 'warning-msg'); hackBanner(false, '✖ ハック失敗', '相手が断線パルスで回線を切った'); }
         comThinkEvent('e', '断線パルス — ' + (n ? '侵入されていた回線を切った' : '回線を閉じた'), 'e' + me.uid);
         matchRecEvent('linkcutE', me.x, me.y, '敵: 断線パルス');
     }
@@ -10193,16 +10209,13 @@ function drawAlertFx(ctx) {
         for (let i = 0; i < nb; i++) { const y = T + R() * (B - T), h = 2 + R() * 10 * k, x = L + R() * (Rr - L) * 0.6, w = 40 + R() * (Rr - L) * 0.5;
             ctx.globalAlpha = 0.12 + 0.3 * k * R(); ctx.fillStyle = R() < 0.5 ? '#ff3fd0' : '#3cf0ff'; ctx.fillRect(x, y, w, h); }
         if (R() < 0.15 * k) { ctx.globalAlpha = 0.06 + 0.1 * k; ctx.fillStyle = '#ffffff'; ctx.fillRect(L, T, Rr - L, B - T); }
-        // 警告の箱 (何をすれば切れるか)
-        const A = S.att, deg = A ? compassDeg(Math.atan2(A.y - player.y, A.x - player.x)) : null, link = Math.round((S.link ?? 1) * 100);
-        const lines = ['⚠ 侵入されている ' + Math.round(u * 100) + '% — ' + (HACK_EFFECTS[S.effect] || {}).jp + ' (約' + Math.max(0, Math.ceil((S.need - S.p) / 60)) + '秒)', '回線の強さ ' + link + '%' + (deg !== null ? '・方位' + deg + '°から' : ''), '切る: 濃いヒッグス(70%以上)に入る / 離れて回線を0に / 断線パルス'];
-        const bw = Math.min(460, Rr - L - 20), bx = L + (Rr - L - bw) / 2, by = T + 12 + (THREATS.some(t => t.kind === 'beam') ? 30 : 0);
-        ctx.globalAlpha = 0.88; ctx.fillStyle = 'rgba(40,0,20,0.9)'; ctx.fillRect(bx, by, bw, 58); ctx.strokeStyle = '#ff3fd0'; ctx.lineWidth = 1.5; ctx.strokeRect(bx, by, bw, 58);
-        ctx.fillStyle = 'rgba(255,63,208,0.85)'; ctx.fillRect(bx, by + 56, bw * (1 - u), 2);
-        ctx.globalAlpha = 1; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-        ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = '#ffd0f0'; ctx.fillText(lines[0], bx + 8 + (R() < 0.1 * k ? 3 : 0), by + 5);
-        ctx.font = '11px sans-serif'; ctx.fillStyle = '#ffb0e0'; ctx.fillText(lines[1], bx + 8, by + 22); ctx.fillStyle = '#e8c8ff'; ctx.fillText(lines[2], bx + 8, by + 38);
     }
+    // ── 第193弾: ハックの進捗パネル (撃った側=シアン・撃たれた側=マゼンタ) と結果の表示 ──
+    { let by = T + 12 + (THREATS.some(t => t.kind === 'beam') ? 30 : 0);
+      const SS = S, AS = !_seatOn() ? hackSessP : null;
+      if (SS) { _drawHackPanel(ctx, L, Rr, by, SS, false, now); by += 82; }
+      if (AS && AS.tgt) { _drawHackPanel(ctx, L, Rr, by, AS, true, now); by += 82; }
+      _drawHackBanner(ctx, L, Rr, by - (SS || AS ? 0 : 0)); }
     // ── ミサイル接近: その方向の画面の縁が赤く脈打ち、矢印と文字 ──
     const cx = (L + Rr) / 2, cy = (T + B) / 2;
     for (const t of THREATS) {
@@ -10227,6 +10240,43 @@ function drawAlertFx(ctx) {
         ctx.fillStyle = 'rgba(30,6,48,0.9)'; ctx.fillRect(bx, by, tw, 22); ctx.strokeStyle = '#c86bff'; ctx.lineWidth = 1; ctx.strokeRect(bx, by, tw, 22);
         ctx.fillStyle = '#ecd2ff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(tx, (L + Rr) / 2, by + 11);
     }
+    ctx.restore();
+}
+function _drawHackPanel(ctx, L, Rr, by, S, mine, now) {
+    const col = mine ? '#66ddff' : '#ff3fd0', soft = mine ? '#a8ecff' : '#ffb0e0', bg = mine ? 'rgba(0,22,34,0.92)' : 'rgba(40,0,20,0.92)';
+    const u = Math.min(1, S.p / S.need), E = HACK_EFFECTS[S.effect] || {}, bw = Math.min(480, Rr - L - 20), bx = L + (Rr - L - bw) / 2, bh = 74;
+    const link = Math.round((S.link ?? 1) * 100), left = Math.max(0, Math.ceil((S.need - S.p) / 60)), flash = S.stageF && _frameCount - S.stageF < 24 ? 1 - (_frameCount - S.stageF) / 24 : 0;
+    ctx.save(); ctx.globalAlpha = 0.94; ctx.fillStyle = bg; ctx.fillRect(bx, by, bw, bh);
+    ctx.globalAlpha = 0.55 + 0.45 * flash; ctx.strokeStyle = col; ctx.lineWidth = 1.5 + flash * 1.5; ctx.strokeRect(bx, by, bw, bh);
+    ctx.globalAlpha = 1; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+    ctx.font = 'bold 13px sans-serif'; ctx.fillStyle = soft; ctx.fillText((mine ? '◆ ハック侵入中 — ' : '⚠ 侵入を受けている — ') + (E.jp || ''), bx + 10, by + 6);
+    ctx.textAlign = 'right'; ctx.font = 'bold 15px monospace'; ctx.fillStyle = col; ctx.fillText(Math.round(u * 100) + '%', bx + bw - 10, by + 5); ctx.textAlign = 'left';
+    // 4段の進捗バー (今の段は光が流れる)
+    const sx0 = bx + 10, sw = (bw - 20 - 9) / 4, sy = by + 27;
+    for (let k = 0; k < 4; k++) {
+        const x = sx0 + k * (sw + 3), seg = Math.max(0, Math.min(1, 4 * u - k));
+        ctx.globalAlpha = 0.28; ctx.fillStyle = col; ctx.fillRect(x, sy, sw, 9);
+        ctx.globalAlpha = 0.95; ctx.fillStyle = col; ctx.fillRect(x, sy, sw * seg, 9);
+        if (seg > 0 && seg < 1) { const gx = x + ((now * 1.6 + k * 0.17) % 1) * sw * seg; ctx.globalAlpha = 0.85; ctx.fillStyle = '#ffffff'; ctx.fillRect(Math.min(gx, x + sw * seg - 6), sy, 6, 9); }
+        ctx.globalAlpha = seg >= 1 ? 1 : seg > 0 ? 0.95 : 0.5; ctx.font = (seg > 0 && seg < 1 ? 'bold ' : '') + '10px sans-serif'; ctx.fillStyle = seg > 0 ? '#ffffff' : soft;
+        ctx.fillText((seg >= 1 ? '✓ ' : '') + HACK_STAGES[k], x, sy + 12);
+    }
+    ctx.globalAlpha = 1; ctx.font = '11px sans-serif'; ctx.fillStyle = soft;
+    if (mine) ctx.fillText('回線 ' + link + '% ・ 残り約' + left + '秒 ・ 成功の見込み ' + (S.chance >= 0.7 ? '高' : S.chance >= 0.45 ? '中' : '低') + ' ・ 相手が離れる/濃い霧/断線で中断', bx + 10, by + 56);
+    else { const A = S.att, deg = A ? compassDeg(Math.atan2(A.y - player.y, A.x - player.x)) : null; ctx.fillText('回線 ' + link + '%' + (deg !== null ? ' (方位' + deg + '°から)' : '') + ' ・ 残り約' + left + '秒 ・ 切る: 離れる / 濃いヒッグス / 断線パルス', bx + 10, by + 56); }
+    ctx.restore();
+}
+function _drawHackBanner(ctx, L, Rr, by) {
+    const b = _hackBanner; if (!b) return;
+    const t = performance.now(); if (t > b.until) { _hackBanner = null; return; }
+    const age = t - b.t0, fade = Math.min(1, (b.until - t) / 900), pop = Math.min(1, age / 220), col = b.ok ? '#3dffb0' : '#ff5a6a', bg = b.ok ? 'rgba(0,36,26,0.94)' : 'rgba(44,4,12,0.94)';
+    const bw = Math.min(520, Rr - L - 20), bx = L + (Rr - L - bw) / 2, bh = 52, jit = age < 500 ? (Math.random() - 0.5) * 6 * (1 - age / 500) : 0;
+    ctx.save(); ctx.globalAlpha = fade * 0.96; ctx.fillStyle = bg; ctx.fillRect(bx + jit, by, bw, bh);
+    ctx.globalAlpha = fade; ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.strokeRect(bx + jit, by, bw, bh);
+    if (age < 380) { ctx.globalAlpha = fade * (1 - age / 380) * 0.5; ctx.fillStyle = col; ctx.fillRect(bx, by, bw, bh); }
+    ctx.globalAlpha = fade; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+    ctx.font = 'bold ' + Math.round(14 + 3 * (1 - pop)) + 'px sans-serif'; ctx.fillStyle = col; ctx.fillText(b.head, bx + 12 + jit, by + 6);
+    ctx.font = '11px sans-serif'; ctx.fillStyle = '#e8f4f0'; ctx.fillText(b.sub, bx + 12 + jit, by + 30, bw - 24);
     ctx.restore();
 }
 function drawHackFx(ctx) {
