@@ -18722,7 +18722,7 @@ function stratActorE(e) {
         hold: () => { if (e.state === 'moving') e.setTarget(e.x, e.y); e._roam = null; },
         can: (k) => k === 'noise' ? (e.itemNoise || 0) > 0 : k === 'spray' ? (e.itemSpray || 0) > 0 : k === 'repair' ? (e.itemRepair || 0) > 0 : (e.itemBlow || 0) > 0,
         use: (k) => { if (k === 'noise') enemyUseNoise(e, e.angle + (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2); else if (k === 'spray') enemyUseSpray(e); else if (k === 'repair') { e.itemRepair--; e._kitT = REPAIR_KIT_TIME; matchRecEvent('repairE', e.x, e.y, '敵: リペアキットを使う'); } else { e.itemBlow--; useFogBlow('e', e.x, e.y); } },
-        have: (t) => !drOK('e', t) ? false : t === 'build' ? (e.turretStock || 0) > 0 && !liveK('turret') : t === 'scout' ? (e.scoutStock || 0) > 0 && !liveK('scout') : (e.droneStock || 0) > 0 && enemies.filter(f => f.type === 'fighter' && !f._kind && f.hp > 0).length < 2,
+        have: (t) => !drOK('e', t) ? false : t === 'build' ? (e.turretStock || 0) > 0 && !liveK('turret') : t === 'scout' ? (e.scoutStock || 0) > 0 && !liveK('scout') : (e.droneStock || 0) > 0 && droneCtrlFits('e', e, 'attack'), // 第198弾: 旧は2機まで固定 → 管制枠
         mobile: (t) => t === 'scout' ? liveK('scout') : t === 'attack' ? liveF() : t === 'build' ? liveK('turret') : liveK('mech'),
         captured: () => enemies.some(f => f.type === 'fighter' && f._hacked && f.hp > 0 && !f._dying),
         techBuilding: () => e._techT > 0, mat: () => enemyMat, canBuild: () => !(e._techT > 0) && droneCtrlFits('e', e, 'mech'),
@@ -18755,7 +18755,7 @@ function enemyStratStep(e, P) {
             if (!site) { e._strat = null; e._stratCD = now + 1800; return false; }
             S.site = site; S.until = now + 7200 + Math.random() * 7200;
             if ((e.scoutStock || 0) > 0 && skillOn('e', 'dr_scout') && !enemies.some(f => f.type === 'fighter' && f._kind === 'scout' && f.hp > 0)) { e.scoutStock--; spawnEnemyDrone(e, 'scout'); }
-            if ((e.droneStock || 0) > 0 && skillOn('e', 'dr_ftr') && enemies.filter(f => f.type === 'fighter' && !f._kind && f.hp > 0).length < 2) { e.droneStock--; _eLaunchFighter(e, { x: site.x, y: site.y }); }
+            if ((e.droneStock || 0) > 0 && skillOn('e', 'dr_ftr') && droneCtrlFits('e', e, 'attack')) { e.droneStock--; _eLaunchFighter(e, { x: site.x, y: site.y }); }
             e._outpost = { x: site.x, y: site.y, until: S.until };
             comThinkEvent('e', '戦略「前哨」(約' + Math.round((S.until - now) / 60) + '秒): ' + (site.type === 'colony' ? 'コロニー' : 'ノード') + 'の中継圏 (' + _dirTxt(e.x, e.y, site.x, site.y) + ') に艦載機・哨戒機を置いて見張らせる — 自分は別の仕事を続ける', 'e' + e.uid);
             return false;
