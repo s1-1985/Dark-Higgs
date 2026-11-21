@@ -3284,3 +3284,26 @@ body.in-game #action-popover .act-icon-btn span { font-family: Orbitron, sans-se
 .com-box .db-btns { background: #050b10 !important; margin: 0 -14px -6px; padding: 8px 14px; border-top: 1px solid rgba(0,255,170,0.25); box-shadow: 0 -8px 10px #050b10; }
 .com-box .db-btns { bottom: -12px; margin-bottom: -12px; padding-bottom: 14px; }
 @media (max-height: 430px) { .com-box .db-btns { bottom: -6px; margin-bottom: -6px; padding-bottom: 8px; } }
+/* 第187弾: QTE中の手動操艦の表示 */
+#cap-manual { position: fixed; left: 50%; top: 58px; transform: translateX(-50%); z-index: 59; display: none; pointer-events: auto; cursor: pointer; padding: 5px 14px; font: 600 12px 'Share Tech Mono', monospace; letter-spacing: .08em; color: #ffe08a; background: rgba(60,40,0,.78); border: 1px solid #ffb84d; clip-path: polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px); }
+/* 第187弾: スキル・マップの設定を見やすく */
+.com-sktabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 4px; }
+.com-sktab { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; font-size: 12px; border: 1px solid rgba(160,220,210,0.3); background: rgba(0,24,22,0.6); color: #a8d8cc; cursor: pointer; clip-path: polygon(6px 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%,0 6px); }
+.com-sktab i { font-style: normal; font-size: 10px; color: #78a89c; }
+.com-sktab.on { border-color: #00ffaa; color: #e6fff6; background: rgba(0,90,66,.55); }
+.com-sktab.on i { color: #7fe8c8; }
+.com-sktab.off { opacity: .55; }
+.com-side[data-side="e"] .com-sktab.on { border-color: #ffa64d; background: rgba(100,50,0,.55); }
+.com-sk-g { display: flex; align-items: center; gap: 6px; margin: 6px 0 4px; font-size: 12px; color: #9fd8c8; }
+.com-sk-g span { font-weight: 700; margin-right: auto; }
+.com-skgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 6px; }
+.com-skgrid .com-sk { margin: 0; height: 100%; }
+.com-aff { padding: 0 4px; border-radius: 2px; background: rgba(120,140,150,.2); }
+.com-aff.hi { background: rgba(60,200,120,.2); } .com-aff.lo { background: rgba(200,90,90,.2); }
+.com-areabar { display: flex; height: 12px; margin: 4px 0 6px; border: 1px solid rgba(160,220,210,.3); background: #02080a; overflow: hidden; }
+.com-areabar i { display: block; height: 100%; transition: width .12s; }
+.com-areabar .a-cloud { background: #6b3fa8; } .com-areabar .a-rock { background: #7d776c; } .com-areabar .a-empty { background: #1d3a5a; }
+.com-mapgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; }
+.com-mapcol .com-sec.sub:first-child { margin-top: 4px; }
+@media (max-width: 760px) { .com-skgrid, .com-mapgrid { grid-template-columns: 1fr; } }
+.part-card.ai-rec { outline: 2px solid #ffd35c; box-shadow: 0 0 14px rgba(255,211,92,.45); }

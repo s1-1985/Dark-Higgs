@@ -64,6 +64,8 @@ let higgsViewOff = false;
 let comDemo = false;     // 自機COMが操作中
 let thinkLogOn = true;   // 思考ログ欄を出すか
 var humanCfgOn = false; // 第161弾: プレイヤーが操作する試合でも 試合の設定 (敵の性格・積み込み・マップ・スキル) を使う
+// 第187弾: 観戦のみ (COM対戦で艦長の判断=QTEでない時)。QTE (AI操艦) 中は、プレイヤーの操作を受け付ける
+function obsOnly() { return comDemo && !capMode; }
 function cfgMatch() { return (comDemo || humanCfgOn) && comCfg ? comCfg : null; }
 let comCfg = null;       // { ship, enemy, mode, pp, ep, pPreset, ePreset, higgsView, think } (ロビーの設定画面で決める)
 let _com = null;         // 自機COMの作業メモ (startGame/generateSector でリセット)
@@ -2829,7 +2831,7 @@ canvas.addEventListener('mousedown', (e) => {
 
 // Double-click to set waypoint
 canvas.addEventListener('dblclick', (e) => {
-    if (!player || player.hp <= 0 || comDemo) return; // 第19弾: COM対戦デモ中は自機COMが操艦する
+    if (!player || player.hp <= 0 || obsOnly()) return; // 第19弾: COM対戦デモ中は自機COMが操艦する
     if (dirSonarPendingFire) return; // sonar takes priority
     const { x: worldX, y: worldY } = screenToWorld(e.clientX, e.clientY);
     const clickedEnemy = enemies.find(en => en.visible && Math.hypot(en.x - worldX, en.y - worldY) < en.radius * 2);
@@ -2867,7 +2869,7 @@ canvas.addEventListener('wheel', e => {
 }, { passive: false });
 canvas.addEventListener('contextmenu', e => {
     e.preventDefault();
-    if (!player || player.hp <= 0 || !gameLoopRunning || comDemo) return;
+    if (!player || player.hp <= 0 || !gameLoopRunning || obsOnly()) return;
     if (player._weaponJamTimer > 0) { logMessage('WEP: 火器管制ダウン — 復旧まで発砲不能', 'warning-msg'); return; }
     const wType = document.getElementById('weapon-select')?.value;
     if (wType !== 'missile' && wType !== 'beam') return;
@@ -7449,7 +7451,7 @@ function _syncAiBtn(force) {
     b.querySelector('.ai-val').textContent = AI_LEVELS[i].jp;
     b.classList.toggle('hot', i >= 3); b.classList.toggle('low', i <= 1);
 }
-document.getElementById('btn-ai-level')?.addEventListener('click', (e) => { e.stopPropagation(); if (!comDemo) cycleAiLevel(); });
+document.getElementById('btn-ai-level')?.addEventListener('click', (e) => { e.stopPropagation(); if (!obsOnly()) cycleAiLevel(); });
 function _syncMTPanel() {
     const pn = document.getElementById('mt-panel');
     if (!pn) return;
@@ -8899,10 +8901,11 @@ function takeLoot(o, src) { // 自機 (人が選んだ時・自機COMが選ん�
 }
 function offerLoot(src) {
     const A = lootActor('p'), c = lootPick4(A);
-    if (comDemo) { takeLoot(lootChoose(A, c), src); return; }
+    if (comDemo) { takeLoot(lootChoose(A, c), src); return; } // 第189弾: QTE中もAIが選ぶ (オーナー「基本はAIが勝手に選ぶ」)
     if (playReplay && playReplay.inp) return;
-    if (_draft) { _draftQ.push({ src, loot: c }); return; }
-    _draft = { src, loot: c };
+    const rec = capMode ? (lootChoose(A, c) || {}).label : null; // 第188弾: QTE中は自分で選ぶ (AIの推奨に ★)
+    if (_draft) { _draftQ.push({ src, loot: c, rec }); return; }
+    _draft = { src, loot: c, rec };
     _openDraftUI();
 }
 function enemyOfferLoot(e, src) {
@@ -8916,8 +8919,9 @@ function offerDraft(src) {
     if (!c.length) { logMessage('部品: ' + _SRC_JP[src] + ' — 新しい部品は無かった (全部持っている)', 'system-msg'); return; }
     if (comDemo) { takePart(comPickPart(c)); return; }
     if (playReplay && playReplay.inp) return; // 第156弾: 人の操作の再生では 選んだ内容を記録から入れる (画面は開かない)
-    if (_draft) { _draftQ.push({ src, c }); return; }
-    _draft = { src, c };
+    const rec = capMode ? comPickPart(c) : null; // 第188弾: QTE中は自分で選ぶ (AIの推奨に ★)
+    if (_draft) { _draftQ.push({ src, c, rec }); return; }
+    _draft = { src, c, rec };
     _openDraftUI();
 }
 function takePart(id) {
@@ -9468,14 +9472,14 @@ function _openDraftUI() {
         document.getElementById('draft-title').textContent = '積み荷を拾った — ' + _SRC_JP[_draft.src];
         document.getElementById('draft-sub').textContent = '4つから1つ選ぶ (空き枠 ' + Math.max(0, lootFreeSlots(lootActor('p'))) + ')。積み込み用のアイテム。見送ることもできる';
         const bx = document.getElementById('draft-cards'); bx.innerHTML = '';
-        for (const o of _draft.loot) { const b = document.createElement('button'); b.className = 'btn'; b.style.cssText = 'min-width:130px;min-height:64px;margin:4px;font-size:14px'; b.textContent = o.label;
+        for (const o of _draft.loot) { const b = document.createElement('button'); b.className = 'btn'; b.style.cssText = 'min-width:130px;min-height:64px;margin:4px;font-size:14px'; b.textContent = (_draft.rec && o.label === _draft.rec ? '★ AIの推奨\n' : '') + o.label; if (_draft.rec && o.label === _draft.rec) b.style.whiteSpace = 'pre-line';
             b.addEventListener('click', () => { const d = _draft; _closeDraftUI(); takeLoot(o, d.src); _nextDraft(); }); bx.appendChild(b); }
         ov.classList.remove('hidden'); return;
     }
     document.getElementById('draft-title').textContent = '部品を拾った — ' + _SRC_JP[_draft.src];
     document.getElementById('draft-sub').textContent = '3つから1つ選ぶ (取り付け枠 ' + partSlotsUsed() + '/' + partSlotsMax() + (partsSpare.length ? '・予備' + partsSpare.length : '') + ')。枠が満杯なら予備に入り、自分のコロニーのドックで付け替えられる';
     const box = document.getElementById('draft-cards'); box.innerHTML = '';
-    for (const id of _draft.c) box.appendChild(_partCard(id, 'これにする', () => { const d = _draft; _closeDraftUI(); takePart(id); _nextDraft(); }));
+    for (const id of _draft.c) { const cd = _partCard(id, _draft.rec === id ? '★ AIの推奨 — これにする' : 'これにする', () => { const d = _draft; _closeDraftUI(); takePart(id); _nextDraft(); }); if (_draft.rec === id) cd.classList.add('ai-rec'); box.appendChild(cd); }
     ov.classList.remove('hidden');
 }
 function _closeDraftUI() { const ov = document.getElementById('draft-overlay'); if (ov) ov.classList.add('hidden'); _draft = null; }
@@ -10108,7 +10112,7 @@ function hackCancelPending(silent) {
     if (!silent) logMessage('HACK: ハック波 — キャンセル。', 'system-msg');
 }
 function selectHackWave(effect) { // 項目を選ぶ (もう一度押すと外す)
-    if (!player || player.hp <= 0 || comDemo || playReplay) return;
+    if (!player || player.hp <= 0 || obsOnly() || playReplay) return;
     hackSel = hackSel === effect ? null : effect;
     if (hackPending) hackCancelPending(true);
     _hackSelUi();
@@ -10117,7 +10121,7 @@ function selectHackWave(effect) { // 項目を選ぶ (もう一度押すと外�
 }
 function hackNeedSel() { logMessage('HACK: ハックする項目 (火器管制・機関停止・センサー・通信) を選んでから「ハック」を押す — 電子戦のポップオーバーで選ぶ', 'warning-msg'); const g = document.getElementById('action-popover'); if (g) { g.classList.add('shake'); setTimeout(() => g.classList.remove('shake'), 500); } sfxUI('ui_error'); }
 function armHackWave() { // 「ハック」ボタン: 撃つ構え (もう一度でキャンセル) — 索敵の指向性ソナーボタンと同じ
-    if (!player || player.hp <= 0 || comDemo || playReplay) return;
+    if (!player || player.hp <= 0 || obsOnly() || playReplay) return;
     if (hackPending) { hackCancelPending(); return; }
     if (_hackPulseCD > 0) { logMessage('HACK: ハック波は再使用まで' + Math.ceil(_hackPulseCD / 60) + '秒', 'warning-msg'); sfxUI('ui_error'); return; }
     if (!hackSel) { hackNeedSel(); return; }
@@ -10131,7 +10135,7 @@ function armHackWave() { // 「ハック」ボタン: 撃つ構え (もう一度
 }
 document.getElementById('btn-hackw-fire')?.addEventListener('click', (e) => { e.stopPropagation(); armHackWave(); });
 function selectDroneHack() {
-    if (!player || player.hp <= 0 || comDemo || playReplay) return;
+    if (!player || player.hp <= 0 || obsOnly() || playReplay) return;
     if (hackPending) hackCancelPending(true);
     const lf = hackLevel('fighter');
     if (!lf.s2) { logMessage('HACK: ドローンへ侵入するには演算力' + HACK_THR.fighter.s2 + '以上が要る (今' + (Math.round(lf.H * 10) / 10) + ')。下の「演算力」をタップで内訳', 'warning-msg'); return; }
@@ -10167,7 +10171,7 @@ function tryFireHackPending(wx, wy) {
 document.querySelectorAll('.hackw-btn').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); selectHackWave(b.dataset.eff); }));
 function lpmSelectHack(effect) {
     hideLongPressMenu();
-    if (!_lpmWorld || !player || player.hp <= 0 || comDemo) return;
+    if (!_lpmWorld || !player || player.hp <= 0 || obsOnly()) return;
     if (_hackPulseCD > 0) { logMessage('HACK: ハック波は再使用まで' + Math.ceil(_hackPulseCD / 60) + '秒', 'warning-msg'); return; }
     const H = hackPower('player');
     logMessage('HACK: ハック波を発射 — 方位' + compassDeg(Math.atan2(_lpmWorld.y - player.y, _lpmWorld.x - player.x)) + '° (' + HACK_EFFECTS[effect].jp + '・演算力' + (Math.round(H * 10) / 10) + '・届く距離' + Math.round(hackPulseRange(H)) + 'u)', 'system-msg');
@@ -10902,7 +10906,7 @@ function checkPassiveDetection() {
 const UNTRACKED_LINES = 2, TRACK_LINES_MAX = 8, TRACK_LINE_MERGE = 400; // 第18弾: 表示の整理 (オーナー合意 2026-10-25)
 // ═══ 第174弾: 慣性の軌跡 — 重い艦は舵を切っても すぐには曲がらない。今の速さ・旋回の速さ・加速のまま進路へ向かった時の軌跡を 点線で 約12秒先まで (2秒ごとに印) ═══
 function drawInertiaPath(ctx) {
-    if (!player || player.hp <= 0 || playerCoasting || !(player._steerF >= _frameCount - 3) || player.state !== 'moving' || comDemo) return;
+    if (!player || player.hp <= 0 || playerCoasting || !(player._steerF >= _frameCount - 3) || player.state !== 'moving' || obsOnly()) return;
     const tx = player.targetX, ty = player.targetY; if (!(tx === tx) || !(ty === ty)) return;
     const cls = gameState.shipType, inv = 1 / camera.zoom;
     let x = player.x, y = player.y, a = player.angle, v = player.currentSpeed, tsv = player._steerTs || v;
@@ -11469,7 +11473,7 @@ function showLongPressMenu(sx, sy) {
 (() => { // 第46弾: 全機帰還
     const b = document.getElementById('btn-drone-recall');
     if (b) b.addEventListener('click', () => {
-        if (comDemo || !player || player.hp <= 0) return;
+        if (obsOnly() || !player || player.hp <= 0) return;
         const ts = ['attack', 'mech', 'scout'].filter(t => playerDrones.some(d => d.type === t && d.hp > 0));
         if (!ts.length) { logMessage('DRONE: 出ている動くドローンはいない', 'system-msg'); return; }
         for (const t of ts) droneOrder(t, 'return', player.x, player.y);
@@ -11513,11 +11517,11 @@ function droneOrder(type, kind, x, y, no) {
 (() => {
     const lb = document.getElementById('lpm-lures');
     if (lb) lb.addEventListener('click', (ev) => {
-        if (ev.target.closest('button[data-mine]')) { hideLongPressMenu(); if (!comDemo) placeMine(); return; } // 第32弾
+        if (ev.target.closest('button[data-mine]')) { hideLongPressMenu(); if (!obsOnly()) placeMine(); return; } // 第32弾
         const b = ev.target.closest('button[data-lure]');
         if (!b || !_lpmWorld || !player) return;
         hideLongPressMenu();
-        if (comDemo) return;
+        if (obsOnly()) return;
         deployDrone(b.dataset.lure, _lpmWorld.x, _lpmWorld.y);
     });
 })();
@@ -11535,7 +11539,7 @@ function droneOrder(type, kind, x, y, no) {
         const b = ev.target.closest('button[data-t]');
         if (!b || !_lpmWorld || !player) return;
         hideLongPressMenu();
-        if (comDemo) return;
+        if (obsOnly()) return;
         droneOrder(b.dataset.t, b.dataset.k, _lpmWorld.x, _lpmWorld.y, b.dataset.no ? +b.dataset.no : 0);
     });
 })();
@@ -11548,7 +11552,7 @@ function orderMove(x, y, clearManual) { if (!player) return; player.targetEntity
 function lpmSelectMove() {
     hideLongPressMenu();
     if (!_lpmWorld || !player) return;
-    if (comDemo) { logMessage('COM対戦デモ中は自機COMが操艦する (観戦のみ)', 'system-msg'); return; }
+    if (obsOnly()) { logMessage('COM対戦デモ中は自機COMが操艦する (観戦のみ)', 'system-msg'); return; }
     orderMove(_lpmWorld.x, _lpmWorld.y, false);
     createClickEffect(_lpmWorld.x, _lpmWorld.y, '#00ffaa');
     const dist = Math.hypot(_lpmWorld.x - player.x, _lpmWorld.y - player.y);
@@ -11574,7 +11578,7 @@ function lpmSelectFire() {
 // 第43弾: 長押しメニュー「指向ソナー」— 押した点の方向へすぐ撃つ (旧: 索敵 → 指向ソナー → 方向を指す の3手)
 function lpmSelectDirSonar() {
     hideLongPressMenu();
-    if (!_lpmWorld || !player || player.hp <= 0 || comDemo) return;
+    if (!_lpmWorld || !player || player.hp <= 0 || obsOnly()) return;
     if (!sonarBand) { sonarNeedBand(); return; }
     fireDirectionalSonar(Math.atan2(_lpmWorld.y - player.y, _lpmWorld.x - player.x));
 }
@@ -11592,7 +11596,7 @@ function toggleAutoAttack() {
 // ビームはチャージ専用 — 2秒溜めてから、その時の向きで撃つ (溜めている間は熱/EM/ヒッグスが漏れる)
 function freeFireAt(wx, wy) {
     if (!player || player.hp <= 0) return;
-    if (comDemo) return;
+    if (obsOnly()) return;
     if (player._weaponJamTimer > 0) { logMessage('WEP: 火器管制ダウン — 復旧まで発砲不能', 'warning-msg'); return; }
     const wType = document.getElementById('weapon-select')?.value;
     if (!playerHasWeapon(wType)) { logMessage('WEP: ' + (_WPN_NAME[wType] || wType) + 'は積んでいない', 'warning-msg'); return; } // 第48弾
@@ -14614,6 +14618,7 @@ function enemyItemsStep(e) {
     { const F = itemFactsE(e), act = itemReactPlan(F); // 第148弾: 反応の搭載品・複合・戦術を 全部候補にして 状況と性格の適性で点を付け、高い順に試す (固定の順序をやめた)
       const tur = () => enemies.find(f => f.type === 'fighter' && f._kind === 'turret' && f._home === e && f.hp > 0);
       if (tacticDecide(F, stratActorE(e), { doI: (a) => itemDoE(e, a), slip: (ang) => _skillSlipE(e, ang), bait: (k, x, y) => { if (k === 'sos' && e.lureSOS > 0) { e.lureSOS--; launchLure('e', 'sos', e.x, e.y, x, y); } else if (e.lureShip > 1) { e.lureShip--; launchLure('e', 'ship', e.x, e.y, x, y); } }, fake: (x, y) => { if (e.itemFake > 0) { e.itemFake--; placeFakeCache('e', x, y); } }, turret: tur, sonar: (pw) => { firePingFromEnemy(e, { omni: true, power: pw }); return true; }, focus: (k, sec) => { e._tacFocusUntil = _frameCount + sec * 60; setEnemyFocus(e, k); }, cover: () => findCoverSpot(e.x, e.y, 6000) }, act, (a) => itemDoE(e, a))) return; }
+    if (!window.__noEnemyAuto) enemyAutoPlay(e); // 第190弾: 自機AIと同じ手駒の自律運用
     // ビーコン: 潜伏を始める時、隠れ場所と反対へ1つ置く (敵の耳をそちらへ向ける)
     if (e._hideT > 0 && !e._beaconDone && e.itemBcn) {
         const k = Object.keys(e.itemBcn).find(b => e.itemBcn[b] > 0);
@@ -19103,17 +19108,17 @@ function syncCombatBar() {
     const bar = document.getElementById('combat-bar');
     if (!bar) return;
     bar.querySelectorAll('.cb-grp').forEach(g => g.querySelectorAll('button').forEach(b => b.classList.toggle('on', combatMode[g.dataset.k] === b.dataset.v)));
-    bar.classList.toggle('com', !!comDemo);
+    bar.classList.toggle('com', obsOnly());
 }
 function setCombatMode(k, v) {
-    if (comDemo || !(k in combatMode)) return;
+    if (obsOnly() || !(k in combatMode)) return;
     combatMode[k] = v;
     syncCombatBar();
     if (typeof playSound === 'function') sfxUI('ui_select');
     logMessage('操艦: 戦闘モード — ' + _CM_JP[combatMode.mode] + '・間合い' + _CM_JP[combatMode.range] + '・' + _CM_JP[combatMode.prio] + '優先' + (combatMode.mode === 'manual' ? ' (移動は自分で指示)' : ''), 'system-msg');
 }
 (() => { // 第49弾: 戦闘バーの目標の操作
-    const on = (id, f) => document.getElementById(id)?.addEventListener('click', (ev) => { ev.stopPropagation(); if (!comDemo && player && player.hp > 0) f(); });
+    const on = (id, f) => document.getElementById(id)?.addEventListener('click', (ev) => { ev.stopPropagation(); if (!obsOnly() && player && player.hp > 0) f(); });
     on('cb-next', () => cycleLockTarget(1)); on('cb-prev', () => cycleLockTarget(-1));
     on('cb-clear', () => clearLockTarget()); on('cb-fire', () => issueFireOrder());
 })();
@@ -19588,7 +19593,7 @@ function capTacticGate(F, cands) {
     return { cand: cands.find(c => c.id === cg.id), none: !cands.find(c => c.id === cg.id) };
 }
 // いま打てる一手: 静かな間に、持ち物と性格で選んだ「仕掛け」を提案する (各スキルの適性で並ぶ)
-function capPlayList(c, P) {
+function capPlayList(c, P, te) {
     const st = (k) => (cargo.stock && cargo.stock[k]) || 0, out = [], now = _frameCount;
     const ang = () => Math.random() * Math.PI * 2, spot = (d) => { const a = ang(); return clampToMapCircle(player.x + Math.cos(a) * d, player.y + Math.sin(a) * d, 1500); };
     const add = (id, skill, label, sub, run, base) => out.push({ id, skill, label, sub: _capTag(P, skill) + ' ' + sub, run, base: base || 1 });
@@ -19607,14 +19612,108 @@ function capPlayList(c, P) {
     add('analysis', 'tc_focus_scan', '解析に演算力を回す', '40秒 解析重視 — 信号の正体と位置が早く絞れる/速さは落ちる', () => _tacFocusP(c, 'analysis', 40), 0.8);
     add('sensor', 'tc_focus_sensor', '探知に演算力を回す', '40秒 探知重視 — 遠くまで聞こえる/漏れる信号も増える', () => _tacFocusP(c, 'sensor', 40), 0.7);
     add('weapon', 'tc_focus_weapon', '兵装に演算力を回す', '40秒 兵装重視 — 装填が速い/他が弱くなる', () => _tacFocusP(c, 'weapon', 40), 0.6);
+    // 第188弾: ドローン・アイテムを積極的に — 戦闘機・砲台・デコイ・ノイズ・リペア・呼び戻し。戦略に応じて重みが変わる
+    const est = capEstPos(te), hurt = player.hp / player.maxHp < 0.85;
+    if (st('attack') > 0 && drOK('p', 'attack')) {
+        if (est) add('ftr_strike', 'cb_decoy_drone', '戦闘機を出して攻撃させる', (est.vis ? '見えている相手' : '推定位置') + 'へ戦闘機を送る — 手数が増える/母艦の位置は変わらない・撃墜されることもある', () => { deployDrone('attack'); droneOrder('attack', 'attack', est.x, est.y); }, 1.2);
+        else add('ftr_escort', 'dr_ftr', '戦闘機を出して護衛させる', '艦の周りを守らせる — 近づく敵や艦載機を迎撃/信号が増える', () => deployDrone('attack'), 0.9);
+    }
+    if (st('build') > 0 && drOK('p', 'build')) add('turret', 'dr_turret', '砲台を据える', '艦の近くに設置 (射程2200u) — 近づく相手を撃つ/設置中は動けず信号が出る', () => deployDrone('build'), 0.9);
+    if (st('decoy') > 0 && est) add('decoy', 'dc_mirror', 'デコイを敵の方へ流す', '熱源を放って相手を引きつける — 狙いが逸れる/信号が増える', () => { const a = Math.atan2(est.y - player.y, est.x - player.x), t = clampToMapCircle(player.x + Math.cos(a + 0.5) * 2500, player.y + Math.sin(a + 0.5) * 2500, 1500); _comUseItem('decoy', t.x, t.y); }, 1.0);
+    if (st('noise') > 0) add('noise', 'dc_silent', 'ノイズメーカーを流す', '偽の音源を走らせる — 相手が音を取り違える/自分の位置は変わらない', () => { player.targetEntity = null; useNoise(est ? Math.atan2(player.y - est.y, player.x - est.x) + (Math.random() - 0.5) : undefined); }, 0.9);
+    if (st('repair') > 0 && hurt && !(_frameCount - (player._lastHitF ?? -1e9) < 600)) add('repair', 'it_repair', 'リペアキットで修理', '6秒かけて耐久+700 — 撃たれていない今のうちに/修理中は熱とEMが漏れる', () => _comUseItem('repair'), 1.6);
+    if (st('flash') > 0 && est && est.vis) add('flash', 'cb_flash_strike', '閃光弾で目を焼く', '半径2500uの敵のセンサーを5秒焼く — 先制のチャンス/自分の位置が見える', () => _comUseItem('flash'), 0.8);
+    const far = playerDrones.filter(d => d.hp > 0 && (d.type === 'attack' || d.type === 'mech' || d.type === 'scout') && Math.hypot(d.x - player.x, d.y - player.y) > 3500);
+    if (far.length && drOK('p', 'attack')) add('recall', 'dr_recall', 'ドローンを呼び戻す', '遠くのドローン' + far.length + '機を母艦へ — 通信が切れる前に/偵察は止まる', () => { for (const t of ['attack', 'mech', 'scout']) droneOrder(t, 'return', player.x, player.y); }, 0.7);
+    // 戦略に応じた重み
+    const sid = c.st && c.st.id, B = CAP_STRAT_BOOST[sid];
+    if (B) for (const a of out) if (B[a.id]) { a.base *= B[a.id]; a.strat = true; }
     return out;
 }
-function capPlayGate(c, P) {
-    const A = capPlayList(c, P);
+// 第189弾 (オーナー「基本はAIが勝手に選ぶ・AIに多様性を」): QTE中のAIが、性格 (スキルの適性)・戦略・状況で 重みつきの乱数で手駒 (ドローン・アイテム・演算力) を自分の判断で使う。最大の一つを選ぶのでなく、直前と同じ物は避けて散らす
+var _capAutoF = 0, _capAutoLast = '';
+// 手駒の選び方は 自機AI・敵COMで同じ関数 (第190弾): 重み = 基本値 × スキル適性^1.2 × 乱数、直前と同じ物は×0.25。スキルをOFFにした物は選ばない
+function autoPlayChoose(A, P, side, last) {
+    A = A.filter(a => skillOn(side, a.skill));
+    if (!A.length) return null;
+    const W = A.map(a => Math.max(0.02, a.base * Math.pow(skillAff(P, a.skill), 1.2) * (a.id === last ? 0.25 : 1) * (['listen', 'sonar'].includes(a.id) ? 0.55 : 1) * (0.5 + Math.random())));
+    let r = Math.random() * W.reduce((x, y) => x + y, 0), pick = A[0];
+    for (let i = 0; i < A.length; i++) { r -= W[i]; if (r <= 0) { pick = A[i]; break; } }
+    if (pick.id === 'listen' && Math.random() < 0.5) return null; // 「聴く」ばかりにならないよう半分は見送る
+    return pick;
+}
+const AUTO_FIGHT_IDS = ['ftr_strike', 'ftr_escort', 'turret', 'decoy', 'noise', 'repair', 'flash', 'smoke', 'spray', 'recall'];
+function capAutoPlay(c, P, fight, te) {
+    const now = _frameCount;
+    if (now < _capAutoF) return false;
+    _capAutoF = now + 1100 + Math.random() * 1100; // 18〜37秒に1回
+    const A = capPlayList(c, P, te).filter(a => !['analysis', 'sensor', 'weapon'].includes(a.id) && (!fight || AUTO_FIGHT_IDS.includes(a.id))); // 演算力の切替は戦術 (tacticRules) の担当
+    const pick = autoPlayChoose(A, P, 'p', _capAutoLast);
+    if (!pick) return false;
+    _capAutoLast = pick.id; pick.run();
+    comThinkEvent('p', 'AI: ' + pick.label + (c.st && STRAT_REG[c.st.id] ? ' (方針「' + STRAT_REG[c.st.id].jp + '」)' : '') + ' — ' + pick.sub.replace(/^\S+ /, ''));
+    if (capMode && typeof uiToast === 'function') uiToast('AI: ' + pick.label, false);
+    return true;
+}
+// 第190弾 (オーナー「敵COMにも同じ自律運用を」): 敵COMも 同じ選び方 (autoPlayChoose)・同じ頻度 (18〜37秒に1回)・同じ条件 (静かな間 / 相手が見えている間・取りに行く物の最中と隠れている間は除く) で
+// 手駒 (艦載機・哨戒機・砲台・偽信号・偽コンテナ・ビーコン・煙幕・散布・閃光・ノイズ・修理・呼び戻し・弱いソナー) を使う。持ち物と実行だけが敵の在庫・API
+function enemyAutoPlay(e) {
+    const now = _frameCount;
+    if (now < (e._autoPlayF || 0) || e.type === 'fighter' || e.hp <= 0 || e._dying || e._techT > 0 || e._asm) return false;
+    const A = stratActorE(e), P = _enemyPersonality(e) || {};
+    if (e._item || e._hideT > 0 || e._pursue) return false;
+    const hitAgo = e._lastHitF ? now - e._lastHitF : 1e9, vis = e.detectionTimer > 60 && !!player && player.hp > 0;
+    const calm = !vis && A.expo <= 2 && !A.engaged(), fightOk = vis && A.expo <= 3;
+    if (!calm && !fightOk) return false;
+    e._autoPlayF = now + 1100 + Math.random() * 1100;
+    const ang = () => Math.random() * Math.PI * 2, spot = (d) => { const a = ang(); return clampToMapCircle(e.x + Math.cos(a) * d, e.y + Math.sin(a) * d, 1500); };
+    const est = vis ? { x: player.x, y: player.y, vis: true } : (() => { const q = A.est(); return q && q.r < 4500 ? { x: q.x, y: q.y, vis: false } : null; })();
+    const out = [], add = (id, skill, label, sub, run, base) => out.push({ id, skill, label, sub, run, base: base || 1 });
+    const liveK = (k) => enemies.some(f => f.type === 'fighter' && f._kind === k && f.hp > 0 && !f._dying);
+    if (A.have('scout')) add('scout', 'dr_scout', '哨戒機を出す', '周りを見張らせる', () => A.launch('scout'));
+    if (liveK('scout') && skillOn('e', 'dr_order')) add('scout_far', 'tc_scout_ahead', '哨戒機を先へ送る', '7000u先を偵察', () => { const t = spot(7000); e._sendTo = { x: t.x, y: t.y, until: now + 3720 }; });
+    if (e.lureSOS > 0) add('fsos', 'it_sos', '偽SOSを置く', '遠くへ偽の遭難信号', () => { e.lureSOS--; const t = spot(5000); launchLure('e', 'sos', e.x, e.y, t.x, t.y); });
+    if (e.lureShip > 0) add('lure', 'dc_mirror', '偽艦影を流す', '偽の艦影信号', () => { e.lureShip--; const t = spot(4500); launchLure('e', 'ship', e.x, e.y, t.x, t.y); });
+    if (e.itemFake > 0) add('fake', 'it_fake', '偽コンテナを置く', '艦尾に罠の箱', () => { e.itemFake--; placeFakeCache('e', e.x + Math.cos(e.angle + Math.PI) * 700, e.y + Math.sin(e.angle + Math.PI) * 700); matchRecEvent('fakeE', e.x, e.y, '敵: 偽コンテナを置く'); });
+    const bk = e.itemBcn && Object.keys(e.itemBcn).find(b => e.itemBcn[b] > 0);
+    if (bk) add('bcn', 'dc_beacon', '帯域ビーコンを置く', '一つの帯域だけ強い偽信号', () => { e.itemBcn[bk]--; const t = spot(4500); launchLure('e', 'ship', e.x, e.y, t.x, t.y, bk); });
+    if (e.itemSmoke > 0) add('smoke', 'it_smoke', '煙幕を張って息を潜める', '霧を濃くして静かに待つ', () => { enemyUseSmoke(e); e.setTarget(e.x, e.y); e.postFireCooldown = 1800; });
+    if (e.itemSpray > 0) add('spray', 'it_spray', '霧を撒いて隠れる', '周囲の霧を濃くして待つ', () => { enemyUseSpray(e); e.setTarget(e.x, e.y); e.postFireCooldown = 1800; });
+    if (!(e._pingCD > 0) && !(now - (e._nudgeSonarF || -1e9) < 7200)) add('sonar', 'so_nudge', '弱いソナーを打つ', '周囲を探る', () => { e._nudgeSonarF = now; firePingFromEnemy(e, { omni: true, power: 'weak' }); }, 0.8);
+    add('listen', 'tc_listen', '止まって20秒聴く', '機関停止で耳をすます', () => itemDoE(e, { k: 'silent', why: '手駒: 止まって聴く' }), 0.9);
+    if (A.have('attack')) {
+        if (est) add('ftr_strike', 'cb_decoy_drone', '戦闘機を出して攻撃させる', '相手へ戦闘機を送る', () => { A.launch('attack'); e._sendTo = { x: est.x, y: est.y, until: now + 3720 }; }, 1.2);
+        else add('ftr_escort', 'dr_ftr', '戦闘機を出して護衛させる', '艦の周りを守らせる', () => A.launch('attack'), 0.9);
+    }
+    if (A.have('build')) add('turret', 'dr_turret', '砲台を据える', '艦の近くに設置', () => A.launch('build'), 0.9);
+    if (e.itemNoise > 0) add('noise', 'dc_silent', 'ノイズメーカーを流す', '偽の音源を走らせる', () => enemyUseNoise(e, est ? Math.atan2(e.y - est.y, e.x - est.x) + (Math.random() - 0.5) : e.angle), 0.9);
+    if (e.itemRepair > 0 && e.hp / e.maxHp < 0.85 && hitAgo > 600 && !((e._kitT || 0) > 0)) add('repair', 'it_repair', 'リペアキットで修理', '耐久+700', () => { e.itemRepair--; e._kitT = REPAIR_KIT_TIME; matchRecEvent('repairE', e.x, e.y, '敵: リペアキットを使う'); }, 1.6);
+    if (e.itemFlash > 0 && est && est.vis) add('flash', 'cb_flash_strike', '閃光弾で目を焼く', '半径2500uのセンサーを焼く', () => enemyUseFlash(e), 0.8);
+    if (e._sendTo && skillOn('e', 'dr_recall') && enemies.some(f => f.type === 'fighter' && f._home === e && f.hp > 0 && Math.hypot(f.x - e.x, f.y - e.y) > 3500)) add('recall', 'dr_recall', 'ドローンを呼び戻す', '遠くのドローンを母艦へ', () => A.recall(), 0.7);
+    const sid = e._strat && e._strat.id, B = CAP_STRAT_BOOST[sid];
+    if (B) for (const a of out) if (B[a.id]) a.base *= B[a.id];
+    const pick = autoPlayChoose(out.filter(a => vis ? AUTO_FIGHT_IDS.includes(a.id) : true), P, 'e', e._autoPlayLast);
+    if (!pick) return false;
+    e._autoPlayLast = pick.id; pick.run(); e._launchFlash = Math.max(e._launchFlash || 0, 30);
+    comThinkEvent('e', '手駒: ' + pick.label + (sid && STRAT_REG[sid] ? ' (方針「' + STRAT_REG[sid].jp + '」)' : '') + ' — ' + pick.sub, 'e' + e.uid);
+    return true;
+}
+const CAP_STRAT_BOOST = { screen: { ftr_strike: 1.9, scout_far: 1.7, ftr_escort: 1.4 }, push: { ftr_strike: 2.0, flash: 1.5, sonar: 1.3 }, ambush: { smoke: 1.5, spray: 1.5, listen: 1.6, fake: 1.5, turret: 1.5, noise: 1.2 }, bait: { fsos: 1.9, lure: 1.9, bcn: 1.7, fake: 1.3 }, trap: { turret: 1.9, fake: 1.9, ftr_escort: 1.2 }, guard: { turret: 1.7, ftr_escort: 1.6, scout_far: 1.3 }, fogHide: { spray: 1.7, smoke: 1.7, listen: 1.4, noise: 1.3 }, fallback: { repair: 2.0, smoke: 1.4, recall: 1.5 }, tech: { turret: 1.6, fake: 1.3 }, hop: { sonar: 1.3, scout_far: 1.4 } };
+// 推定位置 (見えている相手 → 追跡中の信号 → 絞れている信号)。ドローンを送る・デコイを流す先
+function capEstPos(te) {
+    if (te && te.hp > 0 && te.inVision) return { x: te.x, y: te.y, vis: true };
+    const pick = (sid) => { const sa = _signalAnalysis[sid]; if (!sa || !sa.fix) return null; const e = trackEstimate(sa, 0); return e && e.r < 4500 ? { x: e.x, y: e.y, vis: false } : null; };
+    if (lockedSignalId) { const r = pick(lockedSignalId); if (r) return r; }
+    for (const sid in _signalAnalysis) { const r = pick(sid); if (r) return r; }
+    return null;
+}
+function capPlayGate(c, P, fight, te) {
+    const A = capPlayList(c, P, te).filter(a => !fight || ['ftr_strike', 'ftr_escort', 'turret', 'decoy', 'noise', 'repair', 'flash', 'smoke', 'spray', 'recall'].includes(a.id));
     const ranked = A.map(a => ({ a, sc: a.base * Math.pow(skillAff(P, a.skill), 1.2) * (0.75 + 0.5 * Math.random()) })).sort((x, y) => y.sc - x.sc).slice(0, 4).map(x => x.a);
     if (ranked.length < 2) return null;
     const opts = ranked.map(a => ({ id: a.id, label: a.label, sub: a.sub })); opts.push({ id: '_none', label: '何もしない', sub: '今は静かに進む' });
-    const cg = capAsk('play', { title: 'いま打てる一手', sit: _capVoice(P, ranked[0].label) + '。静かな間に仕掛ける？', opts, rec: ranked[0].id }, 3600);
+    const sj = c.st && STRAT_REG[c.st.id] ? '方針「' + STRAT_REG[c.st.id].jp + '」の最中 — ' : '';
+    const cg = capAsk(fight ? 'playf' : 'play', { title: fight ? '交戦中の一手' : 'いま打てる一手', sit: sj + _capVoice(P, ranked[0].label) + (fight ? '。相手が見えている — 手駒を使う？' : '。静かな間に仕掛ける？'), opts, rec: ranked[0].id }, fight ? 99999 : 10800);
     if (!cg || cg.wait) return cg;
     if (cg.id === '_none') return { none: true };
     const act = A.find(a => a.id === cg.id); return act ? { act } : { none: true };
@@ -19655,7 +19754,36 @@ function capRetreatGate(c, hpF, retreat) {
         { id: 'stand', label: '踏みとどまる', sub: '40秒は退かず撃ち合う — 相手を沈めれば勝ち。次の被弾で沈むかもしれない' }];
     return capAsk('retreat', { title: '船体が危険域', sit: '耐久 ' + _pct(hpF) + ' (' + Math.round(player.hp) + ') — 退き際 ' + _pct(retreat) + ' を割った', opts, rec: 'retreat' }, 5400);
 }
+// 第187弾: QTE (AI操艦) 中の手動操艦 — プレイヤーが移動を命じたら、到着するか30秒たつか「AIに任せる」まで、AIは航路を引かない (撃つ・使う・QTEの判断は続く)
+var _capManualUntil = 0; const CAP_MANUAL_FRAMES = 1800;
+function capManualOn() { return capMode && _capManualUntil > _frameCount; }
+function capManualStart() {
+    if (!capMode || !comDemo) return;
+    _capManualUntil = _frameCount + CAP_MANUAL_FRAMES;
+    if (_com) { _com.item = null; _com.hunt = null; } // AIの目的 (取りに行く・任務) は一旦手放す
+    _capManualChip();
+}
+function capManualEnd(why) { if (_capManualUntil > 0) { _capManualUntil = 0; _capManualChip(); if (why) logMessage('AI操艦: ' + why, 'system-msg'); } }
+function _capManualChip() {
+    let el = document.getElementById('cap-manual');
+    if (!el) { el = document.createElement('button'); el.id = 'cap-manual'; el.addEventListener('click', (ev) => { ev.stopPropagation(); capManualEnd('AIに操艦を任せた'); }); (document.getElementById('ui-layer') || document.body).appendChild(el); }
+    const on = capManualOn();
+    el.style.display = on ? 'block' : 'none';
+    if (on) el.textContent = '◆ 手動操艦 ' + Math.ceil((_capManualUntil - _frameCount) / 60) + '秒 — タップでAIに任せる';
+}
 function comPilotStep() {
+    if (!comDemo || !player || player.hp <= 0 || sectorCleared) return;
+    if (_capManualUntil) {
+        if (!capMode || _capManualUntil <= _frameCount || player.state !== 'moving') capManualEnd(capMode ? '手動操艦を終えた — AIが操艦を再開' : '');
+        else if (_frameCount % 30 === 0) _capManualChip();
+    }
+    if (capManualOn()) { // 航路だけ止める: 撃つ・搭載品・QTEの判断はAIが続ける
+        window._capSaveSt = player.setTarget; player.setTarget = function () {};
+        try { return _comPilotStep0(); } finally { delete player.setTarget; }
+    }
+    return _comPilotStep0();
+}
+function _comPilotStep0() {
     if (!comDemo || !player || player.hp <= 0 || sectorCleared) return;
     if (_frameCount % COM_TICK) { if (!_capKick) return; }
     _capKick = false;
@@ -19857,10 +19985,16 @@ function comPilotStep() {
             if (cg && cg.id === 'avoid') { const tp = clampToMapCircle(player.x - Math.cos(angc) * 5000, player.y - Math.sin(angc) * 5000, 1500); player.setTarget(tp.x, tp.y); _comSteered(c, 'free'); c.legF = now; c.capAvoidUntil = now + 2400; setStance('cruise', true); comThinkEvent('p', '艦長の判断: 距離を取る'); return; }
         }
     }
-    if (capMode && playerExposureLevel <= 1 && !(te && lk && lk.full) && !c.hunt && !c.item && !comEngaged() && !(c.capHoldUntil > now)) { // 第185弾: 静かな間の「一手」
-        const pg = capPlayGate(c, P);
+    if (capMode && !c.item && !(c.capHoldUntil > now) && ((playerExposureLevel <= 2 && !(te && lk && lk.full) && !comEngaged()) || (te && lk && lk.full && playerExposureLevel <= 3))) { // 第185弾・第188弾: 静かな間と交戦中の「一手」(ドローン・アイテム)
+        const vis = !!(te && lk && lk.full);
+        const pg = vis ? null : capPlayGate(c, P, false, te); // 艦長に尋ねるのは静かな間に時々だけ (交戦中は尋ねない)
         if (pg && pg.wait) return;
         if (pg && pg.act) { pg.act.run(); comThinkEvent('p', '艦長の判断: ' + pg.act.label); _comStance(c, P); return; }
+        if (!pg && capAutoPlay(c, P, vis, te)) { _comStance(c, P); return; } // 第189弾: 普段はAIが自分の判断で手駒を使う
+    }
+    if (!capMode && comDemo && !c.item && !(c.capHoldUntil > now)) { // 第190弾: 通常のCOM対戦でも自機COMが同じ自律運用 (敵COMと同じ)
+        const vis = !!(te && lk && lk.full);
+        if (((playerExposureLevel <= 2 && !vis && !comEngaged()) || (vis && playerExposureLevel <= 3)) && capAutoPlay(c, P, vis, te)) { _comStance(c, P); return; }
     }
     let held = null;
     // ═══ 第137弾 (操縦の総括・オーナー「いつやるんだ」): 任務の優先順位は 自機COMも敵も同じ並び (PILOT_LADDER) を同じ走査 (pilotLadder) で通す。
@@ -20263,7 +20397,7 @@ function openComDemo() {
     document.getElementById('com-overlay').classList.remove('hidden');
     sfxUI('ui_panel_open');
 }
-var _comSkOpen = false;
+var _comSkOpen = false, _comSkGrp = '';
 function _skinRow(side, c) {
     const cur = (c.skin && c.skin[side]) || (side === 'p' ? 'helios' : 'crow');
     let h = '<div class="com-row">';
@@ -20311,15 +20445,21 @@ function _renderComCfg() {
         else if (pre === 'custom') h.push('<div class="com-note">カスタム (スライダーで調整)</div>');
         // 第22弾: 積み込み (自機/敵とも編集できる)
         h.push('<div class="com-sec sub">積み込み</div><div class="com-row com-lo"><span class="com-lo-sum">積み込み: ' + _loPreview(side, ship, c) + '</span><button class="com-chip" data-act="loadout">編集</button></div>');
-        // 第142弾: スキルのオン・オフ
+        // 第142弾・第187弾: スキルのオン・オフ — グループのタブ (n/m) → 選んだグループのスキルを2列のカードで
         { const L = skillList(), m = (c.sk && c.sk[side]) || {}, nOn = L.filter(x => m[x.id] !== false).length;
-          h.push('<div class="com-sec sub">スキル <small>COMが使う戦術のオン・オフ</small></div><div class="com-sk-head"><button class="com-chip' + (_comSkOpen ? ' on' : '') + '" data-act="skopen">スキル ' + nOn + '/' + L.length + ' ' + (_comSkOpen ? '▴' : '▾') + '</button><button class="com-chip" data-act="skall" data-v="on">全ON</button><button class="com-chip" data-act="skall" data-v="off">全OFF</button></div>');
+          const groups = []; for (const x of L) if (!groups.includes(x.g)) groups.push(x.g);
+          if (!groups.includes(_comSkGrp)) _comSkGrp = groups[0];
+          h.push('<div class="com-sec sub">スキル <small>COMが使う戦術のオン・オフ (' + nOn + '/' + L.length + ')</small></div>');
+          h.push('<div class="com-sk-head"><button class="com-chip' + (_comSkOpen ? ' on' : '') + '" data-act="skopen">' + (_comSkOpen ? '▴ 閉じる' : '▾ 設定する') + '</button><button class="com-chip" data-act="skall" data-v="on">全ON</button><button class="com-chip" data-act="skall" data-v="off">全OFF</button></div>');
           if (_comSkOpen) {
-              let g = '';
+              h.push('<div class="com-sktabs">' + groups.map(g => { const gl = L.filter(x => x.g === g), on = gl.filter(x => m[x.id] !== false).length; return '<button class="com-sktab' + (g === _comSkGrp ? ' on' : '') + (on === 0 ? ' off' : '') + '" data-act="sktab" data-v="' + g + '">' + g + '<i>' + on + '/' + gl.length + '</i></button>'; }).join('') + '</div>');
+              h.push('<div class="com-sk-g"><span>' + _comSkGrp + '</span><button class="com-chip sm" data-act="skgrp" data-v="' + _comSkGrp + ':on">このグループを全ON</button><button class="com-chip sm" data-act="skgrp" data-v="' + _comSkGrp + ':off">全OFF</button></div><div class="com-skgrid">');
               for (const x of L) {
-                  if (x.g !== g) { g = x.g; h.push('<div class="com-sk-g">' + g + ' <button class="com-chip sm" data-act="skgrp" data-v="' + g + ':on">ON</button><button class="com-chip sm" data-act="skgrp" data-v="' + g + ':off">OFF</button></div>'); }
-                  { const af = (pre === 'random' || pre === 'adaptive' || !SKILL_AX_PARSED[x.id]) ? null : skillAff(pp, x.id); h.push('<button class="com-sk' + (m[x.id] !== false ? ' on' : '') + '" data-act="skill" data-v="' + x.id + '"><b>' + x.jp + (af === null ? '' : ' <i class="com-aff ' + (af >= 1.3 ? 'hi' : af < 0.7 ? 'lo' : '') + '">適性×' + (Math.round(af * 10) / 10) + '</i>') + '</b><span>' + x.desc + '</span></button>'); }
+                  if (x.g !== _comSkGrp) continue;
+                  const af = (pre === 'random' || pre === 'adaptive' || !SKILL_AX_PARSED[x.id]) ? null : skillAff(pp, x.id);
+                  h.push('<button class="com-sk' + (m[x.id] !== false ? ' on' : '') + '" data-act="skill" data-v="' + x.id + '"><b>' + x.jp + (af === null ? '' : ' <i class="com-aff ' + (af >= 1.3 ? 'hi' : af < 0.7 ? 'lo' : '') + '">' + (af >= 1.3 ? '得意' : af < 0.7 ? '苦手' : '普通') + ' ×' + (Math.round(af * 10) / 10) + '</i>') + '</b><span>' + x.desc + '</span></button>');
               }
+              h.push('</div>');
           } }
         box.innerHTML = h.join('');
     }
@@ -20332,7 +20472,7 @@ function _renderComCfg() {
     { const hm = c.pCtl !== 'com', ml = c.mode === 'sd' ? 'サーチ&デストロイ' : 'バトルロワイアル';
       const t1 = document.getElementById('com-title'), t2 = document.getElementById('com-lead'), bs = document.getElementById('com-start');
       if (t1) t1.textContent = '試合の設定 — ' + ml;
-      if (t2 && c.cap) t2.innerHTML = '<b>AI操艦</b>: 自機はAIが操る。あなたは艦長として、<b>結果に効く場面だけ</b> (撃つか絞るか・ミサイルへの対処・退くか踏みとどまるか) で選ぶ。選んでいる間は超スローになり、7秒でAIの推奨が実行される。「自機AI」の性格がAIの推奨の癖になる (攻撃的なAIは撃て、慎重なAIは退け)。';
+      if (t2 && c.cap) t2.innerHTML = '<b>AI操艦</b>: 自機はAIが操る。あなたは艦長として、<b>結果に効く場面だけ</b> (撃つか絞るか・ミサイルへの対処・退くか踏みとどまるか) で選ぶ。選んでいる間は超スローになり、7秒でAIの推奨が実行される。<b>移動・射撃・ソナー・搭載品などは自分でも操作できる</b> (移動を命じると、到着か30秒までAIは航路を引かない。画面上部の「手動操艦」をタップでAIに任せる)。「自機AI」の性格がAIの推奨の癖になる (攻撃的なAIは撃て、慎重なAIは退け)。';
       else if (t2) t2.innerHTML = hm ?'自機の艦種・積み込みと、<b>敵COMの艦種・性格・積み込み・スキル</b>、マップを決めて出撃する。操作は右の <b>COM (観戦)</b> に切り替えると、自機もCOMが動かす (戦歴には残らない)。' : '自機も敵もCOMが操作する観戦。どちらも<b>相手は見えない前提</b>で、方位と記録だけから判断する (戦歴・クレジットには残らない)。';
       if (bs) bs.textContent = hm ? '出撃 ▶' : c.cap ? 'AI操艦で出撃 ▶' : 'COM対戦を開始 ▶'; }
     _renderMapCfg();
@@ -20359,14 +20499,17 @@ function _renderMapCfg() {
     const box = document.getElementById('com-map'); if (!box || !comCfg) return;
     const m = comCfg.map = Object.assign({}, MAP_DEF, comCfg.map);
     const empty = Math.max(0, 100 - m.cloud - m.rock);
-    const h = ['<div class="com-sk-head"><button class="com-chip' + (_comMapOpen ? ' on' : '') + '" data-act="mapopen">マップの設定 ' + (_comMapOpen ? '▴' : '▾') + '</button><button class="com-chip" data-act="maprnd" title="マップの設定を今すぐ無作為に振る">🎲 ランダムに振る</button><button class="com-chip' + (m.rnd ? ' on' : '') + '" data-act="maprndon" title="ON: 試合ごとにマップの設定を無作為に決める">毎試合ランダム ' + (m.rnd ? 'ON' : 'OFF') + '</button><button class="com-chip" data-act="mapreset">初期値に戻す</button></div>'];
+    const h = ['<div class="com-sec sub">マップ <small>' + (m.rnd ? '毎試合ランダム' : '雲 ' + m.cloud + '% / 岩石帯 ' + m.rock + '% / 空間 ' + empty + '%') + '</small></div><div class="com-sk-head"><button class="com-chip' + (_comMapOpen ? ' on' : '') + '" data-act="mapopen">' + (_comMapOpen ? '▴ 閉じる' : '▾ 設定する') + '</button><button class="com-chip" data-act="maprnd" title="マップの設定を今すぐ無作為に振る">🎲 ランダムに振る</button><button class="com-chip' + (m.rnd ? ' on' : '') + '" data-act="maprndon" title="ON: 試合ごとにマップの設定を無作為に決める">毎試合ランダム ' + (m.rnd ? 'ON' : 'OFF') + '</button><button class="com-chip" data-act="mapreset">初期値に戻す</button></div>'];
+    h.push('<div class="com-areabar" id="mp-bar" title="面積の内訳"><i class="a-cloud" style="width:' + m.cloud + '%"></i><i class="a-rock" style="width:' + m.rock + '%"></i><i class="a-empty" style="width:' + empty + '%"></i></div>');
     if (_comMapOpen) {
-        h.push('<div class="com-note">面積 (ヒッグス雲＋岩石帯＋何もない空間＝100%)。熱源・磁気嵐・残骸帯の円は「何もない空間」の中に、互いに重ならないように置く。雲と地形は被らない</div>');
+        const sl = (ks) => ks.map(k => { const x = MAP_SL.find(q => q[0] === k); return '<label class="com-sl" title="' + x[6] + '"><span>' + x[1] + (x[6] ? '<small>' + x[6] + '</small>' : '') + '</span><input type="range" min="' + x[2] + '" max="' + x[3] + '" step="' + x[4] + '" value="' + m[k] + '" data-act="map" data-k="' + k + '"><b id="mp-' + k + '">' + m[k] + x[5] + '</b></label>'; }).join('');
+        h.push('<div class="com-mapgrid"><div class="com-mapcol"><div class="com-sec sub">面積 <small>合計100%</small></div>');
         h.push(_mapAreaRow('cloud', 'ヒッグス雲 (濃い)', m.cloud));
         h.push(_mapAreaRow('rock', '岩石帯', m.rock));
         h.push(_mapAreaRow('empty', '何もない空間 (うっすら)', empty));
-        for (const [k, lbl, mn, mx, st, u, d] of MAP_SL) h.push('<label class="com-sl" title="' + d + '"><span>' + lbl + '</span><input type="range" min="' + mn + '" max="' + mx + '" step="' + st + '" value="' + m[k] + '" data-act="map" data-k="' + k + '"><b id="mp-' + k + '">' + m[k] + u + '</b></label>');
-        h.push('<div class="com-row"><span class="com-opt-lbl">輸送船の頻度</span>' + MAP_CONVOY.map(([v, l]) => '<button class="com-chip' + (m.convoy === v ? ' on' : '') + '" data-act="mapconvoy" data-v="' + v + '">' + l + '</button>').join('') + '</div>');
+        h.push('<div class="com-note">熱源・磁気嵐・残骸帯の円は「何もない空間」の中に、互いに重ならないよう置く</div>');
+        h.push('<div class="com-sec sub">輸送船の頻度</div><div class="com-row">' + MAP_CONVOY.map(([v, l]) => '<button class="com-chip' + (m.convoy === v ? ' on' : '') + '" data-act="mapconvoy" data-v="' + v + '">' + l + '</button>').join('') + '</div></div>');
+        h.push('<div class="com-mapcol"><div class="com-sec sub">地形・自然の信号</div>' + sl(['thermal', 'storm', 'wreck', 'fluct']) + '<div class="com-sec sub">拠点・拾い物</div>' + sl(['colony', 'node', 'cache', 'derelict']) + '</div></div>');
     }
     box.innerHTML = h.join('');
 }
@@ -20450,6 +20593,7 @@ function exitComDemo() { location.reload(); }
         else if (act === 'ctl') { comCfg.pCtl = (v === 'com' || v === 'cap') ? 'com' : 'human'; comCfg.cap = v === 'cap'; }
         else if (act === 'skin') { comCfg.skin = Object.assign({ p: 'helios', e: 'crow' }, comCfg.skin); comCfg.skin[side] = v; }
         else if (act === 'skopen') _comSkOpen = !_comSkOpen;
+        else if (act === 'sktab') _comSkGrp = v;
         else if (act === 'skill' || act === 'skall' || act === 'skgrp') {
             const m = (comCfg.sk[side] = comCfg.sk[side] || {}), L = skillList();
             if (act === 'skill') { if (m[v] === false) delete m[v]; else m[v] = false; }
@@ -20476,6 +20620,7 @@ function exitComDemo() { location.reload(); }
             else if (k === 'empty') { m.cloud = Math.max(0, 100 - m.rock - v); if (m.cloud + m.rock > 100) m.rock = 100 - m.cloud; }
             else m[k] = v;
             const set = (id, t) => { const e = document.getElementById('mp-' + id); if (e) e.textContent = t; const i = document.querySelector('input[data-act="map"][data-k="' + id + '"]'); if (i && id !== k) i.value = id === 'empty' ? Math.max(0, 100 - m.cloud - m.rock) : m[id]; };
+            { const bar = document.getElementById('mp-bar'); if (bar && (k === 'cloud' || k === 'rock' || k === 'empty')) { const w = [m.cloud, m.rock, Math.max(0, 100 - m.cloud - m.rock)]; bar.querySelectorAll('i').forEach((e, n) => e.style.width = w[n] + '%'); } }
             if (k === 'cloud' || k === 'rock' || k === 'empty') { set('cloud', m.cloud + '%'); set('rock', m.rock + '%'); set('empty', Math.max(0, 100 - m.cloud - m.rock) + '%'); }
             else { const sl = MAP_SL.find(x => x[0] === k); const e = document.getElementById('mp-' + k); if (e) e.textContent = v + (sl ? sl[5] : ''); }
             return;
@@ -20540,7 +20685,7 @@ function _enemyThought(e) {
 // 副長の状況判断。優先度順に「今いちばん大事なこと」と、その場で押せる1アクションを返す
 var _xoEng = { f: -1e9, text: '', chk: -1e9 }; // var: 初期化の途中で呼ばれても TDZ にならないように
 function xoEngineAdvice() {
-    if (!player || player.hp <= 0 || comDemo || engineSwitchT > 0) return null;
+    if (!player || player.hp <= 0 || obsOnly() || engineSwitchT > 0) return null;
     const now = _frameCount;
     if (now - _xoEng.f < 480) return _xoEng.text;
     if (now - _xoEng.f < 5400 || now - _xoEng.chk < 300) return null;
@@ -20981,7 +21126,7 @@ window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
     if (k === '+' || k === '=' || k === ';') { zoomStep(1.25); return; } // ズームは押しっぱなしでも続ける
     if (k === '-') { zoomStep(0.8); return; }
-    if (k === 'tab') { e.preventDefault(); if (!e.repeat && !comDemo) cycleLockTarget(e.shiftKey ? -1 : 1); return; } // 第49弾: 目標の切替
+    if (k === 'tab') { e.preventDefault(); if (!e.repeat && !obsOnly()) cycleLockTarget(e.shiftKey ? -1 : 1); return; } // 第49弾: 目標の切替
     if (e.repeat) return;
     if (k === 'f') issueFireOrder();
     else if (k === 't') trackNextSignal();
@@ -21778,7 +21923,7 @@ function _recGate(name, args, self) { // true = そのまま実行 / false = 受
     }
     const ost = Ship.prototype.setTarget;
     Ship.prototype.setTarget = function (...a) {
-        if (this === player && !_inStep) { if (_hReplay() && !_prpApplying) return; if (_recOn && _recDepth === 0 && !comDemo && !playReplay) _inputLog.push([_frameCount, '$setTarget', a.map(_recEnc)]); }
+        if (this === player && !_inStep) { if (_hReplay() && !_prpApplying) return; if (comDemo && capMode) capManualStart(); if (_recOn && _recDepth === 0 && !comDemo && !playReplay) _inputLog.push([_frameCount, '$setTarget', a.map(_recEnc)]); }
         _recDepth++; try { return ost.apply(this, a); } finally { _recDepth--; }
     };
 })();
