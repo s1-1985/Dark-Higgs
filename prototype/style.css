@@ -3337,3 +3337,25 @@ body.in-game #action-popover .act-icon-btn span { font-family: Orbitron, sans-se
 .drone-enc button[data-dec="attack"] { border-color: #ff6a4a; color: #ffb8a8; background: #2a0a04; }
 .drone-enc button[data-dec="return"] { border-color: #4a8a6a; color: #a8e8c8; background: #04180e; }
 .drone-enc button:active { transform: scale(0.96); }
+
+/* ═══ 第200弾: 緊急離脱ボタン (ミニマップの右) と 8方向の選択 ═══ */
+#esc-btn { position: fixed; z-index: 60; display: none; padding: 7px 14px 6px; min-width: 104px; font-family: 'Noto Sans JP', sans-serif; color: #fff;
+  background: linear-gradient(180deg, rgba(150,20,30,0.92), rgba(80,6,14,0.92)); border: 1px solid #ff6a6a; box-shadow: 0 0 14px rgba(255,60,60,0.45), inset 0 0 10px rgba(255,120,120,0.25);
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); cursor: pointer; text-align: left; animation: escPulse 1.6s ease-in-out infinite; }
+#esc-btn b { display: block; font-size: 15px; letter-spacing: 0.12em; }
+#esc-btn span { display: block; font-size: 10px; color: #ffc9c9; letter-spacing: 0.05em; }
+#esc-btn.cd { filter: saturate(0.6); }
+#esc-btn:active { transform: scale(0.96); }
+@keyframes escPulse { 0%,100% { box-shadow: 0 0 10px rgba(255,60,60,0.35), inset 0 0 8px rgba(255,120,120,0.2); } 50% { box-shadow: 0 0 22px rgba(255,60,60,0.75), inset 0 0 14px rgba(255,120,120,0.4); } }
+#cap-dec.cap-esc { border-color: #ff6a6a !important; }
+#cap-dec.cap-esc .cap-head b { color: #ff8a8a; }
+.esc-grid { display: grid; grid-template-columns: repeat(3, minmax(96px, 1fr)); grid-template-rows: repeat(3, auto); gap: 6px; margin: 6px auto 8px; max-width: 520px; }
+.esc-grid .esc-d { min-height: 52px; text-align: center; }
+.esc-grid .esc-d b { font-size: 17px; display: block; }
+.esc-grid .esc-d span { font-size: 11px; display: block; }
+.esc-tl { grid-column: 1; grid-row: 1; } .esc-t { grid-column: 2; grid-row: 1; } .esc-tr { grid-column: 3; grid-row: 1; }
+.esc-l { grid-column: 1; grid-row: 2; } .esc-r { grid-column: 3; grid-row: 2; }
+.esc-bl { grid-column: 1; grid-row: 3; } .esc-b { grid-column: 2; grid-row: 3; } .esc-br { grid-column: 3; grid-row: 3; }
+.esc-ship { grid-column: 2; grid-row: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #7fffd4; font-size: 11px; }
+.esc-ship i { font-style: normal; font-size: 26px; display: inline-block; color: #5dff9a; }
+.com-scn { display: block; font-style: normal; font-size: 10px; color: #8fd8ff; margin-top: 2px; }
