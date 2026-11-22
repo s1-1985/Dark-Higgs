@@ -9023,9 +9023,9 @@ function takeLoot(o, src) { // 自機 (人が選んだ時・自機COMが選ん�
 }
 function offerLoot(src) {
     const A = lootActor('p'), c = lootPick4(A);
-    if (comDemo) { takeLoot(lootChoose(A, c), src); return; } // 第189弾: QTE中もAIが選ぶ (オーナー「基本はAIが勝手に選ぶ」)
+    if (comDemo && !(capMode && comCfg && comCfg.draftManual)) { takeLoot(lootChoose(A, c), src); return; } // 第189弾: QTE中もAIが選ぶ (オーナー「基本はAIが勝手に選ぶ」) / 第201弾: 設定で「自分で選ぶ」にした時は下のUIへ
     if (playReplay && playReplay.inp) return;
-    const rec = capMode ? (lootChoose(A, c) || {}).label : null; // 第188弾: QTE中は自分で選ぶ (AIの推奨に ★)
+    const rec = capMode ? (lootChoose(A, c) || {}).label : null; // 第188弾: QTE中は自分で選ぶ時、AIの推奨に ★
     if (_draft) { _draftQ.push({ src, loot: c, rec }); return; }
     _draft = { src, loot: c, rec };
     _openDraftUI();
@@ -9039,9 +9039,9 @@ function enemyOfferLoot(e, src) {
 function offerDraft(src) {
     const c = draftPick3(src);
     if (!c.length) { logMessage('部品: ' + _SRC_JP[src] + ' — 新しい部品は無かった (全部持っている)', 'system-msg'); return; }
-    if (comDemo) { takePart(comPickPart(c)); return; }
+    if (comDemo && !(capMode && comCfg && comCfg.draftManual)) { takePart(comPickPart(c)); return; } // 第201弾: 設定で「自分で選ぶ」にした時は下のUIへ
     if (playReplay && playReplay.inp) return; // 第156弾: 人の操作の再生では 選んだ内容を記録から入れる (画面は開かない)
-    const rec = capMode ? comPickPart(c) : null; // 第188弾: QTE中は自分で選ぶ (AIの推奨に ★)
+    const rec = capMode ? comPickPart(c) : null; // 第188弾: QTE中は自分で選ぶ時、AIの推奨に ★
     if (_draft) { _draftQ.push({ src, c, rec }); return; }
     _draft = { src, c, rec };
     _openDraftUI();
@@ -17864,7 +17864,7 @@ function skillOn(side, id) {
 function comDefaultCfg() {
     return { ship: 'assault', enemy: 'assault', mode: 'br', pPreset: 'standard', ePreset: 'standard',
              pp: Object.assign({}, COM_PRESETS.standard.p), ep: Object.assign({}, COM_PRESETS.standard.p), higgsView: true, think: true,
-             lo: { p: {}, e: {} }, sk: { p: {}, e: {} }, map: Object.assign({}, MAP_DEF), rndAll: { p: false, e: false }, pCtl: 'human', skin: { p: 'helios', e: 'crow' } }; // 第161弾: pCtl=自機の操作 (human/com) / 第162弾: skin=勢力のデザイン (自機/敵) // 第155弾: map=マップの設定 // 第142弾: sk=スキルのオン・オフ // 第22弾: COM対戦の積み込み (自機/敵・艦種ごと。無ければ既定)
+             lo: { p: {}, e: {} }, sk: { p: {}, e: {} }, map: Object.assign({}, MAP_DEF), rndAll: { p: false, e: false }, pCtl: 'human', skin: { p: 'helios', e: 'crow' }, draftManual: false }; // 第201弾: draftManual=AI操艦(QTE)中、部品・積み荷は自分で選ぶ (既定false=AIが性格で選ぶ) // 第161弾: pCtl=自機の操作 (human/com) / 第162弾: skin=勢力のデザイン (自機/敵) // 第155弾: map=マップの設定 // 第142弾: sk=スキルのオン・オフ // 第22弾: COM対戦の積み込み (自機/敵・艦種ごと。無ければ既定)
 }
 function loadComCfg() {
     try { const c = JSON.parse(localStorage.getItem('darkEchoComDemo') || 'null'); if (c && c.pp && c.ep) { const r = Object.assign(comDefaultCfg(), c); for (const pk of ['pp', 'ep']) r[pk] = Object.assign({}, PERS_DEF, r[pk]); /* 第147弾: 新しい軸が無い古い保存は既定で埋める */ if (!r.lo || !r.lo.p || !r.lo.e) r.lo = { p: {}, e: {} }; if (!r.sk || !r.sk.p || !r.sk.e) r.sk = { p: {}, e: {} }; r.map = Object.assign({}, MAP_DEF, r.map); r.rndAll = Object.assign({ p: false, e: false }, r.rndAll); if (!r.skin) r.skin = r.swap ? { p: 'crow', e: 'helios' } : { p: 'helios', e: 'crow' }; /* 第161弾の「入れ替え」を引き継ぐ */ r.skin = Object.assign({ p: 'helios', e: 'crow' }, r.skin); delete r.swap; return r; } } catch (e) {}
@@ -20423,7 +20423,13 @@ function comStratStep(c, P, D, hpF, contact, te, lk, r) {
     if (!S) {
         if (now < (c.stratCD || 0) || comEngaged()) return false; // 第73弾: 会敵中は新しい戦略 (ドローンを遠くへ出す物) を始めない
         const x = comStratCtx(c, P), pk = comPickStrat(c, P, x, hpF);
-        if (capMode) { const cg = capStratGate(c, P, pk); if (cg && cg.wait) return true; if (cg && cg.id) { pk.pick = cg.id; c._capStrat = cg.id; comThinkEvent('p', '艦長の判断: 方針「' + STRAT_REG[cg.id].jp + '」'); } } // 第185弾: 方針は艦長が決める
+        if (capMode) { // 第185弾: 方針は艦長が決める / 第201弾: 強化の節目は専用の平易な4択で1回尋ねる
+            const mstone = !!c._milestoneAsk;
+            const cg = mstone ? capMilestoneGate(c, P, pk) : capStratGate(c, P, pk);
+            if (cg && cg.wait) return true;
+            if (cg && cg.id) { pk.pick = cg.id; c._capStrat = cg.id; comThinkEvent('p', '艦長の判断: 方針「' + STRAT_REG[cg.id].jp + '」'); }
+            if (mstone && cg) c._milestoneAsk = false;
+        }
         S = c.st = { id: pk.pick, t0: now, until: now + COM_STRAT_MIN + Math.random() * COM_STRAT_VAR, ph: 'go', hp0: player.hp, x0: player.x, y0: player.y };
         const ws = Object.keys(pk.w).map(k => k + ' ' + pk.w[k].toFixed(1)).join(' / ');
         comThinkEvent('p', '戦略「' + COM_STRATS[S.id] + '」を選ぶ (約' + Math.round((S.until - now) / 60) + '秒) — 重み ' + ws);
@@ -20534,7 +20540,7 @@ function _syncQteBtn() { const b = document.getElementById('btn-qte'); if (b) b.
 // 第191弾・第192弾 (オーナー「QTEはCOM同士の対戦の要所で選択を委ねるだけ。COMをQTE用に組み直すな。ダメージ・勝敗の趨勢に関わる場面は必ず / プレイヤーがフルマニュアルで選ぶあらゆる内容も確率次第で聞いてよい。ただし受信のたびではフルマニュアルと変わらないので頻度は調整」):
 // 戦闘に直結する場面 (CAP_FIGHT_KEYS) は毎回尋ねる。それ以外 (CAP_PLAN_KEYS) は 確率 × 前回から一定時間 (CAP_PLAN_GAP) をあけて尋ねる。尋ねない時はAI (COM) がこれまでどおり自分で決める (アルゴリズムはQTE用に変えていない)
 const CAP_FIGHT_KEYS = ['maneuver', 'strike', 'fire', 'missile', 'beam', 'retreat', 'hack'];
-const CAP_PLAN_PROB = { search: 1, lock: 0.7, strat: 0.6, hunt: 0.5, grab: 0.5, contact: 0.45, tactic: 0.3, play: 0.45 };
+const CAP_PLAN_PROB = { search: 1, mstone: 1, lock: 0.7, strat: 0.6, hunt: 0.5, grab: 0.5, contact: 0.45, tactic: 0.3, play: 0.45 }; // 第201弾: mstone=強化の節目 (序盤の方針と同じく確実に聞く)
 const CAP_PLAN_GAP = 2700; // 戦闘以外の質問どうしは 45秒以上あける
 var _capPlanLast = -1e9;
 function capAsk(key, spec, cd) { // null=聞かない (AIが続ける) / {wait:true}=選択待ち / {id}=選ばれた
@@ -20545,8 +20551,8 @@ function capAsk(key, spec, cd) { // null=聞かない (AIが続ける) / {wait:t
     if (_capDec) return { wait: true };
     if (_frameCount - (_capLast[key] ?? -1e9) < cd) return null;
     if (!fight) {
-        if (key !== 'search' && _com && !_com.searchAsked && _frameCount < 3600) return null; // 序盤は まず「何を探す？」を先に
-        if (_frameCount - _capPlanLast < CAP_PLAN_GAP && key !== 'search') return null; // 受信のたびに聞くとフルマニュアルと変わらない
+        if (!['search', 'mstone'].includes(key) && _com && !_com.searchAsked && _frameCount < 3600) return null; // 序盤は まず「何を探す？」を先に
+        if (_frameCount - _capPlanLast < CAP_PLAN_GAP && !['search', 'mstone'].includes(key)) return null; // 受信のたびに聞くとフルマニュアルと変わらない
         if (Math.random() > CAP_PLAN_PROB[key]) { _capLast[key] = _frameCount - cd * 0.5; return null; } // 今回は聞かずAIが決める (半分の間隔でまた機会)
         _capPlanLast = _frameCount;
     }
@@ -20744,6 +20750,17 @@ function capStratGate(c, P, pk) {
     const rec = ids.includes(pk.pick) ? pk.pick : ids[0];
     const opts = ids.map(k => ({ id: k, label: STRAT_REG[k].jp, sub: _capTag(P, 'st_' + k) + _capScn('st_' + k) + ' ' + String(STRAT_REG[k].desc || '').slice(0, 70) }));
     return capAsk('strat', { title: '次の方針', sit: _capVoice(P, STRAT_REG[rec].jp) + '。しばらくの間 何をする？', opts, rec }, 600);
+}
+// 第201弾 (オーナー「試合の進め方の段階 — 強化の節目で 狩りに出る/さらに強化/ドローンの網/拠点固め、を尋ねて」): 部品2個か拠点2つという節目で1回・平易な4択に絞って尋ねる
+const CAP_MSTONE_IDS = ['push', 'screen', 'guard', 'trap', 'gather', 'tech', 'raid', 'outpost'];
+function capMilestoneGate(c, P, pk) {
+    const w = pk.w;
+    let ids = CAP_MSTONE_IDS.filter(k => (w[k] || 0) > 0.01).sort((a, b) => w[b] - w[a]).slice(0, 4);
+    if (ids.length < 2) ids = Object.keys(w).filter(k => w[k] > 0.02).sort((a, b) => w[b] - w[a]).slice(0, 4);
+    if (ids.length < 2) return null;
+    const rec = ids.includes(pk.pick) ? pk.pick : ids[0];
+    const opts = ids.map(k => ({ id: k, label: STRAT_REG[k].jp, sub: _capTag(P, 'st_' + k) + _capScn('st_' + k) + ' ' + String(STRAT_REG[k].desc || '').slice(0, 70) }));
+    return capAsk('mstone', { title: '強化の節目 — 次はどうする？', sit: '部品・拠点が揃ってきた。' + _capVoice(P, STRAT_REG[rec].jp) + '。', opts, rec }, 1800);
 }
 function capHuntGate(c, P, w, D) {
     const ids = Object.keys(w).filter(k => w[k] > 0.05).sort((a, b) => w[b] - w[a]).slice(0, 4);
@@ -21204,6 +21221,10 @@ function _comPilotStep0() {
         if (sg && sg.wait) return;
         c.searchAsked = true; c.searchF = now; if (sg && sg.id) { capSearchApply(c, sg.id); _comStance(c, P); return; }
     }
+    // 第201弾: 強化の節目 (部品2個 か 拠点2つ占拠) — 試合中に1回、専用の平易な4択を強制して尋ねる (通常の確率任せの「次の方針」とは別枠)
+    if (capMode && c.searchAsked && !c.mstoneAsked && (partsOn.length >= 2 || coloniesOwned('player') >= 2) && !comEngaged() && playerExposureLevel <= 1) {
+        c.mstoneAsked = true; c._milestoneAsk = true;
+    }
     if (capMode && !c.item && !(c.capHoldUntil > now) && ((playerExposureLevel <= 2 && !(te && lk && lk.full) && !comEngaged()) || (te && lk && lk.full && playerExposureLevel <= 3))) { // 第185弾・第188弾: 静かな間と交戦中の「一手」(ドローン・アイテム)
         const vis = !!(te && lk && lk.full);
         const pg = vis ? null : capPlayGate(c, P, false, te); // 艦長に尋ねるのは静かな間に時々だけ (交戦中は尋ねない)
@@ -21654,6 +21675,7 @@ function _renderComCfg() {
         const sideName = side === 'p' ? (human ? '自機 (あなた)' : c.cap ? '自機AI (あなたは艦長)' : '自機COM') : '敵COM';
         const h = ['<div class="com-side-title ' + (side === 'p' ? 'cs-p' : 'cs-e') + '"><span>' + sideName + '</span> <button class="com-chip' + (ra ? ' on' : '') + '" data-act="rndall" title="ON: 試合ごとに 艦種・性格・積み込み・武器をすべて無作為に決める">🎲 全部ランダム ' + (ra ? 'ON' : 'OFF') + '</button></div>'
             + (side === 'p' ? '<div class="com-sec sub">操作</div><div class="com-row"><button class="com-chip lg' + (human ? ' on' : '') + '" data-act="ctl" data-v="human">プレイヤー</button><button class="com-chip lg' + (!human && !c.cap ? ' on' : '') + '" data-act="ctl" data-v="com">COM (観戦)</button><button class="com-chip lg' + (c.cap ? ' on' : '') + '" data-act="ctl" data-v="cap" title="AIが操艦し、あなたは要所の意思決定だけを行う">AI操艦 (意思決定のみ)</button></div>' : '')
+            + (side === 'p' && c.cap ? '<div class="com-row"><button class="com-chip' + (c.draftManual ? ' on' : '') + '" data-act="draftman" title="部品3択・積み荷4択・ドックの付け替えを、AI (性格) 任せにするか自分で選ぶか">部品・積み荷: ' + (c.draftManual ? '自分で選ぶ' : 'AI任せ') + '</button></div>' : '')
             + (ra ? '<div class="com-note warn">試合ごとに 艦種' + (human ? '・積み込み・武器の種類' : '・性格(8軸)・積み込み・武器の種類') + 'を無作為に決める。下の設定は使わない</div>' : '')
             + '<div class="com-sec sub">艦種</div>' + _shipCards(side, ship, c)];
         h.push('<div class="com-sec sub">デザイン</div>');
@@ -21823,6 +21845,7 @@ function exitComDemo() { location.reload(); }
         }
         else if (act === 'rndall') comCfg.rndAll[side] = !comCfg.rndAll[side];
         else if (act === 'ctl') { comCfg.pCtl = (v === 'com' || v === 'cap') ? 'com' : 'human'; comCfg.cap = v === 'cap'; }
+        else if (act === 'draftman') comCfg.draftManual = !comCfg.draftManual;
         else if (act === 'skin') { comCfg.skin = Object.assign({ p: 'helios', e: 'crow' }, comCfg.skin); comCfg.skin[side] = v; }
         else if (act === 'skopen') _comSkOpen = !_comSkOpen;
         else if (act === 'sktab') _comSkGrp = v;
