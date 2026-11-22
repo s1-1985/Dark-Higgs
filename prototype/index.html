@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261122c">
+    <link rel="stylesheet" href="style.css?v=20261122d">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -873,9 +873,9 @@
     <!-- ?v= は game.js を変更するたびに必ず更新する (ブラウザ/GitHub Pagesのキャッシュ対策) -->
     <script>
     (function(){
-        var N=10, box=document.getElementById('lobby-slides'); if(!box) return;
+        var N=15, box=document.getElementById('lobby-slides'); if(!box) return; // 第202弾: 10→15枚
         var els=[], cur=-1, timer=null;
-        for(var i=1;i<=N;i++){ var d=document.createElement('div'); d.className='ls'; d.dataset.src='assets/title_bg/bg'+(i<10?'0':'')+i+'.jpg?v=163'; box.appendChild(d); els.push(d); }
+        for(var i=1;i<=N;i++){ var d=document.createElement('div'); d.className='ls'; d.dataset.src='assets/title_bg/bg'+(i<10?'0':'')+i+'.jpg?v=164'; box.appendChild(d); els.push(d); }
         function load(d){ if(d && !d.dataset.on){ d.dataset.on='1'; d.style.backgroundImage="url('"+d.dataset.src+"')"; } }
         function show(i){
             i=(i+N)%N; load(els[i]); load(els[(i+1)%N]);
@@ -911,7 +911,7 @@
         });
     })();
     </script>
-    <script src="game.js?v=20261122c"></script>
+    <script src="game.js?v=20261122d"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
