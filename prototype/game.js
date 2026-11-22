@@ -3494,6 +3494,8 @@ class Projectile {
             this.active = false;
             let _bRockMiss = false; // 第153弾: 岩石帯の中から撃つと ビームも外れやすい (実弾・ミサイルと同じ式・撃つ側も同じ)
             if (target && target.hp > 0) { const _rk = getDebrisIntensity(x, y) * ROCK_SHOOT_MISS; if (_rk > 0 && Math.random() < _rk) { _bRockMiss = true; effects.push({ x: this.x, y: this.y, tx: target.x + (Math.random() - 0.5) * 900, ty: target.y + (Math.random() - 0.5) * 900, type: 'beam', a: 1, c: isPlayer ? '#00ffaa' : '#ff4d4d' }); } }
+            if (target && target.hp > 0) this._ghost = shotIsGhost(isPlayer, isPlayer ? null : _beamShooter, target); // 第199弾: ビームは即着弾
+            if (target && target.hp > 0 && !_bRockMiss && ghostMissRoll(this)) { _bRockMiss = true; effects.push({ x: this.x, y: this.y, tx: target.x + (Math.random() - 0.5) * 900, ty: target.y + (Math.random() - 0.5) * 900, type: 'beam', a: 1, c: isPlayer ? '#00ffaa' : '#ff4d4d' }); effects.push({ x: target.x, y: target.y - 30, text: 'ゴースト — 外れ', life: 1.0, type: 'floatText', c: '#c9a6ff' }); } // 第199弾: ゴーストへの射撃
             if (target && target.hp > 0 && !_bRockMiss) {
                 // ヒッグス高濃度エリアではビームダメージ大幅低下 (設計確定仕様)
                 const higgsBetween = getHiggsIntensity((x + target.x) / 2, (y + target.y) / 2);
@@ -3505,6 +3507,7 @@ class Projectile {
                 addHiggsClear(x, y, target.x, target.y); // 第21弾: 命中したビームの軌跡も霧が晴れる
                 const _beamDmg = Math.floor(BEAM_DMG * higgsBeamPenalty * dmgScale * (1 - beamArmorRes) * _bStrike.mult * (isPlayer ? PM.beamDmg * PM.dmgAll : epm(_beamShooter).beamDmg * epm(_beamShooter).dmgAll));
                 target.hp -= _beamDmg;
+                if (isPlayer && target !== player) noteAtkE(target, player);
                 applyHitStatus(isPlayer, _beamShooter, 'beam', target); // 第60弾
                 if (isPlayer && target !== player && target.type !== 'fighter') matchRecEvent('hitE', target.x, target.y, '敵に命中: ビーム −' + _beamDmg + (_bStrike.preempt ? '・奇襲' : ''));
                 if (huntStats) { if (isPlayer && target !== player) { huntStats.dmgDealt += _beamDmg; if (target.type !== 'fighter' && enemies.includes(target)) huntStats.dmgShip = (huntStats.dmgShip || 0) + _beamDmg; } else if (!isPlayer && target === player) huntStats.dmgTaken += _beamDmg; }
@@ -3716,6 +3719,8 @@ class Projectile {
                 return;
             }
             if (this._evaded) return; // 避けられた実弾はそのまま抜けていく
+            if (this._ghost === undefined && !this.fromDrone) this._ghost = shotIsGhost(this.isPlayer, this.isPlayer ? null : this.owner, hitTarget); // 第199弾: 見えていない相手 (ゴースト) に当たった弾
+            if (ghostMissRoll(this)) { this._evaded = true; effects.push({ x: hitTarget.x, y: hitTarget.y - 30, text: 'ゴースト — 外れ', life: 1.0, type: 'floatText', c: '#c9a6ff' }); if (this.type === 'missile') { nearMissBlast(this.x, this.y, this.isPlayer, this.dmg); this.active = false; } return; } // 第199弾: ゴーストへの射撃は命中率×0.6
             // 奇襲(×3.5+混乱)・後方被弾(×1.5)・混乱中追撃(×1.75)・サブシステム損傷を一括判定
             const _hitAng = Math.atan2(this.y - hitTarget.y, this.x - hitTarget.x);
             const _strike = applyStrikeBonuses(this.isPlayer, this.owner || null, hitTarget, _hitAng, this.type, !!this.fromDrone);
@@ -3735,6 +3740,7 @@ class Projectile {
             const _fall = this.type === 'kinetic' && !this._noFall && !(this.isPlayer && PM.kinNoFall) && !(!this.isPlayer && this.owner && epm(this.owner).kinNoFall) ? 1 - KINETIC_FALLOFF * Math.min(1, this.distTraveled / WEAPON_RANGE.kinetic) : 1;
             const _hitDmg = Math.floor(this.dmg * dmgMult * _fall);
             hitTarget.hp -= _hitDmg;
+            if (this.isPlayer && hitTarget !== player) noteAtkE(hitTarget, this._by || player); // 第199弾: 敵側も「攻撃してきた相手」を覚える (艦載機の迎え撃ち・自機のドローンと同じ規則)
             if (this.isPlayer && hitTarget !== player && hitTarget.type !== 'fighter' && typeof _hitAng === 'number') { const hd = hitTarget._hitDirs || (hitTarget._hitDirs = []); hd.push({ ang: _hitAng, f: _frameCount }); if (hd.length > 6) hd.shift(); } // 敵の席: 撃たれた方位 (リングの被弾の弧)
             if (this.emp) applyDaze(hitTarget, 480, 'EMP弾頭'); // 第32弾 (第33弾: 敵のEMPも)
             applyHitStatus(this.isPlayer, this.owner, this.type, hitTarget); // 第60弾: 状態異常の弾
@@ -3968,11 +3974,12 @@ function lockableTargets() {
         if (e.hp <= 0 || e._dying) continue;
         const full = !!e.inVision;
         if (!full && !(e.visible && e.contactLife > 0)) continue;
+        if (!full && !sigLockable(enemySid(e))) continue; // 第199弾: 見えていない相手は 確度50%超 (か確定) だけ
         const ex = full ? e.x : (e.displayX ?? e.x), ey = full ? e.y : (e.displayY ?? e.y);
         out.push({ kind: 'ent', e, full, d: Math.hypot(ex - player.x, ey - player.y), ship: e.type !== 'fighter' }); seen.add(e.uid);
     }
     for (const sid in _signalAnalysis) { // 推定円 (敵艦に結び付く信号は、その艦。結び付かない囮・不明な信号もロックできる)
-        const sa = _signalAnalysis[sid]; if (!sa || !sa.fix || _srcKnown[sid]) continue;
+        const sa = _signalAnalysis[sid]; if (!sa || !sa.fix || _srcKnown[sid] || !sigLockable(sid)) continue; // 第199弾: 確度50%を超えたゴーストだけ
         const est = trackEstimate(sa, 0), d = Math.hypot(est.x - player.x, est.y - player.y);
         if (/^e-/.test(sid)) { const e = enemyBySid(sid); if (!e || e.hp <= 0 || seen.has(e.uid)) continue; out.push({ kind: 'sig', sid, e, full: false, d, ship: e.type !== 'fighter' }); seen.add(e.uid); }
         else out.push({ kind: 'sig', sid, full: false, d, ship: false });
@@ -3984,6 +3991,7 @@ let _lockF = -1e9;
 function lockEntity(e) {
     if (!player || !e || e.hp <= 0) return;
     if (player.manualTarget && player.targetEntity === e) { clearLockTarget(); return; } // もう一度タップ=解除
+    if (!e.inVision && !sigLockable(enemySid(e))) { const sid0 = enemySid(e); if (_signalAnalysis[sid0]) window._lockSignal(sid0); logMessage('LOCK: 確度' + Math.round(sigConf(sid0) * 100) + '% — 50%を超えるまでロックオンできない (追跡して解析を進める)', 'warning-msg'); if (typeof uiToast === 'function') uiToast('確度' + Math.round(sigConf(sid0) * 100) + '% — 50%を超えるまでロックできない (追跡中)', true); return; } // 第199弾
     player.targetEntity = e; player.manualTarget = true; _lockF = _frameCount;
     const sid = enemySid(e); if (_signalAnalysis[sid]) window._lockSignal(sid);
     createClickEffect(e.x, e.y, '#ff4d4d');
@@ -3993,6 +4001,7 @@ function lockEntity(e) {
 }
 function lockSignalTarget(sid) {
     window._lockSignal(sid); _lockF = _frameCount;
+    if (!sigLockable(sid)) { player.targetEntity = null; player.manualTarget = false; logMessage('TRACK: SIG-' + sigNo(sid) + ' を追跡 (確度' + Math.round(sigConf(sid) * 100) + '% — 50%を超えるとロックオンできる)', 'system-msg'); sfxUI('ui_select'); return; } // 第199弾: 確度50%以下は追跡だけ
     const e = /^e-/.test(sid) ? enemyBySid(sid) : null;
     if (e && e.hp > 0) { player.targetEntity = e; player.manualTarget = true; }
     else { player.targetEntity = null; player.manualTarget = false; }
@@ -4055,15 +4064,57 @@ function assumedHitChance(te, w, lk) {
     if (!lk.assumed) return 0;
     if (lk.dist > weaponRange(w)) return 0;
     // 第18弾: 弾が届く時刻の見越し点での幅 (着弾までに相手が動ける分を含む)
-    return hitChanceR(w, assumedAimPoint(te, w).r, PM.seeker ? 1300 : 900);
+    return hitChanceR(w, assumedAimPoint(te, w).r, PM.seeker ? 1300 : 900) * ghostHitMulP(enemySid(te), false); // 第199弾: ゴースト
 }
 // 第97弾: 自機COMが撃つ判断に使う命中の見込み — 敵 (huntHonestR) と同じく推定円を正直に広げて見る。
 //   旧: 敵だけ円を1.7〜2.2倍に広げて撃つ判断をしていた (実機の記録で円の中に居たのは64%) ため、鏡合わせで自機COMが約2.5倍多く撃って圧勝した
 function comHitChance(te, w, lk, sa) {
     if (lk.full) return 0.95;
     if (!lk.assumed || lk.dist > weaponRange(w)) return 0;
-    return hitChanceR(w, huntHonestR(assumedAimPoint(te, w).r, saAge(sa)), PM.seeker ? 1300 : 900);
+    return hitChanceR(w, huntHonestR(assumedAimPoint(te, w).r, saAge(sa)), PM.seeker ? 1300 : 900) * ghostHitMulP(enemySid(te), false); // 第199弾
 }
+// ═══ 第199弾 (オーナー): ゴーストのロックオンと命中率 — 自機も敵も同じ規則 ═══
+//   確度 = その信号が艦影である見込み (識別の手掛かりから・解析が浅いうちは不明=0)。目視している相手は確度100%
+//   ロックオンできる = 目視している / 確度が50%を超えた艦影 (ゴースト)。50%以下は追跡 (解析) だけ — 撃つなら長押し→射撃で座標へ
+//   有視界の外で確度90%以下 = ゴースト (命中率 ×GHOST_HIT_MULT)。90%を超えると「確定」= 有視界に入ったのと同じ扱い (命中率の罰なし・ゴーストを常時表示)。75%を下回るとゴーストに戻る
+const GHOST_LOCK_P = 0.5, GHOST_SOLID_ON = 0.9, GHOST_SOLID_OFF = 0.75, GHOST_HIT_MULT = 0.6;
+function _sigmoidL(L) { return 1 / (1 + Math.exp(-L)); }
+function sigConf(sid) { // 自機から見た確度
+    const e = /^e-/.test(sid || '') ? enemyBySid(sid) : null;
+    if (e && e.inVision && e.hp > 0) return 1;
+    const id = _sigIdent[sid]; if (!id || id.n < IDENT_MIN_N) return 0;
+    return id.sure ? (id.L > 0 ? 1 : 0) : _sigmoidL(id.L);
+}
+function enemyConf(e) { // 敵から見た自艦の確度 (敵の識別 identStepE は自艦そのものを鍵にしている)
+    if ((e.detectionTimer || 0) > 60) return 1;
+    const id = e._eId && e._eId.get(player); if (!id || id.n < IDENT_MIN_N) return 0;
+    return _sigmoidL(id.L);
+}
+function _ghostHyst(o, p) { o._solid = o._solid ? p >= GHOST_SOLID_OFF : p > GHOST_SOLID_ON; return o._solid; }
+function updateGhostStates() {
+    if (_frameCount % 15 !== 3 || !player) return;
+    for (const sid in _signalAnalysis) {
+        const sa = _signalAnalysis[sid]; if (!sa) continue;
+        const was = !!sa._solid, now = _ghostHyst(sa, sigConf(sid));
+        if (now !== was && sa.fix && (sid === lockedSignalId || now)) logMessage('LOCK: SIG-' + sigNo(sid) + (now ? ' 確度' + Math.round(sigConf(sid) * 100) + '% — 確定 (有視界と同じ扱い・ゴーストを常時表示)' : ' 確度が75%を下回った — ゴーストに戻る (命中率 ×' + GHOST_HIT_MULT + ')'), now ? 'system-msg' : 'warning-msg');
+    }
+    for (const e of enemies) if (e.type !== 'fighter' && e.hp > 0 && e._sa) {
+        const was = !!e._sa._solid, now = _ghostHyst(e._sa, enemyConf(e));
+        if (now !== was) comThinkEvent('e', now ? '自機の確度' + Math.round(enemyConf(e) * 100) + '% — 確定 (見えているのと同じ扱い)' : '自機の確度が75%を下回った — ゴーストに戻る', 'e' + e.uid);
+    }
+}
+function sigLockable(sid) { const sa = _signalAnalysis[sid]; return !!(sa && sa._solid) || sigConf(sid) > GHOST_LOCK_P; }
+// 撃つ側の命中率の倍率: 目視/確定=1・ゴースト=GHOST_HIT_MULT・ロックできない (確度50%以下)=0
+function ghostHitMulP(sid, vis) { if (vis) return 1; const sa = _signalAnalysis[sid]; if (sa && sa._solid) return 1; return sigConf(sid) > GHOST_LOCK_P ? GHOST_HIT_MULT : 0; }
+function ghostHitMulE(e) { if ((e.detectionTimer || 0) > 60) return 1; if (e._sa && e._sa._solid) return 1; return enemyConf(e) > GHOST_LOCK_P ? GHOST_HIT_MULT : 0; }
+// 当たった弾がゴーストを狙ったものなら 1発に1回 (1 − GHOST_HIT_MULT) の確率で外れる
+function shotIsGhost(isP, shooter, tgt) { // 撃った側が その相手を見ていない かつ 確定していない (自機も敵も同じ)
+    if (!tgt || tgt.hp === undefined) return false;
+    if (isP) { if (tgt === player || !enemies.includes(tgt) || tgt.inVision) return false; const sa = _signalAnalysis[enemySid(tgt)]; return !(sa && sa._solid); }
+    if (!shooter || shooter.type === 'fighter' || tgt !== player) return false;
+    return !((shooter.detectionTimer || 0) > 60) && !(shooter._sa && shooter._sa._solid);
+}
+function ghostMissRoll(pr) { if (!pr._ghost || pr._ghostRolled) return false; pr._ghostRolled = true; return Math.random() < 1 - GHOST_HIT_MULT; }
 // 推定円の幅 r から見た命中の見込み (自機も敵も同じ)。当たり得る幅 = シーカー/ビーム幅/散布
 function hitChanceR(w, r, seek) {
     const sd = Math.max(80, (r || 1e9) / 2); // 推定円R ≈ 2σ
@@ -4190,7 +4241,7 @@ function bestFireTarget() {
     for (const e of enemies) {
         if (e.hp <= 0 || e._dying) continue;
         if (e.type === 'fighter' && !e.inVision) continue; // 艦載機は推定で撃つ相手ではない (見えたら自動攻撃)
-        const a = e.inVision ? 1 : (e.contactLife > 0 ? e.contactAccuracy : 0);
+        const a = e.inVision ? 1 : (e.contactLife > 0 && sigLockable(enemySid(e)) ? e.contactAccuracy : 0); // 第199弾
         if (a > bestA) { bestA = a; best = e; }
     }
     return best;
@@ -4205,6 +4256,7 @@ function issueFireOrder() {
     if (lockedSignalId && !/^e-/.test(lockedSignalId)) {
         const sa = _signalAnalysis[lockedSignalId];
         if (!sa || !sa.fix) { logMessage('WEP: 射撃解なし — 目標の推定位置が無い。信号を追跡して解析を進めろ', 'warning-msg'); return; }
+        if (!sigLockable(lockedSignalId)) { logMessage('WEP: SIG-' + sigNo(lockedSignalId) + ' は確度' + Math.round(sigConf(lockedSignalId) * 100) + '% — ロックオンできない (50%超が必要)。撃つなら長押し→射撃で座標へ', 'warning-msg'); return; } // 第199弾
         const est = trackEstimate(sa, 0), idn = identInfo(lockedSignalId);
         if (idn.low) logMessage('WEP: 注意 — SIG-' + sigNo(lockedSignalId) + ' は' + idn.txt + '。外れれば位置を教える', 'warning-msg');
         if (w !== 'missile' && w !== 'beam') { logMessage('WEP: 推定点への射撃はミサイル/ビームのみ', 'warning-msg'); return; }
@@ -4214,6 +4266,7 @@ function issueFireOrder() {
     const te = bestFireTarget();
     if (te && !te.inVision) { const idn = identInfo(enemySid(te)); if (idn.low) logMessage('WEP: 注意 — SIG-' + sigNo(enemySid(te)) + ' は' + idn.txt + '。外れれば位置を教える', 'warning-msg'); }
     if (!te) { logMessage('WEP: 射撃解なし — 目標の推定位置が無い。信号を追跡して解析を進めろ', 'warning-msg'); return; }
+    if (!te.inVision && !sigLockable(enemySid(te))) { logMessage('WEP: 確度' + Math.round(sigConf(enemySid(te)) * 100) + '% — ロックオンできない (50%超が必要)。撃つなら長押し→射撃で座標へ', 'warning-msg'); return; } // 第199弾
     if (!playerWeaponReady(player, w)) { logMessage(`WEP: ${w.toUpperCase()} リロード中`, 'warning-msg'); return; }
     const lk = playerLockInfo(te);
     if (lk.dist > weaponRange(w)) {
@@ -5095,7 +5148,7 @@ class Ship {
                 const _liveK = (k) => enemies.some(f => f.type === 'fighter' && f._kind === k && f.hp > 0 && !f._dying);
                 if (this.scoutStock > 0 && skillOn('e', 'dr_scout') && _quiet && _frameCount - this._quietF > 1500 && !_liveK('scout') && (_frameCount + this.uid) % 120 === 0) {
                     this.scoutStock--; spawnEnemyDrone(this, 'scout');
-                } else if (!this._techBuilt && enemyMat >= DRONE_SPEC.mech.mat && droneCtrlFits('e', this, 'mech') && _quiet && _frameCount - this._quietF > (this._techPush > _frameCount ? 1500 : 5400) && !_liveK('mech') && (this._techPush > _frameCount || (this.personality ? (this.personality.greed ?? 0.4) : 0.4) >= 0.3) && !(this._techT > 0)) {
+                } else if (!this._techBuilt && enemyMat >= DRONE_SPEC.mech.mat && techCtrlOK('e', this) && _quiet && _frameCount - this._quietF > (this._techPush > _frameCount ? 1500 : 5400) && !_liveK('mech') && (this._techPush > _frameCount || (this.personality ? (this.personality.greed ?? 0.4) : 0.4) >= 0.3) && !(this._techT > 0)) {
                     enemyMat -= DRONE_SPEC.mech.mat; this._techT = DRONE_SPEC.mech.build; this._techBuilt = true;
                     logMessage('TACTICAL: 敵空母が停止して何かを組み立てている — 大きな電磁波・熱が出ている', 'warning-msg');
                     comThinkEvent('e', 'Techを組み立て開始 (資材' + DRONE_SPEC.mech.mat + '個・' + Math.round(DRONE_SPEC.mech.build / 60) + '秒・停止して大量のシグネチャ)', 'e' + this.uid);
@@ -5193,7 +5246,7 @@ class Ship {
                     } else if (sp.col && _colUsed(sp.col, 'E')) { _waitS = true; // 第66弾: 使用済み = 復活を待つ (300秒で復活。待つ間は他のAI (交戦・巡回) を止めない)
                     } else if ((sp.t += gameSpeedFactor) >= RESUPPLY_TIME) {
                         if (sp.col) _colUsedMark(sp.col, 'E');
-                        this.ammoK = this._fullK; this.ammoM = this._fullM; this._kMag = KINETIC_MAG; this._kReload = 0; this._mReload = 0;
+                        this.ammoK = this._fullK; this.ammoM = this._fullM; this._kMag = KINETIC_MAG; this._kReload = 0; this._mReload = 0; if (sp.col) enemyAddMat(COLONY_SUPPLY_MAT); // 第199弾: 資材+2 (自機と同じ)
                         this._supply = null;
                         this.aiState = 'hunting'; this.huntTimer = 900; this.lurking = false;
                         comThinkEvent('e', '補給完了 (実弾' + this.ammoK + '・ミサイル' + this.ammoM + ') → 狩りへ戻る', 'e' + this.uid);
@@ -5339,7 +5392,7 @@ class Ship {
                     // 第39弾: 見えていない相手には、推定円が十分に小さい時だけ撃つ (自機COMと同じ基準: 見込み ≥ 65% − 35%×攻撃性)。方位しか無ければ撃たない
                     if (wType && this.type !== 'fighter' && !(this.detectionTimer > 60)) {
                         const _te = this._sa && (this._sa.fix || this._sa.motion || this._sa.ping) ? trackEstimate(this._sa, 0) : null;
-                        const _hc = this._lkGuess || !_te ? 0 : hitChanceR(wType, huntHonestR(_te.r, saAge(this._sa)), epm(this).seeker ? 1300 : 900);
+                        const _hc = this._lkGuess || !_te ? 0 : hitChanceR(wType, huntHonestR(_te.r, saAge(this._sa)), epm(this).seeker ? 1300 : 900) * ghostHitMulE(this); // 第199弾: ゴースト (自機と同じ)
                         if (_hc < fireThreshold(pers)) { if (window.__fdbg) window.__fdbg.hc = (window.__fdbg.hc || 0) + 1; wType = null; this.fireCooldown = Math.max(this.fireCooldown, 60); }
                     }
                     // 第22弾: 自機と同じく射角に入っていなければ撃たない (旧: 艦首の向きに関係なく撃てた)。ビームのチャージは射角の外でもできる
@@ -8494,7 +8547,7 @@ function updateResupply() {
     for (const c of structures) {
         if (c.type !== 'colony' || c.owner === 'enemy' || _colUsed(c, 'P')) continue;
         const d = Math.hypot(c.x - player.x, c.y - player.y);
-        if (d < bd && (ammoBelowPlan() || cargo.mat < Math.min(COLONY_SUPPLY_MAT, cargoMatCap()))) { bd = d; best = c; kind = 'colony'; }
+        if (d < bd && (ammoBelowPlan() || cargo.mat < cargoMatCap())) { bd = d; best = c; kind = 'colony'; } // 第199弾: 資材に空きがあれば補給する (旧: 資材が2個未満の時だけ — Tech建造の資材がコロニーで増えなかった)。敵も同じ条件
     }
     if (!best) { _resupply = null; return; }
     if (!_resupply || _resupply.obj !== best) _resupply = { obj: best, kind, p: 0 };
@@ -8627,6 +8680,20 @@ function updateColonyIntel(now) {
     }
 }
 // 敵のコロニー占有 (自機と同じ600u・8秒)。自機のコロニーなら裏返る
+// 第199弾: 敵もコロニーの近く (600u) に居れば 弾が減っているか資材に空きがある時に補給する (自機の updateResupply と同じ条件・同じ時間・1つのコロニーで300秒に1回)
+function updateEnemyColonySupply() {
+    for (const e of enemies) {
+        if (e.type === 'fighter' || e.hp <= 0 || e._dying || e._supply) continue;
+        let best = null, bd = RESUPPLY_R;
+        for (const c of structures) { if (c.type !== 'colony' || c.owner === 'player' || _colUsed(c, 'E')) continue; const d = Math.hypot(c.x - e.x, c.y - e.y); if (d < bd && ((e.ammoK || 0) < (e._fullK || 0) || (e.ammoM || 0) < (e._fullM || 0) || enemyMat < enemyMatCap())) { bd = d; best = c; } }
+        if (!best) { e._colSup = null; continue; }
+        if (!e._colSup || e._colSup.c !== best) e._colSup = { c: best, t: 0 };
+        e._commsF = _frameCount;
+        if ((e._colSup.t += gameSpeedFactor) < RESUPPLY_TIME) continue;
+        _colUsedMark(best, 'E'); e.ammoK = e._fullK; e.ammoM = e._fullM; enemyAddMat(COLONY_SUPPLY_MAT); e._colSup = null;
+        comThinkEvent('e', 'コロニーで補給 (弾を満タン・資材+' + COLONY_SUPPLY_MAT + ' → ' + enemyMat + '個)', 'e' + e.uid);
+    }
+}
 function updateEnemyColonyCapture() {
     for (const st of structures) {
         if (st.type !== 'colony' || st.owner === 'enemy') continue;
@@ -8639,7 +8706,7 @@ function updateEnemyColonyCapture() {
         if (st.eHackP >= 1) {
             const was = st.owner;
             seatSfx('cap_done_colony', 0.9); st.owner = 'enemy'; st.hacked = false; st.eHackP = 0; st.hackP = 0;
-            if (!st._matE) { st._matE = true; enemyAddMat(COLONY_SUPPLY_MAT); } // 第50弾B (第66弾: 上限つき)
+            // 第199弾: 占有しただけの資材+2 は撤去 (自機には無かった) → 資材は補給 (updateEnemyColonySupply) で自機と同じ条件で受け取る
             if (!st._partE) { st._partE = true; enemyOfferDraft(near, 'colony', st.x, st.y); enemyOfferLoot(near, 'colony'); } // 第33弾: 敵も初めて占有したコロニーで部品
             // 第26弾: 占有しただけでは回復も補給もしない (補給は _supply の流れで1つのコロニーにつき1回)
             matchRecEvent('colonyE', st.x, st.y, '敵がコロニーを占有' + (was === 'player' ? ' (自艦のを奪った)' : ''));
@@ -10272,6 +10339,7 @@ function droneCtrlUsed(side, who) {
     else for (const f of enemies) if (f.type === 'fighter' && f._home === who && f.hp > 0 && !f._dying && !f._boarded) u += DRONE_CTRL_COST[_eCtrlKind(f)] ?? 1;
     return u;
 }
+function techCtrlOK(side, who) { return droneCtrlCap(side, who) + 1e-6 >= DRONE_CTRL_COST.mech; } // 第199弾: Techは自分の枠(4)が演算力で足りれば作れる。他のドローンは枠を超えた分が自動制御 (Techを優先して制御)
 function droneCtrlFits(side, who, type) { return droneCtrlUsed(side, who) + (DRONE_CTRL_COST[type] ?? 1) <= droneCtrlCap(side, who) + 1e-6; }
 function droneCtrlMsg() { return '管制枠 ' + (Math.round(droneCtrlUsed('p') * 10) / 10) + ' / ' + (Math.round(droneCtrlCap('p') * 10) / 10) + ' (演算力 ' + (Math.round(hackPower('player') * 10) / 10) + ' — コロニーを占有すると増える)'; }
 // 枠を超えた分は自動制御 (出した順に数えて、後から出した物から)
@@ -10279,14 +10347,14 @@ function updateDroneCtrl() {
     if (_frameCount % 30 !== 7) return;
     if (player && player.hp > 0) {
         const cap = droneCtrlCap('p'); let u = gameState.shipType === 'stealth' ? decoys.length * DRONE_CTRL_COST.decoy : 0;
-        for (const d of playerDrones) { if (d.hp <= 0 || d._boarded) continue; u += DRONE_CTRL_COST[d.type] ?? 1; const ov = u > cap + 1e-6;
+        for (const d of playerDrones.slice().sort((a, b) => (b.type === 'mech') - (a.type === 'mech'))) { if (d.hp <= 0 || d._boarded) continue; u += DRONE_CTRL_COST[d.type] ?? 1; const ov = u > cap + 1e-6;
             if (ov !== !!d._overCap && (d.type === 'attack' || d.type === 'mech' || d.type === 'scout' || d.type === 'boarder')) logMessage('DRONE: ' + _droneName(d) + (ov ? ' 管制枠を超えた — 自動制御 (演算力が下がった: ' + droneCtrlMsg() + ')' : ' 管制枠に戻った — 母艦の制御下'), ov ? 'warning-msg' : 'system-msg');
             d._overCap = ov; }
     }
     for (const e of enemies) {
         if (e.type === 'fighter' || e.hp <= 0) continue;
         const cap = droneCtrlCap('e', e); let u = 0;
-        for (const f of enemies) { if (f.type !== 'fighter' || f._home !== e || f.hp <= 0 || f._dying || f._boarded) continue; u += DRONE_CTRL_COST[_eCtrlKind(f)] ?? 1; f._overCap = u > cap + 1e-6; }
+        for (const f of enemies.filter(q => q.type === 'fighter' && q._home === e).sort((a, b) => (b._kind === 'mech') - (a._kind === 'mech'))) { if (f.hp <= 0 || f._dying || f._boarded) continue; u += DRONE_CTRL_COST[_eCtrlKind(f)] ?? 1; f._overCap = u > cap + 1e-6; }
     }
 }
 // ═══ 第197弾 (オーナー): 強襲突撃艇と艦内への強襲 ═══
@@ -11820,6 +11888,15 @@ function lockIntel(sid, e) {
     const te = sa && sa.fix ? trackEstimate(sa, 0) : null, idn = identInfo(sid), band = sigBandOf(sid);
     const rb = v => Q < 0.5 ? Math.round(v / 10) * 10 : Q < 0.75 ? Math.round(v / 5) * 5 : Math.round(v), rp = v => Q < 0.5 ? Math.round(v / 20) * 20 : Q < 0.8 ? Math.round(v / 10) * 10 : Math.round(v / 5) * 5;
     const lines = [], px = vis ? e.x : te ? te.x : null, py = vis ? e.y : te ? te.y : null;
+    { // 第199弾 (オーナー): 解析率・確度・命中率 を先頭に
+        const cf = vis ? 1 : sigConf(sid), solid = !!(sa && sa._solid), lockOK = vis || sigLockable(sid), w = currentWeapon();
+        lines.push(['解析', Math.round(ana * 100) + '%']);
+        lines.push(['確度', Math.round(cf * 100) + '%  ' + (vis ? '目視' : solid ? '確定 (有視界扱い)' : lockOK ? 'ゴースト' : 'ロック不可 (50%以下)')]);
+        let hc = null, why = '';
+        if (vis || (e && e.hp > 0 && e.contactLife > 0)) { const lk = playerLockInfo(e); hc = lk.dist > weaponRange(w) ? null : assumedHitChance(e, w, lk); if (lk.dist > weaponRange(w)) why = '射程外'; }
+        else if (te) { const lp = leadPoint(sa, w) || te, dd = Math.hypot(lp.x - player.x, lp.y - player.y); if (dd > weaponRange(w)) why = '射程外'; else hc = hitChanceR(w, lp.r || te.r, PM.seeker ? 1300 : 900) * ghostHitMulP(sid, false); }
+        lines.push(['命中', hc == null ? (why || '—') : Math.round(hc * 100) + '% ' + (_WPN_JP[w] || w) + (vis || solid ? '' : lockOK ? ' (ゴースト ×' + GHOST_HIT_MULT + ')' : ' (撃てない)')]);
+    }
     if (px != null) lines.push(['方位', String(rb(compassDeg(Math.atan2(py - player.y, px - player.x)))).padStart(3, '0') + '°  ' + fmtDist(Math.hypot(px - player.x, py - player.y)) + 'u' + (vis || !te ? '' : ' ±' + fmtDist(te.r))]);
     if (Q >= 0.25) {
         if (vis) lines.push(['動き', Math.round((e.currentSpeed || 0) * 60) + 'u/s  艦首' + String(compassDeg(e.angle)).padStart(3, '0') + '°']);
@@ -11986,6 +12063,19 @@ function _bubUp() {
     c.addEventListener('touchend', e => { if (_bub.drag) { _bubUp(); e.stopImmediatePropagation(); e.preventDefault(); } }, { capture: true, passive: false });
 })();
 const _circScreen = []; // 第27弾: 推定円のスクリーン座標 {sid, cx, cy, r} (タップで追跡)
+// 第199弾: 確定したゴースト (確度90%超) — 推定の中心に艦影を常時表示 (見えている艦と同じ扱い。正体の艦種は分からないので輪郭だけ)
+function drawGhostShip(ctx, sid, sa, cx, cy, a0) {
+    if (inPlayerVision(cx, cy) || droneVisionSees(cx, cy)) return; // 見えている所には出さない (第65弾)
+    const inv = 1 / camera.zoom, gs = Math.max(140, 14 * inv), t = Date.now() / 1000, mv = sa.motion;
+    const ang = mv ? Math.atan2(mv.vy, mv.vx) : (sa._ghA ?? 0); sa._ghA = ang;
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang);
+    ctx.globalAlpha = (0.55 + 0.2 * Math.sin(t * 3)) * (a0 || 1);
+    ctx.strokeStyle = '#ff7a6a'; ctx.fillStyle = 'rgba(255,90,80,0.18)'; ctx.lineWidth = 1.8 * inv; ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(gs, 0); ctx.lineTo(gs * 0.15, -gs * 0.42); ctx.lineTo(-gs * 0.8, -gs * 0.5); ctx.lineTo(-gs * 0.55, 0); ctx.lineTo(-gs * 0.8, gs * 0.5); ctx.lineTo(gs * 0.15, gs * 0.42); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.globalAlpha *= 0.5; ctx.beginPath(); for (let y = -gs * 0.4; y <= gs * 0.4; y += 6 * inv) { ctx.moveTo(-gs * 0.6, y + (t * 30 * inv) % (6 * inv)); ctx.lineTo(gs * 0.2, y + (t * 30 * inv) % (6 * inv)); } ctx.lineWidth = 0.7 * inv; ctx.stroke(); // 走査線 (ホログラム)
+    ctx.restore();
+    queueTag(cx, cy - gs, 'GHOST 確定', 'SIG-' + sigNo(sid) + ' 確度' + Math.round(sigConf(sid) * 100) + '%', '#ff7a6a', 'top', 0.9 * (a0 || 1));
+}
 function drawTriangulationCircle(ctx) {
     _circScreen.length = 0;
     for (const sid in _signalAnalysis) {
@@ -11993,11 +12083,11 @@ function drawTriangulationCircle(ctx) {
         if (_srcKnown[sid]) { sa.displayCenterX = null; sa._fa = 0; sa._lastEst = null; continue; } // 第40弾: 特定した発信元は推定円を描かない
         // 第72弾 (オーナー「受信強度が変わると一瞬消えてロックが外れたように見える」): 推定が一瞬出なくなっても、直前の円をしばらく残す (追跡中は20秒・それ以外は4秒・消える前にゆっくり薄れる)
         if (!sa.fix) {
-            const hold = sid === lockedSignalId ? 1200 : 240, age = sa._lastEst ? _frameCount - sa._lastEst.f : 1e9;
+            const hold = sa._solid ? 1e9 : sid === lockedSignalId ? 1200 : 240, age = sa._lastEst ? _frameCount - sa._lastEst.f : 1e9; // 第199弾: 確定したゴーストは常時表示
             if (!sa._lastEst || age > hold) { sa.displayCenterX = null; sa._fa = Math.max(0, (sa._fa || 0) - 0.05); sa._lastEst = age > hold ? null : sa._lastEst; if (!(sa._fa > 0)) continue; }
         }
         const lo = sa.obs && sa.obs[sa.obs.length - 1];
-        if (sid !== lockedSignalId && (!lo || _frameCount - lo.f > TMA_KEEP)) { sa._fa = 0; continue; } // 古い記録の円は出さない
+        if (sid !== lockedSignalId && !sa._solid && (!lo || _frameCount - lo.f > TMA_KEEP)) { sa._fa = 0; continue; } // 古い記録の円は出さない (第199弾: 確定したゴーストは残す)
         _drawEstCircle(ctx, sid, sa, sid === lockedSignalId);
     }
 }
@@ -12007,7 +12097,7 @@ function _drawEstCircle(ctx, sid, sa, locked) {
     let est = sa.fix ? trackEstimate(sa, 0) : null;
     let heldAlpha = 1;
     if (est) sa._lastEst = { x: est.x, y: est.y, r: est.r, moving: false, vx: 0, vy: 0, f: _frameCount };
-    else if (sa._lastEst) { est = sa._lastEst; const hold = locked ? 1200 : 240; heldAlpha = Math.max(0.35, 1 - Math.max(0, (_frameCount - est.f) - hold * 0.6) / (hold * 0.4)); } // 持ち越し中は少し薄く
+    else if (sa._lastEst) { est = sa._lastEst; const hold = sa._solid ? 1e9 : locked ? 1200 : 240; heldAlpha = sa._solid ? 0.8 : Math.max(0.35, 1 - Math.max(0, (_frameCount - est.f) - hold * 0.6) / (hold * 0.4)); } // 持ち越し中は少し薄く
     if (!est) { sa.displayCenterX = null; return; }
     if (sa.displayCenterX == null) { sa.displayCenterX = est.x; sa.displayCenterY = est.y; sa.displayR = est.r; }
     const kc = est.moving ? 0.25 : 0.08;
@@ -12026,6 +12116,7 @@ function _drawEstCircle(ctx, sid, sa, locked) {
         const idn = identInfo(sid), _dp = Math.hypot(cx - player.x, cy - player.y);
         queueTag(cx, cy, 'SIG-' + sigNo(sid), (idn.known ? idn.short : '不明') + ' ' + fmtDist(_dp) + 'u ±' + fmtDist(R), sigColor(sid), 'top', 0.85 * sigRxK(sid) * sa._fa * heldAlpha, 0, anaProgress(sa), !!sa._gate);
         if (_sigHint && _sigHint.sid === sid) { const pu = 0.6 + 0.4 * Math.sin(Date.now() / 120); ctx.save(); ctx.globalAlpha = pu; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3 * inv; ctx.beginPath(); ctx.arc(cx, cy, 16 * inv, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
+        if (sa._solid) drawGhostShip(ctx, sid, sa, cx, cy, heldAlpha);
         sa._lockT0 = 0; return;
     }
     { const sp = worldToScreen(cx, cy); _circScreen.push({ sid, cx: sp.sx, cy: sp.sy, r: R * camera.zoom }); }
@@ -12047,9 +12138,10 @@ function _drawEstCircle(ctx, sid, sa, locked) {
         ctx.globalAlpha = (locked ? 0.7 : 0.4) * fade; ctx.lineWidth = 2 * inv; const rb2 = R + 6 * inv, ro = tt * (locked ? 0.5 : 0.22);
         for (let k = 0; k < 3; k++) { const a0 = ro + k * Math.PI * 2 / 3; ctx.beginPath(); ctx.arc(cx, cy, rb2, a0, a0 + 0.42); ctx.stroke(); }
     }
-    if (locked) {
+    const lockOK = locked && sigLockable(sid); // 第199弾: 確度50%以下は追跡だけ (照準は出さない)
+    if (lockOK) {
         if (!sa._lockT0) sa._lockT0 = Date.now();
-        ctx.globalAlpha = fade; drawLockOnMark(ctx, cx, cy, Math.max(R * 1.04, 18 * inv), idc, sa._lockT0, 'visual', true);
+        ctx.globalAlpha = fade; drawLockOnMark(ctx, cx, cy, Math.max(R * 1.04, 18 * inv), sa._solid ? idc : '#c9a6ff', sa._lockT0, 'visual', true);
     } else sa._lockT0 = 0;
     // 四方の目盛りは 精度の色 (橙=広い → 水色=精密) — 円の色 (識別色) とは別に精度が読める
     ctx.strokeStyle = col; ctx.globalAlpha = (locked ? 0.9 : 0.65) * fade; ctx.lineWidth = 2 * inv;
@@ -12057,10 +12149,11 @@ function _drawEstCircle(ctx, sid, sa, locked) {
     for (let k = 0; k < 4; k++) { const a0 = k * Math.PI / 2, c0 = Math.cos(a0), s0 = Math.sin(a0); ctx.moveTo(cx + c0 * (R - 7 * inv), cy + s0 * (R - 7 * inv)); ctx.lineTo(cx + c0 * (R + 5 * inv), cy + s0 * (R + 5 * inv)); }
     ctx.stroke();
     // 名札 (円の上): 「SIG-xx 艦n%」だけ (第28弾: 説明書きは消す — オーナー)。中心に居るとは限らない
-    { const idn = identInfo(sid); const _dp = Math.hypot(cx - player.x, cy - player.y); queueTag(cx, cy - R, (locked ? '▶ LOCK ' : '') + 'SIG-' + sigNo(sid), (idn.known ? idn.short : '不明') + ' ' + fmtDist(_dp) + 'u', idc, 'top', (locked ? 1 : 0.8 * sigRxK(sid)) * sa._fa * heldAlpha, 0, anaProgress(sa), !!sa._gate);
+    { const idn = identInfo(sid); const _dp = Math.hypot(cx - player.x, cy - player.y); queueTag(cx, cy - R, (lockOK ? (sa._solid ? '▶ LOCK ' : '▶ LOCK GHOST ') : locked ? '◇ TRACK ' : '') + 'SIG-' + sigNo(sid), (idn.known ? idn.short : '不明') + ' ' + fmtDist(_dp) + 'u', idc, 'top', (locked ? 1 : 0.8 * sigRxK(sid)) * sa._fa * heldAlpha, 0, anaProgress(sa), !!sa._gate);
       if (locked) { _lockInfoQ.v = { x: cx, y: cy, r: R, sid, e: enemyBySid(sid) }; }
       // 第44弾 (オーナー): 解析で艦影と特定した (艦影75%以上・または確認) 信号は、推定の中心に艦のしるしを霧の上に描く (中心に居るとは限らない。囮を艦と誤認していればそのまま艦として出る)
-      if (idn.known && idn.p >= 0.75 && !(inPlayerVision(cx, cy) || droneVisionSees(cx, cy))) { // 第65弾 (オーナー「有視界の中で近いのに居ない所にゴースト」): 中心が見えているのに艦のしるしは出さない
+      if (sa._solid) drawGhostShip(ctx, sid, sa, cx, cy, heldAlpha); // 第199弾: 確定 (確度90%超) = 有視界と同じく常時表示
+      else if (idn.known && idn.p >= 0.75 && !(inPlayerVision(cx, cy) || droneVisionSees(cx, cy))) { // 第65弾 (オーナー「有視界の中で近いのに居ない所にゴースト」): 中心が見えているのに艦のしるしは出さない
           const gs = Math.max(120, 11 * inv);
           ctx.globalAlpha = 0.9 * sa._fa; ctx.strokeStyle = '#ff6a5a'; ctx.fillStyle = 'rgba(255,106,90,0.25)'; ctx.lineWidth = 1.6 * inv; ctx.setLineDash([]);
           ctx.beginPath(); ctx.moveTo(cx + gs, cy); ctx.lineTo(cx - gs * 0.7, cy - gs * 0.6); ctx.lineTo(cx - gs * 0.4, cy); ctx.lineTo(cx - gs * 0.7, cy + gs * 0.6); ctx.closePath(); ctx.fill(); ctx.stroke();
@@ -12365,12 +12458,13 @@ function updateFreeBeam() {
         if (en.hp <= 0 || en._dying) continue;
         if (_segDist(en.x, en.y, player.x, player.y, ex, ey) < PM.beamWidth + (en.radius || 0)) { hitE = en; break; }
     }
+    if (hitE && shotIsGhost(true, null, hitE) && Math.random() < 1 - GHOST_HIT_MULT) { effects.push({ x: hitE.x, y: hitE.y - 30, text: 'ゴースト — 外れ', life: 1.0, type: 'floatText', c: '#c9a6ff' }); hitE = null; } // 第199弾
     if (!hitE) for (const cv of convoys) if (_segDist(cv.x, cv.y, player.x, player.y, ex, ey) < PM.beamWidth + cv.radius) { damageConvoy(cv, BEAM_DMG * PM.beamDmg * PM.dmgAll, true); break; } // 第34弾
     if (hitE) {
         const hb = getHiggsIntensity((player.x + hitE.x) / 2, (player.y + hitE.y) / 2);
         const st = applyStrikeBonuses(true, null, hitE, Math.atan2(player.y - hitE.y, player.x - hitE.x), 'beam');
         const d = Math.floor(BEAM_DMG * (1 - hb * 0.8 * PM.beamFog) * st.mult * PM.beamDmg * PM.dmgAll); // 第32弾: 部品
-        hitE.hp -= d; applyHitStatus(true, null, 'beam', hitE); // 第60弾
+        hitE.hp -= d; applyHitStatus(true, null, 'beam', hitE); noteAtkE(hitE, player); // 第60弾
         if (huntStats) huntStats.dmgDealt += d;
         createHitEffect(hitE.x, hitE.y, '#00ffaa'); addShake(15);
         sfxHitEnemy('beam', hitE);
@@ -14681,7 +14775,7 @@ function addMaterials(n) {
 }
 function activeDeployCount() { return playerDrones.length + (gameState.shipType === 'stealth' ? decoys.length : 0); }
 function canDeployNow(type) {
-    const capOk = DRONE_SPEC[type].item || droneCtrlFits('p', null, type);
+    const capOk = DRONE_SPEC[type].item || (type === 'mech' ? techCtrlOK('p') : droneCtrlFits('p', null, type));
     return capOk && ((cargo.stock[type] || 0) > 0 || (!cargo.asm && cargo.mat >= DRONE_SPEC[type].mat));
 }
 
@@ -14729,7 +14823,7 @@ function deployDrone(type, tx, ty) {
     }
     if (spec.noBuild) return;
     if (cargo.asm) { logMessage(`搭載: ${DRONE_SPEC[cargo.asm.type].label}を組み立て中 (残り${Math.max(0, Math.ceil(cargo.asm.t / 60))}秒)`, 'warning-msg'); return; }
-    if (type === 'mech' && !droneCtrlFits('p', null, 'mech')) { logMessage('搭載: Techの管制には枠が4つ要る — ' + droneCtrlMsg() + '。空母ならコロニー2つほど占有すれば足りる', 'warning-msg'); if (typeof uiToast === 'function') uiToast('Techを制御する演算力が足りない — ' + droneCtrlMsg(), true); return; }
+    if (type === 'mech' && !techCtrlOK('p')) { logMessage('搭載: Techの管制には枠が4つ要る — ' + droneCtrlMsg() + '。空母ならコロニー2つほど占有すれば足りる', 'warning-msg'); if (typeof uiToast === 'function') uiToast('Techを制御する演算力が足りない — ' + droneCtrlMsg(), true); return; }
     if (cargo.mat < spec.mat) { logMessage(`搭載: ${spec.label}の完成品が無く資材も足りない (必要${spec.mat}個・残り${cargo.mat}個) — ノードを制圧すると補給できる`, 'warning-msg'); return; }
     cargo.mat -= spec.mat;
     cargo.asm = { type, t: spec.build, total: spec.build, ready: false, tx, ty };
@@ -14771,7 +14865,7 @@ function updateCargo() {
         a.t -= gameSpeedFactor;
         if (a.t <= 0) { a.ready = true; logMessage(`搭載: ${DRONE_SPEC[a.type].label} 組み立て完了`, 'system-msg'); }
     }
-    if (a.ready && (DRONE_SPEC[a.type].item || droneCtrlFits('p', null, a.type))) { cargo.asm = null; _hudCache.cargo = null; _spawnDrone(a.type, a.tx, a.ty); }
+    if (a.ready && (DRONE_SPEC[a.type].item || (a.type === 'mech' ? techCtrlOK('p') : droneCtrlFits('p', null, a.type)))) { cargo.asm = null; _hudCache.cargo = null; _spawnDrone(a.type, a.tx, a.ty); }
 }
 // 組み立て中か (シグネチャ・表示用)
 function cargoAssembling() { return !!(cargo.asm && !cargo.asm.ready); }
@@ -15860,7 +15954,7 @@ class Drone {
             const r = dogfightStep(this, tgt, 'v', vMax);
             this._st = r.st;
             if (!tgt._ghost && r.fire && this.fireCD <= 0 && tgt.hp > 0 && this._ammo > 0) {
-                { const _dp = new Projectile(this.x, this.y, { x: r.ax, y: r.ay, hp: 1, _real: tgt }, true, 'kinetic', FTR_DMG_SCALE * (this._auto ? droneAutoHit('p') : 1)); _dp.fromDrone = true; projectiles.push(_dp); }
+                { const _dp = new Projectile(this.x, this.y, { x: r.ax, y: r.ay, hp: 1, _real: tgt }, true, 'kinetic', FTR_DMG_SCALE * (this._auto ? droneAutoHit('p') : 1)); _dp.fromDrone = true; _dp._by = this; projectiles.push(_dp); }
                 this.fireCD = FTR_FIRE_CD; this._ammo--; this._fireF = _frameCount;
             }
             return;
@@ -15918,10 +16012,10 @@ class Drone {
             // 射撃 (艦首が向いている時だけ)
             if (facing && tgt.hp > 0 && this._dash <= 0 && !tgt._ghost) {
                 if (d > TECH_MSL_MIN && d < TECH_MSL_RANGE && this._mslCD <= 0 && (this.msl || 0) > 0) {
-                    const pr = new Projectile(this.x, this.y, tgt, true, 'missile', TECH_MSL_SCALE * (this._auto ? droneAutoHit('p') : 1)); pr.fromDrone = true; projectiles.push(pr); this._fireF = _frameCount;
+                    const pr = new Projectile(this.x, this.y, tgt, true, 'missile', TECH_MSL_SCALE * (this._auto ? droneAutoHit('p') : 1)); pr.fromDrone = true; pr._by = this; projectiles.push(pr); this._fireF = _frameCount;
                     this.msl--; this._mslCD = TECH_MSL_CD;
                 } else if (d < TECH_RIFLE_RANGE && this.fireCD <= 0 && this._ammo > 0) {
-                    { const _dp = new Projectile(this.x, this.y, tgt, true, 'kinetic', TECH_RIFLE_SCALE * (this._auto ? droneAutoHit('p') : 1)); _dp.fromDrone = true; projectiles.push(_dp); this._flashF = _frameCount; this._ammo--; this._fireF = _frameCount; }
+                    { const _dp = new Projectile(this.x, this.y, tgt, true, 'kinetic', TECH_RIFLE_SCALE * (this._auto ? droneAutoHit('p') : 1)); _dp.fromDrone = true; _dp._by = this; projectiles.push(_dp); this._flashF = _frameCount; this._ammo--; this._fireF = _frameCount; }
                     this._burst = (this._burst || 0) + 1;
                     if (this._burst >= 3) { this._burst = 0; this.fireCD = TECH_RIFLE_CD; } else this.fireCD = 8;
                 }
@@ -16070,7 +16164,7 @@ class Drone {
             const _cl = clampToMapCircle(this.x, this.y, 300); this.x = _cl.x; this.y = _cl.y;
         } else if (this.type === 'build') {
             const tgt = this._nearestEnemy(DRONE_TURRET_RANGE);
-            if (tgt) { const _ld = turretLead(this.x, this.y, tgt); this.angle = Math.atan2(_ld.y - this.y, _ld.x - this.x); if (this.fireCD <= 0 && tgt.hp > 0) { { const _dp = new Projectile(this.x, this.y, { x: _ld.x, y: _ld.y, hp: 1 }, true, 'kinetic', TURRET_DMG_SCALE); _dp.fromDrone = true; _dp._noFall = true; _dp.maxDist = DRONE_TURRET_RANGE * 1.1; projectiles.push(_dp); this.fireFlashTimer = Math.max(this.fireFlashTimer || 0, 6); } this.fireCD = TURRET_CD; } }
+            if (tgt) { const _ld = turretLead(this.x, this.y, tgt); this.angle = Math.atan2(_ld.y - this.y, _ld.x - this.x); if (this.fireCD <= 0 && tgt.hp > 0) { { const _dp = new Projectile(this.x, this.y, { x: _ld.x, y: _ld.y, hp: 1 }, true, 'kinetic', TURRET_DMG_SCALE); _dp.fromDrone = true; _dp._by = this; _dp._noFall = true; _dp.maxDist = DRONE_TURRET_RANGE * 1.1; projectiles.push(_dp); this.fireFlashTimer = Math.max(this.fireFlashTimer || 0, 6); } this.fireCD = TURRET_CD; } }
         } else if (this.type === 'barrier') {
             // 第22弾: ビームの盾 — 動作は barrierBlocksBeam (相手のビームが撃たれた時に判定)。周期ダメージは撤去
         } else if (this.type === 'buoy') {
@@ -16409,6 +16503,7 @@ function enemyFighterStep(f) {
         f._seeT = tgt; f._seeF = _frameCount;
         if (tgt === player && carrier && !f._auto) _eDatalink(carrier, player.x, player.y, 120, 0.7); // データリンクで母艦へ (第81弾: 通信途絶中は届かない・母艦の推定の材料 (点の観測) にもなる — 自機のドローンと同じ)
     } else { tgt = f._seeT && f._seeT.hp > 0 ? f._seeT : null; if (tgt) td = Math.hypot(tgt.x - f.x, tgt.y - f.y); }
+    if (!_rtbF) { tgt = enemyDroneTargetPolicy(f, tgt, f._home && f._home.hp > 0 ? f._home : carrier); if (tgt) td = Math.hypot(tgt.x - f.x, tgt.y - f.y); }
     if (_rtbF) { tgt = null; if (carrier && Math.hypot(carrier.x - f.x, carrier.y - f.y) < DRONE_RESUP_R) { if (!enemyResupTick(f, 'attack') && f._ammo > 0) f._rtbBlock = _frameCount + 3600; if (carrier.type === 'carrier') { const mx = DRONE_SPEC.attack.hp; if (f.hp > 0 && f.hp < mx) f.hp = Math.min(mx, f.hp + mx / (DRONE_REPAIR_SEC.attack * 60)); } } }
     const fly = (tx, ty, vT, turn) => {
         const da = _angDiff(Math.atan2(ty - f.y, tx - f.x), f.angle);
@@ -16483,6 +16578,46 @@ function spawnEnemyDrone(carrier, kind) {
     logMessage('TACTICAL: 敵空母が' + (kind === 'mech' ? 'Tech' : '哨戒機') + 'を' + (kind === 'mech' ? '展開した — 組み立て完了' : '射出した'), 'warning-msg');
     comThinkEvent('e', (kind === 'mech' ? 'Techが完成 → 護衛・迎撃に出す' : '哨戒機を射出 → 周りを偵察させる'), 'e' + carrier.uid);
     matchRecEvent(kind === 'mech' ? 'techE' : 'scoutE', f.x, f.y, kind === 'mech' ? '敵のTechが完成' : '敵が哨戒機を射出');
+}
+// ═══ 第199弾 (オーナー「自艦も敵も同じに」): 敵の艦載機・Tech・哨戒機にも 自機のドローンと同じ標的の規則 ═══
+//   護衛 (母艦から指示が出ていない) = 母艦か自分を撃った相手が「確定している」(自分の目・母艦の目視) なら迎え撃つ (母艦から7000uまで)。未確定の音には向かわない
+//   見張り (前哨の指示) 中に会った相手 = 性格で 攻撃 / 帰還 / 見張りを続ける を決める (自機COMの droneEncDecision と同じ式)。自分を撃った相手には確認なしで応戦
+var _atkLogE = [];
+function noteAtkE(victim, atk) {
+    if (!victim || !atk || !enemies.includes(victim)) return;
+    const now = _frameCount;
+    if (victim.type === 'fighter') { victim._atkBy = { e: atk, f: now }; return; }
+    const r = _atkLogE.find(q => q.e === atk && q.v === victim); if (r) r.f = now; else { _atkLogE.push({ e: atk, v: victim, f: now }); if (_atkLogE.length > 12) _atkLogE.shift(); }
+}
+function _eDroneAlive(a) { return a && a.hp > 0 && (a === player || playerDrones.includes(a)); }
+function _eDroneConfirmed(f, a, home) {
+    if (!_eDroneAlive(a)) return false;
+    if (a === player && home && (home.detectionTimer || 0) > 60) return true; // 母艦が目視している (自機の e.inVision に当たる)
+    const R = DRONE_VIS[f._kind === 'mech' ? 'mech' : f._kind === 'scout' ? 'scout' : 'attack'] || 900, d = Math.hypot(a.x - f.x, a.y - f.y);
+    return d < DRONE_CLOSE_SENSE || (d < R && losReach(f.x, f.y, Math.atan2(a.y - f.y, a.x - f.x), R, getHiggsIntensity(f.x, f.y)) >= d);
+}
+function _eJp(a) { return a === player ? '自艦' : ((DRONE_SPEC[a.type] || {}).label || 'ドローン'); }
+function enemyDroneTargetPolicy(f, tgt, home) {
+    const now = _frameCount, ab = f._atkBy, selfAtk = ab && now - ab.f >= 0 && now - ab.f < 600 && _eDroneConfirmed(f, ab.e, home) ? ab.e : null;
+    const ordered = home && ((home._sendTo && now < home._sendTo.until) || (home._outpost && now < home._outpost.until));
+    if (!ordered) { // 護衛
+        let av = null, bd = Infinity;
+        for (const q of _atkLogE) { const ago = now - q.f; if (ago < 0 || ago > 900 || q.v !== home || !_eDroneConfirmed(f, q.e, home)) continue; if (home && Math.hypot(q.e.x - home.x, q.e.y - home.y) > 7000) continue; const dd = Math.hypot(q.e.x - f.x, q.e.y - f.y); if (dd < bd) { bd = dd; av = q.e; } }
+        av = av || selfAtk;
+        if (av) { if (f._avE !== av) { f._avE = av; comThinkEvent('e', (f._kind === 'mech' ? 'Tech' : '艦載機') + ': 攻撃してきた' + _eJp(av) + 'をロックして迎撃に向かう', home ? 'e' + home.uid : undefined); } return av; }
+        f._avE = null; return tgt;
+    }
+    if (home && home._outpost && now < home._outpost.until && !(home._sendTo && now < home._sendTo.until) && tgt) { // 見張り中の遭遇
+        if (selfAtk === tgt) return tgt;
+        f._enc = f._enc || new Map(); const r = f._enc.get(tgt);
+        if (r && now < r.until) return r.dec === 'attack' ? tgt : null;
+        const P = home.personality || {}, dec = (P.aggression ?? 0.5) >= 0.5 || (P.command ?? 0.4) >= 0.6 ? 'attack' : (P.caution ?? 0.4) >= 0.65 ? 'return' : 'continue';
+        f._enc.set(tgt, { dec, until: now + 3600 });
+        if (dec === 'return') { f.huntTarget = null; f.huntTimer = 0; }
+        comThinkEvent('e', (f._kind === 'mech' ? 'Tech' : '艦載機') + 'が見張り中に' + _eJp(tgt) + 'と遭遇 → ' + ({ attack: '攻撃', return: '帰還', continue: '見張りを続ける' })[dec], home ? 'e' + home.uid : undefined);
+        return dec === 'attack' ? tgt : null;
+    }
+    return tgt;
 }
 function _enemyDroneSees(f, R) { // 見えた (自機のドローン・自艦) — 第52弾: 相手のドローンの迎撃を優先 (Tech同士は相手のTechを最優先)・いなければ自艦
     const h0 = getHiggsIntensity(f.x, f.y);
@@ -16568,6 +16703,7 @@ function enemyTechStep(f) {
         if (tgt === player && !f._auto) _eDatalink(carrier, player.x, player.y, 120, 0.7);
     }
     let tgt = f._seeT && f._seeT.hp > 0 ? f._seeT : null;
+    tgt = enemyDroneTargetPolicy(f, tgt, carrier); // 第199弾: 自機のTechと同じ標的の規則
     // 第52弾: 小銃・ミサイル・サーベルが全部尽きたら母艦へ戻り、資材1個で全弾補給 (自機のTechと同じ)
     const _emptyT = f._ammo <= 0 && (f.msl || 0) <= 0; // 第54弾: 小銃とミサイルが尽きたら戻る
     if (_emptyT) tgt = null;
@@ -16623,7 +16759,7 @@ function enemyTechStep(f) {
 function techSaberHit(d, t) {
     const back = Math.abs(_angDiff(Math.atan2(d.y - t.y, d.x - t.x), t.angle || 0)) > Math.PI * 0.55;
     const dmg = Math.round(TECH_SABER_DMG * (back ? 1.5 : 1));
-    t.hp -= dmg;
+    t.hp -= dmg; if (t !== player) noteAtkE(t, d);
     if (huntStats) huntStats.dmgDealt += dmg;
     effects.push({ x: t.x, y: t.y - 30, text: '斬撃 -' + dmg, life: 1.0, type: 'floatText', c: '#ff9df0' });
     saberFx.push({ x: d.x, y: d.y, tx: t.x, ty: t.y, a: Math.atan2(t.y - d.y, t.x - d.x), t: 0 });
@@ -17774,7 +17910,7 @@ function huntTryFire(e, H, est, minHc) {
     if (e._weaponJamTimer > 0) { H.why = 'jam'; return false; }
     const d0 = Math.hypot(est.x - e.x, est.y - e.y), ff = weaponFlightFrames(w, d0);
     const ax = est.x + (est.vx || 0) * ff, ay = est.y + (est.vy || 0) * ff, d = Math.hypot(ax - e.x, ay - e.y);
-    const hc = hitChanceR(w, (est.r <= 300 && est.age < 60 ? est.r : huntHonestR(est.r, est.age)) + Math.hypot(est.vx || 0, est.vy || 0) * ff * 0.3, epm(e).seeker ? 1300 : 900); // 見えている (r≤300・新しい) 時はそのまま
+    const hc = hitChanceR(w, (est.r <= 300 && est.age < 60 ? est.r : huntHonestR(est.r, est.age)) + Math.hypot(est.vx || 0, est.vy || 0) * ff * 0.3, epm(e).seeker ? 1300 : 900) * ghostHitMulE(e); // 第199弾 // 見えている (r≤300・新しい) 時はそのまま
     H.hc = hc;
     if (hc < minHc) { H.why = 'lowhc'; return false; }
     if (w === 'missile' && d > ENEMY_MISSILE_ENGAGE * epm(e).mslRange * 1.02) { H.why = 'far'; return false; }
@@ -18540,9 +18676,16 @@ function stratRun(A, S, now) {
             if (A.mat() < need) {
                 if (A.makeRoom && cd('room', 10)) A.makeRoom(need);
                 const g = A.matSource(); if (!g) return 'end:資材の取れる所が無い';
-                const near = g.type === 'derelict' ? DERELICT_SALVAGE_R * 0.6 : !g.type ? NODE_CAP_R * 0.6 : COLONY_HACK_R * 0.6;
+                const near = g.type === 'search' ? 900 : g.type === 'derelict' ? DERELICT_SALVAGE_R * 0.6 : !g.type ? NODE_CAP_R * 0.6 : COLONY_HACK_R * 0.6;
                 if (Math.hypot(g.x - A.x, g.y - A.y) > near) A.go(g.x, g.y, 300, null); else A.hold(false);
-                A.think('strat', '戦略「Tech建造」: 資材 ' + A.mat() + '/' + need + '個 → ' + (g.type === 'derelict' ? '難破船' : !g.type ? 'ノード' : 'コロニー') + 'で集める (' + _dirTxt(A.x, A.y, g.x, g.y) + ')');
+                A.think('strat', '戦略「Tech建造」: 資材 ' + A.mat() + '/' + need + '個 → ' + (g.lbl || (g.type === 'derelict' ? '難破船' : !g.type ? 'ノード' : 'コロニー')) + 'で集める (' + _dirTxt(A.x, A.y, g.x, g.y) + ')');
+                return true;
+            }
+            if (!A.ctrlOK()) { // 第199弾: Techを制御する演算力 (管制枠4) が無い → コロニーを占有して演算力を上げる (旧: 枠が足りないまま組み立て場所で黙って待ち続けた)
+                const me = A.owner, cols = structures.filter(q => q.type === 'colony' && q.owner !== me).sort((p, q) => Math.hypot(p.x - A.x, p.y - A.y) - Math.hypot(q.x - A.x, q.y - A.y)), g = cols[0];
+                if (!g) return 'end:演算力を上げるコロニーが無い (Techの管制枠が足りない)';
+                if (Math.hypot(g.x - A.x, g.y - A.y) > COLONY_HACK_R * 0.6) A.go(g.x, g.y, 300, null); else A.hold(false);
+                A.think('strat', '戦略「Tech建造」: 資材は揃った — Techの管制には演算力が足りない → コロニーを占有して上げる (' + _dirTxt(A.x, A.y, g.x, g.y) + ')');
                 return true;
             }
             if (!S.spot) { const cv = findCoverSpot(A.x, A.y, 7000); S.spot = cv ? { x: cv.x, y: cv.y } : clampToMapCircle(A.x, A.y, 800); A.say('資材' + A.mat() + '個が揃った → ' + (cv ? '霧/岩石帯 (' + _dirTxt(A.x, A.y, S.spot.x, S.spot.y) + ')' : 'この場') + 'へ行って組み立てる'); }
@@ -18705,9 +18848,9 @@ function stratActorP(c, hpF, te, lk) {
         hasBoard: () => (cargo.stock.boarder || 0) > 0 || playerDrones.some(d => d.type === 'boarder' && d.hp > 0), boarding: () => enemies.some(q => q._board && q._board.side === 'p'),
         have: (t) => drOK('p', t) && stock(stockK[t]) && !playerDrones.some(d => d.type === t && d.hp > 0), mobile: (t) => playerDrones.some(d => d.type === t && d.hp > 0), captured: () => playerDrones.some(d => d._hacked && d.hp > 0),
         launch: (t) => { if (droneCtrlFits('p', null, t)) deployDrone(t); },
-        techBuilding: () => techBuilding(), mat: () => cargo.mat, canBuild: () => !cargo.asm && droneCtrlFits('p', null, 'mech'), buildTech: () => deployDrone('mech'),
+        techBuilding: () => techBuilding(), ctrlOK: () => techCtrlOK('p'), mat: () => cargo.mat, canBuild: () => !cargo.asm && techCtrlOK('p'), buildTech: () => deployDrone('mech'),
         makeRoom: (need) => { if (cargoMatCap() < need) for (const k of ['scout', 'attack']) if ((SHIP_DRONES[gameState.shipType] || []).includes(k) && (cargo.stock[k] || 0) > 0 && !playerDrones.some(d => d.type === k && d.hp > 0) && droneCtrlFits('p', null, k)) { deployDrone(k); comThinkEvent('p', 'Tech建造の準備: ' + DRONE_SPEC[k].label + 'を出して積載の枠を空ける (資材の上限 ' + cargoMatCap() + '個 → 必要' + need + '個)'); break; } },
-        matSource: () => { let g = _comNearest(true, true), gd = g ? Math.hypot(g.x - player.x, g.y - player.y) : Infinity; for (const st of structures) { if (st.type !== 'derelict' || st.salvaged || !st.discovered) continue; const d = Math.hypot(st.x - player.x, st.y - player.y); if (d < gd) { gd = d; g = st; } } return g; },
+        matSource: () => techMatSource('p', player.x, player.y),
         order: (types, kind, x, y) => { if (skillOn('p', 'dr_order')) for (const t of types) if (playerDrones.some(d => d.type === t && d.hp > 0)) droneOrder(t, kind, x, y); },
         ammoOut: () => ammoOutOf(player), engaged: () => comEngaged(), recall: (why) => comDroneRecall(c, why), say: (t) => comThinkEvent('p', t), think: (sig, t) => comThink('p', sig, t) };
 }
@@ -18725,10 +18868,10 @@ function stratActorE(e) {
         have: (t) => !drOK('e', t) ? false : t === 'build' ? (e.turretStock || 0) > 0 && !liveK('turret') : t === 'scout' ? (e.scoutStock || 0) > 0 && !liveK('scout') : (e.droneStock || 0) > 0 && droneCtrlFits('e', e, 'attack'), // 第198弾: 旧は2機まで固定 → 管制枠
         mobile: (t) => t === 'scout' ? liveK('scout') : t === 'attack' ? liveF() : t === 'build' ? liveK('turret') : liveK('mech'),
         captured: () => enemies.some(f => f.type === 'fighter' && f._hacked && f.hp > 0 && !f._dying),
-        techBuilding: () => e._techT > 0, mat: () => enemyMat, canBuild: () => !(e._techT > 0) && droneCtrlFits('e', e, 'mech'),
+        techBuilding: () => e._techT > 0, ctrlOK: () => techCtrlOK('e', e), mat: () => enemyMat, canBuild: () => !(e._techT > 0) && techCtrlOK('e', e),
         makeRoom: (need) => { if (enemyMatCap() < need) for (const k of ['scout', 'attack']) { const ok = k === 'scout' ? (e.scoutStock || 0) > 0 && !liveK('scout') : (e.droneStock || 0) > 0 && !liveF(); if (ok) { if (k === 'scout') { e.scoutStock--; spawnEnemyDrone(e, 'scout'); } else { e.droneStock--; _eLaunchFighter(e, { x: e.x, y: e.y }); } comThinkEvent('e', 'Tech建造の準備: ' + (k === 'scout' ? '哨戒機' : '戦闘機') + 'を出して積載の枠を空ける (資材の上限 ' + enemyMatCap() + '個 → 必要' + need + '個)', 'e' + e.uid); break; } } },
         buildTech: () => { enemyMat -= DRONE_SPEC.mech.mat; e._techT = DRONE_SPEC.mech.build; e._techBuilt = true; logMessage('TACTICAL: 敵空母が停止して何かを組み立てている — 大きな電磁波・熱が出ている', 'warning-msg'); },
-        matSource: () => { const a = gatherPick('e', e.x, e.y, 'any'), b = gatherPick('e', e.x, e.y, 'part'); if (!a || !b) return a || b; return Math.hypot(a.x - e.x, a.y - e.y) <= Math.hypot(b.x - e.x, b.y - e.y) ? a : b; },
+        matSource: () => techMatSource('e', e.x, e.y),
         launch: (t) => { if (t === 'build') { e.turretStock--; spawnEnemyDrone(e, 'turret'); } else if (t === 'scout') { e.scoutStock--; spawnEnemyDrone(e, 'scout'); } else { e.droneStock--; _eLaunchFighter(e, { x: e.x, y: e.y }); } },
         order: (types, kind, x, y) => { if (skillOn('e', 'dr_order')) e._sendTo = { x, y, until: now + 60 * 62 }; },
         ammoOut: () => ammoOutOf(e), engaged: () => stratNearE(e) || hitAgo < 600, recall: () => { if (skillOn('e', 'dr_recall')) { e._sendTo = null; e._outpost = null; } },
@@ -18897,7 +19040,7 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
     const est = comHunterEst(H.sid), D = est ? Math.hypot(est.x - player.x, est.y - player.y) : null;
     const tryFire = (minHc) => {
         const sp = comStrikePlan(est, H.force); if (!sp) return false; H.w = sp.w;
-        const ff = weaponFlightFrames(H.w, D), hc = hitChanceR(H.w, huntHonestR(est.r, est.age) + Math.hypot(est.vx, est.vy) * ff * 0.3, PM.seeker ? 1300 : 900);
+        const ff = weaponFlightFrames(H.w, D), hc = hitChanceR(H.w, huntHonestR(est.r, est.age) + Math.hypot(est.vx, est.vy) * ff * 0.3, PM.seeker ? 1300 : 900) * ghostHitMulP(lockedSignalId, false); // 第199弾
         H.hc = hc; H.why = '';
         if (hc < minHc) { H.why = 'lowhc'; return false; }
         if (!playerWeaponReady(player, H.w)) { H.why = 'reload'; return false; }
@@ -19909,7 +20052,7 @@ function comExtrasStep(c, P, D, hpF, contact) {
     if (gameState.shipType === 'carrier') {
         if (can('scout') && drOK('p', 'scout') && !mobile('scout') && !contact && (P.caution >= 0.4 || P.stealth >= 0.4) && droneCtrlFits('p', null, 'scout')) { c.itemF = now; deployDrone('scout'); comThinkEvent('p', '哨戒機を出す (気配なし・慎重/隠密 → 周りを偵察)'); return; }
         const needMat = DRONE_SPEC.mech.mat;
-        if (!techBuilding() && !cargo.asm && cargo.mat >= needMat && !mobile('mech') && quietFor >= 90 && (P.greed ?? 0.4) >= 0.4 && droneCtrlFits('p', null, 'mech')) {
+        if (!techBuilding() && !cargo.asm && cargo.mat >= needMat && !mobile('mech') && quietFor >= 90 && (P.greed ?? 0.4) >= 0.4 && techCtrlOK('p')) {
             if (can('build') && drOK('p', 'build') && !playerDrones.some(d => d.type === 'build' && d.hp > 0)) { c.itemF = now; deployDrone('build'); comThinkEvent('p', 'Techの組み立て前に砲台を据える (建造中は動けない — 守りを固める)'); return; }
             c.itemF = now; deployDrone('mech'); comThinkEvent('p', 'Techを組み立て開始 (資材' + needMat + '個・' + Math.round(DRONE_SPEC.mech.build / 60) + '秒・停止して大量のシグネチャ・' + Math.round(quietFor) + '秒気配なし)'); return;
         }
@@ -20104,11 +20247,14 @@ function comStratStep(c, P, D, hpF, contact, te, lk, r) {
     if (!S) {
         if (now < (c.stratCD || 0) || comEngaged()) return false; // 第73弾: 会敵中は新しい戦略 (ドローンを遠くへ出す物) を始めない
         const x = comStratCtx(c, P), pk = comPickStrat(c, P, x, hpF);
-        if (capMode) { const cg = capStratGate(c, P, pk); if (cg && cg.wait) return true; if (cg && cg.id) { pk.pick = cg.id; comThinkEvent('p', '艦長の判断: 方針「' + STRAT_REG[cg.id].jp + '」'); } } // 第185弾: 方針は艦長が決める
+        if (capMode) { const cg = capStratGate(c, P, pk); if (cg && cg.wait) return true; if (cg && cg.id) { pk.pick = cg.id; c._capStrat = cg.id; comThinkEvent('p', '艦長の判断: 方針「' + STRAT_REG[cg.id].jp + '」'); } } // 第185弾: 方針は艦長が決める
         S = c.st = { id: pk.pick, t0: now, until: now + COM_STRAT_MIN + Math.random() * COM_STRAT_VAR, ph: 'go', hp0: player.hp, x0: player.x, y0: player.y };
         const ws = Object.keys(pk.w).map(k => k + ' ' + pk.w[k].toFixed(1)).join(' / ');
         comThinkEvent('p', '戦略「' + COM_STRATS[S.id] + '」を選ぶ (約' + Math.round((S.until - now) / 60) + '秒) — 重み ' + ws);
         if (S.id === 'tech') S.until = now + 36000; // 集めて組み立てるので長く (最大10分)
+        if (c._capStrat === S.id) { S.cap = true; S.until = Math.max(S.until, now + (S.id === 'tech' ? 72000 : 14400)); } // 第199弾: 艦長が選んだ方針は 成し遂げるか危険になるまで続ける (旧: 他の方針と同じ時間・小さな被弾で終わり、Tech建造は資材集めの途中で時間切れになった)
+        c._capStrat = null;
+        if (S.cap) { c.item = null; c.goalLeg = null; }
         if (S.id === 'ambush' || S.id === 'bait' || S.id === 'trap') {
             const site = _comPickSite(c, P);
             if (!site) { c.st = null; S = null; c.stratCD = now + 1800; return false; }
@@ -20126,7 +20272,7 @@ function comStratStep(c, P, D, hpF, contact, te, lk, r) {
         } else if (S.id === 'guard' || S.id === 'orbit') { S.site = x.owned[Math.floor(Math.random() * x.owned.length)]; }
     }
     // ── 共通の中止条件 ──
-    if (S.id !== 'gather' && !STRAT_KEEP[S.id] && player.hp < S.hp0 - player.maxHp * 0.05 && !(S.id === 'push' || S.id === 'screen')) return end('被弾');
+    if (S.id !== 'gather' && !STRAT_KEEP[S.id] && player.hp < S.hp0 - player.maxHp * (S.cap ? 0.35 : 0.05) && !(S.id === 'push' || S.id === 'screen')) return end('被弾');
     if (now > S.until) return end('時間');
     if ((S.id === 'screen' || S.id === 'guard' || S.id === 'push') && comEngaged()) return end('会敵 (' + comEngaged() + ') — ドローンを母艦の護衛へ');
     const sa = lockedSignalId && _signalAnalysis[lockedSignalId], est = sa && sa.fix ? trackEstimate(sa, 0) : null;
@@ -20406,6 +20552,9 @@ function capPlayList(c, P, te) {
 // 第189弾 (オーナー「基本はAIが勝手に選ぶ・AIに多様性を」): QTE中のAIが、性格 (スキルの適性)・戦略・状況で 重みつきの乱数でドローン・アイテム (ドローン・アイテム・演算力) を自分の判断で使う。最大の一つを選ぶのでなく、直前と同じ物は避けて散らす
 var _capAutoF = 0, _capAutoLast = '';
 // ドローン・アイテムの選び方は 自機AI・敵COMで同じ関数 (第190弾): 重み = 基本値 × スキル適性^1.2 × 乱数、直前と同じ物は×0.25。スキルをOFFにした物は選ばない
+// 第199弾: 移動が要る方針 (Tech建造・狩り・襲撃など) の最中は「止まって聴く・煙幕/霧で息を潜める」を選ばない (自機COMも敵も同じ) — 旧: Tech建造の資材集めの途中で止まって20秒聴いていた
+const AUTO_TRAVEL_STRATS = { tech: 1, push: 1, raid: 1, restock: 1, fallback: 1, hop: 1, wide_loop: 1, net: 1, salvage: 1, center: 1, decoyship: 1, board: 1 };
+function autoPlayTravelOK(a, stratId) { return !(stratId && AUTO_TRAVEL_STRATS[stratId] && (a.id === 'listen' || a.id === 'smoke' || a.id === 'spray')); }
 function autoPlayChoose(A, P, side, last) {
     A = A.filter(a => skillOn(side, a.skill));
     if (!A.length) return null;
@@ -20420,7 +20569,7 @@ function capAutoPlay(c, P, fight, te) {
     const now = _frameCount;
     if (now < _capAutoF) return false;
     _capAutoF = now + 1100 + Math.random() * 1100; // 18〜37秒に1回
-    const A = capPlayList(c, P, te).filter(a => !['analysis', 'sensor', 'weapon'].includes(a.id) && (!fight || AUTO_FIGHT_IDS.includes(a.id))); // 演算力の切替は戦術 (tacticRules) の担当
+    const A = capPlayList(c, P, te).filter(a => !['analysis', 'sensor', 'weapon'].includes(a.id) && (!fight || AUTO_FIGHT_IDS.includes(a.id)) && autoPlayTravelOK(a, c.st && c.st.id)); // 演算力の切替は戦術 (tacticRules) の担当
     const pick = autoPlayChoose(A, P, 'p', _capAutoLast);
     if (!pick) return false;
     _capAutoLast = pick.id; pick.run();
@@ -20464,7 +20613,7 @@ function enemyAutoPlay(e) {
     if (e._sendTo && skillOn('e', 'dr_recall') && enemies.some(f => f.type === 'fighter' && f._home === e && f.hp > 0 && Math.hypot(f.x - e.x, f.y - e.y) > 3500)) add('recall', 'dr_recall', 'ドローンを呼び戻す', '遠くのドローンを母艦へ', () => A.recall(), 0.7);
     const sid = e._strat && e._strat.id, B = CAP_STRAT_BOOST[sid];
     if (B) for (const a of out) if (B[a.id]) a.base *= B[a.id];
-    const pick = autoPlayChoose(out.filter(a => vis ? AUTO_FIGHT_IDS.includes(a.id) : true), P, 'e', e._autoPlayLast);
+    const pick = autoPlayChoose(out.filter(a => (vis ? AUTO_FIGHT_IDS.includes(a.id) : true) && autoPlayTravelOK(a, e._strat && e._strat.id)), P, 'e', e._autoPlayLast);
     if (!pick) return false;
     e._autoPlayLast = pick.id; pick.run(); e._launchFlash = Math.max(e._launchFlash || 0, 30);
     comThinkEvent('e', 'ドローン・アイテム: ' + pick.label + (sid && STRAT_REG[sid] ? ' (方針「' + STRAT_REG[sid].jp + '」)' : '') + ' — ' + pick.sub, 'e' + e.uid);
@@ -20772,7 +20921,7 @@ function _comPilotStep0() {
     // 第20弾: 弾が尽きかけたら補給へ (補給所 / ハック済みのコロニー)。実弾が残っているうちはミサイル切れでも戦う
     {
         const loS = shipLoadout(gameState.shipType);
-        if (supplyNeed({ hasAmmo: true, K: cargo.ammoK, M: cargo.ammoM, fullK: loS.ammoK * AMMO_PER_SLOT.kinetic, fullM: loS.ammoM * AMMO_PER_SLOT.missile, prefKin: currentWeapon() === 'kinetic' })) { // 第139弾: 敵と同じ判断
+        if (supplyNeed({ hasAmmo: (loS.ammoK || 0) > 0 || (loS.ammoM || 0) > 0, K: cargo.ammoK, M: cargo.ammoM, fullK: loS.ammoK * AMMO_PER_SLOT.kinetic, fullM: loS.ammoM * AMMO_PER_SLOT.missile, prefKin: currentWeapon() === 'kinetic' })) { // 第139弾: 敵と同じ判断
             const ss = supplySite(player.x, player.y, c => c._pObs === 'enemy', c => _colUsed(c, 'P'));
             if (ss) {
                 c.mode = 'supply'; _comCMOff();
@@ -20876,7 +21025,7 @@ function _comPilotStep0() {
     const got = pilotLadder({
         plan: () => !c.hunt && comPlanStep(c, P, D, hpF, te, lk) && (_comStance(c, P), true), // 第46弾: 作戦「囮で誘い背後を取る」
         fire: fireStep,
-        grab: () => comGrabStep(c, P, hpF, retreat, te, lk) && (_comStance(c, P), true), // 第80弾: 取りに行くと決めた物・目の前の拾い物
+        grab: () => (c.st && c.st.cap && !retreat && !(te && lk && lk.full) ? (c._stratDone = now, comStratStep(c, P, D, hpF, contact, te, lk, r)) : false) || comGrabStep(c, P, hpF, retreat, te, lk) && (_comStance(c, P), true), // 第199弾: 艦長が選んだ方針は 拾い物・任務より先に進める / 第80弾: 取りに行くと決めた物・目の前の拾い物
         hunt: () => comHunterStep(c, P, D, hpF, retreat, te, lk), // 第80弾: 狩人の頭脳
         press: () => comPressStep(c, P, D, hpF, te, lk, retreat, held, contact) && (_comStance(c, P), true), // 第71弾: 決着をつける
         stall: () => comStallTour(c, P, D, hpF, contact) && (_comStance(c, P), true) });
@@ -20884,7 +21033,7 @@ function _comPilotStep0() {
     // 4) 出す
     if (contact && (P.aggression >= 0.5 || P.caution >= 0.5 || playerExposureLevel >= 2) && now - c.lastDeploy > COM_DEPLOY_GAP && !(c.st && (c.st.id === 'ambush' || c.st.id === 'bait' || c.st.id === 'fogHide'))) _comDeploy(c, P); // 第58弾: 潜む戦略の間はドローンを出して信号を増やさない
     // 4b) 第58弾: 戦略テンプレート (待ち伏せ・餌・ドローン・霧に潜む・狩り・拠点防衛)。収集は従来どおり下の流れ
-    if (comStratStep(c, P, D, hpF, contact, te, lk, r)) { return; }
+    if (c._stratDone !== now && comStratStep(c, P, D, hpF, contact, te, lk, r)) { return; }
     // 5a) 第34弾: 正体の分かった輸送船 (または艦影らしいうるさい信号) を追って拿捕 — 止まらずに少し先へ向け直し続ける
     if (!contact) {
         let cvT = null, cvD = 15000;
@@ -21171,6 +21320,19 @@ function _comStance(c, P) {
     if (powerStance !== want) setStance(want, true);
 }
 // 最寄りの「取れる」もの: ノード(自分のもの以外) / 未ハックのコロニー
+// 第199弾: Tech建造の資材の取れる所 (自機COMも敵も同じ関数・距離の上限なし) — 自分のものでないノード (制圧で+4) / 補給を使っていない相手のものでないコロニー (+2) / 見つけた難破船 / 何も無ければ まだ聴いていない海域を探す
+function techMatSource(side, x, y) {
+    const me = side === 'p' ? 'player' : 'enemy', k = side === 'p' ? 'P' : 'E'; let best = null, bd = Infinity;
+    const take = (o, d, lbl) => { if (d < bd) { bd = d; best = { x: o.x, y: o.y, type: o.type, lbl }; } };
+    for (const n of resourceNodes) if (n.owner !== me) take(n, Math.hypot(n.x - x, n.y - y), 'ノード');
+    for (const st of structures) {
+        if (st.type === 'colony') { const opp = side === 'p' ? st._pObs === 'enemy' : st.owner === 'player'; if (!_colUsed(st, k)) take(st, Math.hypot(st.x - x, st.y - y) * (opp ? 1.6 : 1), 'コロニー'); }
+        else if (st.type === 'derelict' && !st.salvaged && (side === 'p' ? st.discovered : (st.discovered || st._discE))) take(st, Math.hypot(st.x - x, st.y - y) * (derelictSosOn(st) || derelictSosIn(st) < 3600 ? 1 : 2), '難破船');
+    }
+    if (best) return best;
+    const sp = searchNext(side === 'p' ? player : enemies.find(e => e.type !== 'fighter' && e.hp > 0) || player, x, y);
+    return sp ? { x: sp.x, y: sp.y, type: 'search', lbl: '未踏の海域 (コンテナを探す)' } : null;
+}
 function _comNearest(nodes, colonies) {
     let best = null, bd = COM_GOAL_RANGE;
     if (nodes) for (const n of resourceNodes) { if (n.owner === 'player') continue; const d = Math.hypot(n.x - player.x, n.y - player.y); if (d < bd) { bd = d; best = n; } }
@@ -22343,7 +22505,7 @@ function _stepWorldCore() {
 
         // 第16弾: ノード制圧 / コロニーハック (近くに留まる)
         updateNodesAndColonies();
-        updateEnemyColonyCapture(); updateColonyIntel(false); // 第23弾
+        updateEnemyColonyCapture(); updateEnemyColonySupply(); updateGhostStates(); updateColonyIntel(false); // 第23弾
         updateResupply(); // 第20弾
 
         // 構造物・ステーションの発見チェック (有視界距離内に入ると発見)
