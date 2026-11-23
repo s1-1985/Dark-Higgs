@@ -458,7 +458,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261123d';
+const SPRITE_VER = '20261123e';
 const SPRITE_FILES = {
     // 第197弾: 強襲突撃艇 (6勢力)
     f2_helios_boarder: 'assets/f2_helios_boarder.png', f2_crow_boarder: 'assets/f2_crow_boarder.png', f2_valkyr_boarder: 'assets/f2_valkyr_boarder.png',
@@ -548,7 +548,7 @@ const SPRITE_FILES = {
     // 第204弾: ノード・コロニーのスプライトスタッキング (疑似3D・層ごとの画像を垂直オフセットで重ねる)
     node_higgs_l0: 'assets/node_higgs_l0.png', node_higgs_l1: 'assets/node_higgs_l1.png', node_higgs_l2: 'assets/node_higgs_l2.png',
     colony_l0: 'assets/structure_colony_l0.png', colony_l1: 'assets/structure_colony_l1.png', colony_l2: 'assets/structure_colony_l2.png',
-    colony_l3: 'assets/structure_colony_l3.png', colony_l4: 'assets/structure_colony_l4.png',
+    colony_l3: 'assets/structure_colony_l3.png',
     // Higgsfield生成エフェクトスプライト (黒背景 → 'lighter'加算合成で黒=透明)
     fx_beam_main:       'assets/fx_beam_main.png',
     fx_explosion_big:   'assets/fx_explosion_big.png',
@@ -3110,12 +3110,12 @@ function drawColonyLife(ctx, st, len, t) {
         ctx.beginPath(); ctx.arc(Math.cos(a) * r, Math.sin(a) * r, Math.max(1.2, R * 0.013), 0, Math.PI * 2); ctx.fill();
     }
     ctx.restore();
-    drawGuideBeacons(ctx, st, R, t); // 第207弾: ドッキングベイから放たれるガイドビーコン (細い明滅する破線)
+    drawGuideBeacons(ctx, st, R, t); // 第208弾: ドッキングベイから放たれるガイドビーコン (薄黄色・平行2本・発光)
+    drawBlinkLamps(ctx, st, R, t); // 第208弾: 機械的に明滅する標識灯 (航空障害灯/ナビゲーションライトのような規則的な点滅)
 }
-// 第207弾 (オーナー): 「ドッキングベイから周囲へ発せられるガイドビーコン」— 薄いソフトな光の帯 (旧・トラクタービームのつもり) ではなく、
-// 航空機の誘導灯/ドッキングガイドのような細い破線のビームが、明滅しながら外へ伸びる (添付の実物フィギュアの緑のレーザー線が参考)
+// 第208弾 (オーナー「起点に丸はいらない・色は薄黄色で発光している感じ・平行する2本線」): ドッキングアームの先端から
+// 薄黄色に発光する細い破線を2本並行に外へ伸ばす。起点のドットは廃止
 function drawGuideBeacons(ctx, st, R, t) {
-    const inv = 1; // R はすでにワールド単位 (ズーム非依存の相対値)
     const N = 4;
     ctx.save();
     for (let i = 0; i < N; i++) {
@@ -3128,26 +3128,50 @@ function drawGuideBeacons(ctx, st, R, t) {
         const on = cyc > 0.42; // 点灯の方が長め
         if (!on) continue;
         const fade = Math.min(1, (cyc - 0.42) / 0.12); // 点灯の立ち上がりをなめらかに
-        const bx = Math.cos(ba) * R * 0.94, by = Math.sin(ba) * R * 0.94; // 起点 = ドッキングアームの先端付近
-        const ex = Math.cos(ba) * (R * 0.94 + len), ey = Math.sin(ba) * (R * 0.94 + len);
-        const dashLen = R * 0.09, gapLen = R * 0.065;
+        const dx = Math.cos(ba), dy = Math.sin(ba);
+        const px = -dy, py = dx; // ビームに垂直な向き (2本を平行にずらす軸)
+        const gap = R * 0.035; // 2本の間隔
+        const b0 = R * 0.94, b1 = R * 0.94 + len;
+        const dashLen = R * 0.085, gapLen = R * 0.06;
         const flowOff = -(t * 0.045) % (dashLen + gapLen); // 外向きに流れる破線アニメ
-        ctx.globalAlpha = 0.9 * fade;
-        ctx.strokeStyle = '#8affb0';
         ctx.lineCap = 'round';
-        // 外側のソフトな滲み (低アルファ・太め) + 内側のくっきりした芯、の二度描きで shadowBlur を使わず光らせる
-        ctx.lineWidth = Math.max(2.2, R * 0.016);
-        ctx.globalAlpha = 0.22 * fade;
         ctx.setLineDash([dashLen, gapLen]); ctx.lineDashOffset = flowOff;
-        ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(ex, ey); ctx.stroke();
-        ctx.lineWidth = Math.max(1, R * 0.006);
-        ctx.globalAlpha = 0.95 * fade;
-        ctx.strokeStyle = '#d6fff0';
-        ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(ex, ey); ctx.stroke();
+        for (const side of [-1, 1]) {
+            const ox = px * gap * side, oy = py * gap * side;
+            const bx = dx * b0 + ox, by = dy * b0 + oy;
+            const ex = dx * b1 + ox, ey = dy * b1 + oy;
+            // 外側のソフトな滲み (低アルファ・太め・薄黄色) + 内側のくっきりした芯、の二度描きで shadowBlur を使わず発光させる
+            ctx.globalAlpha = 0.28 * fade; ctx.strokeStyle = '#ffdf8a';
+            ctx.lineWidth = Math.max(2.4, R * 0.02);
+            ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(ex, ey); ctx.stroke();
+            ctx.globalAlpha = 0.95 * fade; ctx.strokeStyle = '#fff6c8';
+            ctx.lineWidth = Math.max(1, R * 0.006);
+            ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(ex, ey); ctx.stroke();
+        }
         ctx.setLineDash([]);
-        // 起点にビーコンの小さな灯
-        ctx.globalAlpha = fade; ctx.fillStyle = '#d6fff0';
-        ctx.beginPath(); ctx.arc(bx, by, Math.max(1.4, R * 0.012), 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+}
+// 第208弾 (オーナー「機械的な明滅するランプも描いて」): 正弦波のゆっくりした瞬きでなく、短く点灯してすぐ消える
+// 航空障害灯/航法灯ふうの機械的な二値点滅 (on/offがはっきりした矩形波)
+function drawBlinkLamps(ctx, st, R, t) {
+    const N = 6;
+    ctx.save();
+    for (let i = 0; i < N; i++) {
+        const a = _lifeSeed(st.x, st.y, 950 + i * 11) * Math.PI * 2;
+        const r = R * (0.85 + 0.2 * _lifeSeed(st.x, st.y, 955 + i * 11)); // 外周の構造物付近
+        const period = 1400 + _lifeSeed(st.x, st.y, 960 + i * 11) * 2600; // 点滅の周期 (ms相当)
+        const onWin = 110 + _lifeSeed(st.x, st.y, 965 + i * 11) * 160; // 点灯している短い時間
+        const ofs = _lifeSeed(st.x, st.y, 970 + i * 11) * period;
+        const phase = (t + ofs) % period;
+        if (phase > onWin) continue; // 消灯中は何も描かない (はっきりした二値)
+        const col = i % 2 === 0 ? '#ff5a4a' : '#fbfff0';
+        const x = Math.cos(a) * r, y = Math.sin(a) * r;
+        ctx.globalAlpha = 0.9;
+        ctx.fillStyle = col;
+        ctx.beginPath(); ctx.arc(x, y, Math.max(1.3, R * 0.011), 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 0.3; // ごく軽いにじみ (shadowBlur は使わない)
+        ctx.beginPath(); ctx.arc(x, y, Math.max(2.4, R * 0.022), 0, Math.PI * 2); ctx.fill();
     }
     ctx.restore();
 }
@@ -3183,8 +3207,11 @@ class Structure {
         const _iconS = Math.max(20, Math.min(28, camera.zoom * 28)) / (camera.zoom * 28);
         // スプライト優先 (読み込めていればベクターより優先)
         const _ssp = SPRITES[this.type === 'colony' ? 'colony' : 'derelict'];
-        // 第204弾/第207弾: コロニーはスプライトスタッキング (5層・疑似3D) が揃っていればそちらを使う (層を増やして立体感を強く)
-        const _stack = this.type === 'colony' ? [SPRITES.colony_l0, SPRITES.colony_l1, SPRITES.colony_l2, SPRITES.colony_l3, SPRITES.colony_l4] : null;
+        // 第204弾/第208弾: コロニーはスプライトスタッキング (疑似3D) が揃っていればそちらを使う。
+        // 第208弾: 明度で同じ絵を複製していた旧方式 (オーナー指摘「何で同じ絵を複数重ねてんの」) をやめ、
+        // 中心からの半径で「外周のドッキングアーム(土台)→パネル環→ドーム境界→中心の都市コア(最上段)」と
+        // 本当に別のパーツだけを含む4層に分けた (`make_layers_radial.py`)
+        const _stack = this.type === 'colony' ? [SPRITES.colony_l0, SPRITES.colony_l1, SPRITES.colony_l2, SPRITES.colony_l3] : null;
         const _stackOK = _stack && _stack.every(spriteReady);
         if (_stackOK || spriteReady(_ssp)) {
             ctx.save();
@@ -3204,7 +3231,7 @@ class Structure {
                 ctx.globalAlpha = 1;
             }
             const _len = Math.max(this.radius * 2.6, STRUCT_MIN_PX / camera.zoom); // 引いても見失わない最小の大きさ (第18弾: 34px→20px)
-            if (_stackOK) drawSpriteStack(ctx, _stack, _len, _spin, 0.045);
+            if (_stackOK) drawSpriteStack(ctx, _stack, _len, _spin, 0.075);
             else drawSpriteCentered(ctx, _ssp, _len);
             if (this.type === 'colony') { ctx.rotate(_spin); drawColonyLife(ctx, this, _len, t); } // 第206/207弾: 住人の生活感 (窓明かりの瞬き・ガイドビーコン)
             ctx.restore();
