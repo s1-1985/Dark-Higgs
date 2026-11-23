@@ -3338,15 +3338,19 @@ body.in-game #action-popover .act-icon-btn span { font-family: Orbitron, sans-se
 .drone-enc button[data-dec="return"] { border-color: #4a8a6a; color: #a8e8c8; background: #04180e; }
 .drone-enc button:active { transform: scale(0.96); }
 
-/* ═══ 第200弾: 緊急離脱ボタン (ミニマップの右) と 8方向の選択 ═══ */
-#esc-btn { position: fixed; z-index: 60; display: none; padding: 7px 14px 6px; min-width: 104px; font-family: 'Noto Sans JP', sans-serif; color: #fff;
-  background: linear-gradient(180deg, rgba(150,20,30,0.92), rgba(80,6,14,0.92)); border: 1px solid #ff6a6a; box-shadow: 0 0 14px rgba(255,60,60,0.45), inset 0 0 10px rgba(255,120,120,0.25);
-  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); cursor: pointer; text-align: left; animation: escPulse 1.6s ease-in-out infinite; }
-#esc-btn b { display: block; font-size: 15px; letter-spacing: 0.12em; }
-#esc-btn span { display: block; font-size: 10px; color: #ffc9c9; letter-spacing: 0.05em; }
-#esc-btn.cd { filter: saturate(0.6); }
-#esc-btn:active { transform: scale(0.96); }
-@keyframes escPulse { 0%,100% { box-shadow: 0 0 10px rgba(255,60,60,0.35), inset 0 0 8px rgba(255,120,120,0.2); } 50% { box-shadow: 0 0 22px rgba(255,60,60,0.75), inset 0 0 14px rgba(255,120,120,0.4); } }
+/* 第206弾: 緊急離脱は下の帯のHULL表示 (#ss-hp) を押す方式に (旧: 大きく他のHUDに重なる専用ボタン) */
+.ss-cell.ss-hp.esc-ready { animation: escReadyPulse 1.6s ease-in-out infinite; }
+@keyframes escReadyPulse { 0%,100% { box-shadow: inset 0 0 0 1px rgba(255,90,90,0.5); } 50% { box-shadow: inset 0 0 0 1px rgba(255,90,90,0.95), 0 0 10px rgba(255,60,60,0.55); } }
+#esc-confirm { position: fixed; z-index: 70; display: none; font-family: 'Noto Sans JP', sans-serif; color: #fff; padding: 8px 10px;
+  background: linear-gradient(180deg, rgba(40,6,10,0.96), rgba(20,3,5,0.96)); border: 1px solid #ff6a6a; box-shadow: 0 0 16px rgba(255,60,60,0.5);
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); }
+#esc-confirm.on { display: block; }
+#esc-confirm .ec-t { font-size: 12px; font-weight: bold; color: #ffb0b0; margin-bottom: 6px; white-space: nowrap; }
+#esc-confirm .ec-row { display: flex; gap: 6px; }
+#esc-confirm button { font: bold 11px 'Noto Sans JP', sans-serif; padding: 5px 10px; cursor: pointer; border-radius: 2px; }
+#esc-confirm .ec-yes { background: #5a0c12; border: 1px solid #ff6a6a; color: #ffd0d0; }
+#esc-confirm .ec-no { background: #0c1612; border: 1px solid #4a7a6a; color: #c8ffe8; }
+#esc-confirm button:active { transform: scale(0.95); }
 #cap-dec.cap-esc { border-color: #ff6a6a !important; }
 #cap-dec.cap-esc .cap-head b { color: #ff8a8a; }
 .esc-grid { display: grid; grid-template-columns: repeat(3, minmax(96px, 1fr)); grid-template-rows: repeat(3, auto); gap: 6px; margin: 6px auto 8px; max-width: 520px; }

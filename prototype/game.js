@@ -458,7 +458,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261123a';
+const SPRITE_VER = '20261123c';
 const SPRITE_FILES = {
     // 第197弾: 強襲突撃艇 (6勢力)
     f2_helios_boarder: 'assets/f2_helios_boarder.png', f2_crow_boarder: 'assets/f2_crow_boarder.png', f2_valkyr_boarder: 'assets/f2_valkyr_boarder.png',
@@ -3091,6 +3091,38 @@ canvas.addEventListener('touchend', (e) => {
     if (e.touches.length === 0) touch.isPinching = false;
 }, { passive: false });
 
+// 第206弾: 位置+番号から安定した「乱数っぽい」0〜1 (同じコロニーなら毎回同じ瞬きパターンになる)
+function _lifeSeed(x, y, i) { const h = Math.sin(x * 0.0137 + y * 0.0271 + i * 12.9898) * 43758.5453; return h - Math.floor(h); }
+// コロニーに「住人の生活感」を足す — 窓明かりの不規則な瞬き・ドッキングアームのトラクタービームの明滅 (絵そのものは静止画なのでコード側のアニメーション)
+function drawColonyLife(ctx, st, len, t) {
+    const R = len * 0.5;
+    ctx.save();
+    for (let i = 0; i < 12; i++) {
+        const a = _lifeSeed(st.x, st.y, i) * Math.PI * 2;
+        const r = R * (0.18 + 0.5 * _lifeSeed(st.x, st.y, i + 50));
+        const freq = 0.0012 + _lifeSeed(st.x, st.y, i + 90) * 0.0035;
+        const ph = _lifeSeed(st.x, st.y, i + 130) * 1000;
+        const tw = Math.sin(t * freq + ph) * (0.6 + 0.4 * Math.sin(t * freq * 2.3 + ph * 1.7));
+        if (tw < 0.05) continue; // 消灯中
+        ctx.globalAlpha = Math.min(1, 0.3 + 0.7 * tw);
+        ctx.fillStyle = i % 3 === 0 ? '#7fe0ff' : '#ffcf8a';
+        ctx.beginPath(); ctx.arc(Math.cos(a) * r, Math.sin(a) * r, Math.max(1.2, R * 0.013), 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+    // トラクタービーム: ドッキングアームの1本から外向きに明滅する光の帯
+    const ba = _lifeSeed(st.x, st.y, 777) * Math.PI * 2;
+    const flick = Math.max(0, Math.sin(t * 0.0035 + st.x * 0.01)) * (Math.sin(t * 0.021 + st.y * 0.01) > -0.25 ? 1 : 0.1);
+    if (flick > 0.08) {
+        ctx.save();
+        ctx.translate(Math.cos(ba) * R * 0.94, Math.sin(ba) * R * 0.94); ctx.rotate(ba);
+        ctx.globalAlpha = 0.22 * flick;
+        const g = ctx.createLinearGradient(0, 0, R * 0.85, 0);
+        g.addColorStop(0, 'rgba(140,220,255,0.9)'); g.addColorStop(1, 'rgba(140,220,255,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.moveTo(0, -R * 0.05); ctx.lineTo(R * 0.85, -R * 0.15); ctx.lineTo(R * 0.85, R * 0.15); ctx.lineTo(0, R * 0.05); ctx.closePath(); ctx.fill();
+        ctx.restore();
+    }
+}
 // Classes
 class Structure {
     constructor(x, y, type) {
@@ -3129,7 +3161,8 @@ class Structure {
         if (_stackOK || spriteReady(_ssp)) {
             ctx.save();
             ctx.translate(this.x, this.y);
-            const _spin = this.type === 'colony' ? t * 0.00008 : 0; // 母船はごくゆっくり自転
+            // 第206弾: コロニーの自転が遅すぎてほぼ止まって見えた (桁が1つ足りなかった) → ノードと同程度の速さに
+            const _spin = this.type === 'colony' ? t * 0.00045 : 0; // 母船はゆっくり自転
             if (!_stackOK && _spin) ctx.rotate(_spin); // スタック描画は層ごとに自前で回すのでここでは回さない
             if (this.hacked) {
                 // ハック済み: シアンのグローを背後に
@@ -3144,6 +3177,7 @@ class Structure {
             const _len = Math.max(this.radius * 2.6, STRUCT_MIN_PX / camera.zoom); // 引いても見失わない最小の大きさ (第18弾: 34px→20px)
             if (_stackOK) drawSpriteStack(ctx, _stack, _len, _spin);
             else drawSpriteCentered(ctx, _ssp, _len);
+            if (this.type === 'colony') { ctx.rotate(_spin); drawColonyLife(ctx, this, _len, t); } // 第206弾: 住人の生活感 (窓明かりの瞬き・トラクタービームの明滅)
             ctx.restore();
         } else if (this.type === 'colony') {
             ctx.save();
@@ -9419,8 +9453,10 @@ function drawLootTraces(ctx) {
         ctx.globalAlpha = mine ? 0.35 : 0.85;
         ctx.strokeStyle = mine ? '#7fd6ff' : '#ffcf88'; ctx.lineWidth = 1.5 * inv;
         const h = Math.max(36, 8 * inv);
-        if (spriteReady(SPRITES.field_looted)) ctx.drawImage(SPRITES.field_looted, t.x - h * 1.4, t.y - h * 1.4, h * 2.8, h * 2.8); // 第35弾: こじ開けたコンテナ
-        else { ctx.setLineDash([4 * inv, 4 * inv]); ctx.strokeRect(t.x - h, t.y - h * 0.6, h * 2, h * 1.2); ctx.setLineDash([]); }
+        // 第206弾: 「こじ開けたコンテナ」の絵は漂流コンテナ (cache) の跡にだけ使う。
+        // ノード・コロニー・難破船はそれ自体の絵がずっとそこにあるので、同じ場所に空き箱の絵を重ねると不自然 (オーナー指摘) → それらは薄い輪だけ
+        if (t.kind === 'cache' && spriteReady(SPRITES.field_looted)) ctx.drawImage(SPRITES.field_looted, t.x - h * 1.4, t.y - h * 1.4, h * 2.8, h * 2.8); // 第35弾: こじ開けたコンテナ
+        else { ctx.setLineDash([4 * inv, 4 * inv]); ctx.beginPath(); ctx.arc(t.x, t.y, h * 1.1, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
         if (!mine) {
             const ago = Math.max(0, Math.round((_frameCount - t.estF) / 3600 * 2) / 2);
             ctx.fillStyle = '#ffcf88'; ctx.font = Math.round(10 * inv) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
@@ -20643,7 +20679,7 @@ function capOpen(key, spec) {
     sfxUI('ui_panel_open');
 }
 // ═══ 第200弾 (オーナー「ゴーストを認識した段階で ミニマップの右に緊急離脱ボタン。押すとQTEと同じスロー・7秒で8方向から逃げる方角を選ぶ。向いている向きの逆ほど時間がかかる」) ═══
-var _escGo = null, _escBtn = null;
+var _escGo = null, _escBtn = null, _escConfirmBox = null;
 const ESC_DIRS = [['↑', 0], ['↗', 45], ['→', 90], ['↘', 135], ['↓', 180], ['↙', 225], ['←', 270], ['↖', 315]]; // 画面の上=方位0° (北)
 function _escThreatAng() { // 逃げる相手の方角 (観測で分かっている物だけ): 見えている敵 → 脅威 → 追跡中の推定
     let best = null, bd = Infinity;
@@ -20690,20 +20726,39 @@ function escapeTick() { // 回頭が済んだら噴射 (stepWorld から)
         _escGo = null;
     }
 }
+// 第206弾 (オーナー): 旧「緊急離脱」ボタンは大きく他のHUDに重なって邪魔だった → 廃止し、下の帯のHULL表示 (#ss-hp) 自体を
+// 押せるようにする (離脱可能な間だけ赤く脈打つ)。押すと即QTEへ入らず、まず確認 (はい/キャンセル) を挟む。
+// キャンセルは何もしない (時間も速度もスタンスも変えない)。
 function _syncEscBtn() {
     if (typeof document === 'undefined') return;
-    if (!_escBtn) {
-        _escBtn = document.createElement('button'); _escBtn.id = 'esc-btn'; _escBtn.innerHTML = '<b>緊急離脱</b><span>方角を選ぶ</span>';
-        _escBtn.addEventListener('click', (ev) => { ev.stopPropagation(); if (!playReplay) escapeOpen(); });
-        ['mousedown', 'touchstart', 'pointerdown'].forEach(t => _escBtn.addEventListener(t, ev => ev.stopPropagation(), { passive: true }));
-        document.body.appendChild(_escBtn);
+    const hp = document.getElementById('ss-hp');
+    if (hp && !hp._escWired) {
+        hp._escWired = true;
+        hp.style.cursor = 'pointer';
+        hp.addEventListener('click', (ev) => { ev.stopPropagation(); _escConfirmOpen(); });
+        ['mousedown', 'touchstart', 'pointerdown'].forEach(t => hp.addEventListener(t, ev => ev.stopPropagation(), { passive: true }));
     }
     const show = escapeVisible() && !playReplay;
-    if (!show) { if (_escBtn.style.display !== 'none') _escBtn.style.display = 'none'; return; }
-    const L = document.getElementById('hud-left'), T = document.getElementById('hud-top');
-    const lr = L ? L.getBoundingClientRect() : { right: 112 }, tr = T ? T.getBoundingClientRect() : { bottom: 46 };
-    _escBtn.style.left = Math.round(lr.right + 8) + 'px'; _escBtn.style.top = Math.round(tr.bottom + 8) + 'px'; _escBtn.style.display = 'block';
-    _escBtn.classList.toggle('cd', boostCD > 0);
+    if (hp) hp.classList.toggle('esc-ready', show);
+    if (!show && _escConfirmBox) _escConfirmBox.classList.remove('on');
+}
+function _escConfirmBuild() {
+    if (_escConfirmBox || typeof document === 'undefined') return;
+    _escConfirmBox = document.createElement('div'); _escConfirmBox.id = 'esc-confirm';
+    _escConfirmBox.innerHTML = '<div class="ec-t">緊急離脱する？</div><div class="ec-row"><button class="ec-yes">はい</button><button class="ec-no">キャンセル</button></div>';
+    _escConfirmBox.querySelector('.ec-yes').addEventListener('click', (ev) => { ev.stopPropagation(); _escConfirmBox.classList.remove('on'); escapeOpen(); });
+    _escConfirmBox.querySelector('.ec-no').addEventListener('click', (ev) => { ev.stopPropagation(); _escConfirmBox.classList.remove('on'); });
+    ['mousedown', 'touchstart', 'pointerdown'].forEach(t => _escConfirmBox.addEventListener(t, ev => ev.stopPropagation(), { passive: true }));
+    document.body.appendChild(_escConfirmBox);
+    document.addEventListener('click', () => { if (_escConfirmBox) _escConfirmBox.classList.remove('on'); });
+}
+function _escConfirmOpen() {
+    if (!escapeVisible() || playReplay) return;
+    _escConfirmBuild();
+    const hp = document.getElementById('ss-hp'), r = hp ? hp.getBoundingClientRect() : { left: 8, top: innerHeight - 40 };
+    _escConfirmBox.style.left = Math.round(r.left) + 'px';
+    _escConfirmBox.style.bottom = Math.round(innerHeight - r.top + 8) + 'px';
+    _escConfirmBox.classList.add('on');
 }
 function capChoose(id, auto) {
     if (!_capDec) return;
