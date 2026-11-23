@@ -7311,7 +7311,7 @@ var _loPrevMemo = {};
 function _loPreview(side, ship, c) {
     const edited = !!(c.lo && c.lo[side] && c.lo[side][ship]);
     if (edited || side === 'e' || (side === 'p' && c.pCtl !== 'com' && !(c.rndAll && c.rndAll.p))) return loSummary(comLoadout(side, ship), ship, side === 'e');
-    const key = side + '|' + ship + '|' + JSON.stringify(c.pp) + '|' + (c.pPreset) + '|' + !!(c.rndAll && c.rndAll[side]);
+    const key = side + '|' + ship + '|' + JSON.stringify(c.pp) + '|' + (c.pPreset) + '|' + !!(c.rndAll && c.rndAll[side]) + '|' + JSON.stringify(c.randExcl && c.randExcl[side]) + '|' + JSON.stringify(c.personaMatch && c.personaMatch[side]);
     if (!_loPrevMemo[key]) _loPrevMemo[key] = loSummary(comLoadout(side, ship), ship, false) + ' ※目安 (試合ごとに無作為)';
     return _loPrevMemo[key];
 }
@@ -15062,7 +15062,16 @@ function enemyUseFlash(e) {
 // 第145弾 (オーナー): COM対戦の積荷と武器は「性格7割・ランダム3割」— 毎回同じにならないように。自機COMも敵も同じ関数
 const PERSONA_RANDOM_SHARE = 0.3;
 // 第156弾: 「全部ランダム」の側は 積荷・武器を性格に頼らず 100%無作為に (COM対戦の設定画面)
-function persShare(P) { return (cfgMatch() && comCfg.rndAll && P && comCfg.rndAll[P._side]) ? 1 : PERSONA_RANDOM_SHARE; }
+// 第205弾: 積み込みが「ランダムから除外」されていれば従来どおりの性格7割ブレンド。除外されずランダムの対象で、かつ
+//   「性格に合わせる」がOFFの時だけ100%無作為 (ONなら性格7割ブレンドのまま＝ランダムに決まった性格に沿った積み方になる)
+function persShare(P) {
+    if (!cfgMatch() || !P || !P._side) return PERSONA_RANDOM_SHARE;
+    const sd = P._side, ex = (comCfg.randExcl && comCfg.randExcl[sd]) || {};
+    const randomizing = !!(comCfg.rndAll && comCfg.rndAll[sd] && !ex.loadout);
+    if (!randomizing) return PERSONA_RANDOM_SHARE;
+    const match = !(comCfg.personaMatch && comCfg.personaMatch[sd] && comCfg.personaMatch[sd].loadout === false);
+    return match ? PERSONA_RANDOM_SHARE : 1;
+}
 function blendPers(P, rnd) { // 各軸を 性格×0.7 + 乱数×0.3 に (積荷・武器の選び方にだけ使う。立ち回りの性格そのものは変えない)
     const SH = persShare(P), f = v => Math.max(0, Math.min(1, v * (1 - SH) + rnd() * SH));
     return { aggression: f(P.aggression ?? 0.5), stealth: f(P.stealth ?? 0.4), greed: f(P.greed ?? 0.4), caution: f(P.caution ?? 0.4) };
@@ -17903,13 +17912,21 @@ function skillOn(side, id) {
     if (!cfgMatch() || !comCfg.sk) return true;
     const m = comCfg.sk[side]; return !(m && m[id] === false);
 }
+const RANDEXCL_CATS = ['ship', 'design', 'personality', 'loadout', 'skill'];
+function _defRandExclSide() { const o = {}; for (const k of RANDEXCL_CATS) o[k] = false; return o; }
 function comDefaultCfg() {
     return { ship: 'assault', enemy: 'assault', mode: 'br', pPreset: 'standard', ePreset: 'standard',
              pp: Object.assign({}, COM_PRESETS.standard.p), ep: Object.assign({}, COM_PRESETS.standard.p), higgsView: true, think: true,
-             lo: { p: {}, e: {} }, sk: { p: {}, e: {} }, map: Object.assign({}, MAP_DEF), rndAll: { p: false, e: false }, pCtl: 'human', skin: { p: 'helios', e: 'crow' }, draftManual: false }; // 第201弾: draftManual=AI操艦(QTE)中、部品・積み荷は自分で選ぶ (既定false=AIが性格で選ぶ) // 第161弾: pCtl=自機の操作 (human/com) / 第162弾: skin=勢力のデザイン (自機/敵) // 第155弾: map=マップの設定 // 第142弾: sk=スキルのオン・オフ // 第22弾: COM対戦の積み込み (自機/敵・艦種ごと。無ければ既定)
+             lo: { p: {}, e: {} }, sk: { p: {}, e: {} }, map: Object.assign({}, MAP_DEF), rndAll: { p: false, e: false }, pCtl: 'human', skin: { p: 'helios', e: 'crow' }, draftManual: false,
+             // 第205弾: randExcl=カテゴリごとに「ランダムから除外」(ON=手動設定のまま) / personaMatch=積み込み・スキルを性格に合わせるか (ON=性格7割ブレンド・OFF=完全無作為)
+             randExcl: { map: false, p: _defRandExclSide(), e: _defRandExclSide() },
+             personaMatch: { p: { loadout: true, skill: true }, e: { loadout: true, skill: true } } }; // 第201弾: draftManual=AI操艦(QTE)中、部品・積み荷は自分で選ぶ (既定false=AIが性格で選ぶ) // 第161弾: pCtl=自機の操作 (human/com) / 第162弾: skin=勢力のデザイン (自機/敵) // 第155弾: map=マップの設定 // 第142弾: sk=スキルのオン・オフ // 第22弾: COM対戦の積み込み (自機/敵・艦種ごと。無ければ既定)
 }
 function loadComCfg() {
-    try { const c = JSON.parse(localStorage.getItem('darkEchoComDemo') || 'null'); if (c && c.pp && c.ep) { const r = Object.assign(comDefaultCfg(), c); for (const pk of ['pp', 'ep']) r[pk] = Object.assign({}, PERS_DEF, r[pk]); /* 第147弾: 新しい軸が無い古い保存は既定で埋める */ if (!r.lo || !r.lo.p || !r.lo.e) r.lo = { p: {}, e: {} }; if (!r.sk || !r.sk.p || !r.sk.e) r.sk = { p: {}, e: {} }; r.map = Object.assign({}, MAP_DEF, r.map); r.rndAll = Object.assign({ p: false, e: false }, r.rndAll); if (!r.skin) r.skin = r.swap ? { p: 'crow', e: 'helios' } : { p: 'helios', e: 'crow' }; /* 第161弾の「入れ替え」を引き継ぐ */ r.skin = Object.assign({ p: 'helios', e: 'crow' }, r.skin); delete r.swap; return r; } } catch (e) {}
+    try { const c = JSON.parse(localStorage.getItem('darkEchoComDemo') || 'null'); if (c && c.pp && c.ep) { const r = Object.assign(comDefaultCfg(), c); for (const pk of ['pp', 'ep']) r[pk] = Object.assign({}, PERS_DEF, r[pk]); /* 第147弾: 新しい軸が無い古い保存は既定で埋める */ if (!r.lo || !r.lo.p || !r.lo.e) r.lo = { p: {}, e: {} }; if (!r.sk || !r.sk.p || !r.sk.e) r.sk = { p: {}, e: {} }; r.map = Object.assign({}, MAP_DEF, r.map); r.rndAll = Object.assign({ p: false, e: false }, r.rndAll); if (!r.skin) r.skin = r.swap ? { p: 'crow', e: 'helios' } : { p: 'helios', e: 'crow' }; /* 第161弾の「入れ替え」を引き継ぐ */ r.skin = Object.assign({ p: 'helios', e: 'crow' }, r.skin); delete r.swap;
+        r.randExcl = Object.assign({ map: false, p: null, e: null }, r.randExcl); r.randExcl.p = Object.assign(_defRandExclSide(), r.randExcl.p); r.randExcl.e = Object.assign(_defRandExclSide(), r.randExcl.e); // 第205弾: 古い保存は既定(除外なし)で埋める
+        r.personaMatch = Object.assign({ p: null, e: null }, r.personaMatch); r.personaMatch.p = Object.assign({ loadout: true, skill: true }, r.personaMatch.p); r.personaMatch.e = Object.assign({ loadout: true, skill: true }, r.personaMatch.e);
+        return r; } } catch (e) {}
     return comDefaultCfg();
 }
 function saveComCfg() { if (playReplay || /[?&]replay=1/.test(location.search)) return; try { localStorage.setItem('darkEchoComDemo', JSON.stringify(comCfg)); } catch (e) {} }
@@ -21707,6 +21724,16 @@ function _shipCards(side, ship, c) {
     const fac = (c.skin && c.skin[side]) || (side === 'p' ? 'helios' : 'crow');
     return '<div class="com-ships">' + ['assault', 'stealth', 'carrier'].map(k => '<button class="com-ship' + (ship === k ? ' on' : '') + '" data-act="ship" data-v="' + k + '"><img src="assets/f2_' + fac + '_' + k + '.png?v=' + SPRITE_VER + '" alt=""><b>' + SHIP_JP[k] + '</b><small>' + COM_SHIP_DESC[k] + '</small></button>').join('') + '</div>';
 }
+// 第205弾: カテゴリごとの「ランダムから除外」チップ (ON=固定・このカテゴリだけ手動設定を使う) / 積み込み・スキルの「性格に合わせる」チップ
+function _rexChip(side, cat) {
+    const c = comCfg, on = !!(c.randExcl && c.randExcl[side] && c.randExcl[side][cat]);
+    return '<button class="com-chip sm rex' + (on ? ' on' : '') + '" data-act="rex" data-side="' + side + '" data-v="' + cat + '" title="ONにすると、このカテゴリだけ「すべてランダム」の対象から外れ、ここで設定した内容のまま試合に使われる">' + (on ? '🔒 固定中' : '🎲 除外する') + '</button>';
+}
+function _pmChip(side, cat, jp) {
+    const c = comCfg, on = !(c.personaMatch && c.personaMatch[side] && c.personaMatch[side][cat] === false);
+    return '<button class="com-chip sm pm' + (on ? ' on' : '') + '" data-act="pmatch" data-side="' + side + '" data-v="' + cat + '" title="ONだと、無作為に決まった性格に合わせた' + jp + 'になる (得意なスキル・似合う積み方が多く残る)。OFFは性格と無関係に一様な無作為">👤 性格に合わせる ' + (on ? 'ON' : 'OFF') + '</button>';
+}
+const CAT_JP_RANDEXCL = { ship: '艦種', design: 'デザイン', personality: '性格', loadout: '積み込み', skill: 'スキル' };
 function _renderComCfg() {
     const c = comCfg;
     for (const side of ['p', 'e']) {
@@ -21714,20 +21741,23 @@ function _renderComCfg() {
         if (!box) continue;
         const ship = side === 'p' ? c.ship : c.enemy, pre = side === 'p' ? c.pPreset : c.ePreset, pp = side === 'p' ? c.pp : c.ep;
         const ra = !!(c.rndAll && c.rndAll[side]), human = side === 'p' && c.pCtl !== 'com';
+        const ex = (c.randExcl && c.randExcl[side]) || {};
+        const applicable = RANDEXCL_CATS.filter(k => !human || k === 'ship' || k === 'design' || k === 'loadout'); // 性格・スキルはプレイヤー操作側には無い
+        const kept = applicable.filter(k => ex[k]).map(k => CAT_JP_RANDEXCL[k]);
         const sideName = side === 'p' ? (human ? '自機 (あなた)' : c.cap ? '自機AI (あなたは艦長)' : '自機COM') : '敵COM';
-        const h = ['<div class="com-side-title ' + (side === 'p' ? 'cs-p' : 'cs-e') + '"><span>' + sideName + '</span> <button class="com-chip' + (ra ? ' on' : '') + '" data-act="rndall" title="ON: 試合ごとに 艦種・性格・積み込み・武器をすべて無作為に決める">🎲 全部ランダム ' + (ra ? 'ON' : 'OFF') + '</button></div>'
+        const h = ['<div class="com-side-title ' + (side === 'p' ? 'cs-p' : 'cs-e') + '"><span>' + sideName + '</span> <button class="com-chip' + (ra ? ' on' : '') + '" data-act="rndall" title="ON: 各項目の「🔒 固定」が付いていないカテゴリを、試合ごとにすべて無作為に決める">🎲 すべてランダム ' + (ra ? 'ON' : 'OFF') + '</button></div>'
             + (side === 'p' ? '<div class="com-sec sub">操作</div><div class="com-row"><button class="com-chip lg' + (human ? ' on' : '') + '" data-act="ctl" data-v="human">プレイヤー</button><button class="com-chip lg' + (!human && !c.cap ? ' on' : '') + '" data-act="ctl" data-v="com">COM (観戦)</button><button class="com-chip lg' + (c.cap ? ' on' : '') + '" data-act="ctl" data-v="cap" title="AIが操艦し、あなたは要所の意思決定だけを行う">AI操艦 (意思決定のみ)</button></div>' : '')
             + (side === 'p' && c.cap ? '<div class="com-row"><button class="com-chip' + (c.draftManual ? ' on' : '') + '" data-act="draftman" title="部品3択・積み荷4択・ドックの付け替えを、AI (性格) 任せにするか自分で選ぶか">部品・積み荷: ' + (c.draftManual ? '自分で選ぶ' : 'AI任せ') + '</button></div>' : '')
-            + (ra ? '<div class="com-note warn">試合ごとに 艦種' + (human ? '・積み込み・武器の種類' : '・性格(8軸)・積み込み・武器の種類') + 'を無作為に決める。下の設定は使わない</div>' : '')
-            + '<div class="com-sec sub">艦種</div>' + _shipCards(side, ship, c)];
-        h.push('<div class="com-sec sub">デザイン</div>');
+            + (ra ? '<div class="com-note warn">🎲 ON: 試合ごとに艦種・デザイン' + (human ? '' : '・性格・スキル') + '・積み込みを無作為に決める' + (kept.length ? '（<b>' + kept.join('・') + '</b> は固定中 — 下の設定のまま）' : '（各項目の「🔒 固定」で個別に除外できる）') + '</div>' : '')
+            + '<div class="com-sec sub">艦種 ' + _rexChip(side, 'ship') + '</div>' + _shipCards(side, ship, c)];
+        h.push('<div class="com-sec sub">デザイン ' + _rexChip(side, 'design') + '</div>');
         h.push(_skinRow(side, c));
         if (human) { // あなたが操作する側: 性格・スキルは無い (艦種と積み込みだけ)
-            h.push('<div class="com-note">あなたが操作する。性格・スキルは敵COMだけの設定。</div><div class="com-sec sub">積み込み</div>');
+            h.push('<div class="com-note">あなたが操作する。性格・スキルは敵COMだけの設定。</div><div class="com-sec sub">積み込み ' + _rexChip(side, 'loadout') + _pmChip(side, 'loadout', '積み込み') + '</div>');
             h.push('<div class="com-row com-lo"><span class="com-lo-sum">積み込み: ' + _loPreview(side, ship, c) + '</span><button class="com-chip" data-act="loadout">編集</button></div>');
             box.innerHTML = h.join(''); continue;
         }
-        h.push('<div class="com-sec sub">性格</div><div class="com-row">');
+        h.push('<div class="com-sec sub">性格 ' + _rexChip(side, 'personality') + '</div><div class="com-row">');
         for (const k in COM_PRESETS) h.push('<button class="com-chip' + (pre === k ? ' on' : '') + '" data-act="preset" data-v="' + k + '">' + COM_PRESETS[k].label + '</button>');
         h.push('</div><div class="com-note pre">' + (COM_PRESET_DESC[pre] || '') + '</div>');
         const rnd = pre === 'random';
@@ -21740,12 +21770,12 @@ function _renderComCfg() {
         if (rnd) h.push('<div class="com-note">ランダム: 試合ごとに' + SHIP_JP[ship] + 'の範囲で決まる (敵の通常の決め方と同じ)</div>');
         else if (pre === 'custom') h.push('<div class="com-note">カスタム (スライダーで調整)</div>');
         // 第22弾: 積み込み (自機/敵とも編集できる)
-        h.push('<div class="com-sec sub">積み込み</div><div class="com-row com-lo"><span class="com-lo-sum">積み込み: ' + _loPreview(side, ship, c) + '</span><button class="com-chip" data-act="loadout">編集</button></div>');
+        h.push('<div class="com-sec sub">積み込み ' + _rexChip(side, 'loadout') + _pmChip(side, 'loadout', '積み込み') + '</div><div class="com-row com-lo"><span class="com-lo-sum">積み込み: ' + _loPreview(side, ship, c) + '</span><button class="com-chip" data-act="loadout">編集</button></div>');
         // 第142弾・第187弾: スキルのオン・オフ — グループのタブ (n/m) → 選んだグループのスキルを2列のカードで
         { const L = skillList(), m = (c.sk && c.sk[side]) || {}, nOn = L.filter(x => m[x.id] !== false).length;
           const groups = []; for (const x of L) if (!groups.includes(x.g)) groups.push(x.g);
           if (!groups.includes(_comSkGrp)) _comSkGrp = groups[0];
-          h.push('<div class="com-sec sub">スキル <small>COMが使う戦術のオン・オフ (' + nOn + '/' + L.length + ')</small></div>');
+          h.push('<div class="com-sec sub">スキル ' + _rexChip(side, 'skill') + _pmChip(side, 'skill', 'スキル構成') + '<small>COMが使う戦術のオン・オフ (' + nOn + '/' + L.length + ')' + (ra && !ex.skill ? ' — 試合ごとに無作為' : '') + '</small></div>');
           h.push('<div class="com-sk-head"><button class="com-chip' + (_comSkOpen ? ' on' : '') + '" data-act="skopen">' + (_comSkOpen ? '▴ 閉じる' : '▾ 設定する') + '</button><button class="com-chip" data-act="skall" data-v="on">全ON</button><button class="com-chip" data-act="skall" data-v="off">全OFF</button></div>');
           if (_comSkOpen) {
               h.push('<div class="com-sktabs">' + groups.map(g => { const gl = L.filter(x => x.g === g), on = gl.filter(x => m[x.id] !== false).length; return '<button class="com-sktab' + (g === _comSkGrp ? ' on' : '') + (on === 0 ? ' off' : '') + '" data-act="sktab" data-v="' + g + '">' + g + '<i>' + on + '/' + gl.length + '</i></button>'; }).join('') + '</div>');
@@ -21809,14 +21839,32 @@ function _renderMapCfg() {
     }
     box.innerHTML = h.join('');
 }
-// 第156弾・第161弾: 「全部ランダム」「毎試合ランダム」は試合を始める時に具体的な値へ決める (決めた値は設定・記録に残る → リプレイで同じ試合になる)
+const RAND_FACTION_KEYS = Object.keys(FACTIONS);
+// 第205弾: スキルのオン・オフも試合ごとに無作為に決める。matchPersona=ON なら その性格で得意なスキルほど多く残る (スキルの適性で確率を決める)・OFFなら一律に近い確率
+function rollSkillSet(P, matchPersona) {
+    const L = skillList(), out = {};
+    for (const x of L) {
+        let p = 0.78;
+        if (SKILL_AX_PARSED[x.id]) {
+            if (matchPersona) { const aff = skillAff(P, x.id); p = Math.max(0.12, Math.min(0.95, 0.5 + 0.28 * (Math.log(aff) / Math.log(3)))); }
+            else p = 0.65;
+        }
+        if (_nativeRandom() >= p) out[x.id] = false;
+    }
+    return out;
+}
+// 第156弾・第161弾・第205弾: 「全部ランダム」「毎試合ランダム」は試合を始める時に具体的な値へ決める (決めた値は設定・記録に残る → リプレイで同じ試合になる)
+//   第205弾: カテゴリ (艦種・デザイン・性格・積み込み・スキル) ごとに「ランダムから除外」(randExcl) されていれば、そのカテゴリだけ手動設定のまま残す
 function _applyMatchRandoms() {
     for (const sd of ['p', 'e']) if (comCfg.rndAll && comCfg.rndAll[sd]) {
-        const ships = ['assault', 'stealth', 'carrier'], pick = ships[Math.floor(_nativeRandom() * 3)];
-        if (sd === 'p') { comCfg.ship = pick; comCfg.pPreset = 'random'; } else { comCfg.enemy = pick; comCfg.ePreset = 'random'; }
-        if (comCfg.lo) comCfg.lo[sd] = {}; // 積み込みは 性格に頼らない無作為 (persShare=1)
+        const ex = (comCfg.randExcl && comCfg.randExcl[sd]) || {};
+        if (!ex.ship) { const ships = ['assault', 'stealth', 'carrier']; if (sd === 'p') comCfg.ship = ships[Math.floor(_nativeRandom() * 3)]; else comCfg.enemy = ships[Math.floor(_nativeRandom() * 3)]; }
+        if (!ex.design) { comCfg.skin = comCfg.skin || {}; comCfg.skin[sd] = RAND_FACTION_KEYS[Math.floor(_nativeRandom() * RAND_FACTION_KEYS.length)]; }
+        if (!ex.personality) { if (sd === 'p') comCfg.pPreset = 'random'; else comCfg.ePreset = 'random'; }
+        if (comCfg.lo && !ex.loadout) comCfg.lo[sd] = {}; // 積み込みは persShare (性格に合わせる・の設定) が無作為度を決める
+        if (!ex.skill) { const match = !(comCfg.personaMatch && comCfg.personaMatch[sd] && comCfg.personaMatch[sd].skill === false); comCfg.sk[sd] = rollSkillSet(comPersonalityFor(sd), match); }
     }
-    if (comCfg.map && comCfg.map.rnd) comCfg.map = Object.assign(rollMapCfg(), { rnd: true });
+    if (comCfg.map && comCfg.map.rnd && !(comCfg.randExcl && comCfg.randExcl.map)) comCfg.map = Object.assign(rollMapCfg(), { rnd: true });
 }
 // 試合の設定画面 (タイトルでモードを選ぶと開く)。自機をプレイヤーが操作するか COM が操作するかを選べる
 function openMatchSetup(mode) {
@@ -21886,6 +21934,8 @@ function exitComDemo() { location.reload(); }
             if (COM_PRESETS[v].p) Object.assign(side === 'p' ? comCfg.pp : comCfg.ep, COM_PRESETS[v].p);
         }
         else if (act === 'rndall') comCfg.rndAll[side] = !comCfg.rndAll[side];
+        else if (act === 'rex') { comCfg.randExcl = comCfg.randExcl || { map: false, p: _defRandExclSide(), e: _defRandExclSide() }; comCfg.randExcl[side] = comCfg.randExcl[side] || _defRandExclSide(); comCfg.randExcl[side][v] = !comCfg.randExcl[side][v]; }
+        else if (act === 'pmatch') { comCfg.personaMatch = comCfg.personaMatch || { p: {}, e: {} }; const m = comCfg.personaMatch[side] = comCfg.personaMatch[side] || { loadout: true, skill: true }; m[v] = m[v] === false; }
         else if (act === 'ctl') { comCfg.pCtl = (v === 'com' || v === 'cap') ? 'com' : 'human'; comCfg.cap = v === 'cap'; }
         else if (act === 'draftman') comCfg.draftManual = !comCfg.draftManual;
         else if (act === 'skin') { comCfg.skin = Object.assign({ p: 'helios', e: 'crow' }, comCfg.skin); comCfg.skin[side] = v; }
