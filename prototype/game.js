@@ -458,7 +458,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261121b';
+const SPRITE_VER = '20261123a';
 const SPRITE_FILES = {
     // 第197弾: 強襲突撃艇 (6勢力)
     f2_helios_boarder: 'assets/f2_helios_boarder.png', f2_crow_boarder: 'assets/f2_crow_boarder.png', f2_valkyr_boarder: 'assets/f2_valkyr_boarder.png',
@@ -545,6 +545,9 @@ const SPRITE_FILES = {
     node_higgs: 'assets/node_higgs.png',
     colony:     'assets/structure_colony.png',
     derelict:   'assets/structure_derelict.png',
+    // 第204弾: ノード・コロニーのスプライトスタッキング (疑似3D・層ごとの画像を垂直オフセットで重ねる)
+    node_higgs_l0: 'assets/node_higgs_l0.png', node_higgs_l1: 'assets/node_higgs_l1.png', node_higgs_l2: 'assets/node_higgs_l2.png',
+    colony_l0: 'assets/structure_colony_l0.png', colony_l1: 'assets/structure_colony_l1.png', colony_l2: 'assets/structure_colony_l2.png',
     // Higgsfield生成エフェクトスプライト (黒背景 → 'lighter'加算合成で黒=透明)
     fx_beam_main:       'assets/fx_beam_main.png',
     fx_explosion_big:   'assets/fx_explosion_big.png',
@@ -658,6 +661,35 @@ function drawSpriteCentered(ctx, img, targetLen) {
     const iw = img.naturalWidth, ih = img.naturalHeight;
     const s = targetLen / Math.max(iw, ih);
     ctx.drawImage(img, -iw * s / 2, -ih * s / 2, iw * s, ih * s);
+}
+// 第204弾: スプライトスタッキング (疑似3D) — 層ごとの画像 (同じ絵の中で既に相対スケールが決まっている) を
+// 画面の「上」方向(回転の影響を受けない)へ段々ずらして重ね描きし、構造物に高さがあるように見せる。
+// ctx は呼び出し側で既に position へ translate 済みのこと。rotAngle は各層に同じ角度で (オフセットより後に) かける
+// ので、段差は保ったまま層ごとの円環が独立にゆっくり自転しているように見える。
+function drawSpriteStack(ctx, layerImgs, targetLen, rotAngle, dyFrac) {
+    dyFrac = dyFrac == null ? 0.05 : dyFrac;
+    const dy = targetLen * dyFrac;
+    // 土台の影 (層がある程度揃ったら薄い楕円で接地感を出す)
+    const ready = layerImgs.filter(spriteReady);
+    if (ready.length) {
+        ctx.save();
+        ctx.translate(0, targetLen * 0.06);
+        ctx.scale(1, 0.4);
+        const sg = ctx.createRadialGradient(0, 0, 0, 0, 0, targetLen * 0.42);
+        sg.addColorStop(0, 'rgba(0,0,0,0.38)'); sg.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = sg;
+        ctx.beginPath(); ctx.arc(0, 0, targetLen * 0.42, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+    }
+    for (let i = 0; i < layerImgs.length; i++) {
+        const img = layerImgs[i];
+        if (!spriteReady(img)) continue;
+        ctx.save();
+        ctx.translate(0, -dy * i);
+        if (rotAngle) ctx.rotate(rotAngle);
+        drawSpriteCentered(ctx, img, targetLen);
+        ctx.restore();
+    }
 }
 
 // ============================================================
@@ -3091,10 +3123,14 @@ class Structure {
         const _iconS = Math.max(20, Math.min(28, camera.zoom * 28)) / (camera.zoom * 28);
         // スプライト優先 (読み込めていればベクターより優先)
         const _ssp = SPRITES[this.type === 'colony' ? 'colony' : 'derelict'];
-        if (spriteReady(_ssp)) {
+        // 第204弾: コロニーはスプライトスタッキング (3層・疑似3D) が揃っていればそちらを使う
+        const _stack = this.type === 'colony' ? [SPRITES.colony_l0, SPRITES.colony_l1, SPRITES.colony_l2] : null;
+        const _stackOK = _stack && _stack.every(spriteReady);
+        if (_stackOK || spriteReady(_ssp)) {
             ctx.save();
             ctx.translate(this.x, this.y);
-            if (this.type === 'colony') ctx.rotate(t * 0.00008); // 母船はごくゆっくり自転
+            const _spin = this.type === 'colony' ? t * 0.00008 : 0; // 母船はごくゆっくり自転
+            if (!_stackOK && _spin) ctx.rotate(_spin); // スタック描画は層ごとに自前で回すのでここでは回さない
             if (this.hacked) {
                 // ハック済み: シアンのグローを背後に
                 ctx.globalAlpha = 0.35 + Math.sin(t * 0.004) * 0.2;
@@ -3105,7 +3141,9 @@ class Structure {
                 ctx.beginPath(); ctx.arc(0, 0, this.radius * 1.6, 0, Math.PI * 2); ctx.fill();
                 ctx.globalAlpha = 1;
             }
-            drawSpriteCentered(ctx, _ssp, Math.max(this.radius * 2.6, STRUCT_MIN_PX / camera.zoom)); // 引いても見失わない最小の大きさ (第18弾: 34px→20px)
+            const _len = Math.max(this.radius * 2.6, STRUCT_MIN_PX / camera.zoom); // 引いても見失わない最小の大きさ (第18弾: 34px→20px)
+            if (_stackOK) drawSpriteStack(ctx, _stack, _len, _spin);
+            else drawSpriteCentered(ctx, _ssp, _len);
             ctx.restore();
         } else if (this.type === 'colony') {
             ctx.save();
@@ -17033,11 +17071,15 @@ function drawNodesAndColonies(ctx, vpX, vpY, vpW, vpH) {
         const pulse = 0.5 + Math.sin(t * 0.003 + n.x * 0.001) * 0.5;
         const bright = mine ? 0.95 : n.identified ? (isHiggsSnsr ? 0.55 + 0.45 * pulse : 0.45 + 0.2 * pulse) : (isHiggsSnsr ? 0.35 + 0.25 * pulse : 0.32);
         const size = Math.max(72, NODE_MIN_PX * zc);
+        const _nSpin = (t * 0.0008 + n.x * 0.0003) % (Math.PI * 2);
+        const _nStack = [SPRITES.node_higgs_l0, SPRITES.node_higgs_l1, SPRITES.node_higgs_l2];
+        const _nStackOK = _nStack.every(spriteReady); // 第204弾: ノードもスプライトスタッキング (疑似3D)
         ctx.save();
         ctx.translate(n.x, n.y);
-        ctx.rotate((t * 0.0008 + n.x * 0.0003) % (Math.PI * 2));
+        if (!_nStackOK) ctx.rotate(_nSpin);
         ctx.globalAlpha = bright;
-        if (spriteReady(SPRITES.node_higgs)) drawSpriteCentered(ctx, SPRITES.node_higgs, size);
+        if (_nStackOK) drawSpriteStack(ctx, _nStack, size, _nSpin, 0.07);
+        else if (spriteReady(SPRITES.node_higgs)) drawSpriteCentered(ctx, SPRITES.node_higgs, size);
         else { ctx.fillStyle = '#50c8ff'; ctx.beginPath(); ctx.arc(0, 0, size * 0.3, 0, Math.PI * 2); ctx.fill(); }
         ctx.restore();
         // 引いた時はスプライトの細い線が霧に溶けるので、画面上で一定の大きさの輪と点を重ねる (未確認は薄め)
