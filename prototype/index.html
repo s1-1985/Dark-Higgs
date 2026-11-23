@@ -9,9 +9,9 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Dark Echo: Tactical Space RTS</title>
-    <link rel="icon" type="image/png" sizes="64x64" href="assets/favicon_64.png">
-    <link rel="apple-touch-icon" href="assets/apple_touch_icon.png">
-    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" type="image/png" sizes="64x64" href="assets/favicon_64.png?v=165">
+    <link rel="apple-touch-icon" href="assets/apple_touch_icon.png?v=165">
+    <link rel="manifest" href="manifest.webmanifest?v=165">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
     <link rel="stylesheet" href="style.css?v=20261122d">
@@ -875,7 +875,8 @@
     (function(){
         var N=15, box=document.getElementById('lobby-slides'); if(!box) return; // 第202弾: 10→15枚
         var els=[], cur=-1, timer=null;
-        for(var i=1;i<=N;i++){ var d=document.createElement('div'); d.className='ls'; d.dataset.src='assets/title_bg/bg'+(i<10?'0':'')+i+'.jpg?v=164'; box.appendChild(d); els.push(d); }
+        // 第203弾: bg11-14を差し替え(被り解消)・icon類もcache-bust v=165に
+        for(var i=1;i<=N;i++){ var d=document.createElement('div'); d.className='ls'; d.dataset.src='assets/title_bg/bg'+(i<10?'0':'')+i+'.jpg?v=165'; box.appendChild(d); els.push(d); }
         function load(d){ if(d && !d.dataset.on){ d.dataset.on='1'; d.style.backgroundImage="url('"+d.dataset.src+"')"; } }
         function show(i){
             i=(i+N)%N; load(els[i]); load(els[(i+1)%N]);
