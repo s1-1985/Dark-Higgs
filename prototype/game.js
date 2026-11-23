@@ -458,7 +458,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261123f';
+const SPRITE_VER = '20261123g';
 const SPRITE_FILES = {
     // 第197弾: 強襲突撃艇 (6勢力)
     f2_helios_boarder: 'assets/f2_helios_boarder.png', f2_crow_boarder: 'assets/f2_crow_boarder.png', f2_valkyr_boarder: 'assets/f2_valkyr_boarder.png',
