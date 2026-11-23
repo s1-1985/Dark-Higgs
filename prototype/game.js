@@ -2141,8 +2141,23 @@ function _amoebaPath(ctx, pts) {
 }
 
 // 第90弾: 霧の板 (画面より小さい解像度・最大1024px) — 全面を霧で塗り、穴 (中心と方向ごとの届く距離) を縁から内側へ段々と消す
+// 第211弾 (オーナー「有視界とヒッグスの境目がはっきりした線になってしまっている・宇宙の霧らしくもっと曖昧に」):
+//   旧5層(半径倍率1.08→0.74・幅0.34)は消す強さの飛びが大きく、段差(リング)が見えて「線」に見えた。
+//   10層・幅1.22→0.58(0.64)へ広げ、各層の消す強さを滑らかな累積曲線(smoothstep)から逆算して段差を無くし、
+//   最後に画面全体へわずかにガウシアンブラーを掛けて縁をにじませる(1024px以下のオフスクリーン1枚への1回のフィルタなので負荷は小さい)。
 let _fogCv = null, _fogCx = null;
-const FOG_HOLE_LAYERS = [[1.08, 0.18], [1.0, 0.38], [0.93, 0.5], [0.85, 0.65], [0.74, 1]]; // [半径の倍率, 消す強さ] — 縁の外側わずかに薄く・内側へ段々と晴れる
+const FOG_HOLE_LAYERS = (() => {
+    const N = 10, kFrom = 1.22, kTo = 0.58;
+    const arr = []; let prevR = 1;
+    for (let i = 0; i < N; i++) {
+        const k = kFrom + (kTo - kFrom) * i / (N - 1);
+        const t = (i + 1) / N, ease = t * t * (3 - 2 * t), r = 1 - ease; // 累積の残りアルファ(1→0)
+        const a = prevR > 0 ? Math.min(1, Math.max(0, 1 - r / prevR)) : 1;
+        arr.push([k, a]); prevR = r;
+    }
+    return arr;
+})(); // [半径の倍率, 消す強さ]×10 — 縁のはるか外側からごく薄く・内側へなめらかに晴れる
+const FOG_BLUR_PX = 7; // 縁をにじませるぼかし幅(CSS px目安)
 function drawFogHoles(ctx, holes, fogCol, fogAlpha) {
     const sc = Math.min(1, 1024 / Math.max(1, cssW)), w = Math.max(1, Math.ceil(cssW * sc)), h = Math.max(1, Math.ceil(cssH * sc));
     if (!_fogCv) { _fogCv = document.createElement('canvas'); _fogCx = _fogCv.getContext('2d'); }
@@ -2161,7 +2176,11 @@ function drawFogHoles(ctx, holes, fogCol, fogAlpha) {
         }
     }
     fc.globalCompositeOperation = 'source-over'; fc.globalAlpha = 1;
-    ctx.save(); ctx.setTransform(_dpr, 0, 0, _dpr, 0, 0); ctx.imageSmoothingEnabled = true; ctx.drawImage(_fogCv, 0, 0, cssW, cssH); ctx.restore();
+    ctx.save(); ctx.setTransform(_dpr, 0, 0, _dpr, 0, 0); ctx.imageSmoothingEnabled = true;
+    try { ctx.filter = `blur(${FOG_BLUR_PX}px)`; } catch (e) {}
+    ctx.drawImage(_fogCv, 0, 0, cssW, cssH);
+    ctx.filter = 'none';
+    ctx.restore();
 }
 function drawFogOfWar(ctx) {
     if (!player || player.hp <= 0) return;
@@ -7393,7 +7412,10 @@ function cargoSummaryNow() {
     return parts.join('・');
 }
 // 第22弾: 敵COMが使える搭載物 (それ以外は積んでも使わないので敵の積み込みには出さない)
-const ENEMY_USES = ['flash', 'noise', 'smoke', 'fsos', 'lure', 'bcn_heat', 'bcn_optic', 'bcn_em', 'bcn_higgs', 'fogspray', 'fogblow', 'fakecache', 'linkcut', 'repair'];
+// 第211弾 (オーナー「敵側に強襲を実装して・敵の積み込みに強襲がない」): 'boarder'(強襲突撃艇)・'guard'(艦内護衛ドローン=強襲への唯一の対抗手段)の
+//   ロジック自体(spawnEnemyBoarder/boarderStepE/T.itemGuard等)は第197・198弾で実装済みだったが、この一覧に入れ忘れていたため
+//   comLoadout('e',...) が敵の積み込みから毎回0に戻し(側===e の除去ループ)、積み込みエディタにも行が出ず、敵は一度も強襲・護衛を使えなかった
+const ENEMY_USES = ['flash', 'noise', 'smoke', 'fsos', 'lure', 'bcn_heat', 'bcn_optic', 'bcn_em', 'bcn_higgs', 'fogspray', 'fogblow', 'fakecache', 'linkcut', 'repair', 'boarder', 'guard'];
 function comLoadout(side, ship) {
     const st = comCfg && comCfg.lo && comCfg.lo[side] && comCfg.lo[side][ship];
     const lo = Object.assign({ mat: 0 }, st || DEFAULT_LOADOUT[ship]);
@@ -7464,7 +7486,7 @@ function _renderLoadout() {
             + '<button data-k="' + t + '" data-d="1"' + (used + sp.w <= cap ? '' : ' disabled') + '>＋</button></div>');
     }
     const matHint = SHIP_DRONES[e.ship].map(t => DRONE_SPEC[t].label + DRONE_SPEC[t].mat + '個').join('・');
-    if (_eSide) rows.push('<div class="lo-row lo-note">敵が使う物だけ: 弾・' + (e.ship === 'carrier' ? '戦闘機 (艦載機)・' : '') + '閃光弾・ノイズ・煙幕 (退く時)・偽SOS・偽艦影ブイ。資材の組み立てはしない</div>');
+    if (_eSide) rows.push('<div class="lo-row lo-note">敵が使う物だけ: 弾・' + (e.ship === 'carrier' ? '戦闘機 (艦載機)・' : '') + '閃光弾・ノイズ・煙幕 (退く時)・偽SOS・偽艦影ブイ・強襲突撃艇・艦内護衛ドローン。資材の組み立てはしない</div>');
     else rows.push('<div class="lo-row lo-mat"><span class="lo-name">資材<small>1枠=' + MAT_PER_SLOT + '個 — ' + matHint + 'で組み立て</small></span>'
         + '<button data-k="mat" data-d="-1"' + (e.lo.mat > 0 ? '' : ' disabled') + '>−</button><b>' + e.lo.mat + '</b>'
         + '<button data-k="mat" data-d="1"' + (used + 1 <= cap ? '' : ' disabled') + '>＋</button></div>');
