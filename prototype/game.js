@@ -458,7 +458,7 @@ const THRUSTER_DEFS = { // 第48弾: Star Citizen チャート参照の絵 (Higg
 // スプライト画像 (Higgsfield生成・背景除去済みPNG / prototype/assets/)
 // 全て bow=+x (右向き) なのでゲームの angle 規約と一致。読み込み完了まではベクター描画にフォールバック。
 // ============================================================
-const SPRITE_VER = '20261123e';
+const SPRITE_VER = '20261123f';
 const SPRITE_FILES = {
     // 第197弾: 強襲突撃艇 (6勢力)
     f2_helios_boarder: 'assets/f2_helios_boarder.png', f2_crow_boarder: 'assets/f2_crow_boarder.png', f2_valkyr_boarder: 'assets/f2_valkyr_boarder.png',
@@ -548,7 +548,7 @@ const SPRITE_FILES = {
     // 第204弾: ノード・コロニーのスプライトスタッキング (疑似3D・層ごとの画像を垂直オフセットで重ねる)
     node_higgs_l0: 'assets/node_higgs_l0.png', node_higgs_l1: 'assets/node_higgs_l1.png', node_higgs_l2: 'assets/node_higgs_l2.png',
     colony_l0: 'assets/structure_colony_l0.png', colony_l1: 'assets/structure_colony_l1.png', colony_l2: 'assets/structure_colony_l2.png',
-    colony_l3: 'assets/structure_colony_l3.png',
+    colony_l3: 'assets/structure_colony_l3.png', colony_lbase: 'assets/structure_colony_lbase.png',
     // Higgsfield生成エフェクトスプライト (黒背景 → 'lighter'加算合成で黒=透明)
     fx_beam_main:       'assets/fx_beam_main.png',
     fx_explosion_big:   'assets/fx_explosion_big.png',
@@ -667,7 +667,7 @@ function drawSpriteCentered(ctx, img, targetLen) {
 // 画面の「上」方向(回転の影響を受けない)へ段々ずらして重ね描きし、構造物に高さがあるように見せる。
 // ctx は呼び出し側で既に position へ translate 済みのこと。rotAngle は各層に同じ角度で (オフセットより後に) かける
 // ので、段差は保ったまま層ごとの円環が独立にゆっくり自転しているように見える。
-function drawSpriteStack(ctx, layerImgs, targetLen, rotAngle, dyFrac) {
+function drawSpriteStack(ctx, layerImgs, targetLen, rotAngle, dyFrac, backingImg) {
     dyFrac = dyFrac == null ? 0.05 : dyFrac;
     const dy = targetLen * dyFrac;
     // 土台の影 (層がある程度揃ったら薄い楕円で接地感を出す)
@@ -680,6 +680,15 @@ function drawSpriteStack(ctx, layerImgs, targetLen, rotAngle, dyFrac) {
         sg.addColorStop(0, 'rgba(0,0,0,0.38)'); sg.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.fillStyle = sg;
         ctx.beginPath(); ctx.arc(0, 0, targetLen * 0.42, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+    }
+    // 第209弾: 層ごとに違う高さへずらすと、層と層の境目で元絵のどこにも属さない隙間ができ、
+    // 背景の星が透けて見える(オーナー指摘)。offset無し(土台の高さ)に元絵と同じ輪郭の濃い影色シルエットを
+    // 敷いておけば、どの層がどれだけずれても隙間は必ずこの上に乗り、星でなく艦体の影色が見える。
+    if (backingImg && spriteReady(backingImg)) {
+        ctx.save();
+        if (rotAngle) ctx.rotate(rotAngle);
+        drawSpriteCentered(ctx, backingImg, targetLen);
         ctx.restore();
     }
     for (let i = 0; i < layerImgs.length; i++) {
@@ -3212,7 +3221,8 @@ class Structure {
         // 中心からの半径で「外周のドッキングアーム(土台)→パネル環→ドーム境界→中心の都市コア(最上段)」と
         // 本当に別のパーツだけを含む4層に分けた (`make_layers_radial.py`)
         const _stack = this.type === 'colony' ? [SPRITES.colony_l0, SPRITES.colony_l1, SPRITES.colony_l2, SPRITES.colony_l3] : null;
-        const _stackOK = _stack && _stack.every(spriteReady);
+        const _stackBacking = this.type === 'colony' ? SPRITES.colony_lbase : null;
+        const _stackOK = _stack && _stack.every(spriteReady) && (!_stackBacking || spriteReady(_stackBacking));
         if (_stackOK || spriteReady(_ssp)) {
             ctx.save();
             ctx.translate(this.x, this.y);
@@ -3231,7 +3241,7 @@ class Structure {
                 ctx.globalAlpha = 1;
             }
             const _len = Math.max(this.radius * 2.6, STRUCT_MIN_PX / camera.zoom); // 引いても見失わない最小の大きさ (第18弾: 34px→20px)
-            if (_stackOK) drawSpriteStack(ctx, _stack, _len, _spin, 0.075);
+            if (_stackOK) drawSpriteStack(ctx, _stack, _len, _spin, 0.075, _stackBacking);
             else drawSpriteCentered(ctx, _ssp, _len);
             if (this.type === 'colony') { ctx.rotate(_spin); drawColonyLife(ctx, this, _len, t); } // 第206/207弾: 住人の生活感 (窓明かりの瞬き・ガイドビーコン)
             ctx.restore();
