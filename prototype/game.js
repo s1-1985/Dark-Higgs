@@ -8802,7 +8802,7 @@ function updateNodesAndColonies() {
     }
     for (const st of structures) {
         if (st.type === 'derelict' && !st.salvaged && st.discovered && !derelictSosOn(st) && !comDemo && Math.hypot(player.x - st.x, player.y - st.y) < DERELICT_HIJACK_R && hackPower('player') < DERELICT_HIJACK_H && _frameCount - (st._hjHintF || -9999) > 1800) { st._hjHintF = _frameCount; uiToast('難破船 (SOS停止中) — 偽装艦にするには演算力 ' + DERELICT_HIJACK_H + ' が要る (今 ' + (Math.round(hackPower('player') * 10) / 10) + ')。コロニーの占有・解析重視で上がる', true); }
-        if (st.type === 'derelict' && !st.salvaged && st.discovered && !derelictSosOn(st) && Math.hypot(player.x - st.x, player.y - st.y) < DERELICT_HIJACK_R && hackPower('player') >= DERELICT_HIJACK_H && (!comDemo || skillUse('p', 'dc_hijack')) && !document.getElementById('hijack-pop') && pendingLure !== 'derelictfly') { // 第152弾: SOS が止まっている間は ハックして偽装艦に
+        if (st.type === 'derelict' && !st.salvaged && st.discovered && !derelictSosOn(st) && Math.hypot(player.x - st.x, player.y - st.y) < DERELICT_HIJACK_R && hackPower('player') >= DERELICT_HIJACK_H && (!comDemo || skillUse('p', 'st_decoyship')) && !document.getElementById('hijack-pop') && pendingLure !== 'derelictfly') { // 第152弾: SOS が止まっている間は ハックして偽装艦に (第224弾: 旧 dc_hijack の二重登録を st_decoyship に一本化 — 近接ハックの許可ゲートも本スキルで見る)
             st._hjP = (st._hjP || 0) + gameSpeedFactor / DERELICT_HIJACK_TIME;
             _capturing = { kind: 'derelict', obj: st, p: st._hjP, hijack: true };
             if (st._hjP >= 1) { st._hjP = 0; openHijackChoice(st); }
@@ -9457,7 +9457,7 @@ function updateEnemyDerelictSalvage() {
         if (player && player.hp > 0 && Math.hypot(player.x - st.x, player.y - st.y) < DERELICT_SALVAGE_R) continue;
         if (!derelictSosOn(st)) { // 第152弾: SOS が止まっている間は 回収できない — だまし好みで演算力が足りれば ハックして偽装艦に (自機と同じ)
             const _P = near.personality || {};
-            if ((persAx(_P, 'cunning') >= 0.5 || (_P.stealth || 0) >= 0.6 || near._strat && near._strat.id === 'decoyship') && skillUse('e', 'dc_hijack') && hackPower('enemy', near) >= DERELICT_HIJACK_H && Math.hypot(near.x - st.x, near.y - st.y) < DERELICT_HIJACK_R) {
+            if ((persAx(_P, 'cunning') >= 0.5 || (_P.stealth || 0) >= 0.6 || near._strat && near._strat.id === 'decoyship') && skillUse('e', 'st_decoyship') && hackPower('enemy', near) >= DERELICT_HIJACK_H && Math.hypot(near.x - st.x, near.y - st.y) < DERELICT_HIJACK_R) {
                 st.eHjP = (st.eHjP || 0) + gameSpeedFactor / DERELICT_HIJACK_TIME; near._commsF = _frameCount; // EMが漏れる (自機と同じ)
                 if (st.eHjP >= 1) { const lk = near._B.est; hijackDerelict('e', st, lk ? 'fly' : 'stay', lk ? lk.x + (Math.random() - 0.5) * 3000 : undefined, lk ? lk.y + (Math.random() - 0.5) * 3000 : undefined); comThinkEvent('e', '難破船をハックして偽装艦に — ' + (lk ? '自機が居そうな方へ飛ばす' : 'その場で信号を出す'), 'e' + near.uid); }
             }
@@ -15547,7 +15547,7 @@ var SKC = {
     hk_comm: ['combat|contact', 'eDrones|oppDrone>=3|oppCls:carrier'], hk_probe: ['search|contact', 'estRatio>=0.3'], hk_pursuit: ['combat|contact', 'hackWin'], hk_flee: ['combat|escape', 'hacked'], hk_drone: ['combat', 'H>=2.6'], // 第222弾: hk_comm は瞬時の存在に加え、ドローン目撃の蓄積・空母仮説でも立つ (先回り)
     hk_counter: ['combat|escape|contact|search', 'hacked'], hk_opener: ['contact', 'estD:1500..3500'], hk_halt_flee: ['escape', 'hpF<=0.6 expo>=2'],
     // だまし (反応の判断に候補を足す)
-    dc_hijack: ['quiet|search', 'H>=1.8'], dc_ghost: ['escape|combat', 'hitS<=15 estD<=9000', 'has:noise est', 60], dc_trail: ['escape', 'hitS<=15 estD<=10000', 'has:sos est', 120],
+    dc_ghost: ['escape|combat', 'hitS<=15 estD<=9000', 'has:noise est', 60], dc_trail: ['escape', 'hitS<=15 estD<=10000', 'has:sos est', 120],
     dc_pivot: ['combat|escape|contact', 'expo>=2 estD<=6000', 'has:smoke est', 70], dc_mirror: ['contact', 'estD:3000..9000 expo<=2', 'has:lure est', 150], dc_wreck: ['escape', 'hpF<=0.55 hitS<=20', 'has:fake est', 120],
     dc_beacon: ['contact|search|hide', 'expo>=1 estD<=12000', 'bcn est', 100], dc_flashrun: ['combat|escape', 'estD<=3000 hpF<=0.75', 'has:flash est', 30], dc_silent: ['search|contact', 'expo<=1 estD:2500..7000', 'est', 90],
     // 動き方・ドローン (表示・設定画面の目安)
@@ -18244,7 +18244,6 @@ const COM_ITYPE = { assault: 'destroyer', stealth: 'corvette', carrier: 'carrier
 //   スキル = 戦略 (STRAT_REG)・狩人の任務 (HUNT_REG)・反応で使う搭載品・作戦・ハック・だまし。判断の関数はそのまま、重みを0にする/条件を外すだけで「使わない」にできる。
 //   設定は comCfg.sk = { p: {id:false,...}, e: {...} } (書いていない = ON)。COM対戦の時だけ効く (人が操作する試合・通常の敵は全部ON)。自機COMと敵は同じ一覧 (差を作らない)
 var SKILL_EXTRA = [
-    { id: 'dc_hijack', g: 'だまし', jp: '難破船を偽装艦に', desc: 'SOSが止まっている難破船を演算力でハックして、偽装艦 (その場で発信／相手の方へ飛ばす) にする' }, // 第153弾
     // 反応で使う搭載品 (itemReactPlan)
     { id: 'it_linkcut', g: '搭載品', jp: '断線パルス', desc: 'ハックで侵入されたら、回線を切って30秒は閉じる' },
     { id: 'it_repair', g: '搭載品', jp: '応急修理', desc: '撃たれていない間に傷が深ければリペアキットを使う' },
@@ -18397,7 +18396,7 @@ const SKILL_AX = {
     dr_board: 'ag1 cu0.8 co0.5', it_guard: 'ca1 te0.3', st_board: 'ag0.8 cu1.2 co0.8 pa-0.4', cb_board_melee: 'ag1.4 pa-0.5', cb_board_feint: 'cu1.2 co1', cb_board_hack: 'te1.2 cu0.6',
     st_ambush: 'pa1.5 cu0.5', st_bait: 'cu1.5 pa0.5', st_screen: 'co1.5 te0.5', st_fogHide: 'pa0.5', st_push: 'co0.5 pa-1', st_raid: 'ag0.5 pa-0.5', st_supply_hunt: 'ca0.8 cu0.6 gr0.4', st_hitflee: 'ag0.9 st0.7 pa-0.4', st_guard: 'pa1 co0.5',
     st_tech: 'te1.5 pa1 gr0.5', st_trap: 'cu1.5 pa0.5', st_outpost: 'co1.5 te0.5', st_fallback: 'ca1 pa-0.3', st_restock: 'pa0.3', st_playdead: 'cu1.5 st0.5', st_storm: 'te0.8 cu0.5 st0.5', st_heatcloud: 'te0.8 cu0.5 st0.5',
-    st_rock: 'st0.8 pa1', st_wreck: 'st0.8 pa0.8', st_hop: 'cu1 st0.5 pa0.5', st_decoyship: 'cu1.5 te0.8', dc_hijack: 'cu1.5 te0.8',
+    st_rock: 'st0.8 pa1', st_wreck: 'st0.8 pa0.8', st_hop: 'cu1 st0.5 pa0.5', st_decoyship: 'cu1.5 te0.8',
     st_surge: 'ag0.5 pa-0.8 te0.5', st_wide_loop: 'cu1 pa0.7', st_center: 'te0.8 co0.3', st_orbit: 'co1 pa0.5', st_salvage: 'gr1', st_net: 'te1 gr0.5 co0.3',
     // 狩人の任務 (hu_*)
     hu_charge: 'pa-1.5', hu_stalk: 'pa1 cu0.5', hu_lure: 'cu1.5', hu_feint: 'cu1.5', hu_fakebox: 'cu1.5', hu_hold: 'pa1.5', hu_screen: 'co1.5', hu_rush: 'pa-0.8', hu_snipe: 'te0.8 pa0.8', hu_shadow: 'te0.8 pa1', hu_netkill: 'te0.8 ca0.6 co0.4',
