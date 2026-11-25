@@ -4945,7 +4945,7 @@ class Ship {
                 return;
             }
             enemyItemsStep(this);
-            if (this.type !== 'fighter') enemyDeployStep(this); // 第180弾: 資材からの組み立て・ドローンの展開 (自機COMの _comDeploy と同じ条件)
+            if (this.type !== 'fighter') droneOpsStep('e', droneActorE(this)); // 第220弾: 資材からの組み立て・ドローンの展開の判断は L3 (droneOpsStep) へ一本化 (旧 enemyDeployStep。第180弾の条件はそのまま)
             if (this.type === 'fighter') { enemyFighterStep(this); return; } // 第37弾: 敵の艦載機は自機の戦闘機と同じ一撃離脱 (旧: 戦艦と同じ交戦機動で止まって撃っていた)
             // 第21弾: 状況適応の性格 — 1秒ごとに 隠密/貪欲/攻撃的/慎重 を見直す (相手を掴んでいる=追跡か交戦で記憶が新しい)
             if (this.personality && this.personality._adaptive && (_frameCount + this.uid) % 60 === 0) {
@@ -5331,30 +5331,27 @@ class Ship {
             // 交戦中は射出間隔を短縮。ドローンは"自分が信じている位置(最終既知位置)"へ向かわせる。
             if (this.type === 'carrier') {
                 this.droneSpawnTimer--;
-                const _engaged = this.aiState === 'combat' || this.aiState === 'hunting';
-                const _hasContact = _engaged || this._B.fresh > 0.1;
                 // 第22弾: 艦載機の数は自機の空母と同じ既定の積み方 (戦闘機2)。旧 6+セクター — 戦闘機の耐久を自機と同じ1050にしたため、自機の既定(2機)と数もそろえる
                 if (this.droneStock === undefined) this.droneStock = DEFAULT_LOADOUT.carrier.attack || 2;
                 // 第50弾B: 哨戒機 (既定の積み方の1機)・Tech (資材14個・自機と同じ5分・気配が無い間に組み立てる)
                 if (this.scoutStock === undefined) this.scoutStock = DEFAULT_LOADOUT.carrier.scout || 1;
                 if (this.turretStock === undefined) this.turretStock = this.type === 'carrier' ? (DEFAULT_LOADOUT.carrier.build || 1) : 0; // 第66弾: 空母は砲台を1基積む (自機の空母と同じ)
-                const _quiet = !_engaged && (this._B.fresh || 0) < 0.1;
-                if (!_quiet) this._quietF = _frameCount; else if (this._quietF === undefined) this._quietF = _frameCount;
-                const _liveK = (k) => enemies.some(f => f.type === 'fighter' && f._kind === k && f.hp > 0 && !f._dying);
-                if (this.scoutStock > 0 && skillOn('e', 'dr_scout') && _quiet && _frameCount - this._quietF > 1500 && !_liveK('scout') && (_frameCount + this.uid) % 120 === 0) {
+                const J = droneOpsCarrier(this); // 第220弾: 射出の判断は L3 へ (タイマーと実行はここに残る)
+                if (J.scout()) {
                     this.scoutStock--; spawnEnemyDrone(this, 'scout');
-                } else if (!this._techBuilt && enemyMat >= DRONE_SPEC.mech.mat && techCtrlOK('e', this) && _quiet && _frameCount - this._quietF > (this._techPush > _frameCount ? 1500 : 5400) && !_liveK('mech') && (this._techPush > _frameCount || (this.personality ? (this.personality.greed ?? 0.4) : 0.4) >= 0.3) && !(this._techT > 0)) {
+                } else if (J.tech()) {
                     enemyMat -= DRONE_SPEC.mech.mat; this._techT = DRONE_SPEC.mech.build; this._techBuilt = true;
                     logMessage('TACTICAL: 敵空母が停止して何かを組み立てている — 大きな電磁波・熱が出ている', 'warning-msg');
                     comThinkEvent('e', 'Techを組み立て開始 (資材' + DRONE_SPEC.mech.mat + '個・' + Math.round(DRONE_SPEC.mech.build / 60) + '秒・停止して大量のシグネチャ)', 'e' + this.uid);
                 }
-                if (this.droneSpawnTimer <= 0 && _hasContact && !this._hunt && this.droneStock > 0 && skillOn('e', 'dr_ftr') && droneCtrlFits('e', this, 'attack')) { // 第198弾: 管制枠 (演算力で変わる・自機と同じ式)
+                if (this.droneSpawnTimer <= 0 && J.fighter()) { // 第198弾: 管制枠 (演算力で変わる・自機と同じ式) は判断側 (droneOpsCarrier) で見る
                     this.droneStock--;
                     const _bel = this._B.est || { x: this.x + Math.cos(this.angle) * 3000, y: this.y + Math.sin(this.angle) * 3000 }; // 第214弾 (指示書A T3): lk が無ければ自艦の前方3000uへ出す (旧: 真の位置へフォールバック)
                     const drone = new Ship(
                         this.x + (Math.random()-0.5)*300,
                         this.y + (Math.random()-0.5)*300, false, 'fighter'
                     );
+                    drone._home = this; // 第220弾: 母艦の紐付けを出生時に確定する (編成表 droneRoster が艦ごとに数えるため。_eLaunchFighter/spawnEnemyDrone と同じ)
                     drone.aiState = 'hunting';
                     drone.huntTarget = { x: _bel.x, y: _bel.y };
                     drone.huntTimer = 600;
@@ -5362,14 +5359,13 @@ class Ship {
                     // 第21弾: 燃料切れでは消えない (自機のドローンと同じく撃墜されるまで残る。母艦を失った時だけ燃え尽きる)
                     enemies.push(drone);
                     this._launchFlash = 60; // 第20弾: 発進は光とEMが漏れる (自機と同じ)
-                    this.droneSpawnTimer = _engaged ? (380 + Math.floor(Math.random() * 320)) : (700 + Math.floor(Math.random() * 500));
+                    this.droneSpawnTimer = J.engaged ? (380 + Math.floor(Math.random() * 320)) : (700 + Math.floor(Math.random() * 500));
                     logMessage('TACTICAL: 敵空母がファイタードローンを射出！', 'warning-msg');
                     matchRecEvent('launchE', this.x, this.y, '敵が艦載機を発進');
                     comThinkEvent('e', '戦闘機を射出 → 推定位置 (' + _dirTxt(this.x, this.y, _bel.x, _bel.y) + ') へ向かわせる (残り' + this.droneStock + '機)', 'e' + this.uid);
                 }
-                // 第102弾: 敵を掴んでいる間は砲台も据える (自機COMの _comDeploy と同じ条件: 攻撃性≥0.5・慎重さ≥0.5・照射以上を受けた時)
-                { const _P = this.personality || {}; if ((this.turretStock || 0) > 0 && skillOn('e', 'dr_turret') && _hasContact && !this._hunt && !enemies.some(f => f.type === 'fighter' && f._kind === 'turret' && f._home === this && f.hp > 0)
-                    && ((_P.aggression ?? 0.5) >= 0.5 || (_P.caution ?? 0.4) >= 0.5 || _engaged) && (_frameCount + this.uid) % 60 === 0) { this.turretStock--; spawnEnemyDrone(this, 'turret'); } }
+                // 第102弾: 敵を掴んでいる間は砲台も据える (条件の判断は droneOpsCarrier へ移行。第220弾)
+                if (J.turret()) { this.turretStock--; spawnEnemyDrone(this, 'turret'); }
             }
 
             // ── 第17弾: 潜伏 — 後退した敵は濃い霧/岩石帯で止まって修復し、45秒で狩りに戻る ──
@@ -16969,47 +16965,133 @@ function scoutLost(d) {
 // 旧: 敵は 空母の既定の在庫 (戦闘機・哨戒機・砲台) と Tech だけ。攻撃型・潜航型の敵は ドローンを一度も出さず、拾った資材は使い道が無かった。
 //   鏡合わせの記録 (潜航型×潜航型 93試合): 自機COMは資材から哨戒機を72回出し (航跡の検出189回・目視の射撃が敵の約5倍)、敵は2回
 const ENEMY_DEPLOY_KINDS = ['attack', 'build', 'scout']; // 敵が飛ばせる種類 (デコイ・ブイ・バリア・散布は敵の実装が無い)
-function _eLive(e, k) { return enemies.filter(f => f.type === 'fighter' && f.hp > 0 && !f._dying && f._home === e && (k === 'attack' ? !f._kind : f._kind === (k === 'build' ? 'turret' : k))).length; }
-function _eLiveAll(e) { return enemies.filter(f => f.type === 'fighter' && f.hp > 0 && !f._dying && f._home === e).length; }
+// ═══ 第220弾 (指示書C): L3 ドローン作戦 — 編成表 (段1)・射出判断の一本化 (段2)・戦略からの要求窓口 (段3) ═══
+// 種類の語彙は attack/scout/build/mech/boarder に統一する (敵ドローンの _kind では 砲台='turret'・戦闘機=undefined をここで正規化する)
+const DRONE_KINDS_OPS = ['attack', 'scout', 'build', 'mech', 'boarder'];
+function _droneKindOfE(f) { return f._kind === 'turret' ? 'build' : (f._kind || 'attack'); }
+// 編成表 (段1・読み取り専用): 種類ごとに { stock, building, live, resupplying, auto } を数える唯一の場所
+//   side 'p' = 自機 (cargo.stock / cargo.asm / playerDrones)。side 'e' = who の艦 (在庫フィールド / _asm・_techT / _home が一致する敵ドローン)
+//   敵の資材 (enemyMat) は全敵共有プールのため艦ごとの会計には入れない (指示書Cの未確認事項への扱い: 数えるのは艦の在庫と展開中だけ)
+function droneRoster(side, who) {
+    const R = {}; for (const k of DRONE_KINDS_OPS) R[k] = { stock: 0, building: 0, live: 0, resupplying: 0, auto: 0 };
+    if (side === 'p') {
+        for (const k of DRONE_KINDS_OPS) R[k].stock = cargo.stock[k] || 0;
+        if (cargo.asm && R[cargo.asm.type]) R[cargo.asm.type].building = 1;
+        for (const d of playerDrones) { if (d.hp <= 0 || !R[d.type]) continue; const r = R[d.type]; r.live++; if ((d._rsNeed || 0) > 0) r.resupplying++; if (d._auto) r.auto++; }
+    } else {
+        const e = who; if (!e) return R;
+        R.attack.stock = e.droneStock || 0; R.scout.stock = e.scoutStock || 0; R.build.stock = e.turretStock || 0; R.boarder.stock = e.boardStock || 0;
+        if (e._asm && R[e._asm.k]) R[e._asm.k].building = 1;
+        if ((e._techT || 0) > 0) R.mech.building = 1;
+        for (const f of enemies) { if (f.type !== 'fighter' || f.hp <= 0 || f._dying || f._home !== e) continue; const r = R[_droneKindOfE(f)]; if (!r) continue; r.live++; if ((f._rsNeed || 0) > 0) r.resupplying++; if (f._auto) r.auto++; }
+    }
+    return R;
+}
+function _eLive(e, k) { return droneRoster('e', e)[k].live; } // 第220弾: 編成表へ集約 (旧: ここで直接数えていた)
+function _eLiveAll(e) { const R = droneRoster('e', e); let n = 0; for (const k of DRONE_KINDS_OPS) n += R[k].live; return n; }
+// ── 段2: 射出・組み立ての一次判断の一本化 ──
+// 判断 (出すか・何を・いつ) は droneOpsStep が持ち、実行 (在庫を減らす・スポーン・組み立て開始) はアダプタ droneActorP/E に残す。
+// 優先順は初版では現行をそのまま再現する (自機: mech→attack→build→scout / 敵: attack→build→scout)。
+// 空母の有機射出だけは毎フレーム判定+可変タイマーのため、判断を droneOpsCarrier が返し、タイマーと実行は Ship.update 側に残す。
+function droneActorP(c, P, contact) {
+    return { side: 'p', cls: gameState.shipType, P,
+        contact: !!contact, expo: playerExposureLevel >= 2,
+        hiding: !!(c.st && (c.st.id === 'ambush' || c.st.id === 'bait' || c.st.id === 'fogHide')),
+        isCarrier: gameState.shipType === 'carrier',
+        roster: () => droneRoster('p'),
+        gapOK: () => _frameCount - (c.lastDeploy ?? -1e9) > COM_DEPLOY_GAP,
+        markDeploy: () => { c.lastDeploy = _frameCount; },
+        canKind: (k) => (SHIP_DRONES[gameState.shipType] || []).includes(k) && canDeployNow(k) && drOK('p', k),
+        stock: (k) => cargo.stock[k] || 0, mat: () => cargo.mat,
+        execDeploy: (k) => deployDrone(k), // 自機は deployDrone が在庫/組み立てをまとめて処理する
+        say: (t) => comThinkEvent('p', t) };
+}
+function droneActorE(e) {
+    const cls = ENEMY_CLASS[e.type], P = _enemyPersonality(e) || {};
+    return { side: 'e', cls, P,
+        contact: e.aiState === 'combat' || e.aiState === 'hunting' || (e._B.fresh || 0) > 0.1,
+        expo: (e._lastHitF && _frameCount - e._lastHitF < 480) || _frameCount - (e._pingHeardF ?? -1e9) < 900 || e.inVision,
+        hiding: !!(e._strat && (e._strat.id === 'ambush' || e._strat.id === 'bait' || e._strat.id === 'fogHide')),
+        isCarrier: cls === 'carrier',
+        roster: () => droneRoster('e', e),
+        tickOK: () => (_frameCount + e.uid) % COM_TICK === 0 && !(e._techT > 0),
+        asmTick: () => { if (!e._asm) return false; e._asm.t -= gameSpeedFactor; if (e._asm.t <= 0) { const k = e._asm.k; e._asm = null; if (droneCtrlFits('e', e, k)) { _eLaunch(e, k); comThinkEvent('e', DRONE_SPEC[k].label + 'の組み立てが完成 → 出す', 'e' + e.uid); } else e[LOOT_STOCK[k]] = (e[LOOT_STOCK[k]] || 0) + 1; } return true; },
+        gapOK: () => _frameCount - (e._deployF || -1e9) >= COM_DEPLOY_GAP,
+        markDeploy: () => { e._deployF = _frameCount; },
+        canKind: (k) => (SHIP_DRONES[cls] || []).includes(k) && drOK('e', k) && droneCtrlFits('e', e, k),
+        stock: (k) => e[LOOT_STOCK[k]] || 0, mat: () => enemyMat,
+        execStock: (k) => { e[LOOT_STOCK[k]]--; _eLaunch(e, k); },
+        execBuild: (k) => { enemyMat -= DRONE_SPEC[k].mat; e._asm = { k, t: DRONE_SPEC[k].build }; },
+        say: (t) => comThinkEvent('e', t, 'e' + e.uid) };
+}
+function droneOpsStep(side, A) {
+    if (!A.cls) return;
+    if (A.asmTick && A.asmTick()) return; // 組み立て中はそちらが進む (敵の _asm。自機の組み立ては updateCargo が担当)
+    if (A.tickOK && !A.tickOK()) return;
+    if (!A.contact) return;
+    const P = A.P || {};
+    if (!((P.aggression ?? 0.5) >= 0.5 || (P.caution ?? 0.4) >= 0.5 || A.expo)) return;
+    if (A.hiding || !A.gapOK()) return; // 潜む戦略の間は出さない (第58弾の規則を L3 の抑制条件としてここへ集約)
+    const R = A.roster();
+    for (const k of (side === 'p' ? ['mech', 'attack', 'build', 'scout'] : ENEMY_DEPLOY_KINDS)) {
+        if (!A.canKind(k)) continue;
+        if (side === 'e' && k === 'build' && R.build.live > 0) continue;
+        if (side === 'p') {
+            if (A.stock(k) <= 0 && A.isCarrier && A.mat() - DRONE_SPEC[k].mat < DRONE_SPEC.mech.mat) continue; // 空母は Tech用の資材 (14個) を残せる時だけ資材から作る (第66弾)
+            A.execDeploy(k); A.markDeploy();
+            A.say('敵を掴んでいる・攻撃性' + _pct(P.aggression) + ' → ' + DRONE_SPEC[k].label + 'を出す');
+            return;
+        }
+        if (A.stock(k) > 0) {
+            if (A.isCarrier) continue; // 空母の在庫は有機射出 (droneOpsCarrier) の規則が出す
+            A.execStock(k); A.markDeploy();
+            A.say('自機を掴んでいる → ' + DRONE_SPEC[k].label + 'を出す');
+            return;
+        }
+        const need = DRONE_SPEC[k].mat;
+        if (A.mat() < need) continue;
+        if (A.isCarrier && A.mat() - need < DRONE_SPEC.mech.mat) continue; // 自機COMと同じ: 空母は Tech用の資材を残せる時だけ
+        A.execBuild(k); A.markDeploy();
+        A.say('自機を掴んでいる → 資材' + need + '個で' + DRONE_SPEC[k].label + 'を組み立てる (' + Math.round(DRONE_SPEC[k].build / 60) + '秒・電磁波が漏れる)');
+        return;
+    }
+}
+// 空母の有機射出の判断 (段2): 種類ごとの可否は遅延評価で返す (Ship.update が実行順に引く — 在庫・管制枠の変化を元の評価順どおりに見るため)。
+// engaged/hasContact/quiet と静穏の記録 (_quietF) は呼び出し時に確定する。タイマー (droneSpawnTimer) と実行は Ship.update 側に残る。
+function droneOpsCarrier(e) {
+    const engaged = e.aiState === 'combat' || e.aiState === 'hunting';
+    const hasContact = engaged || (e._B.fresh || 0) > 0.1;
+    const quiet = !engaged && (e._B.fresh || 0) < 0.1;
+    if (!quiet) e._quietF = _frameCount; else if (e._quietF === undefined) e._quietF = _frameCount;
+    const P = e.personality || {};
+    return { engaged, hasContact, quiet,
+        scout: () => (e.scoutStock || 0) > 0 && skillOn('e', 'dr_scout') && quiet && _frameCount - e._quietF > 1500 && droneRoster('e', e).scout.live === 0 && (_frameCount + e.uid) % 120 === 0,
+        tech: () => !e._techBuilt && enemyMat >= DRONE_SPEC.mech.mat && techCtrlOK('e', e) && quiet && _frameCount - e._quietF > (e._techPush > _frameCount ? 1500 : 5400) && droneRoster('e', e).mech.live === 0 && (e._techPush > _frameCount || (P.greed ?? 0.4) >= 0.3) && !(e._techT > 0),
+        fighter: () => hasContact && !e._hunt && (e.droneStock || 0) > 0 && skillOn('e', 'dr_ftr') && droneCtrlFits('e', e, 'attack'),
+        turret: () => (e.turretStock || 0) > 0 && skillOn('e', 'dr_turret') && hasContact && !e._hunt && droneRoster('e', e).build.live === 0 && ((P.aggression ?? 0.5) >= 0.5 || (P.caution ?? 0.4) >= 0.5 || engaged) && (_frameCount + e.uid) % 60 === 0 };
+}
+// ── 段3: 戦略からの要求窓口 ──
+// launch/order はここを通る。在庫・管制枠を見て可否を決め、出せなければ代替か中止を思考ログに残す (無言で失敗しない)。
+// 実行そのものは各側のアダプタ (stratActorP/E の execLaunch / execOrder) が持つ。env: { canExec(kind), exec(kind), say(t) }
+const DRONE_OPS_ALT = { attack: 'scout', scout: 'attack' }; // 代替の対応 (砲台・Tech は代替なし: 位置と役割が替わりにならない)
+function droneOpsLaunch(side, env, kind) {
+    if (env.canExec(kind)) { env.exec(kind); return kind; }
+    const alt = DRONE_OPS_ALT[kind];
+    if (alt && env.canExec(alt)) { env.exec(alt); env.say('ドローン作戦: ' + DRONE_SPEC[kind].label + 'を出せない → ' + DRONE_SPEC[alt].label + 'で代用する (索敵網を切らさない)'); return alt; }
+    env.say('ドローン作戦: ' + DRONE_SPEC[kind].label + 'を出せない (在庫・管制枠が無い) → 中止する');
+    return null;
+}
+// 指示の発行窓口: 発行をここへ一本化し、現在の指示を L3 のメモ (recordOrder) に残す。env: { recordOrder(o), execOrder(types, kind, x, y) }
+function droneOpsOrder(side, env, types, kind, x, y) {
+    env.recordOrder({ types, kind, x, y, f: _frameCount });
+    env.execOrder(types, kind, x, y);
+}
 function _eLaunch(e, k) {
     if (k === 'scout') spawnEnemyDrone(e, 'scout');
     else if (k === 'build') spawnEnemyDrone(e, 'turret');
     else _eLaunchFighter(e, e._B.est || { x: e.x, y: e.y });
 }
-function enemyDeployStep(e) {
-    const cls = ENEMY_CLASS[e.type]; if (!cls) return;
-    if (e._asm) { // 組み立て中 (自機の cargo.asm と同じ: 時間がかかり、電磁波と熱が漏れる・完成で出す)
-        e._asm.t -= gameSpeedFactor;
-        if (e._asm.t <= 0) {
-            const k = e._asm.k; e._asm = null;
-            if (droneCtrlFits('e', e, k)) { _eLaunch(e, k); comThinkEvent('e', DRONE_SPEC[k].label + 'の組み立てが完成 → 出す', 'e' + e.uid); }
-            else e[LOOT_STOCK[k]] = (e[LOOT_STOCK[k]] || 0) + 1;
-        }
-        return;
-    }
-    if ((_frameCount + e.uid) % COM_TICK !== 0 || e._techT > 0) return;
-    const P = _enemyPersonality(e) || {};
-    const contact = e.aiState === 'combat' || e.aiState === 'hunting' || (e._B.fresh || 0) > 0.1;
-    const expo = (e._lastHitF && _frameCount - e._lastHitF < 480) || _frameCount - (e._pingHeardF ?? -1e9) < 900 || e.inVision; // 自機の「照射以上」と同じ (itemFactsE の兆候2以上)
-    if (!contact || !((P.aggression ?? 0.5) >= 0.5 || (P.caution ?? 0.4) >= 0.5 || expo)) return;
-    if (_frameCount - (e._deployF || -1e9) < COM_DEPLOY_GAP) return;
-    if (e._strat && (e._strat.id === 'ambush' || e._strat.id === 'bait' || e._strat.id === 'fogHide')) return; // 潜む戦略の間は出さない (自機COMと同じ)
-    for (const k of ENEMY_DEPLOY_KINDS) {
-        if (!(SHIP_DRONES[cls] || []).includes(k) || !drOK('e', k) || !droneCtrlFits('e', e, k)) continue;
-        if (k === 'build' && _eLive(e, 'build') > 0) continue;
-        const stock = e[LOOT_STOCK[k]] || 0;
-        if (stock > 0) {
-            if (cls === 'carrier') continue; // 空母の在庫は従来の射出の規則が出す
-            e[LOOT_STOCK[k]]--; _eLaunch(e, k); e._deployF = _frameCount;
-            comThinkEvent('e', '自機を掴んでいる → ' + DRONE_SPEC[k].label + 'を出す', 'e' + e.uid); return;
-        }
-        const need = DRONE_SPEC[k].mat;
-        if (enemyMat < need) continue;
-        if (cls === 'carrier' && enemyMat - need < DRONE_SPEC.mech.mat) continue; // 自機COMと同じ: 空母は Tech用の資材を残せる時だけ
-        enemyMat -= need; e._asm = { k, t: DRONE_SPEC[k].build }; e._deployF = _frameCount;
-        comThinkEvent('e', '自機を掴んでいる → 資材' + need + '個で' + DRONE_SPEC[k].label + 'を組み立てる (' + Math.round(DRONE_SPEC[k].build / 60) + '秒・電磁波が漏れる)', 'e' + e.uid); return;
-    }
-}
+// 第220弾: 旧 enemyDeployStep の判断は droneOpsStep (L3) へ移行した。組み立て中 (e._asm) の進行も droneActorE.asmTick が持つ
 function _eLaunchFighter(e, bel) {
     if (!droneCtrlFits('e', e, 'attack')) { e.droneStock = (e.droneStock || 0) + 1; return null; } // 第198弾: 管制枠
     const d = new Ship(e.x + (Math.random() - 0.5) * 300, e.y + (Math.random() - 0.5) * 300, false, 'fighter');
@@ -19171,15 +19253,15 @@ function enemyPlanStep(e) { return planStep(_planActorE(e)); }
 function stratNearE(e) { const B = beliefViewE(e), lk = B.est; return !!(B.seen || (lk && (B.fresh || 0) > 0.25 && Math.hypot(lk.x - e.x, lk.y - e.y) < 6500)); }
 function stratFactsE(e) {
     const B = beliefViewE(e);
-    const now = _frameCount, cls = _shipClass(e), liveK = (k) => enemies.some(f => f.type === 'fighter' && f._kind === k && f.hp > 0 && !f._dying);
+    const now = _frameCount, cls = _shipClass(e), R = droneRoster('e', e); // 第220弾: ドローンの数え方は編成表へ集約 (旧 liveK は全敵横断だった)
     const lures = []; if ((e.lureSOS || 0) > 0) lures.push('fsos'); if ((e.lureShip || 0) > 1) lures.push('lure'); // 偽艦影の最後の1個は作戦用
     if (e.itemBcn) for (const b in e.itemBcn) if (e.itemBcn[b] > 0) lures.push('bcn_' + b);
     const lk = B.est, near = !!(B.seen || (lk && (B.fresh || 0) > 0.25 && Math.hypot(lk.x - e.x, lk.y - e.y) < 6500));
     const hitAgo = e._lastHitF ? now - e._lastHitF : 1e9, pingAgo = now - (e._pingHeardF ?? -1e9);
     return { side: 'e', px: e.x, py: e.y, estD: lk && (B.fresh || 0) > 0.25 ? Math.hypot(lk.x - e.x, lk.y - e.y) : 1e9, ammoOut: ammoOutOf(e), raid: !!raidTarget('e', e.x, e.y), cls, relays: ownRelaySites('enemy').length, slotsFree: enemySlotsMax(e) - enemySlotsUsed(e), lures, owned: structures.filter(q => q.type === 'colony' && q.owner === 'enemy'), near,
         expo: hitAgo < 480 ? 3 : (pingAgo < 900 || e.inVision) ? 2 : 0, strong: (e.parts || []).length >= 3, early: comEarlyGather(enemySlotsUsed(e), enemySlotsMax(e), now, e.personality), hpF: e.hp / e.maxHp,
-        hasScout: (e.scoutStock || 0) > 0 || liveK('scout'), hasFtr: (e.droneStock || 0) > 0 || liveK('attack'), hasTech: liveK('mech'), hasBuild: (e.turretStock || 0) > 0, hasBoard: (e.boardStock || 0) > 0 || liveK('boarder'),
-        canTech: cls === 'carrier' && !liveK('mech') && !(e._techT > 0) }; // 第135弾: 自機COMと同じく 作り直せる (旧: 敵は1試合に1回だけ)
+        hasScout: R.scout.stock > 0 || R.scout.live > 0, hasFtr: R.attack.stock > 0 || R.attack.live > 0, hasTech: R.mech.live > 0, hasBuild: R.build.stock > 0, hasBoard: R.boarder.stock > 0 || R.boarder.live > 0,
+        canTech: cls === 'carrier' && R.mech.live === 0 && !(e._techT > 0) }; // 第135弾: 自機COMと同じく 作り直せる (旧: 敵は1試合に1回だけ)
 }
 // 第125弾 (共通化・段5後半の7): 戦略「待ち伏せ/餌/罠」の待機位置の決め方を自機COMと敵で同じ関数に
 //   拠点の外側 (罠は砲台の射程に入る近さ) の 近くの霧/岩石帯 へ。時間切れの延長は遅い艦でも着く前に切れない値 (双方 0.2u/f で割る)
@@ -19480,6 +19562,7 @@ function stratActorP(c, hpF, te, lk) {
     const sa = beliefViewP(lockedSignalId).sa; // 第213弾: 信念ボード経由 (値は従来の信号解析の参照と同じ)
     const stockK = { scout: 'scout', attack: 'attack', build: 'build' }, itemK = { noise: 'noise', spray: 'fogspray', repair: 'repair', blow: 'fogblow' };
     const stock = (k) => (SHIP_DRONES[gameState.shipType] || []).includes(k) && (cargo.stock[k] || 0) > 0;
+    const execLaunchP = (t) => { if (droneCtrlFits('p', null, t)) deployDrone(t); }; // 第220弾: 実行だけの口 (判断は droneOpsLaunch / 編成表が持つ)
     return { side: 'p', owner: 'player', engine: gameState.engineType, x: player.x, y: player.y, hpF, expo: playerExposureLevel, hHere: getHiggsIntensity(player.x, player.y), seen: !!(te && lk && lk.full), ag: (c.pp ? c.pp.aggression : 0.5), partsN: partsOn.length,
         estName: 'SIG-' + sigNo(lockedSignalId), est: () => sa && sa.fix ? trackEstimate(sa, 0) : null, next: () => searchNext(player, player.x, player.y), kit: () => (player._kitT || 0) > 0,
         go: (x, y, tol, stance) => { c.mode = 'strat'; _comCMOff(); if (!(player.state === 'moving' && Math.hypot(player.targetX - x, player.targetY - y) < tol) && _comCanSteer(c)) { player.setTarget(x, y); _comSteered(c, 'leg'); }
@@ -19487,19 +19570,22 @@ function stratActorP(c, hpF, te, lk) {
         hold: (coast) => { _comHold(c); if (coast && !playerCoasting) toggleCoast(true); },
         can: (k) => stock(itemK[k]), use: (k) => deployDrone(itemK[k]),
         hasBoard: () => (cargo.stock.boarder || 0) > 0 || playerDrones.some(d => d.type === 'boarder' && d.hp > 0), boarding: () => enemies.some(q => q._board && q._board.side === 'p'),
-        have: (t) => drOK('p', t) && stock(stockK[t]) && !playerDrones.some(d => d.type === t && d.hp > 0), mobile: (t) => playerDrones.some(d => d.type === t && d.hp > 0), captured: () => playerDrones.some(d => d._hacked && d.hp > 0),
-        launch: (t) => { if (droneCtrlFits('p', null, t)) deployDrone(t); },
+        have: (t) => { const k = stockK[t]; if (!k) return false; const r = droneRoster('p')[k]; return drOK('p', t) && (SHIP_DRONES[gameState.shipType] || []).includes(k) && r.stock > 0 && r.live === 0; }, // 第220弾: 編成表へ集約 (旧: stock と playerDrones を直接見ていた)
+        mobile: (t) => { const r = droneRoster('p')[t]; return !!r && r.live > 0; }, captured: () => playerDrones.some(d => d._hacked && d.hp > 0),
+        launch: (t) => droneOpsLaunch('p', { canExec: (k) => (SHIP_DRONES[gameState.shipType] || []).includes(k) && droneCtrlFits('p', null, k) && ((cargo.stock[k] || 0) > 0 || (!cargo.asm && !DRONE_SPEC[k].item && !DRONE_SPEC[k].noBuild && cargo.mat >= DRONE_SPEC[k].mat)), exec: execLaunchP, say: (tx) => comThinkEvent('p', tx) }, t), // 第220弾: 戦略からの要求窓口 (段3)
+        execLaunch: execLaunchP,
         techBuilding: () => techBuilding(), ctrlOK: () => techCtrlOK('p'), mat: () => cargo.mat, canBuild: () => !cargo.asm && techCtrlOK('p'), buildTech: () => deployDrone('mech'),
-        makeRoom: (need) => { if (cargoMatCap() < need) for (const k of ['scout', 'attack']) if ((SHIP_DRONES[gameState.shipType] || []).includes(k) && (cargo.stock[k] || 0) > 0 && !playerDrones.some(d => d.type === k && d.hp > 0) && droneCtrlFits('p', null, k)) { deployDrone(k); comThinkEvent('p', 'Tech建造の準備: ' + DRONE_SPEC[k].label + 'を出して積載の枠を空ける (資材の上限 ' + cargoMatCap() + '個 → 必要' + need + '個)'); break; } },
+        makeRoom: (need) => { if (cargoMatCap() < need) for (const k of ['scout', 'attack']) if ((SHIP_DRONES[gameState.shipType] || []).includes(k) && (cargo.stock[k] || 0) > 0 && droneRoster('p')[k].live === 0 && droneCtrlFits('p', null, k)) { execLaunchP(k); comThinkEvent('p', 'Tech建造の準備: ' + DRONE_SPEC[k].label + 'を出して積載の枠を空ける (資材の上限 ' + cargoMatCap() + '個 → 必要' + need + '個)'); break; } }, // 第220弾: 展開中は編成表で見る
         matSource: () => techMatSource('p', player.x, player.y),
-        order: (types, kind, x, y) => { if (skillOn('p', 'dr_order')) for (const t of types) if (playerDrones.some(d => d.type === t && d.hp > 0)) droneOrder(t, kind, x, y); },
+        order: (types, kind, x, y) => droneOpsOrder('p', { recordOrder: (o) => { c._opsOrder = o; }, execOrder: (ty, kd, ox, oy) => { if (skillOn('p', 'dr_order')) for (const t of ty) if (playerDrones.some(d => d.type === t && d.hp > 0)) droneOrder(t, kd, ox, oy); } }, types, kind, x, y), // 第220弾: 指示の発行窓口 (段3)
         ammoOut: () => ammoOutOf(player), engaged: () => comEngaged(), recall: (why) => comDroneRecall(c, why), say: (t) => comThinkEvent('p', t), think: (sig, t) => comThink('p', sig, t) };
 }
 // 敵のアダプタ
 function stratActorE(e) {
     const B = beliefViewE(e); // 第213弾: 信念ボード (est は従来どおり sa の解のみ・lk フォールバック無し)
-    const now = _frameCount, liveK = (k) => enemies.some(f => f.type === 'fighter' && f._kind === k && f.hp > 0 && !f._dying), liveF = () => enemies.some(f => f.type === 'fighter' && !f._kind && f.hp > 0 && !f._dying);
+    const now = _frameCount;
     const P = e.personality || {}, hitAgo = e._lastHitF ? now - e._lastHitF : 1e9, pingAgo = now - (e._pingHeardF ?? -1e9);
+    const execLaunchE = (t) => { if (t === 'build') { e.turretStock--; spawnEnemyDrone(e, 'turret'); } else if (t === 'scout') { e.scoutStock--; spawnEnemyDrone(e, 'scout'); } else { e.droneStock--; _eLaunchFighter(e, { x: e.x, y: e.y }); } }; // 第220弾: 実行だけの口 (判断は droneOpsLaunch / 編成表が持つ)
     return { side: 'e', owner: 'enemy', engine: e.engine, x: e.x, y: e.y, hpF: e.hp / e.maxHp, expo: hitAgo < 480 ? 3 : (pingAgo < 900 || e.inVision) ? 2 : 0, hHere: getHiggsIntensity(e.x, e.y), seen: !!e.inVision, ag: P.aggression ?? 0.5, partsN: (e.parts || []).length,
         hasBoard: () => (e.boardStock || 0) > 0 || enemies.some(f => f._kind === 'boarder' && f._home === e && f.hp > 0), boarding: () => !!(player && player._board && player._board.side === 'e'),
         estName: '自機', est: () => B.sa && B.sa.fix ? trackEstimate(B.sa, 0) : null, next: () => searchNext(e, e.x, e.y), kit: () => (e._kitT || 0) > 0,
@@ -19507,15 +19593,16 @@ function stratActorE(e) {
         hold: () => { if (e.state === 'moving') e.setTarget(e.x, e.y); e._roam = null; },
         can: (k) => k === 'noise' ? (e.itemNoise || 0) > 0 : k === 'spray' ? (e.itemSpray || 0) > 0 : k === 'repair' ? (e.itemRepair || 0) > 0 : (e.itemBlow || 0) > 0,
         use: (k) => { if (k === 'noise') enemyUseNoise(e, e.angle + (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2); else if (k === 'spray') enemyUseSpray(e); else if (k === 'repair') { e.itemRepair--; e._kitT = REPAIR_KIT_TIME; matchRecEvent('repairE', e.x, e.y, '敵: リペアキットを使う'); } else { e.itemBlow--; useFogBlow('e', e.x, e.y); } },
-        have: (t) => !drOK('e', t) ? false : t === 'build' ? (e.turretStock || 0) > 0 && !liveK('turret') : t === 'scout' ? (e.scoutStock || 0) > 0 && !liveK('scout') : (e.droneStock || 0) > 0 && droneCtrlFits('e', e, 'attack'), // 第198弾: 旧は2機まで固定 → 管制枠
-        mobile: (t) => t === 'scout' ? liveK('scout') : t === 'attack' ? liveF() : t === 'build' ? liveK('turret') : liveK('mech'),
+        have: (t) => { if (!drOK('e', t)) return false; const R = droneRoster('e', e); return t === 'build' ? R.build.stock > 0 && R.build.live === 0 : t === 'scout' ? R.scout.stock > 0 && R.scout.live === 0 : R.attack.stock > 0 && droneCtrlFits('e', e, 'attack'); }, // 第220弾: 編成表へ集約 (旧 liveK は全敵横断に数えていた。第198弾の管制枠は維持)
+        mobile: (t) => { const r = droneRoster('e', e)[t]; return !!r && r.live > 0; },
         captured: () => enemies.some(f => f.type === 'fighter' && f._hacked && f.hp > 0 && !f._dying),
         techBuilding: () => e._techT > 0, ctrlOK: () => techCtrlOK('e', e), mat: () => enemyMat, canBuild: () => !(e._techT > 0) && techCtrlOK('e', e),
-        makeRoom: (need) => { if (enemyMatCap() < need) for (const k of ['scout', 'attack']) { const ok = k === 'scout' ? (e.scoutStock || 0) > 0 && !liveK('scout') : (e.droneStock || 0) > 0 && !liveF(); if (ok) { if (k === 'scout') { e.scoutStock--; spawnEnemyDrone(e, 'scout'); } else { e.droneStock--; _eLaunchFighter(e, { x: e.x, y: e.y }); } comThinkEvent('e', 'Tech建造の準備: ' + (k === 'scout' ? '哨戒機' : '戦闘機') + 'を出して積載の枠を空ける (資材の上限 ' + enemyMatCap() + '個 → 必要' + need + '個)', 'e' + e.uid); break; } } },
+        makeRoom: (need) => { if (enemyMatCap() < need) for (const k of ['scout', 'attack']) { const R = droneRoster('e', e); if (R[k].stock > 0 && R[k].live === 0) { execLaunchE(k); comThinkEvent('e', 'Tech建造の準備: ' + DRONE_SPEC[k].label + 'を出して積載の枠を空ける (資材の上限 ' + enemyMatCap() + '個 → 必要' + need + '個)', 'e' + e.uid); break; } } }, // 第220弾: 在庫・展開中は編成表で見る
         buildTech: () => { enemyMat -= DRONE_SPEC.mech.mat; e._techT = DRONE_SPEC.mech.build; e._techBuilt = true; logMessage('TACTICAL: 敵空母が停止して何かを組み立てている — 大きな電磁波・熱が出ている', 'warning-msg'); },
         matSource: () => techMatSource('e', e.x, e.y),
-        launch: (t) => { if (t === 'build') { e.turretStock--; spawnEnemyDrone(e, 'turret'); } else if (t === 'scout') { e.scoutStock--; spawnEnemyDrone(e, 'scout'); } else { e.droneStock--; _eLaunchFighter(e, { x: e.x, y: e.y }); } },
-        order: (types, kind, x, y) => { if (skillOn('e', 'dr_order')) e._sendTo = { x, y, until: now + 60 * 62 }; },
+        launch: (t) => droneOpsLaunch('e', { canExec: (k) => { const r = droneRoster('e', e)[k]; return !!r && r.stock > 0 && droneCtrlFits('e', e, k); }, exec: execLaunchE, say: (tx) => comThinkEvent('e', tx, 'e' + e.uid) }, t), // 第220弾: 戦略からの要求窓口 (段3)
+        execLaunch: execLaunchE,
+        order: (types, kind, x, y) => droneOpsOrder('e', { recordOrder: (o) => { e._opsOrder = o; }, execOrder: (ty, kd, ox, oy) => { if (skillOn('e', 'dr_order')) e._sendTo = { x: ox, y: oy, until: now + 60 * 62 }; } }, types, kind, x, y), // 第220弾: 指示の発行窓口 (段3)
         ammoOut: () => ammoOutOf(e), engaged: () => stratNearE(e) || hitAgo < 600, recall: () => { if (skillOn('e', 'dr_recall')) { e._sendTo = null; e._outpost = null; } },
         say: (t) => comThinkEvent('e', t, 'e' + e.uid), think: (sig, t) => comThink('e', sig, t, 'e' + e.uid) };
 }
@@ -19539,7 +19626,7 @@ function enemyStratStep(e, P) {
             const site = outpostPick('enemy', e.x, e.y, e._siteUsed || (e._siteUsed = {}));
             if (!site) { e._strat = null; e._stratCD = now + 1800; return false; }
             S.site = site; S.until = now + 7200 + Math.random() * 7200;
-            if ((e.scoutStock || 0) > 0 && skillOn('e', 'dr_scout') && !enemies.some(f => f.type === 'fighter' && f._kind === 'scout' && f.hp > 0)) { e.scoutStock--; spawnEnemyDrone(e, 'scout'); }
+            if ((e.scoutStock || 0) > 0 && skillOn('e', 'dr_scout') && !enemies.some(f => f.type === 'fighter' && f._kind === 'scout' && f.hp > 0)) stratActorE(e).execLaunch('scout'); // 第220弾: 実行はアダプタの口へ
             if ((e.droneStock || 0) > 0 && skillOn('e', 'dr_ftr') && droneCtrlFits('e', e, 'attack')) { e.droneStock--; _eLaunchFighter(e, { x: site.x, y: site.y }); }
             e._outpost = { x: site.x, y: site.y, until: S.until };
             comThinkEvent('e', '戦略「前哨」(約' + Math.round((S.until - now) / 60) + '秒): ' + (site.type === 'colony' ? 'コロニー' : 'ノード') + 'の中継圏 (' + _dirTxt(e.x, e.y, site.x, site.y) + ') に艦載機・哨戒機を置いて見張らせる — 自分は別の仕事を続ける', 'e' + e.uid);
@@ -19580,7 +19667,7 @@ function enemyStratStep(e, P) {
     if (S.id === 'screen' && (now % 300 === 0) && e._sendTo) e._sendTo.until = now + 60 * 40; // 艦載機への行き先を保つ
     stratGoWait({ S, spot: g, px: e.x, py: e.y, say: (t) => comThinkEvent('e', t, 'e' + e.uid),
         go: () => { if (!(e.state === 'moving' && Math.hypot(e.targetX - g.x, e.targetY - g.y) < 600)) { e.setTarget(g.x, g.y); e._roam = 'strat'; } },
-        arrive: () => { if (S.id === 'trap' && !S.built && (e.turretStock || 0) > 0 && skillOn('e', 'dr_turret')) { S.built = true; e.turretStock--; spawnEnemyDrone(e, 'turret'); if ((e.lureSOS || 0) > 0) { e.lureSOS--; launchLure('e', 'sos', e.x, e.y, S.site.x, S.site.y); } } },
+        arrive: () => { if (S.id === 'trap' && !S.built && (e.turretStock || 0) > 0 && skillOn('e', 'dr_turret')) { S.built = true; stratActorE(e).execLaunch('build'); if ((e.lureSOS || 0) > 0) { e.lureSOS--; launchLure('e', 'sos', e.x, e.y, S.site.x, S.site.y); } } }, // 第220弾: 砲台の実行はアダプタの口へ
         hold: () => { if (e.state === 'moving') e.setTarget(e.x, e.y); e._roam = null; } });
     return true;
 }
@@ -20959,7 +21046,7 @@ function comStratStep(c, P, D, hpF, contact, te, lk, r) {
                 const x = comStratCtx(c, P);
                 if (S.id === 'trap' && !S.turret) { // 第66弾: 罠 — 砲台を据え、囮を拠点の方へ置く
                     S.turret = true;
-                    if (x.has('build') && drOK('p', 'build') && droneCtrlFits('p', null, 'build')) { deployDrone('build'); comThinkEvent('p', '罠: ここに砲台を据えた (' + Math.round(DRONE_TURRET_RANGE) + 'u以内に入った相手を撃つ)'); }
+                    if (x.has('build') && drOK('p', 'build') && droneCtrlFits('p', null, 'build')) { stratActorP(c, hpF, te, lk).execLaunch('build'); comThinkEvent('p', '罠: ここに砲台を据えた (' + Math.round(DRONE_TURRET_RANGE) + 'u以内に入った相手を撃つ)'); } // 第220弾: 実行はアダプタの口へ
                     if (S.item && x.has(S.item)) { _comUseItem(S.item, S.site.x, S.site.y); comThinkEvent('p', '罠: ' + DRONE_SPEC[S.item].label + 'を' + S.site.lbl + 'の方へ置いて、相手を砲台の近くへ誘う'); }
                 }
                 if (x.has('scout') && drOK('p', 'scout') && !x.mobile('scout') && P.caution >= 0.4 && now - (c.itemF || -1e9) > 900) { c.itemF = now; deployDrone('scout'); droneOrder('scout', 'patrol', S.site.x, S.site.y); comThinkEvent('p', '哨戒機を拠点の周りに出して見張らせる'); }
@@ -21769,7 +21856,7 @@ function _comPilotStep0() {
             }
             if (combatMode.mode !== c.cm.mode || combatMode.prio !== c.cm.prio || combatMode.range !== 'auto') { combatMode = { mode: c.cm.mode, range: 'auto', prio: c.cm.prio }; syncCombatBar(); }
             comThink('p', 'full', '有視界で捉えた (' + Math.round(lk.dist / 100) * 100 + 'u) → ' + (combatMode.mode === 'flank' ? '回り込み' : '正対') + 'で撃つ');
-            if (contact && (P.aggression >= 0.5 || P.caution >= 0.5 || playerExposureLevel >= 2) && now - c.lastDeploy > COM_DEPLOY_GAP && !(c.st && (c.st.id === 'ambush' || c.st.id === 'bait' || c.st.id === 'fogHide'))) _comDeploy(c, P); // 第58弾: 潜む戦略の間はドローンを出して信号を増やさない
+            droneOpsStep('p', droneActorP(c, P, contact)); // 第220弾: 射出判断は L3 (droneOpsStep) へ一本化 (接触・性格・間隔・潜む戦略の条件は従来どおり droneOpsStep 内で判定)
             _comStance(c, P);
             return true;
         } else if (te && lk.assumed && !c.hunt) { // 第80弾: 任務中は任務の判断で撃つ
@@ -21809,7 +21896,7 @@ function _comPilotStep0() {
         stall: () => comStallTour(c, P, D, hpF, contact) && (_comStance(c, P), true) });
     if (got) return;
     // 4) 出す
-    if (contact && (P.aggression >= 0.5 || P.caution >= 0.5 || playerExposureLevel >= 2) && now - c.lastDeploy > COM_DEPLOY_GAP && !(c.st && (c.st.id === 'ambush' || c.st.id === 'bait' || c.st.id === 'fogHide'))) _comDeploy(c, P); // 第58弾: 潜む戦略の間はドローンを出して信号を増やさない
+    droneOpsStep('p', droneActorP(c, P, contact)); // 第220弾: 射出判断は L3 (droneOpsStep) へ一本化 (旧 _comDeploy。第58弾の潜む戦略の抑制も L3 側へ)
     // 4b) 第58弾: 戦略テンプレート (待ち伏せ・餌・ドローン・霧に潜む・狩り・拠点防衛)。収集は従来どおり下の流れ
     if (c._stratDone !== now && comStratStep(c, P, D, hpF, contact, te, lk, r)) { return; }
     // 5a) 第34弾: 正体の分かった輸送船 (または艦影らしいうるさい信号) を追って拿捕 — 止まらずに少し先へ向け直し続ける
@@ -22081,15 +22168,7 @@ function comPressStep(c, P, D, hpF, te, lk, retreat, held, contact) {
     _comPressGo(c, dm.sx, dm.sy, fast);
     return true;
 }
-function _comDeploy(c, P) {
-    for (const k of ['mech', 'attack', 'build', 'scout']) {
-        if (!(SHIP_DRONES[gameState.shipType] || []).includes(k) || !canDeployNow(k) || !drOK('p', k)) continue;
-        if ((cargo.stock[k] || 0) <= 0 && gameState.shipType === 'carrier' && cargo.mat - DRONE_SPEC[k].mat < DRONE_SPEC.mech.mat) continue; // 第66弾: 資材から作るのは、Tech用の資材 (14個) を残せる時だけ
-        deployDrone(k); c.lastDeploy = _frameCount;
-        comThinkEvent('p', '敵を掴んでいる・攻撃性' + _pct(P.aggression) + ' → ' + DRONE_SPEC[k].label + 'を出す');
-        return;
-    }
-}
+// 第220弾: 旧 _comDeploy の判断は droneOpsStep (L3) へ移行した (優先順 mech→attack→build→scout と第66弾の資材温存は droneOpsStep 側で再現)
 // 出力スタンス: 全速(接近中・攻撃的) > 潜航(隠密 or 副長が「追われている」と言った) > 巡航
 function _comStance(c, P) {
     if (c.mode === 'escape' || c.mode === 'hide') return;
