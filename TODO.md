@@ -94,6 +94,7 @@
 - ✅ **生成スプライト表示** — `SPRITES` 非同期ローダー、未ロード時ベクター描画フォールバック。**PR#34**
 - ✅ **襲撃スキル7件（第212弾）** — 戦略 `st_supply_hunt` 補給狩り / `st_hitflee` 一撃離脱、任務 `hu_netkill` 聴音網潰し、複合 `cb_decoy_raid` 陽動襲撃 / `cb_silence_raid` 沈黙の襲撃、戦術 `tc_raid_rush` 襲撃の踏み込み / `tc_node_dash` ノード急襲。スキル総数 120→127。実行は共有関数（stratRun / huntNetkill / comboRules / tacticRules）で自機COM・敵とも対称
 - ✅ **信念ボードの読み口（第213弾・指示書A段1〜段2）** — 真値監査6件（T1〜T4・N1・N2）を現行コードで再確認し確定。状態は動かさず getter ビュー `beliefViewE` / `beliefViewP` ＋ `beliefEst` / `beliefSeen` を新設し、`_planActorE` / `_planActorP` / `stratActorE` / `stratActorP` / `stratFactsE` / `stratNearE` の読みをボード経由に差し替え（`planStep` 本体は無変更・挙動不変をシード固定のCOM対戦計測で前後完全一致により確認）
+- ✅ **信念ボードの真値修正5件（第214弾・指示書A段3のT4以外）** — T1 戦闘機動の艦首向き読みを有視界ゲート（`inVision` / `detectionTimer>60`）へ変更 / N1 行動推定のノード近接は lk が無ければ推定しない / T2 照準の真位置フォールバックを廃し lk が無ければ撃たない（機動の仮目標は huntTarget） / T3 空母の戦闘機射出は lk が無ければ自艦前方3000uへ / N2 発射種別は観測（被弾・ビーム軌跡・外れ射撃・至近弾）で `e._obsFire` に記録しボードの `lastFire` 経由で読む。シード固定のCOM対戦計測7設定で退化なし（5設定は全カウンタ一致・2設定は交戦以降で分岐も接触喪失/停止/例外なし）。残りは T4（`_identTruth` 置換・単独実施）と段4の状態実移行
 
 ### 基盤
 - ✅ HUDオーバーレイ（ズーム不変）/ ミニマップ / セーブロード / ゲームオーバー・クリア画面 / カメラ追従 / スマホ操作（ドラッグ・長押し・ピンチ）
