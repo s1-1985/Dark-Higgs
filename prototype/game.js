@@ -17688,7 +17688,7 @@ function updateThreats() {
         const b = best[sid];
         if (_srcKnown[sid]) continue; // 特定した発信元は聞き流す
         const idn = identInfo(sid), id = _sigIdent[sid];
-        if (id && id.sure && idn.p < 0.5 && _identTruth(sid) !== 'small') continue; // 確認済みの囮・自然
+        if (id && id.sure && idn.p < 0.5) continue; // 確認済みの囮・自然 (第215弾・指示書A T4: 旧は真値で 'small' (戦闘機) を例外にしていたが、識別確定 (identSure の false) が付くのは輸送船・自然/コンテナ・囮だけ — 戦闘機を含む敵は目視で identSure (true) になる — ため、信念側に相当する到達経路が無く例外は不要)
         if (idn.known && idn.p < 0.25 && !(id && id.sure)) continue; // AIが「艦影でない」と判断した信号 (解析が浅いと誤る)
         if ((b.strength || 0) < THR_SIG_MIN_STR && idn.p < 0.55) continue;
         const j = thrAIJudge(sid, b);
@@ -21019,8 +21019,8 @@ function capContactWatch() {
     for (const e of enemies) if (e.hp > 0 && !e._dying && e.inVision && !_capSeen['v' + e.uid]) { _capSeen['v' + e.uid] = 1; hit = '敵影を目視'; }
     for (const sid of sigListSids()) {
         if (_capSeen[sid]) continue;
-        const tr = _identTruth(sid); if (tr === 'nature' || tr === 'cache' || /^C-/.test(sid)) continue; // 自然・コンテナ・輸送船は敵と思わない (囮・ビーコンは敵と思う)
-        const d = identInfo(sid); if (d.known && (d.p < 0.25 || (d.low && d.txt.includes('確認')))) continue;
+        if (_srcKnown[sid] || /^C-/.test(sid)) continue; // 海図に載せた発信元・輸送船は敵と思わない (囮・ビーコンは敵と思う。第215弾・指示書A T4: 旧は真値で自然・コンテナも即座に除いていた → 信念 (下の識別判定) で外れるまでは敵の可能性として扱う)
+        const d = identInfo(sid), idi = _sigIdent[sid]; if ((idi && idi.sure && d.p < 0.5) || (d.known && d.p < 0.4)) continue; // 第215弾: 正体を確認した信号・識別で艦影40%未満の信号は敵と思わない (dud と同じ基準)
         _capSeen[sid] = 1; hit = hit || ('SIG-' + (sigNo(sid) || '?') + ' を受信');
     }
     if (hit && gameSpeed !== 1) { setGameSpeed(1); uiToast('◈ 敵と思われる接触 (' + hit + ') — 倍速を1倍に戻した', true); comThinkEvent('p', '敵と思われる接触 — 倍速を1倍に戻した'); }
@@ -21373,7 +21373,7 @@ function _comPilotStep0() {
     // 第23弾: 内部IDで艦か囮かを見分けない (旧: 'e-' で始まる信号=敵艦と分かっていた)。囮と識別した信号だけ除く
     // 第41弾: 艦でないと分かった信号 (海図に載せた発信元・識別で艦影25%未満・正体を確認した囮/輸送船) は「相手の気配」に数えない
     //   (旧: 輸送船や艦影1%の信号も気配に数え、その測量に走り続けた・2つの囮の間で2秒ごとに追跡を往復した)
-    const dud = (sid) => { if (_srcKnown[sid]) return true; { const tr = _identTruth(sid); if (tr === 'nature' || tr === 'cache' || /^C-/.test(sid)) return true; } /* 第129弾: 敵と同じ — 自然・コンテナ・輸送船は気配に数えない (COM対戦の自機COMは正体を直接知る。人が操作する試合では使わない) */ const d = identInfo(sid); return d.known && (d.p < 0.25 || (d.low && d.txt.includes('確認'))); };
+    const dud = (sid) => { if (_srcKnown[sid]) return true; if (/^C-/.test(sid)) return true; /* 第215弾 (指示書A T4): 自然・コンテナは真値でなく信念で外す — 海図に載せた発信元・正体を確認した信号・識別で艦影40%未満の信号だけを気配に数えない。未確定の自然・コンテナは識別が付くまで一時的に追うことがある (人間と同じ外し方。第41弾の往復対策 (付け替えの commit・マージン・rej) はそのまま効く)。輸送船 (C-) は信号の種別印として従来どおり除く (旧 第129弾: COM対戦の自機COMは正体を直接知っていた) */ const d = identInfo(sid), id = _sigIdent[sid]; return (id && id.sure && d.p < 0.5) || (d.known && d.p < 0.4); };
     const contact = Object.keys(sigs).some(k => !dud(k)) || enemies.some(e => e.hp > 0 && !e._dying && e.inVision);
     if (lockedSignalId && dud(lockedSignalId)) {
         const d = identInfo(lockedSignalId);
