@@ -4495,6 +4495,7 @@ class Ship {
         //   intel=司令部情報の概位置 / lastFire=最後に観測した発射種別 {type, f} / idm=識別の対数オッズ Map
         //   初期値は旧フィールドの初期状態をそのまま再現 (est=null / fresh=0 / r・guess・behavior・noiseTainted・lastFire は未代入=undefined / intel は現行経路が null 代入のみ)。全艦に持たせ、どの生成経路でも未初期化にならないようにする。
         this._B = { sa: null, est: null, fresh: 0, r: undefined, guess: undefined, behavior: undefined, noiseTainted: undefined, intel: null, lastFire: undefined, idm: null };
+        this._sitJ = null;   // 第218弾 (指示書B): 局面判定 sitJudge のメモ (敵側。判定ティックで生成・更新される)
         if (!isPlayer) {
             this.aiState = 'lurking';   // 'lurking' | 'gathering' | 'hunting' | 'combat'
             this.huntTarget = null;      // {x,y} last known player position
@@ -4946,8 +4947,8 @@ class Ship {
             // 第41弾: 航行モードは自機COMと同じく性格と場面で (comFocusPlan)。1秒ごとに見て、20秒は変えない (交戦・退く時はすぐ)
             if (this.type !== 'fighter' && (_frameCount + this.uid) % 60 === 0 && !(this._tacFocusUntil > _frameCount && this.aiState !== 'combat')) { // 第146弾: 戦術が航行モードを切り替えた間は選び直さない
                 const _pf = this.personality || { aggression: 0.5, stealth: 0.4, greed: 0.4, caution: 0.4 };
-                const _sit = (this._hiding || this.hp / this.maxHp < 0.12 + (_pf.caution ?? 0.4) * 0.43) ? 'retreat' : (this.aiState === 'combat' && this.detectionTimer > 60) ? 'engage'
-                           : (this.aiState === 'combat' || this.aiState === 'hunting') ? 'track' : 'search';
+                if (!this._sitJ) sitJudge(this, sitAug(Object.assign(itemFactsE(this), { who: this, retreatT: retreatThreshold(_pf) }))); // 第218弾: 局面メモは判定ティック (enemyItemsStep→tacticDecide) で更新済み。無い場合だけここで作る
+                const _sit = sitNavClass(this._sitJ); // 第218弾: 航行モードの4分類は局面からの導出に統一 (旧: _hiding・耐久・aiState からの独自組み立て)
                 const _fk = comFocusPlan(_pf, _sit, !!(this._quietRun || this._hiding || (_pf.stealth ?? 0) >= 0.5));
                 if (_fk !== this._focus && (_sit === 'engage' || _sit === 'retreat' || _frameCount - (this._focusF || -1e9) >= 1200)) { this._focusF = _frameCount; setEnemyFocus(this, _fk); }
                 // 第42弾: エンジンも場面と居る所の環境で (自機COMと同じ comEngineDecide)。替えるのは捜索・接近の間で、潜伏中でなく15秒撃たれていない時だけ
@@ -15336,6 +15337,7 @@ function itemReactPlan(F0) {
     // 第200弾: 固い条件に当たらなくても、場面と発動条件の表に 0.5〜0.7 以上合えば使う (一致度の高い順)
     {
         const S = sitAug(Object.assign({}, F0, { retreatT: retreatThreshold(P) })), thr = 0.5 + 0.2 * Math.random();
+        sitJudgeAttach(F0, S); // 第218弾: 局面メモを更新し、この S の場面は sitJudge 経由で導出する
         const T = [['it_repair', 'repair'], ['it_flash', 'flash'], ['it_noise', 'noise'], ['it_smoke', 'smoke'], ['it_sos', 'sos'], ['it_fake', 'fake'], ['it_spray', 'spray'], ['it_blow', 'blow'],
             ['dc_pivot', 'smoke', () => ({ slip: eA + rr() * Math.PI / 2 })], ['dc_flashrun', 'flash', () => ({ slip: eA + Math.PI })], ['dc_silent', 'silent', () => ({})], ['dc_beacon', 'beacon', () => ({ band: F.bcn, ang: eA + rr() * Math.PI / 2 })]];
         const L = [];
@@ -15486,14 +15488,14 @@ function comboRules(F, A, X, R) {
 //   場面: quiet=静穏 (手掛かりなし) / search=探索 (弱い気配・広い推定) / contact=接触 (絞れた推定・まだ見えない) / combat=交戦 (見えている・撃たれた) / escape=離脱 (傷が深く追われている・弾切れで照射) / hide=潜伏 / early=序盤
 //   条件の書き方: 'hpF<=0.5' 'estD:1500..6000' 'expo>=2' 'seen' '!seen' 'has:noise' 'cls:stealth|carrier' 'wK' (実弾を積む)
 //   一致度が 0.5〜0.7 (判断ごとに揺らぐ) 以上・場面が合う・必須が揃えば候補に入る (旧来の固い条件を満たした時も従来どおり候補)
-var SCENE_JP = { quiet: '静穏', search: '探索', contact: '接触', combat: '交戦', escape: '離脱', hide: '潜伏', early: '序盤' };
+var SCENE_JP = { quiet: '静穏', search: '探索', contact: '接触', combat: '交戦', escape: '離脱', recover: '回復', hide: '潜伏', early: '序盤' }; // 第218弾: recover (回復) を追加
 var SKC = {
     // 戦略 (重みに掛かる)
     st_gather: ['quiet|search|early', 'expo<=1 hpF>=0.4 parts<=3'], st_ambush: ['quiet|search', 'expo<=1 hpF>=0.5 fog>=0.3'], st_bait: ['quiet|search', 'expo<=1 hpF>=0.5'],
     st_screen: ['search|contact', 'expo<=2 hpF>=0.5 drones>=1'], st_fogHide: ['escape|hide|contact', 'hpF<=0.75 expo>=1'], st_push: ['contact|search', 'hpF>=0.7 parts>=2 expo<=2'],
     st_raid: ['quiet|search', 'hpF>=0.5 expo<=1'], st_guard: ['quiet|search', 'cols>=1 expo<=1'], st_tech: ['quiet|early|search', 'expo<=0 hpF>=0.6 cls:carrier'],
-    st_board: ['contact|combat', 'estD<=12000 hpF>=0.5'], st_trap: ['quiet|search', 'expo<=1 hpF>=0.5'], st_fallback: ['escape', 'hpF<=0.5 cols>=1'],
-    st_restock: ['escape|search|quiet', 'ammo<=0.3'], st_playdead: ['escape', 'hpF<=0.35 expo>=2'], st_storm: ['hide|escape|search', 'expo>=1 hpF<=0.8'],
+    st_board: ['contact|combat', 'estD<=12000 hpF>=0.5'], st_trap: ['quiet|search', 'expo<=1 hpF>=0.5'], st_fallback: ['escape|recover', 'hpF<=0.5 cols>=1'],
+    st_restock: ['escape|search|quiet|recover', 'ammo<=0.3'], st_playdead: ['escape', 'hpF<=0.35 expo>=2'], st_storm: ['hide|escape|search', 'expo>=1 hpF<=0.8'],
     st_heatcloud: ['hide|escape|search', 'expo>=1 hpF<=0.8'], st_surge: ['search|contact|quiet', 'lull'], st_wide_loop: ['contact|search', 'estD:5000..18000 hpF>=0.6'],
     st_center: ['quiet', 'expo<=0 hpF>=0.6'], st_orbit: ['quiet', 'cols>=1 expo<=0'], st_salvage: ['quiet|early', 'expo<=0 parts<=3'], st_net: ['quiet|search', 'expo<=1 H<=2.5'],
     st_rock: ['hide|escape|contact', 'hpF<=0.8 expo>=1'], st_wreck: ['hide|escape|contact', 'hpF<=0.8 expo>=1'], st_hop: ['contact', 'estD:5000..16000'],
@@ -15582,15 +15584,140 @@ function sitAug(F, A) {
     S.lureAny = F.n('sos') > 0 || F.n('lure') > 0 || !!F.bcn;
     return S;
 }
-function sitScenes(S) {
-    const sc = {}, low = S.hpF <= (S.retreatT != null ? S.retreatT + 0.1 : 0.4);
+// ═══ 第218弾 (指示書B 段階1〜3): 局面判定の集約 sitJudge — 「今どの局面か」を返す単一の層 ═══
+//   入力は既存の事実 F を sitAug した S だけ (新しい材料は作らない)。艦ごとのメモ (敵=e._sitJ / 自機COM=c._sitJ) に
+//   主局面 phase・勝算 odds・確信度 conf・入りフレーム since を保持し、ヒステリシス (最小保持と入り/出の閾値分離) で明滅を抑える。
+//   不利は局面ではなく勝算 odds の軸として分離した (「交戦中かつ不利」のように局面と同時に立つため)。
+//   aiState (敵の実行状態機械) は置き換えない。sitJudge は「評価」として並走し、場面 (sitScenes) と航行モード分類がここから導出する。
+var SIT_PHASE_JP = { quiet: '静穏', search: '探索', contact: '接触', combat: '交戦', escape: '離脱', recover: '回復', hide: '潜伏' };
+// 局面の生条件 (旧 sitScenes の条件そのまま + recover の新設)。畳み込み・導出・フォールバックの全てがこの1か所だけを見る
+function sitRaw(S) {
+    const low = S.hpF <= (S.retreatT != null ? S.retreatT + 0.1 : 0.4), r = {};
+    r.combat = !!(S.seen || S.hitS <= 10 || S.expo >= 3);
+    r.escape = !!((low && (S.expo >= 2 || S.hitS <= 15)) || (S.ammoOut && S.expo >= 2));
+    r.contact = !!(S.est && S.estRatio <= 0.35 && !S.seen && S.hitS > 10);
+    r.hide = !!S.hiding;
+    r.recover = !!(S.hpF <= (S.retreatT != null ? S.retreatT : 0.29) && S.expo <= 1 && S.hitS > 15); // 退き際まで傷つき、追われていない (離脱の後段)
+    r.search = !!(!r.combat && !r.contact && (S.expo >= 1 || (S.est && S.estRatio > 0.35) || S.quietS <= 60));
+    r.quiet = !!(!S.est && S.expo <= 0 && !S.seen && S.hitS > 30);
+    return r;
+}
+// 生条件を優先順位 (escape > combat > contact > hide > recover > search > quiet) で単一の主局面へ畳む
+function sitFoldPhase(S, r, cur) {
+    let contact = r.contact;
+    if (!contact && cur === 'contact' && S.est && S.estRatio <= 0.5 && !S.seen && S.hitS > 10) contact = true; // 出の閾値分離: 入り estRatio 0.35 / 出 0.5
+    if (r.escape) return 'escape';
+    if (r.combat) return 'combat';
+    if (contact) return 'contact';
+    if (r.hide) return 'hide';
+    if (r.recover) return 'recover';
+    if (r.search) return 'search';
+    if (r.quiet) return 'quiet';
+    return (S.est || S.expo >= 1) ? 'search' : 'quiet'; // どの生条件にも当たらない隙間 (被弾10〜30秒・推定なし等) の受け皿
+}
+// 確信度: 材料の鮮度から作る連続値 (下流は SKC の一致度 frac と同じ流儀で使う)
+function sitConf(S, r, phase) {
+    const c01 = (v) => Math.max(0, Math.min(1, v));
+    switch (phase) {
+        case 'combat': return c01(Math.max(S.seen ? 1 : 0, S.hitS <= 10 ? 1 - S.hitS / 10 : 0, S.expo / 3));
+        case 'escape': { const line = S.retreatT != null ? S.retreatT + 0.1 : 0.4; return c01((S.ammoOut && S.expo >= 2) ? 0.75 : 0.55 + 0.45 * (1 - S.hpF / Math.max(0.05, line))); }
+        case 'contact': return c01(1 - S.estRatio);
+        case 'hide': return 0.8;
+        case 'recover': { const line = S.retreatT != null ? S.retreatT : 0.29; return c01(0.5 + 0.5 * (1 - S.hpF / Math.max(0.05, line))); }
+        case 'search': return c01(S.est ? 0.4 + 0.6 * (1 - Math.min(1, S.estRatio)) : 0.4);
+        case 'quiet': return c01(Math.min(1, S.quietS / 60));
+        default: return 0.5;
+    }
+}
+// 勝算 (局面と直交する軸): 自分の耐久・露出・弾薬と、相手耐久の見積もりだけから粗く出す (精密化しない)。
+//   敵側の相手耐久は「当てた損害 _dmgToPlayer」からの見積もり (交戦ブロックの playerHpFrac と同じ前例)
+function sitOdds(S) {
+    let oppF = 1;
+    if (S.side === 'e' && S.who && S.who._dmgToPlayer && player && player.maxHp) oppF = Math.max(0, 1 - S.who._dmgToPlayer / player.maxHp);
+    const sc = (S.hpF - oppF) - 0.08 * (S.expo || 0) - (S.ammoOut ? 0.10 : 0) + ((S.ammo != null ? S.ammo : 1) - 0.5) * 0.08;
+    return sc > 0.12 ? 'adv' : sc < -0.12 ? 'disadv' : 'even';
+}
+var SIT_HOLD = { contact: 480, hide: 300, recover: 600, search: 300, quiet: 300 }; // 最小保持 (フレーム)。combat/escape は入り即時・出は生条件が外れて 180f (3秒) 後
+function sitJudge(holder, S) {
+    if (!holder || !S) return null;
+    const now = _frameCount;
+    let J = holder._sitJ;
+    if (!J) J = holder._sitJ = { phase: 'search', odds: 'even', conf: 0, since: -1e9, prev: null, f: -1, rawF: -1e9, contactF: -1e9, nav: 'search' };
+    if (J.f === now) return J; // 同一フレーム内の再更新は冪等 (itemReactPlan / tacticDecide / sitNow のどこから呼ばれても同じ)
+    J.f = now;
+    const r = sitRaw(S), raw = sitFoldPhase(S, r, J.phase);
+    if (raw === J.phase) { J.rawF = now; }
+    else {
+        const immediate = raw === 'combat' || raw === 'escape';
+        const go = immediate || ((J.phase === 'combat' || J.phase === 'escape') ? now - J.rawF >= 180 : now - J.since >= (SIT_HOLD[J.phase] || 0));
+        if (go) {
+            const from = J.phase;
+            J.prev = from; J.phase = raw; J.since = now; J.rawF = now;
+            J.conf = sitConf(S, r, raw); J.odds = sitOdds(S);
+            try { comThinkEvent(S.side, '局面: ' + (SIT_PHASE_JP[from] || from) + ' → ' + (SIT_PHASE_JP[raw] || raw) + ' (確信度' + Math.round(J.conf * 100) + '%・勝算 ' + ({ adv: '有利', even: '互角', disadv: '不利' })[J.odds] + ')', S.side === 'e' && S.who ? 'e' + S.who.uid : 'p'); } catch (er) {}
+            sitJudgeNav(J, S, r, now);
+            return J;
+        }
+    }
+    J.conf = sitConf(S, r, J.phase); J.odds = sitOdds(S);
+    sitJudgeNav(J, S, r, now);
+    return J;
+}
+// 接触の保持と航行分類: 局面が contact/combat でなくても、推定か信号接触があってから 1800f (30秒) は「追跡」を保つ。
+//   旧実装の航行モードはこの弱い接触で track になっていた (自機COM: contactF の窓 / 敵: aiState hunting) — 主局面の contact (推定が絞れた状態) より広い
+function sitJudgeNav(J, S, r, now) {
+    if (r.contact || r.combat || S.est) J.contactF = now;
+    else if (S.quietS <= 30) J.contactF = Math.max(J.contactF || -1e9, now - Math.round(S.quietS * 60));
+    J.nav = (J.phase === 'escape' || J.phase === 'recover') ? 'retreat'
+        : J.phase === 'combat' ? 'engage'
+        : (J.phase === 'contact' || now - (J.contactF ?? -1e9) < 1800) ? 'track' : 'search';
+}
+// 事実 F と拡張 S から、その行為者の局面メモを更新して S._J に付ける (判定ティックの3か所: itemReactPlan / tacticDecide / sitNow から呼ばれる)
+function sitJudgeAttach(F, S) {
+    if (!F || !S) return null;
+    const holder = F.side === 'p' ? (_com || F.who) : F.who;
+    if (!holder) return null;
+    const J = sitJudge(holder, S);
+    if (J) S._J = J;
+    return J;
+}
+// 航行モードの4分類は局面からの導出に統一 (旧: 敵 _sit と自機COM sit が別実装・別材料だった)。
+//   潜伏は search に寄せる (敵の修復潜伏は低耐久の間 escape/recover が優先して立つため、retreat になるべき局面はそちらで拾える)
+function sitNavClass(J) {
+    if (!J) return 'search';
+    if (J.nav) return J.nav; // sitJudge が局面+接触保持から付けた分類
+    switch (J.phase) {
+        case 'escape': case 'recover': return 'retreat';
+        case 'combat': return 'engage';
+        case 'contact': return 'track';
+        default: return 'search';
+    }
+}
+// 旧 sitScenes そのまま (生条件の集合)。局面メモが付いていない S 用のフォールバック
+function sitScenesRaw(S) {
+    const sc = {}, r = sitRaw(S);
     if (S.early) sc.early = 1;
     if (S.hiding) sc.hide = 1;
-    if (S.seen || S.hitS <= 10 || S.expo >= 3) sc.combat = 1;
-    if ((low && (S.expo >= 2 || S.hitS <= 15)) || (S.ammoOut && S.expo >= 2)) sc.escape = 1;
-    if (S.est && S.estRatio <= 0.35 && !S.seen && S.hitS > 10) sc.contact = 1;
-    if (!sc.combat && !sc.contact && (S.expo >= 1 || (S.est && S.estRatio > 0.35) || S.quietS <= 60)) sc.search = 1;
-    if (!S.est && S.expo <= 0 && !S.seen && S.hitS > 30) sc.quiet = 1;
+    if (r.combat) sc.combat = 1;
+    if (r.escape) sc.escape = 1;
+    if (r.contact) sc.contact = 1;
+    if (r.search) sc.search = 1;
+    if (r.quiet) sc.quiet = 1;
+    return sc;
+}
+// 第218弾 (段階2): 場面集合は sitJudge の主局面から導出する。early/hide は時刻・姿勢の修飾として従来どおり生材料から付ける
+function sitScenes(S) {
+    const J = S._J;
+    if (!J) return sitScenesRaw(S);
+    const sc = {}, r = sitRaw(S);
+    if (S.early) sc.early = 1;
+    if (S.hiding) sc.hide = 1;
+    if (J.phase === 'combat' || (J.phase === 'escape' && r.combat)) sc.combat = 1;
+    if (J.phase === 'escape') sc.escape = 1;
+    if (J.phase === 'contact') sc.contact = 1;
+    if (J.phase === 'recover') sc.recover = 1;
+    if (J.phase === 'search' || ((J.phase === 'recover' || J.phase === 'hide') && r.search)) sc.search = 1;
+    if (J.phase === 'quiet' || ((J.phase === 'recover' || J.phase === 'hide') && r.quiet)) sc.quiet = 1;
     return sc;
 }
 // 一致度: 場面が合うか・必須が揃うか・条件を満たした割合
@@ -15616,8 +15743,8 @@ function sitNow(side) {
     const C = _sitCache[side]; if (C && C.f === _frameCount) return C.v;
     let v = null;
     try {
-        if (side === 'p') { if (_com && player && player.hp > 0) v = sitAug(Object.assign(itemFactsP(_com, _com.pp || PERS_DEF, player.hp / player.maxHp), { who: player, retreatT: retreatThreshold(_com.pp || PERS_DEF) })); }
-        else { const e = enemies.find(q => q.type !== 'fighter' && q.hp > 0 && !q._dying); if (e) v = sitAug(Object.assign(itemFactsE(e), { who: e, retreatT: retreatThreshold(e.personality || PERS_DEF) })); }
+        if (side === 'p') { if (_com && player && player.hp > 0) { v = sitAug(Object.assign(itemFactsP(_com, _com.pp || PERS_DEF, player.hp / player.maxHp), { who: player, retreatT: retreatThreshold(_com.pp || PERS_DEF) })); if (v) { const J = sitJudge(_com, v); if (J) v._J = J; } } }
+        else { const e = enemies.find(q => q.type !== 'fighter' && q.hp > 0 && !q._dying); if (e) { v = sitAug(Object.assign(itemFactsE(e), { who: e, retreatT: retreatThreshold(e.personality || PERS_DEF) })); if (v) { const J = sitJudge(e, v); if (J) v._J = J; } } }
     } catch (er) { v = null; }
     _sitCache[side] = { f: _frameCount, v }; return v;
 }
@@ -15650,6 +15777,7 @@ function tacticDecide(F, A, X, act, doAct) {
     if ((F.get('tacHold') || 0) > now) { if (F.seen || F.hitAgo < 900 || F.exposure >= 3) F.set('tacHold', 0); else { A.hold(true); return true; } }
     // 第200弾: スキルの発動条件の表 (SKC) — 場面が合い・必須が揃い・条件の一致度が 0.5〜0.7 以上なら、旧来の固い条件を満たさなくても候補に入れる
     const S = sitAug(Object.assign({}, F, { retreatT: retreatThreshold(F.P || PERS_DEF) }), A), thr = 0.5 + 0.2 * Math.random();
+    sitJudgeAttach(F, S); // 第218弾: 局面メモを更新 (同一フレームでは itemReactPlan 側の更新が先行し、ここは冪等)
     const R = (id, cond, run) => {
         const dbg = window.__tacDbg; // 検証用: スキルごとの 判定回数・適性で使える・条件成立 (通常は未定義)
         const capP = capMode && F.side === 'p'; // 第185弾: AI操艦では 条件が揃ったスキルを全部 候補にして艦長に見せる (使うかの乱数窓は通常の自動実行のときだけ)
@@ -19692,7 +19820,7 @@ const _dirTxt = (fx, fy, tx, ty) => '方位' + compassDeg(Math.atan2(ty - fy, tx
 // 例外はミサイル回避と離脱。旧: 0.5秒ごとに判断し航路をすぐ引き直していた (人間には真似できない小刻みな三角測量)
 const COM_TICK = 120, COM_LEG_HOLD = 1200, COM_GOAL_RANGE = 9000, COM_DEPLOY_GAP = 600, COM_HIDE_TIME = ENEMY_HIDE_TIME, COM_SEARCH_LEG = 4000, COM_SEARCH_PAUSE = 600; // 第39弾: 捜索で着いたら10秒止まって聴く
 const COM_SKIP = { '帰投': 1, 'ソナー': 1, '離脱': 1, '射撃': 1 }; // 自機COMが自分で決める (退く・撃つ) / 使わない (副長の「静寂ならソナー」は位置を晒すだけ)
-function comNewMemo() { return { pp: comPersonalityFor('p'), lastDeploy: -1e9, hideUntil: 0, flankUntil: 0, silentUntil: 0, mode: '' }; }
+function comNewMemo() { return { pp: comPersonalityFor('p'), lastDeploy: -1e9, hideUntil: 0, flankUntil: 0, silentUntil: 0, mode: '', _sitJ: null }; } // _sitJ: 第218弾の局面メモ
 
 // ═══ 第22弾: 試合の記録 — 1秒ごとの位置と出来事を残し、試合が終わったら地図と時間のスライダーで振り返る ═══
 // (見た目だけ: 記録は判断に使わない。真の位置を記録するので、表示するのは試合が終わった後だけ)
@@ -21451,7 +21579,8 @@ function _comPilotStep0() {
     {
         const teF = bestFireTarget(), lkF = teF ? playerLockInfo(teF) : null;
         if (contact) c.contactF = now;
-        const sit = hpF < retreat ? 'retreat' : (lkF && lkF.full) ? 'engage' : now - (c.contactF ?? -1e9) < 1800 ? 'track' : 'search'; // 信号が明滅しても30秒は「追跡」のまま
+        if (!c._sitJ) sitJudge(c, sitAug(Object.assign(itemFactsP(c, P, hpF), { who: player, retreatT: retreat }))); // 第218弾: 局面メモは判定ティック (comReactItems→tacticDecide) で更新済み。無い場合だけここで作る
+        const sit = sitNavClass(c._sitJ); // 第218弾: 航行モードの4分類は局面からの導出に統一 (旧: 退き際・完全ロック・接触時刻からの独自組み立て。追跡の保持は sitJudge のヒステリシスが担う)
         const fk = comFocusPlan(P, sit, powerStance === 'silent' || P.stealth >= 0.5);
         if (fk !== c.focus && (sit === 'engage' || sit === 'retreat' || now - (c.focusF || -1e9) >= 1200) && !(c.tacFocusUntil > now && sit !== 'engage' && sit !== 'retreat')) {
             c.focus = fk; c.focusF = now; setGenFocus(fk, true);
