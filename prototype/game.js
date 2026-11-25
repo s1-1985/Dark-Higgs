@@ -3571,8 +3571,10 @@ function applyStrikeBonuses(byPlayer, attacker, target, hitAng, wType, fromDrone
         }
     }
     // 第221弾 (指示書D 段2): 自機側の発射観測 — 被弾した兵装の種別は観測できる (敵側 observeFireE と対称)。艦載機の攻撃は母艦のドローン目撃として数える
+    // 第223弾: 発射種別の観測記録 (observeFireP の _lastFireP) は艦載機でも対象自身の sid に残す (読み手は対象の信念を引くため。相手モデルへの集計は従来どおり主対象の時だけ)
     if (!byPlayer && target === player && attacker && attacker.hp > 0 && !attacker.isPlayer) {
-        if (attacker.type === 'fighter') oppDroneSeenP(attacker); else observeFireP(enemySid(attacker), wType);
+        if (attacker.type === 'fighter') oppDroneSeenP(attacker);
+        observeFireP(enemySid(attacker), wType);
     }
     if (!byPlayer && target === player && attacker && attacker.hp > 0 && !attacker.isPlayer &&
         _frameCount - (attacker._revealFrame || -999) > 90) {
@@ -4159,7 +4161,7 @@ function lockableTargets() {
         const full = !!e.inVision;
         if (!full && !(e.visible && e.contactLife > 0)) continue;
         if (!full && !sigLockable(enemySid(e))) continue; // 第199弾: 見えていない相手は 確度50%超 (か確定) だけ
-        const ex = full ? e.x : (e.displayX ?? e.x), ey = full ? e.y : (e.displayY ?? e.y);
+        const ex = full ? e.x : e.displayX, ey = full ? e.y : e.displayY; // 第223弾: 非有視界の距離は表示位置 (信念側) から。真位置へのフォールバックを廃止 (旧: displayX ?? x。Ship は displayX を常に持つため従来も到達不能だった腕)
         out.push({ kind: 'ent', e, full, d: Math.hypot(ex - player.x, ey - player.y), ship: e.type !== 'fighter' }); seen.add(e.uid);
     }
     for (const sid in _signalAnalysis) { // 推定円 (敵艦に結び付く信号は、その艦。結び付かない囮・不明な信号もロックできる)
@@ -4236,7 +4238,8 @@ function playerLockInfo(te) {
     const assumed = !full && te.contactLife > 0;
     const acc = full ? 1 : Math.max(0, Math.min(1, te.contactAccuracy || 0));
     // 第18弾: 想定ロックの距離は推定位置までの距離 (旧: 真の距離で射程外を判定していた = 見えない相手の距離が漏れていた)
-    const dEst = !full && te.displayX != null ? Math.hypot(te.displayX - player.x, te.displayY - player.y) : dist;
+    // 第223弾: 非有視界で表示位置が無い場合も真距離には落とさない (射程外 = 判断に使えない、として扱う。Ship は displayX を常に持つため従来も到達不能だった腕)
+    const dEst = full ? dist : (te.displayX != null ? Math.hypot(te.displayX - player.x, te.displayY - player.y) : Infinity);
     return { full, assumed, acc, dist: dEst };
 }
 
@@ -4879,11 +4882,13 @@ class Ship {
                 else {
                     const sa = _signalAnalysis[enemySid(te)];
                     const est = sa && sa.fix ? trackEstimate(sa, 0) : null;
-                    tx = est ? est.x : (te.displayX ?? te.x); ty = est ? est.y : (te.displayY ?? te.y);
+                    tx = est ? est.x : te.displayX; ty = est ? est.y : te.displayY; // 第223弾: 真位置へのフォールバックを廃止 (表示位置は信念側の値。旧: displayX ?? x)
+                    if (tx == null) { tx = this.x; ty = this.y; } // 推定も表示位置も無い = 位置の信念が無い → 自艦位置を基準にする (T2/T3 の前例どおり真値には落とさない)
                     if (sa && sa.motion && Math.hypot(sa.motion.vx, sa.motion.vy) > 0.2) tAng = Math.atan2(sa.motion.vy, sa.motion.vx);
                 }
                 const D = combatMode.range === 'auto' ? (CM_RANGE[wType] || CM_RANGE.missile) : CM_DIST[combatMode.range];
-                const oppW = te._lastFireType && _frameCount - (te._lastFireF || -1e9) < 1200 ? te._lastFireType : null;
+                const _obsFP = beliefViewP(enemySid(te)).lastFire; // 第223弾: 材料は観測した発射種別だけ (旧: te._lastFireType の真値読み)
+                const oppW = _obsFP && _frameCount - _obsFP.f < 1200 ? _obsFP.type : null;
                 const man = combatManeuver(this, tx, ty, tAng, D, combatMode.mode, combatMode.prio, oppW ? WEAPON_FIRE_ARC[oppW] : null, combatMode.prio === 'evade' ? incomingMissile(this, false) : null);
                 this._cmWhy = man.why;
                 const d = _steer(man.ang, man.spd * _baseTargetSpeed);
@@ -7032,7 +7037,7 @@ function generateSector() {
     hackPending = null; hackSel = null; // 第126弾
     passiveBearings = [];
     for (const k in _ringSm) delete _ringSm[k];
-    lockedSignalId = null; _contactLabels = {}; _contactLabelNext = 1; _signalAnalysis = {}; for (const k in _srcKnown) delete _srcKnown[k]; for (const k in _oppModelP) delete _oppModelP[k]; // 第40弾 / 第221弾: 相手モデルも試合ごとに消す
+    lockedSignalId = null; _contactLabels = {}; _contactLabelNext = 1; _signalAnalysis = {}; for (const k in _srcKnown) delete _srcKnown[k]; for (const k in _oppModelP) delete _oppModelP[k]; for (const k in _lastFireP) delete _lastFireP[k]; // 第40弾 / 第221弾: 相手モデルも試合ごとに消す / 第223弾: 観測した発射種別も
     for (const k in _passiveLastSeen) delete _passiveLastSeen[k];
     player = new Ship(MAP_CX, MAP_CY, true);
     player.generatorOutput = genAlloc.engine;
@@ -19248,7 +19253,9 @@ function beliefViewE(e) {
 }
 function beliefViewP(sid) {
     const sa = sid ? _signalAnalysis[sid] : null;
-    return { side: 'p', key: sid, sa: sa || null, ident: () => identInfo(sid), opp: () => _oppView(sid ? _oppModelP[sid] : null) }; // 第221弾: 相手モデルの読み口
+    return { side: 'p', key: sid, sa: sa || null, ident: () => identInfo(sid),
+        get lastFire() { return (sid && _lastFireP[sid]) || null; }, // 第223弾: 最後に観測した相手の発射種別 {type, f} (敵側 beliefViewE.lastFire と対称)
+        opp: () => _oppView(sid ? _oppModelP[sid] : null) }; // 第221弾: 相手モデルの読み口
 }
 function beliefEst(B) {
     const lk = B.est; if (!lk || (B.fresh || 0) < 0.12) return null;
@@ -19360,8 +19367,15 @@ function _oppFire(rec, wType) {
     if (b === 'beam') _oppAddM(rec, 'cls', { assault: 0.5, stealth: -0.3, carrier: -0.3 }, 'ビームを観測 (積めるのは攻撃型)');
     else if (b === 'kinetic') _oppAddM(rec, 'cls', { carrier: -0.25, assault: 0.1, stealth: 0.1 }, '実弾を観測 (空母は積まない)');
 }
-// 自機側の発射観測 (被弾・ビーム軌跡の経路から)。主対象 (lockedSignalId) の記録にだけ入れる
-function observeFireP(sid, wType) { if (sid && wType && sid === lockedSignalId) _oppFire(oppRecP(sid), wType); }
+// 自機側の発射観測 (被弾・ビーム軌跡の経路から)
+// 第223弾: 信念としての「最後に観測した発射種別」_lastFireP (sid → {type, f}。敵側 e._B.lastFire と対称) は観測のたびに残す
+//   (被弾・軌跡はロック状態に依らない観測事実)。相手モデルへの集計は従来どおり主対象 (lockedSignalId) の時だけ
+const _lastFireP = {};
+function observeFireP(sid, wType) {
+    if (!sid || !wType) return;
+    _lastFireP[sid] = { type: wType, f: _frameCount };
+    if (sid === lockedSignalId) _oppFire(oppRecP(sid), wType);
+}
 // ドローン目撃 → 艦種証拠 (艦種ごとの運用範囲は SHIP_DRONES が根拠: Tech は空母だけ・攻撃/砲台は潜航型が出せない・哨戒は攻撃型が出せない)
 const OPP_DRONE_CLS = {
     mech:   { carrier: 1.2, assault: -0.4, stealth: -0.4 },
@@ -22075,7 +22089,8 @@ function _comPilotStep0() {
                 comThinkEvent('p', '有視界 ' + Math.round(lk.dist / 100) * 100 + 'u → ' + _WPN_JP[wWant] + 'に持ち替える');
             }
             // 第22弾: 見えている間は戦闘モードで操艦する (性格と相手の兵装で 正対/回り込み・優先を選び、10秒は続ける)
-            const oppW = te._lastFireType && now - (te._lastFireF || -1e9) < 1200 ? te._lastFireType : null;
+            const _obsFP = beliefViewP(enemySid(te)).lastFire; // 第223弾: 材料は観測した発射種別だけ (旧: te._lastFireType の真値読み)
+            const oppW = _obsFP && now - _obsFP.f < 1200 ? _obsFP.type : null;
             if (!c.cm || now - c.cm.f >= CM_HOLD || c.cm.oppW !== oppW || (c.cm.hp >= 0.5) !== (hpF >= 0.5)) {
                 let ch = comChooseManeuver(P, hpF, wWant, oppW);
                 if (capMode) { // 第182弾: 撃ち合いの組み立ては艦長が決める (正対 / 回り込み / 回避優先)
