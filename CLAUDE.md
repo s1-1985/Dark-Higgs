@@ -1583,6 +1583,13 @@ tools/render3d/ # 第38弾: GLBを真上から描いて傾き別のPNGに書き�
 - 登録一式: `STRAT_REG` / `HUNT_REG` / `SKILL_EXTRA` / `SKC` / `SKILL_AX` / `TAC_URG` / `PERS_TRAITS`（策士に複合2件・電脳戦士に聴音網潰し）。対称性: 実行は全て共有関数で自機COM・敵とも同じ
 - 検証: `node --check` OK / 登録簿を評価して重み関数の発火・不発火を確認 / Node製スタブハーネスで game.js 全体を読み込み `skillList()` = 127・新規7件の `skillMatch`・`huntWeights` の netkill ゲートを確認。**ブラウザ実機でのCOM対戦確認は未実施（マージ前に要確認）**
 
+### 第213弾: 信念ボードの読み口を導入（指示書A 段1〜段2）— 状態は動かさず読みだけ集約（2026-11-25・オーナー承認）
+> COM思考レイヤー設計の実装指示書Aに基づく最初の一切れ。「いいよ、Aの段1〜2から始めて」
+- **段1（監査の確定・コード変更なし）**: 要修正の真値参照6件を現行コード（第212弾込み）で再grepして場所と形を確定 — T1 戦闘機動の `player.angle` 直接参照（5528）/ T2 照準の真位置フォールバック（5448-5449）/ T3 空母の戦闘機射出 `_bel` の真位置フォールバック（5328）/ T4 判断側の `_identTruth` 使用3件（17681・20984・21338。`identStep` 内部の使用は証拠生成側として正当）/ N1 `predictedBehavior` のノード近接判定の真 player フォールバック（5261）/ N2 戦闘機動の `player._lastFireType` 直接読み（5516）。この段では修正しない
+- **段2（ビュー導入）**: getter ビュー `beliefViewE(e)`（`sa`/`est`/`r`/`fresh`/`guess`/`behavior`/`noiseTainted`/`intel`/`seen` を既存フィールドからそのまま返す）・`beliefViewP(sid)`（`sa` は生成時点の参照を保持 = 従来アダプタの冒頭 const 捕捉と同じ意味、`ident()` つき）と、読み口関数 `beliefEst(B)`（従来 `_planActorE.est` の規則そのまま）・`beliefSeen(B)` を新設。差し替え: `_planActorE`（est/seen/onEnd）・`_planActorP`（sa・識別）・`stratActorE`（est）・`stratActorP`（sa）・`stratFactsE`（lk/near/estD）・`stratNearE`。**`planStep` 本体は無変更、状態フィールドは一切動かしていない**
+- 検証: `node --check` OK / Nodeスタブハーネスで全体読み込み・`skillList()` = 127 / grep で差し替え済みアダプタ本体に `playerLastKnownPos`・信号解析表の直接参照が残らないことを確認 / **COM対戦の自動計測**: ハーネス環境で `startComDemo()` ＋ 開発用 `__simSteps` を使い、シード固定（`__rpSeed`）・攻撃型同士・標準性格・BR で 86,400フレーム（24分相当）を変更前後で駆動 → 初回接触フレーム（70,500）・接触フレーム数（4,500）・思考/試合イベント数（455/77）・両艦HP が**完全一致**し、挙動不変を確認
+- **計測の限界（正直な記録）**: このシード・設定では接触は聴音レベルまでで、有視界・交戦（与ダメ交換）には至らなかった（与ダメは前後とも0で比較材料なし）。1シード・1設定のみの確認であり、ブラウザ実機での確認も引き続き未実施。真値修正そのものは段3（T1→N1→T2→T3→N2→T4 の順）で別途行う
+
 ### マップ
 - 円形マップ `MAP_RADIUS=35000`（`FIELD_SIZE`=直径70000）@`game.js:35`
 - ヒッグスの霧 = 濃度グリッド（第21弾・細かくまばら）+ 時間経過で増加（ゾーン圧縮）。リソースノード5-10個（第18弾: 常に表示・未確認は薄く。HIGGS帯で見ると確認済みになる）
