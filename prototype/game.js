@@ -3511,6 +3511,7 @@ function nearMissBlast(x, y, byPlayer, dmg) {
         if (!t || t.hp <= 0 || t._dying || Math.hypot(t.x - x, t.y - y) > NEAR_MISS_R) return;
         const d = Math.floor(dmg * NEAR_MISS_DMG);
         t.hp -= d;
+        if (byPlayer && t !== player) observeFireE(t, 'missile'); // 第214弾 (指示書A N2): 至近弾の爆発でもミサイルと分かる
         if (t === player) notePlayerHit('nearmiss', d, x, y, null);
         if (huntStats) { if (byPlayer && t !== player) { huntStats.dmgDealt += d; if (t.type !== 'fighter' && enemies.includes(t)) huntStats.dmgShip = (huntStats.dmgShip || 0) + d; } else if (!byPlayer && t === player) huntStats.dmgTaken += d; }
         effects.push({ x: t.x, y: t.y - 30, text: '至近弾 -' + d, life: 1.0, type: 'floatText', c: byPlayer ? '#ffcc66' : '#ff8866' });
@@ -3547,6 +3548,7 @@ function applyStrikeBonuses(byPlayer, attacker, target, hitAng, wType, fromDrone
         const d = Math.hypot(player.x - target.x, player.y - target.y);
         target._alertUntil = _frameCount + ENEMY_ALERT_MEMORY;
         enemyGetsBearing(target, player.x, player.y, 0.06, 0.8); // 第98弾: 被弾方位だけ (自機が撃たれた時と同じ。旧: 距離まで分かる点)
+        observeFireE(target, wType); // 第214弾 (指示書A N2): 被弾した兵装の種別は観測できる
         target.contactFreshness = Math.max(target.contactFreshness || 0, 0.75);
         if (target.aiState === 'lurking' || target.aiState === 'gathering') {
             target.aiState = 'hunting'; target.lurking = false;
@@ -3735,7 +3737,7 @@ class Projectile {
                             // 代償として、近くに居た敵は撃たれたことに気付き発射点の方角を掴む
                             createHitEffect(this.x, this.y, '#88aacc');
                             logMessage('WEP: 終末シーカー — 推定点に目標なし (推定が外れた/移動された)', 'warning-msg');
-                            missRevealsShooter(this.ox ?? player.x, this.oy ?? player.y, this.x, this.y, false);
+                            missRevealsShooter(this.ox ?? player.x, this.oy ?? player.y, this.x, this.y, false, this.isPlayer ? this.type : null); // 第214弾 (指示書A N2): 弾の種別も観測として渡す
                             recordMiss(this.sid, { x: this.x, y: this.y, r: 1000 });
                             this.active = false;
                             return;
@@ -4053,9 +4055,13 @@ function enemyGetsBearing(e, tx, ty, sigma, strength) {
     if (est) { e.playerLastKnownPos = { x: est.x, y: est.y, vx: est.vx || 0, vy: est.vy || 0 }; e._lkGuess = false; e._estR = est.r; }
     else { const ga = ang + (e.uid % 2 ? 0.35 : -0.35), gd = 4500; e.playerLastKnownPos = { x: e.x + Math.cos(ga) * gd, y: e.y + Math.sin(ga) * gd, vx: 0, vy: 0 }; e._lkGuess = true; e._estR = gd; }
 }
+// 第214弾 (指示書A N2): 敵が「受けた発射」の種別を観測として信念 (_obsFire) に記録する共通口。
+// 被弾・ビーム軌跡・外れ射撃・至近弾の経路から呼ぶ。旧: 戦闘機動が player._lastFireType (真値) を直接読んでいた。
+// 観測できなかった発射は分からないままになるのが正しい (信念は外れることがあるのが正常)
+function observeFireE(e, wType) { if (e && wType) e._obsFire = { type: wType, f: _frameCount }; }
 // 外れた射撃は相手に「撃たれた」ことと射手の方角を教える (第15弾: 試行錯誤には代償がある)。
 // 弾の通り道/着弾点の近く(2500u)に居た敵は、発射点の方へ誤差付きの最終既知位置を得て狩りに来る。
-function missRevealsShooter(ox, oy, ex, ey, isLine) {
+function missRevealsShooter(ox, oy, ex, ey, isLine, obsType) { // 第214弾 (指示書A N2): obsType = 通り過ぎた/着弾した弾の種別 (観測として記録)
     for (const e of enemies) {
         if (e.hp <= 0 || e._dying || e.type === 'fighter') continue;
         let d;
@@ -4071,6 +4077,7 @@ function missRevealsShooter(ox, oy, ex, ey, isLine) {
         if (e._sa) e._sa.ping = { x: e.playerLastKnownPos.x, y: e.playerLastKnownPos.y, r: err, f: _frameCount }; // 第39弾: 推定の材料 (点の観測)
         e._lkGuess = false;
         e.contactFreshness = Math.max(e.contactFreshness || 0, 0.8);
+        if (obsType) observeFireE(e, obsType);
         e.detectionState = 'alerted';
         e._alertUntil = _frameCount + ENEMY_ALERT_MEMORY;
         if (e.aiState === 'lurking' || e.aiState === 'gathering') { e.aiState = 'hunting'; e.huntTimer = 600 + Math.hypot(e.x - ox, e.y - oy) / 1.2; }
@@ -4087,6 +4094,7 @@ function beamRevealsShooter(ox, oy, byPlayer, shooter) {
             const d = Math.hypot(e.x - ox, e.y - oy);
             if (d > BEAM_REVEAL_RANGE * PM.beamReveal) continue; // 第32弾: 霧貫通は軌跡が遠くまで知れる
             enemyGetsBearing(e, ox, oy, 0.02, 0.9); // 第98弾: 軌跡の方位線だけ (自機が敵のビームを受けた時と同じ σ)
+            observeFireE(e, 'beam'); // 第214弾 (指示書A N2): 軌跡を見ればビームと分かる
             e.contactFreshness = Math.max(e.contactFreshness || 0, 0.85);
             e.detectionState = 'alerted';
             e._alertUntil = _frameCount + ENEMY_ALERT_MEMORY;
@@ -5258,7 +5266,7 @@ class Ship {
                 const pm = { heat: _rl.heat * 0.3, optic: _rl.optic * 0.2, em: _rl.em * 0.3 }; // 受信レベル×しきい値 = 受け取った強さ
                 // 最寄りアクティブノードがプレイヤー近傍か (EMスパイク+ノード近接=収集)
                 let nearNode = false;
-                const _plk = this.playerLastKnownPos || player; for (const n of resourceNodes) { if (n.active && Math.hypot(n.x - _plk.x, n.y - _plk.y) < 650 + (this._estR || 0)) { nearNode = true; this._predNode = n; break; } } // 第39弾: 推定位置から (旧: 自機の真の位置)
+                const _plk = this.playerLastKnownPos; if (_plk) for (const n of resourceNodes) { if (n.active && Math.hypot(n.x - _plk.x, n.y - _plk.y) < 650 + (this._estR || 0)) { nearNode = true; this._predNode = n; break; } } // 第39弾: 推定位置から (旧: 自機の真の位置) / 第214弾 (指示書A N1): lk が無ければ真値へ落とさず、ノード近接は推定しない
                 if (domSig === 'em' && nearNode)               pb = 'gathering';   // リソース収集 → 先回り
                 else if (pm.heat > 0.4 && pm.em > 0.4 && pm.optic < 0.3) pb = 'charging'; // ビームチャージ → 回避
                 else if (domSig === 'optic')                   pb = 'kinetic';     // 実弾多用 → アウトレンジ
@@ -5325,7 +5333,7 @@ class Ship {
                 }
                 if (this.droneSpawnTimer <= 0 && _hasContact && !this._hunt && this.droneStock > 0 && skillOn('e', 'dr_ftr') && droneCtrlFits('e', this, 'attack')) { // 第198弾: 管制枠 (演算力で変わる・自機と同じ式)
                     this.droneStock--;
-                    const _bel = this.playerLastKnownPos || (player ? { x: player.x, y: player.y } : { x: this.x, y: this.y });
+                    const _bel = this.playerLastKnownPos || { x: this.x + Math.cos(this.angle) * 3000, y: this.y + Math.sin(this.angle) * 3000 }; // 第214弾 (指示書A T3): lk が無ければ自艦の前方3000uへ出す (旧: 真の位置へフォールバック)
                     const drone = new Ship(
                         this.x + (Math.random()-0.5)*300,
                         this.y + (Math.random()-0.5)*300, false, 'fighter'
@@ -5445,8 +5453,9 @@ class Ship {
                 // 接触が新しいほど速度ぶんリード外挿、喪失するほど古い点で凍結 → 移動/沈黙で外れる。
                 const lk = this.playerLastKnownPos;
                 const lead = this.contactFreshness * 40; // 鮮度に応じた外挿フレーム (最大40)
-                const aimX = lk ? lk.x + lk.vx * lead : (player ? player.x : this.x);
-                const aimY = lk ? lk.y + lk.vy * lead : (player ? player.y : this.y);
+                const _ht2 = this.huntTarget; // 第214弾 (指示書A T2): lk が無い間は狩りの目標を仮の照準点にする (旧: 真の位置へフォールバック)
+                const aimX = lk ? lk.x + lk.vx * lead : (_ht2 ? _ht2.x : this.x);
+                const aimY = lk ? lk.y + lk.vy * lead : (_ht2 ? _ht2.y : this.y);
                 const distToBelief = Math.hypot(aimX - this.x, aimY - this.y);
                 // 第22弾: ストレイフ (左右へ振る横移動) は撤去 — 戦艦の機動は combatManeuver (正対 / 回り込み) だけ
 
@@ -5513,7 +5522,8 @@ class Ship {
                 if (!ENEMY_CLASS[this.type]) { if (this.predictedBehavior === 'kinetic' && _plannedW === 'kinetic') _plannedW = this._wpref('missile'); if (outmatched && _plannedW === 'kinetic') _plannedW = this._wpref('missile'); }
                 if (ENEMY_CLASS[this.type]) {
                     const _ms = this._maxSpeeds();
-                    const oppW = player && player._lastFireType && _frameCount - (player._lastFireF || -1e9) < 1200 && this.contactFreshness > 0.3 ? player._lastFireType : null;
+                    const _obsF = this._obsFire; // 第214弾 (指示書A N2): 材料は観測した発射種別だけ (旧: player._lastFireType の真値読み)
+                    const oppW = _obsF && _frameCount - _obsF.f < 1200 && this.contactFreshness > 0.3 ? _obsF.type : null;
                     const cp = this._cmPlan;
                     if (!cp || _frameCount - cp.f >= CM_HOLD || cp.oppW !== oppW || (cp.hp >= 0.5) !== (hpFrac >= 0.5)) {
                         const ch = comChooseManeuver(pers, hpFrac, _plannedW, oppW);
@@ -5525,7 +5535,7 @@ class Ship {
                     const pl = this._cmPlan;
                     // 相手の艦首の向き: 近くで掴んでいれば見える / それ以外は推定の動きから (止まっていれば分からない)
                     let tAng = null;
-                    if (distToBelief < 1500 && this.contactFreshness > 0.6 && player) tAng = player.angle;
+                    if ((this.inVision || this.detectionTimer > 60) && player) tAng = player.angle; // 第214弾 (指示書A T1): 艦首向きの真値読みは有視界の時だけ (旧: 推定距離<1500+鮮度>0.6 — 有視界とは一致しないゲートだった)
                     else if (lk && Math.hypot(lk.vx, lk.vy) > 0.2) tAng = Math.atan2(lk.vy, lk.vx);
                     const oppArc = oppW ? WEAPON_FIRE_ARC[oppW] : null;
                     let man;
@@ -5539,7 +5549,7 @@ class Ship {
                     this._moveHeading(man.ang, man.spd * _cmSpd);
                     _ct.mode = desperate ? 'retreat' : man.why;
                 }
-                const _wantFire = distToBelief < engageRange && this.fireCooldown <= 0 && this._weaponJamTimer <= 0 && player && player.hp > 0 && (!desperate || Math.random() < 0.25);
+                const _wantFire = lk && distToBelief < engageRange && this.fireCooldown <= 0 && this._weaponJamTimer <= 0 && player && player.hp > 0 && (!desperate || Math.random() < 0.25); // 第214弾 (指示書A T2): lk が無ければ撃たない
                 if (window.__fdbg) { const k = !(distToBelief < engageRange) ? 'range' : this.fireCooldown > 0 ? 'cd' : this._weaponJamTimer > 0 ? 'jam' : desperate ? 'desp' : 'ok'; window.__fdbg[k] = (window.__fdbg[k] || 0) + 1; } // 開発用: 敵が撃てない理由の集計
                 if (_wantFire) {
                     const ta = Math.atan2(aimY - this.y, aimX - this.x);
@@ -9345,7 +9355,7 @@ function mirvSplit(pr, cx, cy) {
         if (tgt.type !== 'fighter') { matchRecEvent('hitE', tgt.x, tgt.y, '敵に命中: 多弾頭 −' + d); applyStrikeBonuses(true, null, tgt, Math.atan2(by - tgt.y, bx - tgt.x), 'missile'); }
     }
     logMessage(hits ? 'WEP: 多弾頭が分裂 — 子弾' + hits + '発が命中' : 'WEP: 多弾頭が分裂 — 子弾は何にも当たらなかった (推定が外れた)', hits ? 'warning-msg' : 'system-msg');
-    if (!hits) { missRevealsShooter(pr.ox ?? player.x, pr.oy ?? player.y, cx, cy, false); if (pr.sid) recordMiss(pr.sid, { x: cx, y: cy, r: 1500 }); }
+    if (!hits) { missRevealsShooter(pr.ox ?? player.x, pr.oy ?? player.y, cx, cy, false, pr.type); if (pr.sid) recordMiss(pr.sid, { x: cx, y: cy, r: 1500 }); } // 第214弾 (指示書A N2): 弾の種別も観測として渡す
     addShake(6);
     pr.active = false;
 }
@@ -18966,6 +18976,7 @@ const _PLAN_JP = { lure: '偽艦影ブイ', fsos: '偽SOS', bcn_heat: '熱ビー
 // ═══ 第213弾 (指示書A 段2): 信念ボードの読み口 (ビュー) — 状態は既存フィールドのまま一切動かさず、判断側の読みだけをここに集約する ═══
 //   beliefViewE(e): 敵の信念 (対象=自機) の getter ビュー。sa=_sa / est=playerLastKnownPos / r=_estR / fresh=contactFreshness / guess=_lkGuess /
 //     behavior=predictedBehavior / noiseTainted=_noiseLk / intel=intelPos / seen=inVision をそのまま返す (値の正規化はしない)
+//     第214弾: lastFire=_obsFire (観測した発射種別) を追加
 //   beliefViewP(sid): 自機側の信念 (対象=信号sid) のビュー。sa は生成時点の参照を保持する (従来アダプタの冒頭 const 捕捉と同じ意味)
 //   beliefEst(B): 従来 _planActorE.est の規則そのまま (sa の解があれば trackEstimate、無ければ lk + 幅 _estR、鮮度<0.12 で null)
 //   beliefSeen(B): 従来 _planActorE.seen の規則そのまま (敵側は inVision)
@@ -18974,6 +18985,7 @@ function beliefViewE(e) {
         get sa() { return e._sa; }, get est() { return e.playerLastKnownPos; }, get r() { return e._estR; },
         get fresh() { return e.contactFreshness; }, get guess() { return e._lkGuess; }, get behavior() { return e.predictedBehavior; },
         get noiseTainted() { return e._noiseLk; }, get intel() { return e.intelPos; }, get seen() { return !!e.inVision; },
+        get lastFire() { return e._obsFire || null; }, // 第214弾 (指示書A N2): 最後に観測した相手の発射種別 {type, f}
         identP: () => enemyConf(e) };
 }
 function beliefViewP(sid) {
