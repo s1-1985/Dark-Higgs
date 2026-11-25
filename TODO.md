@@ -92,6 +92,7 @@
 - ✅ **敵ユニット4種** — corvette/destroyer/carrier/fighter（fighter=ドローン）。敵carrierが`fighter`を周期スポーン @`game.js:1546`
 - ✅ **コロニー / 難破船** — colony=S&Dハック目標、derelict=EWハックで**偽コンタクト発生**（`decoyActive`）@`game.js:880,2840`
 - ✅ **生成スプライト表示** — `SPRITES` 非同期ローダー、未ロード時ベクター描画フォールバック。**PR#34**
+- ✅ **襲撃スキル7件（第212弾）** — 戦略 `st_supply_hunt` 補給狩り / `st_hitflee` 一撃離脱、任務 `hu_netkill` 聴音網潰し、複合 `cb_decoy_raid` 陽動襲撃 / `cb_silence_raid` 沈黙の襲撃、戦術 `tc_raid_rush` 襲撃の踏み込み / `tc_node_dash` ノード急襲。スキル総数 120→127。実行は共有関数（stratRun / huntNetkill / comboRules / tacticRules）で自機COM・敵とも対称
 
 ### 基盤
 - ✅ HUDオーバーレイ（ズーム不変）/ ミニマップ / セーブロード / ゲームオーバー・クリア画面 / カメラ追従 / スマホ操作（ドラッグ・長押し・ピンチ）

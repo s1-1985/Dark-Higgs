@@ -15441,6 +15441,24 @@ function comboRules(F, A, X, R) {
         F.mark('cbRepSmF'); F.mark('smokeF'); F.mark('repairF');
         X.doI({ k: 'smoke', why: '煙幕の下の修理 — まず煙幕で姿を隠す' }); X.doI({ k: 'repair', why: '煙幕の下の修理 — その下でリペアキットを使う' }); return true;
     });
+    // 第212弾: 陽動襲撃 — 偽の信号を一方の拠点へ向け、反対側の拠点を襲いに行く
+    R('cb_decoy_raid', () => ((F.n('lure') > 0 || F.n('sos') > 0) && F.exposure <= 1 && F.quietF > 1200 && F.cd('cbDecRaidF', 200)), () => {
+        const vis = {}, s1 = stratPickSite(F.side, A.x, A.y, vis); if (!s1) return false;
+        let s2 = stratPickSite(F.side, A.x, A.y, vis); if (s2 && Math.hypot(s2.x - s1.x, s2.y - s1.y) < 2000) s2 = null;
+        F.mark('cbDecRaidF');
+        X.bait(F.n('lure') > 0 ? 'lure' : 'sos', s1.x, s1.y);
+        say('陽動襲撃 — 偽の信号を' + s1.lbl + ' (' + _dirTxt(A.x, A.y, s1.x, s1.y) + ') へ向け、守りを引きつける');
+        if (s2) { X.slip(Math.atan2(s2.y - A.y, s2.x - A.x)); say('本命は反対側の' + s2.lbl + ' (' + _dirTxt(A.x, A.y, s2.x, s2.y) + ') — 静かに回り込む'); }
+        return true;
+    });
+    // 第212弾: 沈黙の襲撃 — ノイズで耳を引きつけ、自分は潜航で静かに推定へ近づく
+    R('cb_silence_raid', () => (F.n('noise') > 0 && eA !== null && F.estD >= 3500 && F.estD <= 12000 && F.exposure <= 1 && F.cd('cbSilRaidF', 150)), () => {
+        F.mark('cbSilRaidF'); F.mark('noiseF');
+        X.doI({ k: 'noise', why: '沈黙の襲撃: ノイズを推定の方へ走らせて耳を引きつける', aim: eA });
+        X.slip(eA);
+        say('沈黙の襲撃 — ノイズに耳を引きつけさせ、自分は潜航で静かに推定へ近づく');
+        return true;
+    });
     return false;
 }
 // ═══ 第146弾 (オーナー「スキルをもっともっと増やして・あらゆる要素を俯瞰して」): 戦術 — ソナー・航行モード・状態異常・弾切れ・探信・ドローン・アイテムを使う単発の動き。自機COMも敵も同じ関数。
@@ -15498,6 +15516,13 @@ var SKC = {
     tc_status_retreat: ['combat|escape', 'dazed expo>=2', 'has:smoke', 60], tc_ammo_flee: ['escape|combat', 'ammoOut expo>=2', 'has:noise est', 60], tc_kite: ['combat', 'hpF>=0.6 estD<=1500 hitS<=10', 'est', 30],
     tc_probe_evade: ['combat|contact', 'expo>=2 !seen', 'est', 40], tc_scout_ahead: ['contact|search', 'estD>=6000', 'est scoutMob', 90], tc_flash_open: ['contact', 'estRatio<=0.25 estD<=2200 !seen', 'has:flash est', 60],
     tc_noise_shadow: ['contact', 'estD:2500..8000 !seen', 'has:noise est', 90], tc_beacon_ring: ['hide', 'expo<=1', 'bcn', 120], tc_spray_lair: ['hide', 'fog<=0.5', 'has:spray', 120],
+    st_supply_hunt: ['search|contact', 'hpF>=0.6 estD:3500..20000 expo<=2'],
+    st_hitflee: ['quiet|search', 'hpF>=0.65 expo<=1 has:noise'],
+    hu_netkill: ['search|contact', 'expo<=2 hpF>=0.5'],
+    cb_decoy_raid: ['quiet|search', 'expo<=1 hpF>=0.6', 'lureAny', 200],
+    cb_silence_raid: ['contact', 'estD:3500..12000 expo<=1 has:noise', 'est', 150],
+    tc_raid_rush: ['contact', 'estD:3000..9000 estRatio<=0.25 hpF>=0.5', 'est', 90],
+    tc_node_dash: ['search|contact', 'expo<=2 hpF>=0.5', '', 60],
     // 初動の3つ (tc_early_*) は性格の条件だけで出す (表から出すと序盤に何度も止まる)
 };
 var _SKC_P = {};
@@ -15589,10 +15614,10 @@ function sitWeightMul(side, id) {
 function skillScenesJp(id) { const p = _skcParse(id); return p && p.sc.length ? p.sc.map(k => SCENE_JP[k] || k).join('・') : ''; }
 const TAC_URG = {
     cb_flash_strike: [1.5, 'off'], cb_decoy_drone: [1.3, 'def'], cb_watch_bait: [0.8, 'info'], cb_nest: [0.7, 'def'], cb_saturate: [1.4, 'def'], cb_smoke_flank: [1.4, 'off'], cb_tech_guard: [1.0, 'def'], cb_scout_turret: [0.8, 'info'],
-    cb_captured: [0.9, 'off'], cb_blow_strike: [1.1, 'off'], cb_repair_smoke: [1.5, 'def'],
+    cb_captured: [0.9, 'off'], cb_blow_strike: [1.1, 'off'], cb_repair_smoke: [1.5, 'def'], cb_decoy_raid: [0.9, 'off'], cb_silence_raid: [1.0, 'off'],
     tc_listen_spot: [0.8, 'info'], tc_listen: [1.0, 'info'], tc_sonar_fix: [1.0, 'info'], tc_ping_step: [0.6, 'info'], tc_focus_scan: [0.7, 'info'], tc_focus_weapon: [0.9, 'off'], tc_focus_sensor: [0.6, 'info'], tc_status_retreat: [1.3, 'def'], tc_ammo_flee: [1.3, 'def'],
     tc_kite: [1.0, 'def'], tc_probe_evade: [1.1, 'def'], tc_scout_ahead: [0.8, 'info'], tc_flash_open: [1.0, 'off'], tc_noise_shadow: [0.8, 'off'], tc_beacon_ring: [0.6, 'def'], tc_spray_lair: [0.6, 'def'],
-    tc_early_scout: [0.9, 'info'], tc_early_listen: [1.0, 'info'], tc_early_sonar: [0.8, 'info'],
+    tc_early_scout: [0.9, 'info'], tc_early_listen: [1.0, 'info'], tc_early_sonar: [0.8, 'info'], tc_raid_rush: [1.1, 'off'], tc_node_dash: [0.9, 'off'],
 };
 function tacScore(F, id) {
     const u = TAC_URG[id] || [1, 'off'], E = F.exposure || 0, low = F.hpF < 0.5;
@@ -15650,6 +15675,21 @@ function tacticRules(F, A, X, R) {
     const eA = F.estAng, now = _frameCount, hit = F.hitAgo, say = (t) => A.say(t), P = F.P || {}, rr = () => (Math.random() < 0.5 ? 1 : -1);
     const wideEst = eA !== null && F.estR < 1e8 && F.estR / Math.max(1, F.estD) > 0.3, tightEst = eA !== null && F.estR < 1e8 && F.estR / Math.max(1, F.estD) <= 0.25;
     // 第154弾: 聴く場所を選ぶ — 磁気嵐の中は全センサーの受信が鈍り、残骸帯の中は方位の誤差が広がる。気配を探している間にそこに居たら、外へ出て聴く
+    // 第212弾: 襲撃の踏み込み — 推定が締まった瞬間、全速で一気に距離を詰める
+    R('tc_raid_rush', () => (eA !== null && F.estD >= 3000 && F.estD <= 9000 && F.estR < 1e8 && F.estR / Math.max(1, F.estD) <= 0.25 && F.hpF >= 0.5 && F.cd('tcRushF', 90)), () => {
+        F.mark('tcRushF');
+        A.go(F.estX, F.estY, 600, 'flank');
+        say('襲撃の踏み込み — 推定が締まった → 全速で一気に距離を詰める');
+        return true;
+    });
+    // 第212弾: ノード急襲 — 相手が制圧を進めているノードへ、完了前に割り込んで横取りする
+    R('tc_node_dash', () => (nodeDashTarget(F.side, A.x, A.y) && F.exposure <= 2 && F.hpF >= 0.5 && F.cd('tcNodeDashF', 60)), () => {
+        const n = nodeDashTarget(F.side, A.x, A.y); if (!n) return false;
+        F.mark('tcNodeDashF');
+        A.go(n.x, n.y, 200, 'flank');
+        say('ノード急襲 — 制圧のEM漏れ: 相手が進めているノード (' + _dirTxt(A.x, A.y, n.x, n.y) + ') へ割り込んで横取りする');
+        return true;
+    });
     R('tc_listen_spot', () => { if (F.hiding || F.seen || F.exposure > 1 || F.hpF < 0.5 || !F.cd('tcSpotF', 90)) return false; const sI = getStormIntensity(A.x, A.y), wI = getWreckIntensity(A.x, A.y); return (sI >= 0.3 || wI >= 0.3) && (F.quietF > 300 || F.estD < 1e8); }, () => {
         F.mark('tcSpotF'); const sI = getStormIntensity(A.x, A.y), wI = getWreckIntensity(A.x, A.y), arr = wI >= sI ? wreckField : stormField;
         let b = null, bd = Infinity; for (const m of arr) { const d = Math.hypot(m.x - A.x, m.y - A.y); if (d < bd) { bd = d; b = m; } }
@@ -18021,8 +18061,12 @@ var SKILL_EXTRA = [
     { id: 'tc_early_sonar', g: '戦術', jp: '初動の測定', desc: '序盤、弱いソナーを一度打って周りの様子を掴む (電脳が高いほど)' },
     { id: 'cb_saturate', g: '複合', jp: '信号の飽和', desc: '撃たれたら ノイズ・ビーコン・偽艦影を一度に出して本物の信号を埋もれさせる' },
     { id: 'so_nudge', g: '動き方', jp: 'あえて弱いソナー', desc: '長く気配が無い時、弱いソナーを打って相手を誘い出す・探る' },
+    { id: 'cb_decoy_raid', g: '複合', jp: '陽動襲撃', desc: '偽艦影を一方の拠点へ向け、守りが寄った隙に反対側の拠点を襲いに行く' },
+    { id: 'cb_silence_raid', g: '複合', jp: '沈黙の襲撃', desc: 'ノイズで耳を引きつけ、自分は潜航で静かに推定へ近づく襲撃の踏み込み' },
+    { id: 'tc_raid_rush', g: '戦術', jp: '襲撃の踏み込み', desc: '推定が締まった瞬間、全速で一気に距離を詰めて襲撃圏に入る' },
+    { id: 'tc_node_dash', g: '戦術', jp: 'ノード急襲', desc: '相手が制圧を進めているノードへ、完了前に割り込んで横取りする' },
 ];
-var HUNT_DESC = { charge: '推定へまっすぐ詰めて撃ち合う', stalk: '背後へ静かに回り込み、気付かれる前に撃つ', lure: '囮を置き、相手が向かう線の横で待ち伏せる', feint: '撃たれたらノイズを逃げる向きに流して横へ滑り、忍び寄りへ', fakebox: '偽コンテナを相手の行く先に置き、爆発で位置が割れたら撃つ', hold: '近づいてくる相手を機関を止めて待つ', screen: '艦載機を先に送り、見つけたら挟み撃ちにする', rush: '霧伝いに近づいて実弾の至近戦に持ち込む', snipe: 'ビームのチャージ警告の外から狙撃する', shadow: '相手の後ろにつき、方位を貯めて真後ろから撃つ' };
+var HUNT_DESC = { charge: '推定へまっすぐ詰めて撃ち合う', stalk: '背後へ静かに回り込み、気付かれる前に撃つ', lure: '囮を置き、相手が向かう線の横で待ち伏せる', feint: '撃たれたらノイズを逃げる向きに流して横へ滑り、忍び寄りへ', fakebox: '偽コンテナを相手の行く先に置き、爆発で位置が割れたら撃つ', hold: '近づいてくる相手を機関を止めて待つ', screen: '艦載機を先に送り、見つけたら挟み撃ちにする', rush: '霧伝いに近づいて実弾の至近戦に持ち込む', snipe: 'ビームのチャージ警告の外から狙撃する', shadow: '相手の後ろにつき、方位を貯めて真後ろから撃つ', netkill: '相手の聴音局ノードを奪い、相手の目 (聴音網) を痩せさせる' };
 // 第144弾: ドローン運用のスキル — 哨戒機 dr_scout・戦闘機 dr_ftr・砲台 dr_turret を出す / 指示を出す dr_order / 会敵で呼び戻す dr_recall。自機COMも敵も同じ
 function drOK(side, t) { const id = t === 'scout' ? 'dr_scout' : t === 'attack' ? 'dr_ftr' : t === 'build' ? 'dr_turret' : null; return !id || skillUse(side, id); }
 function skillList() {
@@ -18067,8 +18111,8 @@ function comPersonalityFor(side) {
 const PERS_TRAITS = [
     { id: 'warlord',  jp: '猛将',   f: (P) => 0.6 * persAx(P, 'aggression') + 0.3 * (1 - persAx(P, 'caution')) + 0.3 * (1 - persAx(P, 'patience')) - 0.3 * persAx(P, 'stealth'), ids: /^(hu_charge|hu_rush|hu_snipe|st_push|st_raid|tc_kite|tc_focus_weapon|tc_flash_open|cb_flash_strike|cb_blow_strike|hk_opener|hk_fcs|hk_pursuit|st_surge)$/ },
     { id: 'hunter',   jp: '狩人',   f: (P) => 0.45 * persAx(P, 'stealth') + 0.45 * persAx(P, 'patience') + 0.25 * persAx(P, 'aggression') + 0.15 * persAx(P, 'cunning'), ids: /^(hu_stalk|hu_shadow|hu_hold|st_ambush|st_wide_loop|tc_listen|tc_early_listen|tc_focus_sensor|tc_spray_lair|hk_halt|dc_silent|so_nudge)$/ },
-    { id: 'schemer',  jp: '策士',   f: (P) => 0.8 * persAx(P, 'cunning') + 0.2 * persAx(P, 'stealth') + 0.1 * persAx(P, 'patience'), ids: /^(dc_|cb_nest|cb_watch_bait|cb_saturate|cb_decoy_drone|cb_scout_turret|cb_tech_guard|pl_decoy|it_noise|it_sos|it_fake|hu_lure|hu_feint|hu_fakebox|st_bait|st_trap|st_playdead|tc_noise_shadow|tc_beacon_ring|tc_ammo_flee)/ },
-    { id: 'netrunner',jp: '電脳戦士', f: (P) => 0.8 * persAx(P, 'tech') + 0.15 * persAx(P, 'patience') + 0.1 * persAx(P, 'caution'), ids: /^(hk_|jam|it_linkcut|tc_early_sonar|tc_sonar_fix|tc_focus_scan|tc_ping_step|tc_probe_evade|st_center|st_net|st_storm|st_heatcloud|en_swap|se_hi|cb_hack_strike|cb_captured)/ },
+    { id: 'schemer',  jp: '策士',   f: (P) => 0.8 * persAx(P, 'cunning') + 0.2 * persAx(P, 'stealth') + 0.1 * persAx(P, 'patience'), ids: /^(dc_|cb_nest|cb_watch_bait|cb_saturate|cb_decoy_drone|cb_decoy_raid|cb_silence_raid|cb_scout_turret|cb_tech_guard|pl_decoy|it_noise|it_sos|it_fake|hu_lure|hu_feint|hu_fakebox|st_bait|st_trap|st_playdead|tc_noise_shadow|tc_beacon_ring|tc_ammo_flee)/ },
+    { id: 'netrunner',jp: '電脳戦士', f: (P) => 0.8 * persAx(P, 'tech') + 0.15 * persAx(P, 'patience') + 0.1 * persAx(P, 'caution'), ids: /^(hk_|jam|it_linkcut|hu_netkill|tc_early_sonar|tc_sonar_fix|tc_focus_scan|tc_ping_step|tc_probe_evade|st_center|st_net|st_storm|st_heatcloud|en_swap|se_hi|cb_hack_strike|cb_captured)/ },
     { id: 'commander',jp: '指揮官', f: (P) => 0.8 * persAx(P, 'command') + 0.2 * persAx(P, 'caution') + 0.1 * persAx(P, 'greed'), ids: /^(dr_|tc_early_scout|hu_screen|st_screen|st_outpost|st_orbit|cb_flash_strike|cb_smoke_flank|cb_decoy_drone|cb_scout_turret|cb_blow_strike|tc_scout_ahead|st_tech)/ },
     { id: 'warden',   jp: '守護者', f: (P) => 0.5 * persAx(P, 'caution') + 0.4 * persAx(P, 'patience') + 0.2 * persAx(P, 'command') - 0.2 * persAx(P, 'aggression'), ids: /^(st_guard|st_orbit|st_fallback|st_fogHide|st_restock|st_outpost|tc_status_retreat|cb_repair_smoke|it_repair|it_smoke|it_spray|hk_flee|hk_halt_flee|hk_counter)/ },
     { id: 'collector',jp: '収集家', f: (P) => 0.8 * persAx(P, 'greed') + 0.1 * persAx(P, 'command'), ids: /^(st_gather|st_salvage|st_net|st_tech|gt_cv|cb_tech_guard)/ },
@@ -18080,12 +18124,12 @@ const _AX = { ag: 'aggression', st: 'stealth', gr: 'greed', ca: 'caution', cu: '
 const SKILL_AX = {
     // 戦略 (st_*)
     dr_board: 'ag1 cu0.8 co0.5', it_guard: 'ca1 te0.3', st_board: 'ag0.8 cu1.2 co0.8 pa-0.4', cb_board_melee: 'ag1.4 pa-0.5', cb_board_feint: 'cu1.2 co1', cb_board_hack: 'te1.2 cu0.6',
-    st_ambush: 'pa1.5 cu0.5', st_bait: 'cu1.5 pa0.5', st_screen: 'co1.5 te0.5', st_fogHide: 'pa0.5', st_push: 'co0.5 pa-1', st_raid: 'ag0.5 pa-0.5', st_guard: 'pa1 co0.5',
+    st_ambush: 'pa1.5 cu0.5', st_bait: 'cu1.5 pa0.5', st_screen: 'co1.5 te0.5', st_fogHide: 'pa0.5', st_push: 'co0.5 pa-1', st_raid: 'ag0.5 pa-0.5', st_supply_hunt: 'ca0.8 cu0.6 gr0.4', st_hitflee: 'ag0.9 st0.7 pa-0.4', st_guard: 'pa1 co0.5',
     st_tech: 'te1.5 pa1 gr0.5', st_trap: 'cu1.5 pa0.5', st_outpost: 'co1.5 te0.5', st_fallback: 'ca1 pa-0.3', st_restock: 'pa0.3', st_playdead: 'cu1.5 st0.5', st_storm: 'te0.8 cu0.5 st0.5', st_heatcloud: 'te0.8 cu0.5 st0.5',
     st_rock: 'st0.8 pa1', st_wreck: 'st0.8 pa0.8', st_hop: 'cu1 st0.5 pa0.5', st_decoyship: 'cu1.5 te0.8', dc_hijack: 'cu1.5 te0.8',
     st_surge: 'ag0.5 pa-0.8 te0.5', st_wide_loop: 'cu1 pa0.7', st_center: 'te0.8 co0.3', st_orbit: 'co1 pa0.5', st_salvage: 'gr1', st_net: 'te1 gr0.5 co0.3',
     // 狩人の任務 (hu_*)
-    hu_charge: 'pa-1.5', hu_stalk: 'pa1 cu0.5', hu_lure: 'cu1.5', hu_feint: 'cu1.5', hu_fakebox: 'cu1.5', hu_hold: 'pa1.5', hu_screen: 'co1.5', hu_rush: 'pa-0.8', hu_snipe: 'te0.8 pa0.8', hu_shadow: 'te0.8 pa1',
+    hu_charge: 'pa-1.5', hu_stalk: 'pa1 cu0.5', hu_lure: 'cu1.5', hu_feint: 'cu1.5', hu_fakebox: 'cu1.5', hu_hold: 'pa1.5', hu_screen: 'co1.5', hu_rush: 'pa-0.8', hu_snipe: 'te0.8 pa0.8', hu_shadow: 'te0.8 pa1', hu_netkill: 'te0.8 ca0.6 co0.4',
     // 搭載品・作戦
     it_linkcut: 'te1', it_repair: 'ca0.7', it_flash: 'ca0.5 cu0.3', it_noise: 'cu1 ca0.3', it_smoke: 'ca0.5 st0.5', it_sos: 'cu1.2', it_fake: 'cu1.5', it_spray: 'st0.5 te0.3', it_blow: 'ag0.5 te0.5', pl_decoy: 'cu1.5 pa0.7 st0.4', jam: 'te1.2',
     // ハック
@@ -18096,11 +18140,11 @@ const SKILL_AX = {
     dr_scout: 'co1 te0.5', dr_ftr: 'co1.2 ag0.5', dr_turret: 'co0.8 pa0.8', dr_order: 'co1',
     // 複合
     cb_flash_strike: 'co0.8 ag0.7 cu0.5', cb_hack_strike: 'te1 co0.7', cb_decoy_drone: 'co0.8 cu1', cb_watch_bait: 'cu1 co0.6 pa0.5', cb_nest: 'cu1.2 pa0.7 co0.5', cb_smoke_flank: 'co1 cu0.7', cb_tech_guard: 'cu1 te0.7',
-    cb_scout_turret: 'cu1 co0.7 pa0.5', cb_captured: 'te1 co0.5 ag0.3', cb_blow_strike: 'co0.8 ag0.6 te0.3', cb_repair_smoke: 'ca0.8 cu0.3', cb_saturate: 'cu1.5 te0.5',
+    cb_scout_turret: 'cu1 co0.7 pa0.5', cb_captured: 'te1 co0.5 ag0.3', cb_blow_strike: 'co0.8 ag0.6 te0.3', cb_repair_smoke: 'ca0.8 cu0.3', cb_saturate: 'cu1.5 te0.5', cb_decoy_raid: 'cu1.4 co0.5 pa0.4', cb_silence_raid: 'st1 cu0.7 pa0.6',
     // 戦術
     tc_early_listen: 'pa1.2 ca0.4', tc_early_scout: 'co1.3 te0.4', tc_early_sonar: 'te1.3 pa-0.3',
     tc_listen_spot: 'te1 pa0.5', tc_listen: 'pa1 te0.5', tc_sonar_fix: 'te1', tc_ping_step: 'te0.6 pa-0.8 cu0.4', tc_focus_scan: 'te1.2', tc_focus_weapon: 'ag0.8 te0.3', tc_focus_sensor: 'te0.8 pa0.5', tc_status_retreat: 'ca0.8', tc_ammo_flee: 'ca0.6 cu0.5',
-    tc_kite: 'ag0.3 te0.5', tc_probe_evade: 'ca0.6 te0.5', tc_scout_ahead: 'co1 te0.5', tc_flash_open: 'ag0.5 cu0.7', tc_noise_shadow: 'cu1.3 st0.5', tc_beacon_ring: 'cu1.2 pa0.5', tc_spray_lair: 'st0.8 pa0.5',
+    tc_kite: 'ag0.3 te0.5', tc_probe_evade: 'ca0.6 te0.5', tc_scout_ahead: 'co1 te0.5', tc_flash_open: 'ag0.5 cu0.7', tc_noise_shadow: 'cu1.3 st0.5', tc_beacon_ring: 'cu1.2 pa0.5', tc_spray_lair: 'st0.8 pa0.5', tc_raid_rush: 'ag1 pa-0.8', tc_node_dash: 'ag0.7 gr0.5 pa-0.3',
     // 動き方 (占拠・拾い物は報酬なので適性で絞らない — 第141弾)
     en_swap: 'te1', se_hi: 'te1 ca0.3', so_nudge: 'te0.8 pa-0.5',
 };
@@ -18527,6 +18571,15 @@ function huntScreen(HA, H, X) {
 // 第119弾 (段5後半の5): 忍び寄り・肉薄・狙撃の「近づいて撃つ」本体 (approach) — 自機COMも敵も同じ関数 (敵の実装を土台に)
 //   X.hard=相手を目視している / X.plan(est,force)=射撃解 / X.mslReach()=ミサイルを挟み撃ちで撃つ時の射程 / X.dlRecent()=艦載機の目が新しいか / X.icptSpeed=先回りの速さ / X.cruise・X.silent=基準の速さ
 //   X.fails=焦れ(撃てずに終わった回数) / X.myVis()=自分の見通し / X.transit(why)
+function huntNetkill(HA, H, X) { // 第212弾: 聴音網潰し — 相手の聴音局ノードへ行き、居座って制圧し返す (ノード制圧は近くの居座りで進む)
+    const { now, say } = X, t = H.tgt;
+    if (!t || t.owner === H.mySide) return X.end(t ? 'ノードを奪った — 相手の聴音網が痩せた' : '対象のノードが消えた', false);
+    const d = Math.hypot(t.x - HA.x, t.y - HA.y);
+    if (d > NODE_CAP_R * 0.8) { HA.go(t.x, t.y, 'cruise'); if (!H.nkLog || now - H.nkLog > 1800) { H.nkLog = now; say('【' + H.jp + '】聴音局ノード (' + _dirTxt(HA.x, HA.y, t.x, t.y) + '・' + Math.round(d / 100) * 100 + 'u) へ向かう'); } return true; }
+    HA.drift(null);
+    if (!H.nkArr) { H.nkArr = now; say('【' + H.jp + '】ノードに取りついた → 制圧して相手の目を痩せさせる'); }
+    return true;
+}
 function huntApproach(HA, H, X) {
     let { est } = X; const { D, now, ag, st, say } = X;
     if (!est || est.age > 3600) { if (now - (H.lostF || (H.lostF = now)) > 60 * 75) return X.end('見失った', false); HA.drift(null); return true; }
@@ -18686,6 +18739,7 @@ const HUNT_REG = {
     rush:   { jp: '霧伝いの肉薄', ph: 'approach', w: (k, F) => F.kOk && F.hullK >= 0.9 && F.hpF > 0.5 && F.D < 12000 ? (0.3 + 1.0 * k.ag + 0.5 * F.hpF + 0.3 * k.st) : 0 },
     snipe:  { jp: 'ビームの狙撃', ph: 'approach', w: (k, F) => F.bOk && F.spdK >= 0.8 && F.D > 5500 ? (0.15 + 0.7 * k.ca + 0.5 * k.st) * (F.hullK >= 0.9 ? 1.2 : 0.8) : 0 },
     shadow: { jp: '影追い', ph: 'shadow', w: (k, F) => F.spdK >= 1.5 && F.moving && F.D < 12000 ? 0.4 + 1.1 * k.st + 0.6 * k.ca : 0 },
+    netkill: { jp: '聴音網潰し', ph: 'netkill', w: (k, F) => F.netNode ? 0.4 + 0.7 * k.ca + 0.5 * k.st + 0.3 * k.ag : 0 },
 };
 // 艦の足の速さ・船体の大きさ (任務の重みに使う。艦種の名前ではなく性能で見る)
 function huntBuild(cls) { return { spdK: (SHIP_MAX_SPEED_MULT[cls] || 0.58) / 0.58, hullK: Math.min(1.2, (PLAYER_HP_BASE[cls] || 2500) / 3500) }; }
@@ -18753,7 +18807,7 @@ function enemyHunterStep(e, heard, hard) {
         // 第81弾: 艦種ごとの戦術 — 空母=艦載機の網 (艦載機で釘付けにし、母艦は霧の中から別の向きで撃つ) / 攻撃型=霧伝いの肉薄 (3連装の実弾を至近の背後から)・ビームの狙撃 / 潜航型=影追い (相手の後ろについて記録を貯め、背後から一撃)
         const kOk = _eHas(e, 'kinetic') && (e.ammoK === undefined || e.ammoK > 0), bOk = _eHas(e, 'beam');
         const myDrones = enemies.filter(f => f.type === 'fighter' && (f._home === e || f._home === undefined) && f.hp > 0 && !f._dying && (f._kind === undefined || f._kind === 'mech')).length;
-        const w = huntWeights({ side: 'e', P, D, cls, stc, fails: e._huntFails, hpF, closing, moving: est.moving || !!(e._lastMove && now - e._lastMove.f < 900), hasLure: !!lureK, hasNoise: (e.itemNoise || 0) > 0, hasFake: (e.itemFake || 0) > 0,
+        const w = huntWeights({ side: 'e', P, D, cls, stc, fails: e._huntFails, hpF, closing, moving: est.moving || !!(e._lastMove && now - e._lastMove.f < 900), hasLure: !!lureK, hasNoise: (e.itemNoise || 0) > 0, hasFake: (e.itemFake || 0) > 0, netNode: !!netkillTarget('e', e.x, e.y),
             hitOrPing: now - (e._hpLossF ?? -1e9) < 1800 || now - (e._pingHeardF ?? -1e9) < 1800, strike: (e.droneStock || 0) > 0 || myDrones > 0, kOk, bOk, holdRecent: now - (e._stratEndF ?? -1e9) < 900 });
         if (e._forceNext && w[e._forceNext] !== undefined) { for (const k in w) w[k] = k === e._forceNext ? 1 : 0; } e._forceNext = null; // 偽装退却/偽コンテナの罠の続き
         if (window.__huntForce && w[window.__huntForce] !== undefined) { for (const k in w) w[k] = k === window.__huntForce ? 1 : 0; }
@@ -18764,6 +18818,7 @@ function enemyHunterStep(e, heard, hard) {
         const side = Math.random() < 0.5 ? 1 : -1;
         H = e._hunt = { k: pick, jp: HUNT_REG[pick].jp, ph: HUNT_REG[pick].ph, t0: now, f0: now, side, w: sp.w, R: sp.R, hp0: e.hp, strikes: 0, lureK, force: pick === 'rush' ? 'kinetic' : pick === 'snipe' ? 'beam' : null };
         if (H.force) { const sp2 = huntStrikePlan(e, est, H.force); if (sp2) { H.w = sp2.w; H.R = sp2.R; } }
+        if (pick === 'netkill') { const tg = netkillTarget('e', e.x, e.y); if (!tg) { e._hunt = null; return false; } H.tgt = tg; H.mySide = 'enemy'; }
         if (pick === 'lure') {
             const a0 = Math.atan2(e.y - est.y, e.x - est.x); // 推定から自分への向き
             const bd = Math.min(5000, Math.max(2500, D * 0.45));
@@ -18784,9 +18839,10 @@ function enemyHunterStep(e, heard, hard) {
             snipe: () => 'チャージの警告 (' + BEAM_CHARGE_WARN_R + 'u) より遠く、' + Math.round(H.R / 100) * 100 + 'uからビームで狙撃する — 撃ったらすぐ場所を変える',
             shadow: () => '動いている自機の後ろ (相手の死角) について、視界の外で方位の記録を貯める → 推定が絞れたら背後から一撃',
             feint: () => '見つかった (撃たれた/探信された) → ノイズメーカーを逃げる向きへ全速で走らせ、自分は機関を止めて横へ滑る。相手がノイズを追う間に背後へ回り込む',
+            netkill: () => '自機を追わず、相手の聴音局ノード (' + _dirTxt(e.x, e.y, H.tgt.x, H.tgt.y) + ') を奪いに行く — 目を痩せさせてから狩る',
             fakebox: () => '自機の行く先に偽コンテナを置き、横の霧で機関を止めて待つ — 開けたら爆発で位置が割れる。その瞬間に撃つ',
         })[pick]() + ' (性格 攻' + _pct(ag) + '・隠' + _pct(st) + '・慎' + _pct(ca) + ')');
-        matchRecEvent('tacE', e.x, e.y, '敵の作戦「' + H.jp + '」' + ({ stalk: ' — 静かに背後へ回り込み、気付かれる前に撃つ', lure: ' — 囮で誘い出し、横の霧で待ち伏せる', hold: ' — 近づいてくる相手を止まって待つ', screen: ' — 艦載機で釘付けにし、母艦は別の向きから撃つ', rush: ' — 霧伝いに背後へ肉薄し、実弾を至近から', snipe: ' — チャージの警告の外からビームで狙撃', shadow: ' — 相手の後ろについて推定を絞り、背後から一撃', feint: ' — ノイズメーカーで逃げたふりをして、背後へ回り込む', fakebox: ' — 行く先に偽コンテナを置き、開けた所を撃つ' })[pick]); // 第80弾: 試合の記録で敵の作戦を振り返れる (プレイヤーが学べる)
+        matchRecEvent('tacE', e.x, e.y, '敵の作戦「' + H.jp + '」' + ({ stalk: ' — 静かに背後へ回り込み、気付かれる前に撃つ', lure: ' — 囮で誘い出し、横の霧で待ち伏せる', hold: ' — 近づいてくる相手を止まって待つ', screen: ' — 艦載機で釘付けにし、母艦は別の向きから撃つ', rush: ' — 霧伝いに背後へ肉薄し、実弾を至近から', snipe: ' — チャージの警告の外からビームで狙撃', shadow: ' — 相手の後ろについて推定を絞り、背後から一撃', feint: ' — ノイズメーカーで逃げたふりをして、背後へ回り込む', fakebox: ' — 行く先に偽コンテナを置き、開けた所を撃つ', netkill: ' — 聴音局ノードを奪い、相手の目を痩せさせる' })[pick]); // 第80弾: 試合の記録で敵の作戦を振り返れる (プレイヤーが学べる)
     }
     // ── 任務を進める ──
     e._quietRun = true; // 任務中は静粛 (推進と演算の信号×0.55)
@@ -18852,6 +18908,7 @@ function enemyHunterStep(e, heard, hard) {
     if (H.ph === 'wait' || H.ph === 'creep' || H.ph === 'egress' || H.ph === 'lurk') return huntPostStrike(HAx, H, HXx); // 第116弾: 一撃のあとの動きは 自機COMと共通
     switch (H.ph) {
         case 'approach': return huntApproach(HAx, H, HXx); // 第119弾: 自機COMと共通
+        case 'netkill': return huntNetkill(HAx, H, HXx); // 第212弾: 聴音網潰し
         case 'screen': return huntScreen(HAx, H, HXx); // 第118弾: 自機COMと共通
         case 'shadow': return huntShadow(HAx, H, HXx); // 第116弾: 自機COMと共通
         case 'set': return huntLureSet(HAx, H, HXx); // 第123弾: 自機COMと共通
@@ -19063,6 +19120,48 @@ function stratRun(A, S, now) {
             if (Math.hypot(t.x - A.x, t.y - A.y) > 280) { A.go(t.x, t.y, 220, null); return true; }
             A.hold(false); A.think('strat', '戦略「拠点襲撃」: 占有中'); return true;
         }
+        case 'supply_hunt': { // 第212弾: 補給狩り — 相手が補給に使うコロニーへ先回りして待ち、戻ってきた所を襲う
+            const opp = A.owner === 'player' ? 'enemy' : 'player';
+            if (!S.site) {
+                let best = null, bd = Infinity;
+                for (const st of structures) if (st.type === 'colony' && st.owner === opp) { const dd = est ? Math.hypot(st.x - est.x, st.y - est.y) : Math.hypot(st.x - A.x, st.y - A.y); if (dd < bd) { bd = dd; best = st; } }
+                if (!best) return 'end:相手の補給拠点 (コロニー) が無い';
+                S.site = best; A.say('補給狩り — 相手のコロニー (' + _dirTxt(A.x, A.y, best.x, best.y) + ') へ先回りして、補給に戻る所を襲う');
+            }
+            const t = S.site;
+            if (t.owner !== opp) return 'end:補給拠点の持ち主が変わった';
+            if (A.hpF < 0.5) return 'end:耐久が減った';
+            if (A.seen) return false;
+            const dSite = Math.hypot(t.x - A.x, t.y - A.y);
+            if (est && Math.hypot(est.x - t.x, est.y - t.y) < 2600) {
+                if (dSite > 700) { A.go(t.x, t.y, 300, 'flank'); A.think('strat', '戦略「補給狩り」: 相手が補給拠点へ近づいた → 詰める'); return true; }
+                return false;
+            }
+            const anch = est || t, aa = Math.atan2(anch.y - t.y, anch.x - t.x), wp = clampToMapCircle(t.x + Math.cos(aa) * 1800, t.y + Math.sin(aa) * 1800, 1500);
+            if (Math.hypot(wp.x - A.x, wp.y - A.y) > 350) { A.go(wp.x, wp.y, 250, 'silent'); return true; }
+            A.hold(true); A.think('strat', '戦略「補給狩り」: 補給拠点の手前で待つ (残り' + Math.max(0, Math.ceil((S.until - now) / 60)) + '秒)');
+            return true;
+        }
+        case 'hitflee': { // 第212弾: 一撃離脱 — 拠点に取りついて一当てしたら、反撃の推定が立つ前にノイズを流して霧へ消える
+            if (!S.site) { S.site = raidTarget(A.owner === 'player' ? 'p' : 'e', A.x, A.y); if (!S.site) return 'end:襲う拠点が無い'; A.say('一撃離脱 — ' + (S.site.type === 'colony' ? 'コロニー' : 'ノード') + ' (' + _dirTxt(A.x, A.y, S.site.x, S.site.y) + ') を襲って消える'); }
+            const t = S.site, dT = Math.hypot(t.x - A.x, t.y - A.y);
+            if (S.ph === 'flee') {
+                if (!S.spot) return 'end:離脱した';
+                if (Math.hypot(S.spot.x - A.x, S.spot.y - A.y) > 300) { A.go(S.spot.x, S.spot.y, 200, 'silent'); return true; }
+                return 'end:霧に消えた';
+            }
+            if (A.hpF < 0.5 || A.expo >= 3 || (S.ph === 'hit' && now - (S.hitF || 0) > 1500) || t.owner === A.owner) {
+                S.ph = 'flee';
+                if (A.can('noise') && cd('noise', 60)) { A.use('noise'); A.say('ノイズメーカーを流して目を逸らす'); }
+                const cv = findCoverSpot(A.x, A.y, 6000); S.spot = cv ? { x: cv.x, y: cv.y } : null;
+                A.say('一撃離脱 — 反撃が来る前に霧へ消える');
+                return true;
+            }
+            if (dT > 280) { A.go(t.x, t.y, 220, null); return true; }
+            if (S.ph !== 'hit') { S.ph = 'hit'; S.hitF = now; A.say('襲撃 — 拠点に取りついた (長くは居ない)'); }
+            A.hold(false); A.think('strat', '戦略「一撃離脱」: 拠点を襲っている (離脱まで' + Math.max(0, Math.ceil((1500 - (now - (S.hitF || now))) / 60)) + '秒)');
+            return true;
+        }
         case 'fallback': { // 第146弾: 傷が深い → 占有したコロニーへ下がる
             const col = S.site || (S.site = (structures.filter(q => q.type === 'colony' && q.owner === A.owner).sort((a, b) => Math.hypot(a.x - A.x, a.y - A.y) - Math.hypot(b.x - A.x, b.y - A.y))[0] || null));
             if (!col || col.owner !== A.owner) return 'end:退く拠点が無い';
@@ -19191,8 +19290,8 @@ function stratRun(A, S, now) {
     return false;
 }
 const HIDE_STRATS = { rock: 1, wreck: 1, fogHide: 1, ambush: 1, bait: 1, trap: 1, storm: 1, heatcloud: 1, playdead: 1, guard: 1 }; // 第150弾: 隠れて待つ戦略
-const STRAT_NEW = { fallback: 1, restock: 1, playdead: 1, storm: 1, heatcloud: 1, surge: 1, wide_loop: 1, center: 1, orbit: 1, salvage: 1, net: 1, rock: 1, wreck: 1, hop: 1, decoyship: 1 }, STRAT_KEEP = { board: 1, rock: 1, wreck: 1, fogHide: 1, screen: 1, fallback: 1, playdead: 1, storm: 1, heatcloud: 1, restock: 1 }; // 第146弾: 新しい戦略 / 相手が近くても続ける戦略
-const STRAT_SHARED = { board: 1, rock: 1, wreck: 1, hop: 1, decoyship: 1, fogHide: 1, push: 1, screen: 1, guard: 1, tech: 1, raid: 1, fallback: 1, restock: 1, playdead: 1, storm: 1, heatcloud: 1, surge: 1, wide_loop: 1, center: 1, orbit: 1, salvage: 1, net: 1 };
+const STRAT_NEW = { fallback: 1, restock: 1, playdead: 1, storm: 1, heatcloud: 1, surge: 1, wide_loop: 1, center: 1, orbit: 1, salvage: 1, net: 1, rock: 1, wreck: 1, hop: 1, decoyship: 1, supply_hunt: 1, hitflee: 1 }, STRAT_KEEP = { board: 1, rock: 1, wreck: 1, fogHide: 1, screen: 1, fallback: 1, playdead: 1, storm: 1, heatcloud: 1, restock: 1 }; // 第146弾: 新しい戦略 / 相手が近くても続ける戦略
+const STRAT_SHARED = { board: 1, rock: 1, wreck: 1, hop: 1, decoyship: 1, fogHide: 1, push: 1, screen: 1, guard: 1, tech: 1, raid: 1, fallback: 1, restock: 1, playdead: 1, storm: 1, heatcloud: 1, surge: 1, wide_loop: 1, center: 1, orbit: 1, salvage: 1, net: 1, supply_hunt: 1, hitflee: 1 };
 // 自機COMのアダプタ
 function stratActorP(c, hpF, te, lk) {
     const sa = lockedSignalId && _signalAnalysis[lockedSignalId];
@@ -19349,7 +19448,7 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
         const myStrike = playerDrones.filter(d => d.hp > 0 && (d.type === 'attack' || d.type === 'mech')).length + ((cargo.stock.attack || 0) > 0 ? 1 : 0);
         const kOk = playerHasWeapon('kinetic') && cargo.ammoK > 0, bOk = playerHasWeapon('beam');
         const _hitAgoP = playerHitLog.length ? now - playerHitLog[playerHitLog.length - 1].f : 1e9;
-        const w = huntWeights({ side: 'p', P, D, cls, stc, fails: c.huntFails, hpF, closing, moving: est.moving || !!(c.lastMove && c.lastMove.sid === lockedSignalId && now - c.lastMove.f < 900), hasLure: kinds.length > 0, hasNoise: (cargo.stock.noise || 0) > 0, hasFake: (cargo.stock.fakecache || 0) > 0,
+        const w = huntWeights({ side: 'p', P, D, cls, stc, fails: c.huntFails, hpF, closing, moving: est.moving || !!(c.lastMove && c.lastMove.sid === lockedSignalId && now - c.lastMove.f < 900), hasLure: kinds.length > 0, hasNoise: (cargo.stock.noise || 0) > 0, hasFake: (cargo.stock.fakecache || 0) > 0, netNode: !!netkillTarget('p', player.x, player.y),
             hitOrPing: _hitAgoP < 1800 || now - (threatObs.pingF ?? -1e9) < 1800, strike: myStrike > 0, kOk, bOk, holdRecent: now - (c.stratEndF ?? -1e9) < 900 });
         if (c.forceNext && w[c.forceNext] !== undefined) { for (const k in w) w[k] = k === c.forceNext ? 1 : 0; } c.forceNext = null; // 偽装退却/偽コンテナの罠の続き (敵と同じ)
         if (window.__huntForceP && w[window.__huntForceP] !== undefined) { for (const k in w) w[k] = k === window.__huntForceP ? 1 : 0; }
@@ -19360,6 +19459,7 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
         const side = Math.random() < 0.5 ? 1 : -1;
         H = c.hunt = { k: pick, jp: HUNT_REG[pick].jp, ph: HUNT_REG[pick].ph, t0: now, f0: now, side, w: sp.w, R: sp.R, hp0: player.hp, strikes: 0, sid: lockedSignalId, lureK: kinds[0], force: pick === 'rush' ? 'kinetic' : pick === 'snipe' ? 'beam' : null };
         if (H.force) { const sp2 = comStrikePlan(est, H.force); if (sp2) { H.w = sp2.w; H.R = sp2.R; } }
+        if (pick === 'netkill') { const tg = netkillTarget('p', player.x, player.y); if (!tg) { c.hunt = null; return false; } H.tgt = tg; H.mySide = 'player'; }
         if (pick === 'lure') {
             const hb = c.heardBand && now - (c.heardBandF || -1e9) < 3600 ? 'bcn_' + c.heardBand : null;
             if (hb && kinds.includes(hb)) H.lureK = hb;
@@ -19379,6 +19479,7 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
             snipe: () => 'チャージの警告 (' + BEAM_CHARGE_WARN_R + 'u) より遠く、' + Math.round(H.R / 100) * 100 + 'uからビームで狙撃する',
             shadow: () => '動いているSIG-' + sigNo(H.sid) + 'の後ろ (死角) について記録を貯め、絞れたら背後から一撃',
             feint: () => '見つかった (撃たれた/探信された) → ノイズメーカーを逃げる向きへ全速で走らせ、自分は機関を止めて横へ滑る。相手がノイズを追う間に背後へ回り込む',
+            netkill: () => '相手を追わず、聴音局ノード (' + _dirTxt(player.x, player.y, H.tgt.x, H.tgt.y) + ') を奪いに行く — 目を痩せさせてから狩る',
             fakebox: () => 'SIG-' + sigNo(H.sid) + 'の行く先に偽コンテナを置き、横の霧で機関を止めて待つ — 開けたら爆発で位置が割れる。その瞬間に撃つ',
         })[pick]() + ' (性格 攻' + _pct(ag) + '・隠' + _pct(st) + '・慎' + _pct(ca) + ')');
         matchRecEvent('tacP', player.x, player.y, '自機COMの作戦「' + H.jp + '」');
@@ -19438,6 +19539,7 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
     if (H.ph === 'wait' || H.ph === 'creep' || H.ph === 'egress' || H.ph === 'lurk') return huntPostStrike(HAx, H, HXx); // 第116弾: 一撃のあとの動きは 敵と共通
     switch (H.ph) {
         case 'approach': return huntApproach(HAx, H, HXx); // 第119弾: 敵と共通
+        case 'netkill': return huntNetkill(HAx, H, HXx); // 第212弾: 聴音網潰し
         case 'screen': return huntScreen(HAx, H, HXx); // 第118弾: 敵と共通
         case 'shadow': return huntShadow(HAx, H, HXx); // 第116弾: 敵と共通
         case 'set': return huntLureSet(HAx, H, HXx); // 第123弾: 敵と共通
@@ -20434,6 +20536,8 @@ const STRAT_REG = {
     fogHide:{ jp: '霧に潜む', desc: '霧に潜む (濃い霧で止まって傷を癒し、見失わせる)', w: (k, x) => x.hpF < 0.75 || x.expo >= 2 ? 0.4 + 1.6 * k.ca + 0.8 * k.st : 0.1 },
     push:   { jp: '圧倒して狩る', desc: '圧倒して狩る (強化が済んだら全速で相手の推定へ詰める)', w: (k, x) => (x.slotsFree <= 1 || x.strong) && x.hpF > 0.7 ? 0.3 + 2.0 * k.ag + (x.slotsFree <= 0 ? 0.8 : 0) : 0.1 },
     raid:   { jp: '拠点襲撃', desc: '拠点襲撃 (相手に取られたコロニー・ノードへ行き、取り返す)', near: true, w: (k, x) => x.raid && x.hpF > 0.6 ? (0.2 + 0.9 * k.ag + 0.5 * k.gr) * (k.early ? 0.2 : 1) : 0 },
+    supply_hunt: { jp: '補給狩り', desc: '補給狩り (相手が補給に使うコロニーへ先回りし、戻ってきた所を襲う)', w: (k, x) => x.oppBase && x.hpF > 0.6 && x.estD > 3500 && x.estD < 20000 ? (0.2 + 0.7 * k.ca + 0.4 * k.gr) * (k.early ? 0.3 : 1) : 0 },
+    hitflee: { jp: '一撃離脱', desc: '一撃離脱 (拠点を襲い、反撃の推定が立つ前にノイズを流して霧へ消える)', near: true, w: (k, x) => x.raid && x.hpF > 0.65 && x.noise ? (0.25 + 0.9 * k.ag + 0.5 * k.st) * (k.early ? 0.3 : 1) : 0 },
     guard:  { jp: '拠点を守る', desc: '拠点を守る (占有したコロニーの近くで待ち、ドローンを周りに置く)', w: (k, x) => x.owned.length ? 0.2 + 1.2 * k.ca + 0.5 * (1 - k.gr) : 0 },
     tech:   { jp: 'Tech建造', desc: 'Tech建造 (資材を集めて枠を空け、隠れ場所で組み立てる — 建造中は動けないので砲台で守る)', near: true, w: (k, x) => x.canTech ? (0.5 + 0.9 * k.gr + 0.8 * k.st + 0.3 * k.ca) * (k.early ? 0.3 : 1) : 0 },
     board:  { jp: '強襲作戦', desc: '強襲作戦 (相手の推定へ詰め、ドローンの陽動・撃ち合いのどさくさ・ハックに合わせて強襲突撃艇を取り付かせる)', w: (k, x) => x.hasBoard && x.estD < 14000 ? (0.25 + 1.0 * k.ag + 0.3 * k.st - 0.4 * k.ca) * (k.early ? 0.15 : 1) : 0 },
@@ -20461,6 +20565,16 @@ const STRAT_REG = {
 const COM_STRATS = {}; for (const id in STRAT_REG) COM_STRATS[id] = STRAT_REG[id].desc;
 // 占有したノード・コロニーのうち中継として使える所 (奪われかけでない)。side 'player'|'enemy'
 // 第143弾: 相手が持っている (取られた) 拠点のうち最寄り
+function netkillTarget(side, x, y) { // 第212弾: 相手の聴音局ノード (所有したノードは聴音局になる) の最寄り
+    const opp = side === 'p' ? 'enemy' : 'player'; let best = null, bd = 22000;
+    for (const n of resourceNodes) if (n.owner === opp) { const d = Math.hypot(n.x - x, n.y - y); if (d < bd) { bd = d; best = n; } }
+    return best;
+}
+function nodeDashTarget(side, x, y) { // 第212弾: 相手が制圧を進めているノード (制圧のEM漏れで分かる範囲)
+    const foe = side === 'p' ? 'capE' : 'capP'; let best = null, bd = 11000;
+    for (const n of resourceNodes) { if ((n[foe] || 0) < 0.05) continue; const d = Math.hypot(n.x - x, n.y - y); if (d < bd) { bd = d; best = n; } }
+    return best;
+}
 function raidTarget(side, x, y) {
     const opp = side === 'p' ? 'enemy' : 'player'; let best = null, bd = CAP_RANGE;
     for (const st of structures) if (st.type === 'colony' && st.owner === opp) { const d = Math.hypot(st.x - x, st.y - y); if (d < bd) { bd = d; best = st; } }
@@ -20554,6 +20668,7 @@ function _hijackSite(side, x, y) { let b = null, bd = 20000; for (const st of st
 function _restockSite(side, x, y) { const opp = side === 'p' ? 'enemy' : 'player'; let b = null, bd = 20000; for (const st of structures) if (st.type === 'colony' && st.owner !== opp) { const d = Math.hypot(st.x - x, st.y - y); if (d < bd) { bd = d; b = st; } } return b; }
 function _salvageSite(side, x, y) { let b = null, bd = 20000; for (const st of structures) if (st.type === 'derelict' && !st.salvaged && (st.discovered || (side === 'e' && st._discE))) { const d = Math.hypot(st.x - x, st.y - y); if (d < bd) { bd = d; b = st; } } return b; }
 function _netSite(side, x, y) { const me = side === 'p' ? 'player' : 'enemy'; let b = null, bd = CAP_RANGE; for (const n of resourceNodes) if (n.owner !== me) { const d = Math.hypot(n.x - x, n.y - y); if (d < bd) { bd = d; b = n; } } return b; }
+function _oppBase(side, x, y) { const opp = side === 'p' ? 'enemy' : 'player'; let b = null, bd = 22000; for (const st of structures) if (st.type === 'colony' && st.owner === opp) { const d = Math.hypot(st.x - x, st.y - y); if (d < bd) { bd = d; b = st; } } return b; } // 第212弾: 相手が補給に使えるコロニー (補給狩りの前提)
 function stratExtra(x) {
     if (x.px === undefined) return {};
     const side = x.side, px = x.px, py = x.py, o = {};
@@ -20562,7 +20677,7 @@ function stratExtra(x) {
     o.farFromCenter = Math.hypot(px - MAP_CX, py - MAP_CY) > 9000;
     o.rock = !!terrainSpot(px, py, 'rock', 12000); o.wreck = !!terrainSpot(px, py, 'wreck', 12000); // 第153弾
     { const _who = side === 'p' ? null : enemies.find(q => q.hp > 0 && q.type !== 'fighter'); o.hijackSite = (side === 'p' ? hackPower('player') : (_who ? hackPower('enemy', _who) : 0)) >= DERELICT_HIJACK_H ? _hijackSite(side, px, py) : null; }
-    o.restockSite = _restockSite(side, px, py); o.salvageSite = _salvageSite(side, px, py); o.netSite = _netSite(side, px, py);
+    o.restockSite = _restockSite(side, px, py); o.salvageSite = _salvageSite(side, px, py); o.netSite = _netSite(side, px, py); o.oppBase = _oppBase(side, px, py);
     return o;
 }
 function stratWeights(P, x) {
@@ -20668,7 +20783,7 @@ function comStratStep(c, P, D, hpF, contact, te, lk, r) {
             }
             return true;
         }
-        case 'rock': case 'wreck': case 'hop': case 'decoyship': case 'screen': case 'fogHide': case 'push': case 'guard': case 'tech': case 'raid': case 'fallback': case 'restock': case 'playdead': case 'storm': case 'heatcloud': case 'surge': case 'wide_loop': case 'center': case 'orbit': case 'salvage': case 'net': { // 第134弾: 実行本体は敵と共通 (stratRun)
+        case 'rock': case 'wreck': case 'hop': case 'decoyship': case 'screen': case 'fogHide': case 'push': case 'guard': case 'tech': case 'raid': case 'fallback': case 'restock': case 'playdead': case 'storm': case 'heatcloud': case 'surge': case 'wide_loop': case 'center': case 'orbit': case 'salvage': case 'net': case 'supply_hunt': case 'hitflee': { // 第134弾: 実行本体は敵と共通 (stratRun)
             const r2 = stratRun(stratActorP(c, hpF, te, lk), S, now);
             if (typeof r2 === 'string') return end(r2.slice(4));
             return r2;
