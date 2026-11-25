@@ -15537,7 +15537,7 @@ var SKC = {
     cb_decoy_raid: ['quiet|search', 'expo<=1 hpF>=0.6', 'lureAny', 200],
     cb_silence_raid: ['contact', 'estD:3500..12000 expo<=1 has:noise', 'est', 150],
     tc_raid_rush: ['contact', 'estD:3000..9000 estRatio<=0.25 hpF>=0.5', 'est', 90],
-    tc_node_dash: ['search|contact', 'expo<=2 hpF>=0.5', '', 60],
+    tc_node_dash: ['search|contact', 'expo<=2 hpF>=0.5', '', 180], // 第217弾: クールダウン 60秒→180秒
     // 初動の3つ (tc_early_*) は性格の条件だけで出す (表から出すと序盤に何度も止まる)
 };
 var _SKC_P = {};
@@ -15698,7 +15698,7 @@ function tacticRules(F, A, X, R) {
         return true;
     });
     // 第212弾: ノード急襲 — 相手が制圧を進めているノードへ、完了前に割り込んで横取りする
-    R('tc_node_dash', () => (nodeDashTarget(F.side, A.x, A.y) && F.exposure <= 2 && F.hpF >= 0.5 && F.cd('tcNodeDashF', 60)), () => {
+    R('tc_node_dash', () => (nodeDashTarget(F.side, A.x, A.y) && F.exposure <= 2 && F.hpF >= 0.5 && F.cd('tcNodeDashF', 180)), () => { // 第217弾: クールダウン 60秒→180秒
         const n = nodeDashTarget(F.side, A.x, A.y); if (!n) return false;
         F.mark('tcNodeDashF');
         A.go(n.x, n.y, 200, 'flank');
@@ -18589,6 +18589,7 @@ function huntScreen(HA, H, X) {
 function huntNetkill(HA, H, X) { // 第212弾: 聴音網潰し — 相手の聴音局ノードへ行き、居座って制圧し返す (ノード制圧は近くの居座りで進む)
     const { now, say } = X, t = H.tgt;
     if (!t || t.owner === H.mySide) return X.end(t ? 'ノードを奪った — 相手の聴音網が痩せた' : '対象のノードが消えた', false);
+    if (H.nkArr && now - H.nkArr > 60 * 75) return X.end('ノードに取りついて75秒 — 制圧を諦めて切り上げる', false); // 第217弾: 居座りの時間切れ (取りついてから75秒)
     const d = Math.hypot(t.x - HA.x, t.y - HA.y);
     if (d > NODE_CAP_R * 0.8) { HA.go(t.x, t.y, 'cruise'); if (!H.nkLog || now - H.nkLog > 1800) { H.nkLog = now; say('【' + H.jp + '】聴音局ノード (' + _dirTxt(HA.x, HA.y, t.x, t.y) + '・' + Math.round(d / 100) * 100 + 'u) へ向かう'); } return true; }
     HA.drift(null);
@@ -18754,7 +18755,7 @@ const HUNT_REG = {
     rush:   { jp: '霧伝いの肉薄', ph: 'approach', w: (k, F) => F.kOk && F.hullK >= 0.9 && F.hpF > 0.5 && F.D < 12000 ? (0.3 + 1.0 * k.ag + 0.5 * F.hpF + 0.3 * k.st) : 0 },
     snipe:  { jp: 'ビームの狙撃', ph: 'approach', w: (k, F) => F.bOk && F.spdK >= 0.8 && F.D > 5500 ? (0.15 + 0.7 * k.ca + 0.5 * k.st) * (F.hullK >= 0.9 ? 1.2 : 0.8) : 0 },
     shadow: { jp: '影追い', ph: 'shadow', w: (k, F) => F.spdK >= 1.5 && F.moving && F.D < 12000 ? 0.4 + 1.1 * k.st + 0.6 * k.ca : 0 },
-    netkill: { jp: '聴音網潰し', ph: 'netkill', w: (k, F) => F.netNode ? 0.4 + 0.7 * k.ca + 0.5 * k.st + 0.3 * k.ag : 0 },
+    netkill: { jp: '聴音網潰し', ph: 'netkill', w: (k, F) => F.netNode && !F.nkBlock && !F.closing && F.D >= 9000 ? 0.15 + 0.3 * k.ca + 0.25 * k.st + 0.15 * k.ag : 0 }, // 第217弾: 主力任務の1/3程度に下げ、相手が近づいている局面 (closing/近距離) と終了後90秒は選ばない
 };
 // 艦の足の速さ・船体の大きさ (任務の重みに使う。艦種の名前ではなく性能で見る)
 function huntBuild(cls) { return { spdK: (SHIP_MAX_SPEED_MULT[cls] || 0.58) / 0.58, hullK: Math.min(1.2, (PLAYER_HP_BASE[cls] || 2500) / 3500) }; }
@@ -18776,7 +18777,7 @@ function enemyHunterStep(e, heard, hard) {
     if (est && est.age < 600) { const mv = e._mvMem || (e._mvMem = { vh: [] }); const v = _huntVel(mv, est); if (v && Math.hypot(v.vx, v.vy) > 0.25) e._lastMove = { x: est.x, y: est.y, vx: v.vx, vy: v.vy, f: now }; }
     const toCombat = () => { e.aiState = 'combat'; e.lurking = false; e.detectionState = 'alerted'; e.huntTimer = Math.max(e.huntTimer || 0, 600); };
     if (e._hpLast !== undefined && e.hp < e._hpLast) e._hpLossF = now; e._hpLast = e.hp;
-    const end = (why, combat, cd) => { say('【' + H.jp + '】終了 — ' + why); e._hunt = null; e._huntEndF = now; e._sendTo = null;
+    const end = (why, combat, cd) => { say('【' + H.jp + '】終了 — ' + why); e._hunt = null; e._huntEndF = now; if (H.k === 'netkill') e._nkEndF = now; /* 第217弾: 聴音網潰しの連鎖防止 (終了後90秒は再抽選しない) */ e._sendTo = null;
         if (H.k !== 'prowl') { if (H.strikes > 0) e._huntFails = 0; else if (!combat) e._huntFails = Math.min(4, (e._huntFails || 0) + 1); } /* 仕掛けて撃てずに終わった回数 — 重なると焦れて突撃しやすく・撃つ基準も甘くなる (人間らしい焦り) */ e._huntCD = now + (cd !== undefined ? cd : HUNT_CD * (0.6 + 0.8 * Math.random())); if (combat) toCombat(); return false; };
     const ms = e._maxSpeeds() || { silent: 0.6, cruise: 1.2, flank: 1.8 };
     // ── 任務を選ぶ ──
@@ -18822,7 +18823,7 @@ function enemyHunterStep(e, heard, hard) {
         // 第81弾: 艦種ごとの戦術 — 空母=艦載機の網 (艦載機で釘付けにし、母艦は霧の中から別の向きで撃つ) / 攻撃型=霧伝いの肉薄 (3連装の実弾を至近の背後から)・ビームの狙撃 / 潜航型=影追い (相手の後ろについて記録を貯め、背後から一撃)
         const kOk = _eHas(e, 'kinetic') && (e.ammoK === undefined || e.ammoK > 0), bOk = _eHas(e, 'beam');
         const myDrones = enemies.filter(f => f.type === 'fighter' && (f._home === e || f._home === undefined) && f.hp > 0 && !f._dying && (f._kind === undefined || f._kind === 'mech')).length;
-        const w = huntWeights({ side: 'e', P, D, cls, stc, fails: e._huntFails, hpF, closing, moving: est.moving || !!(e._lastMove && now - e._lastMove.f < 900), hasLure: !!lureK, hasNoise: (e.itemNoise || 0) > 0, hasFake: (e.itemFake || 0) > 0, netNode: !!netkillTarget('e', e.x, e.y),
+        const w = huntWeights({ side: 'e', P, D, cls, stc, fails: e._huntFails, hpF, closing, moving: est.moving || !!(e._lastMove && now - e._lastMove.f < 900), hasLure: !!lureK, hasNoise: (e.itemNoise || 0) > 0, hasFake: (e.itemFake || 0) > 0, netNode: !!netkillTarget('e', e.x, e.y), nkBlock: now - (e._nkEndF ?? -1e9) < 5400,
             hitOrPing: now - (e._hpLossF ?? -1e9) < 1800 || now - (e._pingHeardF ?? -1e9) < 1800, strike: (e.droneStock || 0) > 0 || myDrones > 0, kOk, bOk, holdRecent: now - (e._stratEndF ?? -1e9) < 900 });
         if (e._forceNext && w[e._forceNext] !== undefined) { for (const k in w) w[k] = k === e._forceNext ? 1 : 0; } e._forceNext = null; // 偽装退却/偽コンテナの罠の続き
         if (window.__huntForce && w[window.__huntForce] !== undefined) { for (const k in w) w[k] = k === window.__huntForce ? 1 : 0; }
@@ -19474,7 +19475,7 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
     const now = _frameCount, ag = P.aggression, st = P.stealth, ca = P.caution, gr = P.greed;
     let H = c.hunt;
     const say = (t) => comThinkEvent('p', t);
-    const end = (why, cd) => { say('【' + H.jp + '】終了 — ' + why); if (H.sent) { droneOrder('attack', 'return'); if (playerDrones.some(d => d.hp > 0 && d.type === 'mech')) droneOrder('mech', 'return'); } if (H.strikes > 0) c.huntFails = 0; else if (cd === undefined) c.huntFails = Math.min(4, (c.huntFails || 0) + 1); c.hunt = null; c.huntCD = now + (cd !== undefined ? cd : HUNT_CD * (0.6 + 0.8 * Math.random())); if (playerCoasting) toggleCoast(false); return false; };
+    const end = (why, cd) => { say('【' + H.jp + '】終了 — ' + why); if (H.k === 'netkill') c.nkEndF = now; /* 第217弾: 聴音網潰しの連鎖防止 (終了後90秒は再抽選しない) */ if (H.sent) { droneOrder('attack', 'return'); if (playerDrones.some(d => d.hp > 0 && d.type === 'mech')) droneOrder('mech', 'return'); } if (H.strikes > 0) c.huntFails = 0; else if (cd === undefined) c.huntFails = Math.min(4, (c.huntFails || 0) + 1); c.hunt = null; c.huntCD = now + (cd !== undefined ? cd : HUNT_CD * (0.6 + 0.8 * Math.random())); if (playerCoasting) toggleCoast(false); return false; };
     const seen = !!(te && lk && lk.full);
     if (!H) {
         if (now < (c.huntCD || 0) || seen || hpF < retreat + 0.06 || playerExposureLevel >= 3 || !lockedSignalId) return false;
@@ -19491,7 +19492,7 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
         const myStrike = playerDrones.filter(d => d.hp > 0 && (d.type === 'attack' || d.type === 'mech')).length + ((cargo.stock.attack || 0) > 0 ? 1 : 0);
         const kOk = playerHasWeapon('kinetic') && cargo.ammoK > 0, bOk = playerHasWeapon('beam');
         const _hitAgoP = playerHitLog.length ? now - playerHitLog[playerHitLog.length - 1].f : 1e9;
-        const w = huntWeights({ side: 'p', P, D, cls, stc, fails: c.huntFails, hpF, closing, moving: est.moving || !!(c.lastMove && c.lastMove.sid === lockedSignalId && now - c.lastMove.f < 900), hasLure: kinds.length > 0, hasNoise: (cargo.stock.noise || 0) > 0, hasFake: (cargo.stock.fakecache || 0) > 0, netNode: !!netkillTarget('p', player.x, player.y),
+        const w = huntWeights({ side: 'p', P, D, cls, stc, fails: c.huntFails, hpF, closing, moving: est.moving || !!(c.lastMove && c.lastMove.sid === lockedSignalId && now - c.lastMove.f < 900), hasLure: kinds.length > 0, hasNoise: (cargo.stock.noise || 0) > 0, hasFake: (cargo.stock.fakecache || 0) > 0, netNode: !!netkillTarget('p', player.x, player.y), nkBlock: now - (c.nkEndF ?? -1e9) < 5400,
             hitOrPing: _hitAgoP < 1800 || now - (threatObs.pingF ?? -1e9) < 1800, strike: myStrike > 0, kOk, bOk, holdRecent: now - (c.stratEndF ?? -1e9) < 900 });
         if (c.forceNext && w[c.forceNext] !== undefined) { for (const k in w) w[k] = k === c.forceNext ? 1 : 0; } c.forceNext = null; // 偽装退却/偽コンテナの罠の続き (敵と同じ)
         if (window.__huntForceP && w[window.__huntForceP] !== undefined) { for (const k in w) w[k] = k === window.__huntForceP ? 1 : 0; }
@@ -20608,14 +20609,14 @@ const STRAT_REG = {
 const COM_STRATS = {}; for (const id in STRAT_REG) COM_STRATS[id] = STRAT_REG[id].desc;
 // 占有したノード・コロニーのうち中継として使える所 (奪われかけでない)。side 'player'|'enemy'
 // 第143弾: 相手が持っている (取られた) 拠点のうち最寄り
-function netkillTarget(side, x, y) { // 第212弾: 相手の聴音局ノード (所有したノードは聴音局になる) の最寄り
-    const opp = side === 'p' ? 'enemy' : 'player'; let best = null, bd = 22000;
+function netkillTarget(side, x, y) { // 第212弾: 相手の聴音局ノード (所有したノードは聴音局になる) の最寄り (第217弾: 対象範囲 22000→14000)
+    const opp = side === 'p' ? 'enemy' : 'player'; let best = null, bd = 14000;
     for (const n of resourceNodes) if (n.owner === opp) { const d = Math.hypot(n.x - x, n.y - y); if (d < bd) { bd = d; best = n; } }
     return best;
 }
-function nodeDashTarget(side, x, y) { // 第212弾: 相手が制圧を進めているノード (制圧のEM漏れで分かる範囲)
-    const foe = side === 'p' ? 'capE' : 'capP'; let best = null, bd = 11000;
-    for (const n of resourceNodes) { if ((n[foe] || 0) < 0.05) continue; const d = Math.hypot(n.x - x, n.y - y); if (d < bd) { bd = d; best = n; } }
+function nodeDashTarget(side, x, y) { // 第212弾: 相手が制圧を進めているノード (制圧のEM漏れで分かる範囲) (第217弾: 進行の敷居 0.05→0.3・範囲 11000→5000 — 完了前に実際に駆けつけられる所だけ)
+    const foe = side === 'p' ? 'capE' : 'capP'; let best = null, bd = 5000;
+    for (const n of resourceNodes) { if ((n[foe] || 0) < 0.3) continue; const d = Math.hypot(n.x - x, n.y - y); if (d < bd) { bd = d; best = n; } }
     return best;
 }
 function raidTarget(side, x, y) {
