@@ -2095,6 +2095,7 @@ function visionRadiusAt(s, x, y, base = BASE_VISION_RADIUS) {
     let factor = 1 - h * (1 - MIN_VISION_FACTOR);
     if (factor < MIN_VISION_FACTOR) factor = MIN_VISION_FACTOR;
     let r = base * factor;
+    if (s) { const pd = s._permDeb || (s === player && !_prpSeatBusy ? (typeof _permDebP !== 'undefined' ? _permDebP : null) : null); if (pd && pd.sight) r *= pd.sight; } // 第225弾: 強襲で光学室を壊された艦は有視界が狭いまま (自機・敵共通。敵の席の描画中は player が差し替わるため _prpSeatBusy で自機分を抑止)
     if (surgePhase === 'active') r *= SURGE_VISION_MULT;        // ヒッグスサージ: 有視界も縮む
     if (s && s._sysSensorTimer > 0) r *= 0.6;                    // センサー損傷
     if (s && s._daze > 0) r *= DAZE_VISION_MULT;                  // 第20弾: センサー撹乱
@@ -9110,7 +9111,7 @@ function recomputeParts() {
     const m = Object.assign({}, PM_DEF);
     for (const id of partsOn) PARTS[id].f(m);
     { const lo = shipLoadout(gameState.shipType); applyVariants(m, lo.v, lo.w); } // 第60弾: 武器の種類
-    if (typeof _permDebP !== 'undefined' && _permDebP) { m.speed *= _permDebP.speed; m.rxRange *= _permDebP.sense; } // 第197弾: 強襲の永続的な被害
+    if (typeof _permDebP !== 'undefined' && _permDebP) { m.speed *= _permDebP.speed; m.rxRange *= _permDebP.sense; m.mslTurn *= (_permDebP.guide || 1); } // 第197弾: 強襲の永続的な被害 / 第225弾: 誘導室の被害はミサイル旋回へ
     PM = m;
     if (player && player.hp > 0) {
         const nm = Math.round((PLAYER_HP_BASE[gameState.shipType] || 2000) * (1 + PM.hp));
@@ -9402,7 +9403,7 @@ function recomputeEnemyParts(e) {
     const m = Object.assign({}, PM_DEF);
     for (const id of e.parts || []) PARTS[id].f(m);
     if (e.wvar) applyVariants(m, e.wvar, e.wset); // 第60弾: 敵の武器の種類
-    if (e._permDeb) { m.speed *= e._permDeb.speed; m.rxRange *= e._permDeb.sense; } // 第197弾
+    if (e._permDeb) { m.speed *= e._permDeb.speed; m.rxRange *= e._permDeb.sense; m.mslTurn *= (e._permDeb.guide || 1); } // 第197弾 / 第225弾: 誘導
     if (e._baseHp === undefined) e._baseHp = e.maxHp;
     const nm = Math.round(e._baseHp * (1 + m.hp)), d = nm - e.maxHp;
     e.maxHp = nm; e.hp = Math.max(1, Math.min(nm, e.hp + Math.max(0, d)));
@@ -10239,7 +10240,7 @@ var HACK_SESS_BASE = 840, HACK_SESS_MIN = 180, HACK_SESS_MAX = 1440, HACK_BREAK 
 function hackSuccessChance(q) { return Math.max(0.12, Math.min(0.92, 0.2 + 0.45 * q)); }
 var HACK_ATTEMPT_H = 2.0; // 侵入を試みる演算力 (旧3.0 — コロニー3つ+解析重視が要り、ほとんど侵入されなかった)
 var _hackBanner = null; // 結果の表示 {ok,head,sub,until(ms),own}
-function hackBanner(ok, head, sub) { if (_seatOn && _seatOn()) return; _hackBanner = { ok, head, sub, until: performance.now() + 5200, t0: performance.now() }; }
+function hackBanner(ok, head, sub) { if (_seatOn && _seatOn()) return; _hackBanner = { ok, head, sub, until: performance.now() + 2500, t0: performance.now() }; } // 第225弾: 結果バナーの表示を 5.2秒→2.5秒に短縮 (小型化とセット)
 var HACK_RES_CLASS = { stealth: 2.2, assault: 2.8, carrier: 3.2 };
 var HACK_EFFECTS = { fcs: { jp: '火器管制妨害', st: 'fcs', dur: 720 }, halt: { jp: '機関停止', st: 'halt', dur: 900 }, sensor: { jp: 'センサー妨害', st: 'sensor', dur: 900 }, optic: { jp: '光学妨害', st: 'optic', dur: 600 }, guide: { jp: '誘導妨害', st: 'guide', dur: 900 }, comm: { jp: '通信妨害', st: 'comm', dur: 1200 }, counter: { jp: '逆探知の反撃', st: 'comm', dur: 600 } };
 var _hackPulseCD = 0, _hackBurstUntil = 0, hackSessP = null, _hackWinP = null;
@@ -10370,21 +10371,25 @@ function _hackAim(sa, ox, oy, H) {
 // 第111弾 (段3): ハック波を撃つかの判断は自機COMと敵で同じ関数。H≥3.0・方向が絞れている・相手が艦影らしい (信用できる) 時に撃つ。交戦中か2200u未満の距離が分かる時は火器管制ダウン・それ以外は機関停止
 function hackDecide(A) {
     const on = (id) => skillUse(A.side, id);
-    // 第142弾: ハックのスキル。効果の選び方 — 逃げる/隠れている=目隠し(センサー) / 交戦中・至近=火器管制潰し / 相手がドローンを出している=通信妨害 / それ以外=機関停止の奇襲。侵入できない演算力でも「探り」で位置を暴ける
+    // 第142弾: ハックのスキル。侵入できない演算力でも「探り」で位置を暴ける
+    // 第225弾 (オーナー「ハックの効果が機関停止か火器管制ばかり。センサーや光学をもっと均一に」): 効果の選び方を固定の優先チェーンから均一ランダムへ。
+    //   旧チェーンは 交戦中=fcs・それ以外=halt にほぼ固定され、sensor/optic は逃走中+escape局面の時しか出なかった。戦術的に明確な例外 (ミサイル接近中の誘導妨害) だけ優先を残し、
+    //   それ以外は「使えるスキルの効果」から均一に選ぶ。状況 (逃走中・ドローン目撃など) は候補を絞るためには使わない
     if (A.H >= HACK_ATTEMPT_H && A.credible) {
         const aim = _hackAim(A.sa, A.x, A.y, A.H);
         if (aim) {
             let eff = null;
-            if (A.incomingMsl && on('hk_guide')) eff = 'guide'; // 第196弾: 迫るミサイルを撃った相手の誘導を妨害
-            else if (A.fleeing && on('hk_optic') && Math.random() < 0.5) eff = 'optic'; // 逃げる時は目潰しで見失わせる
-            else if (A.fleeing && aim.d !== null && aim.d < 3500 && on('hk_halt_flee') && (!on('hk_sensor') || Math.random() < 0.5)) eff = 'halt'; // 第146弾: 追っ手の機関を止めて振り切る
-            else if (A.fleeing && on('hk_sensor')) eff = 'sensor';
-            else if (!A.engaged && !A.fleeing && aim.d !== null && aim.d > 1500 && aim.d < 3500 && on('hk_opener')) eff = 'fcs'; // 第146弾: 交戦の前に火器管制を潰して先手を取る
-            else if (aim.d !== null && (A.engaged || aim.d < 2200) && on('hk_fcs')) eff = 'fcs';
-            else if ((A.foeDrones > 0 || (A.foeDroneHist || 0) >= 3 || A.foeCarrier) && !A.engaged && on('hk_comm')) eff = 'comm'; // 第222弾 (指示書D 段4): 今出ていなくても、ドローン目撃の蓄積・空母仮説があれば先回りして通信妨害を狙う
-            else if (on('hk_halt')) eff = 'halt';
-            else if (on('hk_sensor')) eff = 'sensor';
-            else if (on('hk_fcs')) eff = 'fcs';
+            if (A.incomingMsl && on('hk_guide')) eff = 'guide'; // 第196弾: 迫るミサイルを撃った相手の誘導を妨害 (例外として優先を維持)
+            else {
+                const pool = [];
+                if (on('hk_fcs')) pool.push('fcs');
+                if (on('hk_halt')) pool.push('halt');
+                if (on('hk_sensor')) pool.push('sensor');
+                if (on('hk_optic')) pool.push('optic');
+                if (on('hk_guide')) pool.push('guide');
+                if (on('hk_comm')) pool.push('comm');
+                if (pool.length) eff = pool[Math.floor(Math.random() * pool.length)];
+            }
             if (eff) return { ang: aim.ang, d: aim.d, eff };
         }
     }
@@ -10582,7 +10587,7 @@ function updateDroneCtrl() {
 // 艦影かゴースト (推定円・反応の印) を捉えていないと発進できず、何も捉えていない地点には送れない。
 // 送った地点に本当に相手艦が居れば取り付き → ハッチ解放 (相手の演算力が高いほど長い・最後は爆破) → 艦内侵入 (艦内迎撃力が高いほど長い) → 破壊活動。
 // 強襲は必ず成功する。止められるのは 艦内護衛ドローン (積み込みアイテム・1回1個) だけ。
-// かかった時間が短い (50秒以内) ほど 永続的な被害 (推進力・命中率・センサー感度が15〜30%低下)、長ければ 約1分の 機関停止/火器管制妨害/センサー妨害。
+// かかった時間が短い (50秒以内) ほど 永続的な被害 (推進力・命中率・センサー感度・有視界・ミサイル誘導のいずれかが低下)、長ければ 約1分の 機関停止/火器管制妨害/センサー妨害/光学妨害/誘導妨害/通信妨害。 (第225弾: ハックと同じ顔ぶれに揃えた)
 // 自機も敵も同じ式 (敵は f._kind==='boarder' の艦載機)。値は実装で決めた値
 var BOARD_SPEED = 4.2, BOARD_SENSE_R = 900, BOARD_LATCH_R = 170, BOARD_SEARCH_F = 600, BOARD_SNAP_R = 1500;
 var BOARD_ATTACH_F = 180, BOARD_HATCH_BASE = 240, BOARD_HATCH_PER_H = 360, BOARD_HATCH_MAX = 1200; // 第198弾: 取り付き3秒・ハッチ4秒+6秒×演算力 (20秒を超えると爆破)
@@ -10591,8 +10596,8 @@ var BOARD_TEMP2_DUR = 2700, BOARD_PERM_ST_DUR = 3600, BOARD_HULL_PERM = 0.12, BO
 var BOARD_PD_DETECT = 1600, BOARD_PD_DPS = 1.75, BOARD_PD_DRN_R = 2600, BOARD_PD_BUSY_F = 300, BOARD_PD_BUSY_K = 0.35; // 第198弾: 近接防御 — 1600uで突撃艇に気付き、毎秒約96削る (正面から単独で来れば取り付く前に落ちる)
 var BOARD_DEF_CLASS = { stealth: 0.8, assault: 1.4, carrier: 1.8 };
 var BOARD_STAGES = ['取り付き', 'ハッチ解放', '艦内侵入', '破壊活動'];
-var BOARD_PERM = { speed: { room: '機関部', what: '推進力', st: 'engine' }, hit: { room: '火器管制室', what: '命中率', st: 'fcs' }, sense: { room: 'センサー室', what: 'センサー感度', st: 'sensor' } };
-var BOARD_TEMP = [['halt', '機関部', '機関停止'], ['fcs', '火器管制室', '火器管制妨害'], ['sensor', 'センサー室', 'センサー妨害']];
+var BOARD_PERM = { speed: { room: '機関部', what: '推進力', st: 'engine' }, hit: { room: '火器管制室', what: '命中率', st: 'fcs' }, sense: { room: 'センサー室', what: 'センサー感度', st: 'sensor' }, sight: { room: '光学室', what: '有視界', st: 'optic' }, guide: { room: '誘導室', what: 'ミサイル誘導', st: 'guide' } }; // 第225弾: ハックと同じ顔ぶれへ光学・誘導を追加 (通信は艦側の連続量が無いため永続側には入れない)
+var BOARD_TEMP = [['halt', '機関部', '機関停止'], ['fcs', '火器管制室', '火器管制妨害'], ['sensor', 'センサー室', 'センサー妨害'], ['optic', '光学室', '光学妨害'], ['guide', '誘導室', '誘導妨害'], ['comm', '通信室', '通信妨害']]; // 第225弾: ハックの6種と一致
 var _permDebP = null, _boardGuardBtn = null;
 function boardDefense(sh) {
     const isP = sh === player, cls = isP ? gameState.shipType : ENEMY_CLASS[sh.type];
@@ -10759,11 +10764,11 @@ function boardEnd(T, S, ok, why) {
 }
 function _boardSucceed(T, S) {
     // 第198弾 (オーナー「強襲を受けると結構大変に」): 永続の時は その系統が60秒止まる＋船体12% / 時間がかかった時は 主系統120秒＋別系統45秒＋船体8% (重装襲撃ドローンで×1.4)
-    const toP = T === player, mine = S.side === 'p', R = Math.random(), hm = S.harm || 1, keys = ['speed', 'hit', 'sense'];
+    const toP = T === player, mine = S.side === 'p', R = Math.random(), hm = S.harm || 1, keys = ['speed', 'hit', 'sense', 'sight', 'guide'];
     let head, sub, hull;
     if (S.tot <= BOARD_PERM_F) {
-        const k = keys[Math.min(2, Math.floor(R * 3))], pct = Math.min(45, Math.round((20 + 15 * Math.max(0, Math.min(1, (BOARD_PERM_F - S.tot) / 1500))) * hm));
-        const D = toP ? (_permDebP || (_permDebP = { speed: 1, hit: 1, sense: 1 })) : (T._permDeb || (T._permDeb = { speed: 1, hit: 1, sense: 1 }));
+        const k = keys[Math.floor(R * keys.length)], pct = Math.min(45, Math.round((20 + 15 * Math.max(0, Math.min(1, (BOARD_PERM_F - S.tot) / 1500))) * hm));
+        const D = toP ? (_permDebP || (_permDebP = { speed: 1, hit: 1, sense: 1, sight: 1, guide: 1 })) : (T._permDeb || (T._permDeb = { speed: 1, hit: 1, sense: 1, sight: 1, guide: 1 }));
         D[k] = Math.max(0.3, D[k] * (1 - pct / 100));
         if (toP) recomputeParts(); else recomputeEnemyParts(T);
         const B = BOARD_PERM[k], sd = Math.round(BOARD_PERM_ST_DUR * hm);
@@ -10772,7 +10777,7 @@ function _boardSucceed(T, S) {
         head = toP ? '⚠ 敵強襲部隊による破壊活動 — ' + B.room + 'に被害発生' : '◆ 強襲成功 — 敵の' + B.room + 'を破壊';
         sub = B.what + 'が ' + pct + '% 低下 (永続)・' + STATUS_DEF[B.st].jp + ' 約' + Math.round(sd / 60) + '秒・船体 −' + hull + ' — ' + Math.round(S.tot / 60) + '秒で破られた';
     } else {
-        const i = Math.min(2, Math.floor(R * 3)), P = BOARD_TEMP[i], Q = BOARD_TEMP[(i + 1 + Math.floor(Math.random() * 2)) % 3], d1 = Math.round(BOARD_TEMP_DUR * hm), d2 = Math.round(BOARD_TEMP2_DUR * hm);
+        const i = Math.floor(R * BOARD_TEMP.length), P = BOARD_TEMP[i], Q = BOARD_TEMP[(i + 1 + Math.floor(Math.random() * (BOARD_TEMP.length - 1))) % BOARD_TEMP.length], d1 = Math.round(BOARD_TEMP_DUR * hm), d2 = Math.round(BOARD_TEMP2_DUR * hm);
         applyStatus(T, P[0], d1); applyStatus(T, Q[0], d2);
         hull = Math.round(T.maxHp * BOARD_HULL_TEMP * hm);
         head = toP ? '⚠ 敵強襲部隊が' + P[1] + 'を占拠 — ' + P[2] : '◆ 強襲成功 — 敵の' + P[1] + 'を占拠';
@@ -11201,14 +11206,14 @@ function _drawHackPanel(ctx, L, Rr, by, S, mine, now) {
 function _drawHackBanner(ctx, L, Rr, by) {
     const b = _hackBanner; if (!b) return;
     const t = performance.now(); if (t > b.until) { _hackBanner = null; return; }
-    const age = t - b.t0, fade = Math.min(1, (b.until - t) / 900), pop = Math.min(1, age / 220), col = b.ok ? '#3dffb0' : '#ff5a6a', bg = b.ok ? 'rgba(0,36,26,0.94)' : 'rgba(44,4,12,0.94)';
-    const bw = Math.min(520, Rr - L - 20), bx = L + (Rr - L - bw) / 2, bh = 52, jit = age < 500 ? (Math.random() - 0.5) * 6 * (1 - age / 500) : 0;
+    const age = t - b.t0, fade = Math.min(1, (b.until - t) / 600), pop = Math.min(1, age / 160), col = b.ok ? '#3dffb0' : '#ff5a6a', bg = b.ok ? 'rgba(0,36,26,0.94)' : 'rgba(44,4,12,0.94)';
+    const bw = Math.min(340, Rr - L - 20), bx = L + (Rr - L - bw) / 2, bh = 36, jit = age < 300 ? (Math.random() - 0.5) * 3 * (1 - age / 300) : 0; // 第225弾: 結果バナーを小型化 (幅520→340・高さ52→36) し、震え・点滅も控えめに
     ctx.save(); ctx.globalAlpha = fade * 0.96; ctx.fillStyle = bg; ctx.fillRect(bx + jit, by, bw, bh);
     ctx.globalAlpha = fade; ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.strokeRect(bx + jit, by, bw, bh);
-    if (age < 380) { ctx.globalAlpha = fade * (1 - age / 380) * 0.5; ctx.fillStyle = col; ctx.fillRect(bx, by, bw, bh); }
+    if (age < 220) { ctx.globalAlpha = fade * (1 - age / 220) * 0.35; ctx.fillStyle = col; ctx.fillRect(bx, by, bw, bh); }
     ctx.globalAlpha = fade; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
-    ctx.font = 'bold ' + Math.round(14 + 3 * (1 - pop)) + 'px sans-serif'; ctx.fillStyle = col; ctx.fillText(b.head, bx + 12 + jit, by + 6);
-    ctx.font = '11px sans-serif'; ctx.fillStyle = '#e8f4f0'; ctx.fillText(b.sub, bx + 12 + jit, by + 30, bw - 24);
+    ctx.font = 'bold ' + Math.round(12 + 2 * (1 - pop)) + 'px sans-serif'; ctx.fillStyle = col; ctx.fillText(b.head, bx + 8 + jit, by + 3);
+    ctx.font = '10px sans-serif'; ctx.fillStyle = '#e8f4f0'; ctx.fillText(b.sub, bx + 8 + jit, by + 20, bw - 16);
     ctx.restore();
 }
 function drawHackFx(ctx) {
@@ -15543,7 +15548,7 @@ var SKC = {
     it_fake: ['quiet|hide', 'expo<=0 quietS>=45', 'has:fake', 120], it_spray: ['escape|combat|hide', 'expo>=2 fog<=0.5', 'has:spray', 90], it_blow: ['contact|combat', 'estD<=4000 fog>=0.5 !seen', 'has:blow est', 90],
     it_guard: ['combat|escape', 'board'], pl_decoy: ['contact', 'estD:3500..14000 hpF>=0.5'], jam: ['combat|escape', 'msl hitS<=10 cls:stealth'],
     // ハック (表示・設定画面の目安)
-    hk_halt: ['contact', 'estD<=9000 H>=2'], hk_fcs: ['combat', 'estD<=2500'], hk_sensor: ['escape', 'hpF<=0.6 expo>=2'], hk_optic: ['escape', 'expo>=2'], hk_guide: ['combat|escape', 'msl'],
+    hk_halt: ['contact', 'estD<=9000 H>=2'], hk_fcs: ['combat', 'estD<=2500'], hk_sensor: ['escape|combat|contact', 'hpF<=0.6 expo>=2'], hk_optic: ['escape|combat|contact', 'expo>=2'], hk_guide: ['combat|escape', 'msl'], // 第225弾: 効果選択の均一化で sensor/optic は逃走時以外でも選ばれるため、目安の局面を実態に合わせて広げた (数値条件は据え置き。hackDecide は SKC を読まないので COM の挙動への影響はない)
     hk_comm: ['combat|contact', 'eDrones|oppDrone>=3|oppCls:carrier'], hk_probe: ['search|contact', 'estRatio>=0.3'], hk_pursuit: ['combat|contact', 'hackWin'], hk_flee: ['combat|escape', 'hacked'], hk_drone: ['combat', 'H>=2.6'], // 第222弾: hk_comm は瞬時の存在に加え、ドローン目撃の蓄積・空母仮説でも立つ (先回り)
     hk_counter: ['combat|escape|contact|search', 'hacked'], hk_opener: ['contact', 'estD:1500..3500'], hk_halt_flee: ['escape', 'hpF<=0.6 expo>=2'],
     // だまし (反応の判断に候補を足す)
