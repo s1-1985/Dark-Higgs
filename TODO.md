@@ -93,6 +93,7 @@
 - ✅ **コロニー / 難破船** — colony=S&Dハック目標、derelict=EWハックで**偽コンタクト発生**（`decoyActive`）@`game.js:880,2840`
 - ✅ **生成スプライト表示** — `SPRITES` 非同期ローダー、未ロード時ベクター描画フォールバック。**PR#34**
 - ✅ **襲撃スキル7件（第212弾）** — 戦略 `st_supply_hunt` 補給狩り / `st_hitflee` 一撃離脱、任務 `hu_netkill` 聴音網潰し、複合 `cb_decoy_raid` 陽動襲撃 / `cb_silence_raid` 沈黙の襲撃、戦術 `tc_raid_rush` 襲撃の踏み込み / `tc_node_dash` ノード急襲。スキル総数 120→127。実行は共有関数（stratRun / huntNetkill / comboRules / tacticRules）で自機COM・敵とも対称
+- ✅ **信念ボードの読み口（第213弾・指示書A段1〜段2）** — 真値監査6件（T1〜T4・N1・N2）を現行コードで再確認し確定。状態は動かさず getter ビュー `beliefViewE` / `beliefViewP` ＋ `beliefEst` / `beliefSeen` を新設し、`_planActorE` / `_planActorP` / `stratActorE` / `stratActorP` / `stratFactsE` / `stratNearE` の読みをボード経由に差し替え（`planStep` 本体は無変更・挙動不変をシード固定のCOM対戦計測で前後完全一致により確認）
 
 ### 基盤
 - ✅ HUDオーバーレイ（ズーム不変）/ ミニマップ / セーブロード / ゲームオーバー・クリア画面 / カメラ追従 / スマホ操作（ドラッグ・長押し・ピンチ）

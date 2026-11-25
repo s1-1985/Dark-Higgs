@@ -18963,11 +18963,35 @@ function planStep(A) {
     return true;
 }
 const _PLAN_JP = { lure: '偽艦影ブイ', fsos: '偽SOS', bcn_heat: '熱ビーコン', bcn_optic: '光ビーコン', bcn_em: 'EMビーコン', bcn_higgs: '霧ビーコン' };
-// 敵のアダプタ: 推定は方位の記録から解いたもの (e._sa)。無ければ最後の推定位置 (e.playerLastKnownPos・幅 e._estR)
+// ═══ 第213弾 (指示書A 段2): 信念ボードの読み口 (ビュー) — 状態は既存フィールドのまま一切動かさず、判断側の読みだけをここに集約する ═══
+//   beliefViewE(e): 敵の信念 (対象=自機) の getter ビュー。sa=_sa / est=playerLastKnownPos / r=_estR / fresh=contactFreshness / guess=_lkGuess /
+//     behavior=predictedBehavior / noiseTainted=_noiseLk / intel=intelPos / seen=inVision をそのまま返す (値の正規化はしない)
+//   beliefViewP(sid): 自機側の信念 (対象=信号sid) のビュー。sa は生成時点の参照を保持する (従来アダプタの冒頭 const 捕捉と同じ意味)
+//   beliefEst(B): 従来 _planActorE.est の規則そのまま (sa の解があれば trackEstimate、無ければ lk + 幅 _estR、鮮度<0.12 で null)
+//   beliefSeen(B): 従来 _planActorE.seen の規則そのまま (敵側は inVision)
+function beliefViewE(e) {
+    return { side: 'e', key: 'e' + e.uid,
+        get sa() { return e._sa; }, get est() { return e.playerLastKnownPos; }, get r() { return e._estR; },
+        get fresh() { return e.contactFreshness; }, get guess() { return e._lkGuess; }, get behavior() { return e.predictedBehavior; },
+        get noiseTainted() { return e._noiseLk; }, get intel() { return e.intelPos; }, get seen() { return !!e.inVision; },
+        identP: () => enemyConf(e) };
+}
+function beliefViewP(sid) {
+    const sa = sid ? _signalAnalysis[sid] : null;
+    return { side: 'p', key: sid, sa: sa || null, ident: () => identInfo(sid) };
+}
+function beliefEst(B) {
+    const lk = B.est; if (!lk || (B.fresh || 0) < 0.12) return null;
+    const t = B.sa && B.sa.fix ? trackEstimate(B.sa, 0) : null;
+    return t ? { x: t.x, y: t.y, r: t.r } : { x: lk.x, y: lk.y, r: B.r || 3000 };
+}
+function beliefSeen(B) { return !!B.seen; }
+// 敵のアダプタ: 推定は方位の記録から解いたもの (e._sa)。無ければ最後の推定位置 (e.playerLastKnownPos・幅 e._estR) — 第213弾: 読みは信念ボード (beliefViewE / beliefEst) 経由
 function _planActorE(e) {
+    const B = beliefViewE(e);
     return { side: 'e', P: e.personality || { aggression: 0.5, stealth: 0.3, caution: 0.4 }, x: e.x, y: e.y, hp: e.hp, maxHp: e.maxHp, m: e, k: n => '_' + n,
-        est: () => { const lk = e.playerLastKnownPos; if (!lk || (e.contactFreshness || 0) < 0.12) return null; const t = e._sa && e._sa.fix ? trackEstimate(e._sa, 0) : null; return t ? { x: t.x, y: t.y, r: t.r } : { x: lk.x, y: lk.y, r: e._estR || 3000 }; },
-        seen: () => !!e.inVision, blocked: () => e._hideT > 0,
+        est: () => beliefEst(B),
+        seen: () => beliefSeen(B), blocked: () => e._hideT > 0,
         items: () => {
             const out = [], hb = e._heardBand && _frameCount - (e._heardBandF || -1e9) < 3600 ? e._heardBand : null;
             if (hb && e.itemBcn && e.itemBcn[hb] > 0) out.push('bcn_' + hb);
@@ -18980,20 +19004,21 @@ function _planActorE(e) {
         goto: pt => { const ms = e._maxSpeeds(); e._quietRun = true; e._moveHeading(Math.atan2(pt.y - e.y, pt.x - e.x), ms ? Math.min(ms.cruise * 0.8, ms.silent || 1e9) : 1.0); },
         hold: () => { if (e._coastIfIdle) e._coastIfIdle(); }, quiet: () => { e._quietRun = true; },
         say: t => comThinkEvent('e', t, 'e' + e.uid),
-        onEnd: atk => { if (atk) { e.aiState = 'hunting'; e.huntTimer = 900; e.lurking = false; const lk = e.playerLastKnownPos; if (lk) e.setTarget(lk.x, lk.y); } } };
+        onEnd: atk => { if (atk) { e.aiState = 'hunting'; e.huntTimer = 900; e.lurking = false; const lk = B.est; if (lk) e.setTarget(lk.x, lk.y); } } };
 }
 function enemyPlanStep(e) { return planStep(_planActorE(e)); }
 // ═══ 第58弾: 敵COMの戦略 — 自機COMと同じ考え方 (集めずに拠点で待ち伏せる・餌を置いて待つ・拠点を守る)。気配が無い間にだけ選ぶ (気配があれば従来の追跡) ═══
 // 第113弾 (段4): 重みの式・選び方・拠点の選び方は 自機COMと共通 (stratWeights / stratPick / stratPickSite)。敵が知っていること x は stratFactsE が作る
 // 第114弾: 「相手が近い」の判断は自機COMの comEngaged/near と同じ考え方 — 見えている・推定が6500u以内で新しい (弱い気配だけでは戦略を止めない)
-function stratNearE(e) { const lk = e.playerLastKnownPos; return !!(e.inVision || (lk && (e.contactFreshness || 0) > 0.25 && Math.hypot(lk.x - e.x, lk.y - e.y) < 6500)); }
+function stratNearE(e) { const B = beliefViewE(e), lk = B.est; return !!(B.seen || (lk && (B.fresh || 0) > 0.25 && Math.hypot(lk.x - e.x, lk.y - e.y) < 6500)); }
 function stratFactsE(e) {
+    const B = beliefViewE(e);
     const now = _frameCount, cls = _shipClass(e), liveK = (k) => enemies.some(f => f.type === 'fighter' && f._kind === k && f.hp > 0 && !f._dying);
     const lures = []; if ((e.lureSOS || 0) > 0) lures.push('fsos'); if ((e.lureShip || 0) > 1) lures.push('lure'); // 偽艦影の最後の1個は作戦用
     if (e.itemBcn) for (const b in e.itemBcn) if (e.itemBcn[b] > 0) lures.push('bcn_' + b);
-    const lk = e.playerLastKnownPos, near = !!(e.inVision || (lk && (e.contactFreshness || 0) > 0.25 && Math.hypot(lk.x - e.x, lk.y - e.y) < 6500));
+    const lk = B.est, near = !!(B.seen || (lk && (B.fresh || 0) > 0.25 && Math.hypot(lk.x - e.x, lk.y - e.y) < 6500));
     const hitAgo = e._lastHitF ? now - e._lastHitF : 1e9, pingAgo = now - (e._pingHeardF ?? -1e9);
-    return { side: 'e', px: e.x, py: e.y, estD: lk && (e.contactFreshness || 0) > 0.25 ? Math.hypot(lk.x - e.x, lk.y - e.y) : 1e9, ammoOut: ammoOutOf(e), raid: !!raidTarget('e', e.x, e.y), cls, relays: ownRelaySites('enemy').length, slotsFree: enemySlotsMax(e) - enemySlotsUsed(e), lures, owned: structures.filter(q => q.type === 'colony' && q.owner === 'enemy'), near,
+    return { side: 'e', px: e.x, py: e.y, estD: lk && (B.fresh || 0) > 0.25 ? Math.hypot(lk.x - e.x, lk.y - e.y) : 1e9, ammoOut: ammoOutOf(e), raid: !!raidTarget('e', e.x, e.y), cls, relays: ownRelaySites('enemy').length, slotsFree: enemySlotsMax(e) - enemySlotsUsed(e), lures, owned: structures.filter(q => q.type === 'colony' && q.owner === 'enemy'), near,
         expo: hitAgo < 480 ? 3 : (pingAgo < 900 || e.inVision) ? 2 : 0, strong: (e.parts || []).length >= 3, early: comEarlyGather(enemySlotsUsed(e), enemySlotsMax(e), now, e.personality), hpF: e.hp / e.maxHp,
         hasScout: (e.scoutStock || 0) > 0 || liveK('scout'), hasFtr: (e.droneStock || 0) > 0 || liveK('attack'), hasTech: liveK('mech'), hasBuild: (e.turretStock || 0) > 0, hasBoard: (e.boardStock || 0) > 0 || liveK('boarder'),
         canTech: cls === 'carrier' && !liveK('mech') && !(e._techT > 0) }; // 第135弾: 自機COMと同じく 作り直せる (旧: 敵は1試合に1回だけ)
@@ -19294,7 +19319,7 @@ const STRAT_NEW = { fallback: 1, restock: 1, playdead: 1, storm: 1, heatcloud: 1
 const STRAT_SHARED = { board: 1, rock: 1, wreck: 1, hop: 1, decoyship: 1, fogHide: 1, push: 1, screen: 1, guard: 1, tech: 1, raid: 1, fallback: 1, restock: 1, playdead: 1, storm: 1, heatcloud: 1, surge: 1, wide_loop: 1, center: 1, orbit: 1, salvage: 1, net: 1, supply_hunt: 1, hitflee: 1 };
 // 自機COMのアダプタ
 function stratActorP(c, hpF, te, lk) {
-    const sa = lockedSignalId && _signalAnalysis[lockedSignalId];
+    const sa = beliefViewP(lockedSignalId).sa; // 第213弾: 信念ボード経由 (値は従来の信号解析の参照と同じ)
     const stockK = { scout: 'scout', attack: 'attack', build: 'build' }, itemK = { noise: 'noise', spray: 'fogspray', repair: 'repair', blow: 'fogblow' };
     const stock = (k) => (SHIP_DRONES[gameState.shipType] || []).includes(k) && (cargo.stock[k] || 0) > 0;
     return { side: 'p', owner: 'player', engine: gameState.engineType, x: player.x, y: player.y, hpF, expo: playerExposureLevel, hHere: getHiggsIntensity(player.x, player.y), seen: !!(te && lk && lk.full), ag: (c.pp ? c.pp.aggression : 0.5), partsN: partsOn.length,
@@ -19314,11 +19339,12 @@ function stratActorP(c, hpF, te, lk) {
 }
 // 敵のアダプタ
 function stratActorE(e) {
+    const B = beliefViewE(e); // 第213弾: 信念ボード (est は従来どおり sa の解のみ・lk フォールバック無し)
     const now = _frameCount, liveK = (k) => enemies.some(f => f.type === 'fighter' && f._kind === k && f.hp > 0 && !f._dying), liveF = () => enemies.some(f => f.type === 'fighter' && !f._kind && f.hp > 0 && !f._dying);
     const P = e.personality || {}, hitAgo = e._lastHitF ? now - e._lastHitF : 1e9, pingAgo = now - (e._pingHeardF ?? -1e9);
     return { side: 'e', owner: 'enemy', engine: e.engine, x: e.x, y: e.y, hpF: e.hp / e.maxHp, expo: hitAgo < 480 ? 3 : (pingAgo < 900 || e.inVision) ? 2 : 0, hHere: getHiggsIntensity(e.x, e.y), seen: !!e.inVision, ag: P.aggression ?? 0.5, partsN: (e.parts || []).length,
         hasBoard: () => (e.boardStock || 0) > 0 || enemies.some(f => f._kind === 'boarder' && f._home === e && f.hp > 0), boarding: () => !!(player && player._board && player._board.side === 'e'),
-        estName: '自機', est: () => e._sa && e._sa.fix ? trackEstimate(e._sa, 0) : null, next: () => searchNext(e, e.x, e.y), kit: () => (e._kitT || 0) > 0,
+        estName: '自機', est: () => B.sa && B.sa.fix ? trackEstimate(B.sa, 0) : null, next: () => searchNext(e, e.x, e.y), kit: () => (e._kitT || 0) > 0,
         go: (x, y, tol) => { if (!(e.state === 'moving' && Math.hypot(e.targetX - x, e.targetY - y) < tol)) { e.setTarget(x, y); e._roam = 'strat'; } },
         hold: () => { if (e.state === 'moving') e.setTarget(e.x, e.y); e._roam = null; },
         can: (k) => k === 'noise' ? (e.itemNoise || 0) > 0 : k === 'spray' ? (e.itemSpray || 0) > 0 : k === 'repair' ? (e.itemRepair || 0) > 0 : (e.itemBlow || 0) > 0,
@@ -19584,10 +19610,10 @@ function comGrabStep(c, P, hpF, retreat, te, lk) {
 }
 // 自機COMのアダプタ: 推定は追跡中の信号の方位の記録から (艦影らしくない信号は対象にしない)
 function _planActorP(c, P, hpF) {
-    const sa = lockedSignalId ? _signalAnalysis[lockedSignalId] : null;
+    const BV = beliefViewP(lockedSignalId), sa = BV.sa; // 第213弾: 信念ボード経由 (sa・識別の読みは従来と同じ)
     const owned = k => (cargo.stock[k] || 0) > 0 && (SHIP_DRONES[gameState.shipType] || []).includes(k);
     return { side: 'p', P, x: player.x, y: player.y, hp: player.hp, maxHp: player.maxHp, m: c, k: n => n,
-        est: () => { if (!sa || !sa.fix) return null; const idn = identInfo(lockedSignalId); if (idn.known && idn.p < 0.4) return null; const t = trackEstimate(sa, 0); return t ? { x: t.x, y: t.y, r: t.r } : null; },
+        est: () => { if (!sa || !sa.fix) return null; const idn = BV.ident(); if (idn.known && idn.p < 0.4) return null; const t = trackEstimate(sa, 0); return t ? { x: t.x, y: t.y, r: t.r } : null; },
         seen: () => { const te = bestFireTarget(); const lk = te ? playerLockInfo(te) : null; return !!(te && lk && lk.full); }, blocked: () => !lockedSignalId,
         items: () => {
             const out = [], hb = c.heardBand && _frameCount - (c.heardBandF || -1e9) < 3600 ? 'bcn_' + c.heardBand : null;
