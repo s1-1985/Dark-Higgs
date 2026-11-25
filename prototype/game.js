@@ -372,9 +372,11 @@ const PASSIVE_BASE = 15000; // 第39弾 (オーナー合意): 受信の最大距
 // マップを3000u角のマスに分け、巡航の艦が聞こえる距離 (受信の最大距離×0.45) の内を「聴いた」とする。3分たてば忘れる (相手は動く)
 const SEARCH_CELL = 3000, SEARCH_N = 24, SEARCH_FORGET = 10800, SEARCH_HEAR_FRAC = 0.45;
 function searchMem(who) { return who._srch || (who._srch = new Float32Array(SEARCH_N * SEARCH_N).fill(-1e9)); }
+// 第219弾 (指示書B 段階4): 不在レイヤー — 「有視界で見たが何も居なかった」確認の時刻を、肯定の聴取記録 (_srch) と混ぜずに別に持つ。読み手はまだ付けない (記録のみ)
+function searchNegMem(who) { return who._srchNeg || (who._srchNeg = new Float32Array(SEARCH_N * SEARCH_N).fill(-1e9)); }
 function _scell(i) { return MAP_CX - SEARCH_N * SEARCH_CELL / 2 + (i + 0.5) * SEARCH_CELL; }
-function searchMark(who, x, y, R) {
-    const m = searchMem(who), r2 = R * R;
+function searchMark(who, x, y, R, neg) {
+    const m = neg ? searchNegMem(who) : searchMem(who), r2 = R * R;
     for (let j = 0; j < SEARCH_N; j++) { const cy = _scell(j); if (Math.abs(cy - y) > R) continue;
         for (let i = 0; i < SEARCH_N; i++) { const cx = _scell(i), dx = cx - x, dy = cy - y; if (dx * dx + dy * dy < r2) m[j * SEARCH_N + i] = _frameCount; } }
 }
@@ -406,6 +408,14 @@ function searchNext(who, x, y) {
     }
     if (best) { who._sGoal = { x: best.x, y: best.y, f: _frameCount }; who._sDir = Math.atan2(best.y - y, best.x - x); }
     return best || { x: MAP_CX, y: MAP_CY };
+}
+// 第219弾 (指示書B 段階4): 記録源の追加 — 母艦だけでなく、自軍の聴音局 (ノード/コロニー) と哨戒機が聴いている範囲も探索マップへ。
+// 半径は母艦と同じ流儀 (受信距離 × SEARCH_HEAR_FRAC)。聴音局は listeningPosts の R (ノード6000/コロニー8000/自機哨戒機6000)。
+// 敵の哨戒機は聴音局ではなく目視の機体 (母艦へデータリンクで知らせる) なので、その受信仕様どおり有視界 DRONE_VIS.scout を半径にする。
+// 通信途絶中 (自動制御) の哨戒機の観測は母艦に届かないので記録しない (データリンクと同じ)。呼び出しは数秒ごとのまとめ打ち。
+function searchMarkSensors(who, side) {
+    for (const post of listeningPosts(side)) searchMark(who, post.x, post.y, post.R * SEARCH_HEAR_FRAC);
+    if (side === 'enemy') for (const f of enemies) if (f.type === 'fighter' && f._kind === 'scout' && f._home === who && f.hp > 0 && !f._dying && !f._auto) searchMark(who, f.x, f.y, DRONE_VIS.scout * SEARCH_HEAR_FRAC);
 }
 
 // ═══ 第39弾 (オーナー合意): 航行モード (重点) 5つ — 自艦も敵も同じ効果 ═══
@@ -5181,9 +5191,10 @@ class Ship {
                 const _R = Math.max(visClose(this), myDetectRange), _me = this;
                 const _see = (x, y) => { const d = Math.hypot(x - _me.x, y - _me.y); return d < _R && losReach(_me.x, _me.y, Math.atan2(y - _me.y, x - _me.x), _R) >= d; };
                 const _vm = visualNegative(_sa, _see, _see(player.x, player.y));
-                if (_vm) { recordMissSa(_sa, _vm); this._B.guess = false; }
+                if (_vm) { recordMissSa(_sa, _vm); this._B.guess = false; searchMark(this, _vm.x, _vm.y, _vm.r, true); } // 第219弾: 「見たが居なかった」も不在レイヤーへ
             }
             if (_listen && this.type !== 'fighter' && (_frameCount + this.uid) % 120 < 60) searchMark(this, this.x, this.y, sigRange * SEARCH_HEAR_FRAC); // 第39弾: 聴いた範囲を覚える
+            if (_listen && this.type !== 'fighter' && (_frameCount + this.uid) % 120 === 0) searchMarkSensors(this, 'enemy'); // 第219弾: 聴音局・哨戒機の範囲も (2秒ごとのまとめ打ち)
             if (_listen) {
                 const _lo = _sa.obs[_sa.obs.length - 1];
                 if (!_lo && !_sa.ping) _sa.ana = 0;
@@ -9882,6 +9893,7 @@ function updateVisualNegatives() {
         }
         if (!m) continue;
         recordMiss(sid, m);
+        searchMark(player, m.x, m.y, m.r, true); // 第219弾: 「見たが居なかった」も不在レイヤーへ (肯定の聴取記録とは混ぜない)
         const id = _sigIdent[sid]; if (id && !id.sure) id.L = Math.max(-4, (id.L || 0) - 0.5); // 居ない所を指す信号は 艦影の見込みも下がる
         sfx('det_visual_negative'); logMessage('AI: SIG-' + sigNo(sid) + ' の推定位置を目視 — 何も居ない。位置が違うか艦影ではなかった (この円を除外・' + (sa._vnN) + '回目)', 'system-msg');
     }
@@ -21538,6 +21550,7 @@ function _comPilotStep0() {
     if (lockedSignalId && sigs[lockedSignalId] && !sigs[lockedSignalId].relay) { c.heardBand = sigs[lockedSignalId].sensor; c.heardBandF = now; }
     // 第39弾: 聴いた範囲を覚える (敵と同じ searchMark)
     searchMark(player, player.x, player.y, passiveRange() * SEARCH_HEAR_FRAC);
+    searchMarkSensors(player, 'player'); // 第219弾: 聴音局・哨戒機の聴いている範囲も (COMティック=2秒ごとのまとめ打ち)
     // 第41弾: 聴く帯域は敵と同じ comBandPlan (相手を聞いた帯域を先頭・霧で弱まりにくい順・聞こえなければ聴き回す)。10秒ごとに見直す
     if (now - (c.bpF || -1e9) >= 600) {
         c.bpF = now;
