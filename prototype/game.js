@@ -387,7 +387,7 @@ function searchNext(who, x, y) {
     // 第62弾 (オーナー「COMが同じ所をぐるぐる回る」): 一度選んだ行き先は、着く(＝聴いた)か90秒たつまで変えない。
     // 旧: 呼ばれるたびに選び直し、聴いたマスの更新と乱数で1万5千u離れたマスの間を24秒ごとに往復していた (自機COM・敵とも同じ関数)
     const sg = who._sGoal;
-    if (sg && _frameCount - sg.f < 5400) {
+    if (sg && _frameCount - sg.f < THEORY.memory.goalHold) { // 第228弾: 保持の長さは THEORY (根っこ) へ集約
         const gi = Math.max(0, Math.min(SEARCH_N - 1, Math.floor((sg.x - (MAP_CX - SEARCH_N * SEARCH_CELL / 2)) / SEARCH_CELL))), gj = Math.max(0, Math.min(SEARCH_N - 1, Math.floor((sg.y - (MAP_CY - SEARCH_N * SEARCH_CELL / 2)) / SEARCH_CELL)));
         if (Math.min(SEARCH_FORGET, _frameCount - m[gj * SEARCH_N + gi]) >= SEARCH_FORGET * 0.5 && Math.hypot(sg.x - x, sg.y - y) >= SEARCH_CELL) return { x: sg.x, y: sg.y };
     }
@@ -1611,9 +1611,9 @@ function actorFallbackWeapon(s) {
 }
 function actorPickWeapon(s, dist) {
     const has = (w) => actorHas(s, w) && actorAmmo(s, w);
-    const mOk = has('missile') && dist > 250 && dist < actorWeaponRange(s, 'missile') * 0.9;
+    const mOk = has('missile') && dist > THEORY.weapon.pick.missileMin && dist < actorWeaponRange(s, 'missile') * 0.9; // 第228弾: 間合いの知識は THEORY へ集約
     const kOk = has('kinetic') && dist < actorWeaponRange(s, 'kinetic') * 0.9;
-    const bOk = actorHas(s, 'beam') && (dist >= 2500 || (!has('missile') && !has('kinetic'))); // 近距離ではビームを選ばない (10秒チャージの間 艦首が向かず撃てない)
+    const bOk = actorHas(s, 'beam') && (dist >= THEORY.weapon.pick.beamLong || (!has('missile') && !has('kinetic'))); // 近距離ではビームを選ばない (10秒チャージの間 艦首が向かず撃てない)
     return mOk && actorReady(s, 'missile') ? 'missile' : kOk ? 'kinetic' : bOk && actorReady(s, 'beam') ? 'beam' : mOk ? 'missile' : bOk ? 'beam' : null;
 }
 const LOCK_PERSIST_BASE = 2.0; // ロック保持倍率 (visionRadius × N)
@@ -8298,7 +8298,7 @@ function comEngineEval(P, sit, env) {
                 exh += m / W.dirs.length;
             }
             const tb = ENGINE_TRAIL[E];
-            const trail = tb ? (TRAIL_LIFE[tb] / 5400) * T * (tb === 'higgs' ? 0.25 + 0.55 * h : 0.6) * (stance === 'silent' ? 0.7 : 1) : 0;
+            const trail = tb ? (TRAIL_LIFE[tb] / THEORY.memory.wakeLife) * T * (tb === 'higgs' ? 0.25 + 0.55 * h : 0.6) * (stance === 'silent' ? 0.7 : 1) : 0; // 第228弾: 正規化の分母 (痕跡の寿命) は THEORY へ集約
             spd += v * w / wsum; ex += exh * w / wsum; tr += trail * w / wsum;
         }
         const ag = engineAgility(E), agi = (ag.accel - 1) * 0.3 + (ag.turn - 1) * 0.4;
@@ -10408,7 +10408,7 @@ function enemyHackAI(e) {
     const now = _frameCount, hitAgo = e._lastHitF ? now - e._lastHitF : 1e9;
     const _orH = _oppRead(beliefViewE(e).opp(), e.personality || PERS_DEF); // 第222弾: 相手モデル (ドローン目撃の蓄積・空母仮説)
     const r = hackDecide({ side: 'e', H: hackPower('enemy', e), sa: e._sa, x: e.x, y: e.y, credible: (e._B.fresh || 0) >= 0.15, engaged: e.aiState === 'combat',
-        fleeing: !!(e._hiding || e._hideT > 0) || (e.hp / e.maxHp < 0.4 && hitAgo < 900), foeDrones: playerDrones.filter(d => d.hp > 0 && (d.type === 'attack' || d.type === 'mech' || d.type === 'scout')).length, foeDroneHist: _orH.drones, foeCarrier: _orH.cls === 'carrier', incomingMsl: !!incomingMissile(e, true), probeOk: hitAgo > 1800 && now - (e._pingHeardF ?? -1e9) > 1800, probeCdOk: now - (e._probeF ?? -1e9) > 10800 });
+        fleeing: !!(e._hiding || e._hideT > 0) || (e.hp / e.maxHp < 0.4 && hitAgo < 900), foeDrones: playerDrones.filter(d => d.hp > 0 && (d.type === 'attack' || d.type === 'mech' || d.type === 'scout')).length, foeDroneHist: _orH.drones, foeCarrier: _orH.cls === 'carrier', incomingMsl: !!incomingMissile(e, true), probeOk: hitAgo > 1800 && now - (e._pingHeardF ?? -1e9) > 1800, probeCdOk: now - (e._probeF ?? -1e9) > THEORY.sense.probeInterval }); // 第228弾: 探りの間隔は THEORY へ集約 (自機側と同一規則)
     if (r) { if (r.probe) { e._probeF = now; comThinkEvent('e', '探りのハック波 — 侵入はできないが応答で相手の位置を暴く', 'e' + e.uid); } fireHackPulse(e, r.ang, r.eff); }
 }
 // 自機COMのハック (同じ基準。追跡中の信号が艦影らしい時)
@@ -10419,7 +10419,7 @@ function comHackStep() {
     const engaged = enemies.some(q => q.hp > 0 && q.type !== 'fighter' && q.inVision) || (playerHitLog.length && _frameCount - playerHitLog[playerHitLog.length - 1].f < 600);
     const _orH = _oppRead(beliefViewP(lockedSignalId).opp(), (_com && _com.pp) || PERS_DEF); // 第222弾: 相手モデル (敵と同じ読み方)
     const r = hackDecide({ side: 'p', H: hackPower('player'), sa, x: player.x, y: player.y, credible: !!idn && !idn.low && !(idn.p !== undefined && idn.p < 0.5), engaged,
-        fleeing: !!(_com && _com.mode === 'hide') || (player.hp / player.maxHp < 0.4 && hitAgo < 900), foeDrones: enemies.filter(q => q.hp > 0 && q.type === 'fighter').length, foeDroneHist: _orH.drones, foeCarrier: _orH.cls === 'carrier', incomingMsl: !!incomingMissile(player, false), probeOk: hitAgo > 1800 && playerExposureLevel < 2, probeCdOk: !_com || now - (_com.probeF ?? -1e9) > 10800 });
+        fleeing: !!(_com && _com.mode === 'hide') || (player.hp / player.maxHp < 0.4 && hitAgo < 900), foeDrones: enemies.filter(q => q.hp > 0 && q.type === 'fighter').length, foeDroneHist: _orH.drones, foeCarrier: _orH.cls === 'carrier', incomingMsl: !!incomingMissile(player, false), probeOk: hitAgo > 1800 && playerExposureLevel < 2, probeCdOk: !_com || now - (_com.probeF ?? -1e9) > THEORY.sense.probeInterval }); // 第228弾: 探りの間隔は THEORY へ集約 (敵側と同一規則)
     if (!r) return;
     if (capMode) { const cg = capHackGate(r, hackPower('player')); if (cg && cg.wait) return; if (cg && cg.id === 'hold') { if (_com) _com.probeF = now; comThinkEvent('p', '艦長の判断: ハック波は撃たない'); return; } }
     if (r.probe && _com) _com.probeF = now;
@@ -15617,7 +15617,7 @@ function sitAug(F, A) {
     const x = who ? who.x : 0, y = who ? who.y : 0;
     S.fog = F.hHere; S.storm = getStormIntensity(x, y); S.thermal = getThermalIntensity(x, y); S.rock = getDebrisIntensity(x, y); S.wreck = getWreckIntensity(x, y); S.badZone = S.storm >= 0.3 || S.wreck >= 0.3;
     S.hitS = F.hitAgo / 60; S.quietS = F.quietF / 60; S.expo = F.exposure; S.msl = F.mslIn; S.est = F.estAng !== null; S.estRatio = F.estR < 1e8 && F.estD < 1e8 ? F.estR / Math.max(1, F.estD) : 9;
-    S.early = now < 10800; S.hpF = F.hpF;
+    S.early = now < THEORY.time.earlyUntil; S.hpF = F.hpF; // 第228弾: 序盤の境界は THEORY (根っこ) へ集約
     const mob = {}; if (side === 'p') { for (const d of playerDrones) if (d.hp > 0) mob[d.type] = (mob[d.type] || 0) + 1; } else for (const f of enemies) if (f.type === 'fighter' && f._home === who && f.hp > 0 && !f._dying) { const k = _eCtrlKind(f); mob[k] = (mob[k] || 0) + 1; }
     S.mob = mob; S.drones = Object.values(mob).reduce((a, b) => a + b, 0) + (A ? ['scout', 'attack', 'build'].filter(k => A.have(k)).length : 0);
     S.eDrones = side === 'p' ? enemies.some(f => f.type === 'fighter' && f.hp > 0 && !f._dying) : playerDrones.some(d => d.hp > 0 && (d.type === 'attack' || d.type === 'mech' || d.type === 'scout'));
@@ -18068,6 +18068,79 @@ function updateHuntTension() {
 const BANDS = ['heat', 'optic', 'em', 'higgs'];
 const BAND_LABEL = { heat: 'HEAT', optic: 'OPTIC', em: 'EM', higgs: 'HIGGS' };
 const BAND_JP = { heat: '熱', optic: '光学', em: '電磁波', higgs: 'ヒッグス' };
+// ═══ 第228弾 (木の構造・作り込みフェーズ1「根っこ」): 基本理論の知識ストア THEORY ═══
+//   根っこ = このゲームの基本理論を記憶・理解しておく部分 (tree-structure.md)。
+//   理論は従来、重み関数や条件式の数値に埋め込まれて散在していた (＝知識ではなく癖)。
+//   ここには「既存コードから抽出した値だけ」を置く。新規の数値は作らない:
+//   定数があるものはその定数への参照、式に埋まっていたものは名前を付けてここへ移した。
+//   幹 (原則) や年輪 (思考レイヤー) は今後ここを参照する。挙動を変える場所ではない。
+const THEORY = {
+    // ── 勝利の理論: 勝敗は敵艦の全滅 (撃沈) で決まる。S&D では全コロニーのハックでも決まり、
+    //    逆に全コロニーを敵に占有されると敗北する。ノード制圧は勝敗に直接つながらず、
+    //    聴音網と資源 (SCR・資材) を与える (勝利条件チェックは gameLoop 内)。
+    win: {
+        coloniesPerMatch: COLONY_COUNT, // モードごとのコロニー数 { br: 5, sd: 5 }
+        nodeScr: NODE_SCR,              // ノード制圧のスコア 150 SCR
+        coloniesOwned,                  // 占有コロニー数を数える既存関数への参照
+    },
+    // ── 感知の理論: 聴くのは4帯域。同調した帯域の方位記録が溜まると最小二乗で位置が締まる。
+    //    聴音局 (制圧ノード/コロニー/哨戒機) が観測点を増やす。撃てば・動けば自分の信号も出る。
+    sense: {
+        bands: BANDS,                   // ['heat', 'optic', 'em', 'higgs']
+        bandJp: BAND_JP,
+        lvRange: LV_RANGE,              // 感度レベルごとの受信距離倍率 [1, 0.7, 1, 1.35]
+        sensorConfig,                   // 帯域ごとの閾値・信号式
+        passiveBase: PASSIVE_BASE,      // パッシブ受信の最大距離 15000u
+        engineMain: ENGINE_MAIN,        // 機関ごとの主帯域 (熱核=熱 / パルス=EM / ヒッグス=霧 / 光子=光)
+        engineTrail: ENGINE_TRAIL,      // 痕跡を残す帯域 (熱核=熱 / ヒッグス=霧。他は残さない)
+        postRange: { node: NODE_RELAY_RANGE, colony: COLONY_RELAY_RANGE, scout: SCOUT_LISTEN_R }, // 聴音局の耳の半径 6000/8000/6000
+        probeInterval: 10800,           // 探りのハック波の再使用間隔 3分 — enemyHackAI と comHackStep の両方に同じリテラルで埋まっていた同一規則を集約
+    },
+    // ── 記憶の理論: 霧は記録する。航跡・方位記録・探索の記憶はそれぞれ寿命を持ち、古い記録は捨てる。
+    memory: {
+        wakeLife: WAKE_LIFE,            // 霧の痕跡 90秒 (5400f)
+        trailLife: TRAIL_LIFE,          // 帯域別の痕跡寿命 { higgs: 5400, heat: 3600 }
+        trailSettle: TRAIL_SETTLE,      // 新しい側の8秒 (480f) は読めない
+        tmaKeep: TMA_KEEP,              // 方位記録の保持 90秒 (5400f)
+        searchForget: SEARCH_FORGET,    // 探索記憶の忘却 3分 (10800f)
+        searchCell: SEARCH_CELL,        // 探索マスの大きさ 3000u
+        hearFrac: SEARCH_HEAR_FRAC,     // 聴いた範囲 = 受信距離 × 0.45
+        goalHold: 5400,                 // 索敵の行き先は90秒保持する — searchNext の式に埋まっていた
+    },
+    // ── 兵装の理論: 射程は実弾800/ミサイル2200/ビーム8000 (第13弾で1表に統一済み)。
+    //    ビームは弾数無限だが溜めが長く近距離では選ばない。ミサイルには最小射距離がある。
+    weapon: {
+        range: WEAPON_RANGE,
+        fireArc: WEAPON_FIRE_ARC,       // 射角: 実弾±150° / ミサイル±45° / ビーム±10°
+        ammoPerSlot: AMMO_PER_SLOT,     // 積載1枠 = 実弾48斉射 / ミサイル3発
+        pick: { missileMin: 250, beamLong: 2500 }, // actorPickWeapon の式に埋まっていた間合いの知識 (ミサイルの最小射距離 / ビームを使う遠距離)
+        rangeOf: (w) => WEAPON_RANGE[w] || 800,
+    },
+    // ── 艦種の理論: 攻撃型=耐久と火力 / 潜航型=速く静かだが脆い / 空母型=遅く重いが積載と管制で勝つ。
+    ship: {
+        hpBase: PLAYER_HP_BASE,         // { assault: 3500, stealth: 700, carrier: 2500 }
+        maxSpeedMult: SHIP_MAX_SPEED_MULT,
+        accelRate: SHIP_ACCEL_RATE,
+        turnSlow: SHIP_TURN_SLOW,
+        dyn: SHIP_DYN,
+        holdCap: HOLD_CAP,              // 積載枠 { carrier: 16, assault: 10, stealth: 6 }
+        drones: SHIP_DRONES,            // 艦種ごとに積めるドローン
+    },
+    // ── 拠点と経済の理論: ノードは「耳」 (制圧5秒・聴音6000u・資材+4・150SCR)。
+    //    コロニーは「港」 (ハック8秒・聴音8000u・補給は1回だけ/復活300秒・演算力+0.6)。
+    //    資材はノード制圧と回収で入り、ドローンの組み立てで出ていく。
+    base: {
+        node: { capR: NODE_CAP_R, capTime: NODE_CAP_TIME, relayRange: NODE_RELAY_RANGE, matGain: NODE_MAT_GAIN, scr: NODE_SCR, intelBuff: NODE_INTEL_BUFF, intelBuffMax: NODE_INTEL_BUFF_MAX },
+        colony: { hackR: COLONY_HACK_R, hackTime: COLONY_HACK_TIME, relayRange: COLONY_RELAY_RANGE, resupplyR: RESUPPLY_R, resupplyTime: RESUPPLY_TIME, resupplyCD: COLONY_RESUPPLY_CD, supplyRenew: SUPPLY_RENEW, supplyMat: COLONY_SUPPLY_MAT, intelPeriod: COLONY_INTEL_PERIOD, computePer: ANA_COLONY },
+        matPerSlot: MAT_PER_SLOT,       // 積載1枠 = 資材2個
+        droneSpec: DRONE_SPEC,          // ドローンの枠・資材・建造時間・寿命・耐久
+    },
+    // ── 時間の理論: 序盤は「まだ何も見えていない」時間。境界は3分。
+    //    (tc_early_listen の「序盤」は別の90秒を指す — 未形式化として CLAUDE.md に記録)
+    time: {
+        earlyUntil: 10800,              // 序盤の境界 3分 — sitAug の S.early に埋まっていた
+    },
+};
 // パッシブ受信の到達距離 (方位ウェッジ生成・受信レベル表示で共通)
 function passiveRange() {
     // 第39弾: 受信の最大距離 15000u × 探知重視 × 部品 × 居る場所の霧 (敵と同じ式)
