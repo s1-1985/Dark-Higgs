@@ -15789,12 +15789,13 @@ function matchOutlook(side, who, S, prev, now) {
 //   各原則は { id, jp (原則文), theory (THEORY の節への紐付け), eval(ctx) → { str: 0..1, why, aim? } }。
 //   eval が読むのは THEORY と信念側の材料 (ctx = { side, who, S, J, O (見通し), P, now }) だけ。
 //   原則は「規定」であって判断そのものではない: 強さと根拠を返すところまでで、姿勢への落とし込みは対応表が担う。
-// 第233弾: 情報のない収集期には、公開マップ上の自軍未保有拠点も「情報を得る道」として読む。
+// 第233弾: 情報のない序盤には、公開マップ上の自軍未保有拠点も「情報を得る道」として読む。
+// 収集期全体に適用した初案では狩人の交戦が消失した。時間原則の序盤の窓に限定する。
 // 自軍保有か否か・既知の拠点座標・既存 CAP_RANGE のみ。相手が占有した真値は区別しない。
 function trunkBaseOpportunity(c) {
     const { S, J, who, now, side } = c;
     const out = { cols: 0, nodes: 0 };
-    if (!who || now >= THEORY.time.gatherUntil || S.seen || S.est || S.expo > 0 || S.ammoOut ||
+    if (!who || now >= THEORY.time.earlyUntil || S.seen || S.est || S.expo > 0 || S.ammoOut ||
         (J.phase !== 'quiet' && J.phase !== 'search')) return out;
     const me = side === 'p' ? 'player' : 'enemy';
     const near = q => q.owner !== me && Math.hypot(q.x - who.x, q.y - who.y) < CAP_RANGE;
@@ -15818,7 +15819,7 @@ const PRINCIPLES = [
         else { str = 0.95; why = '相手の推定が無い — 決戦の材料が無い'; }
         if (!S.oppCls) str = Math.min(1, str + 0.08); // 艦種の仮説すら無い間は情報をさらに求める
         const B = c.baseOpp;
-        // 情報不足の強さは変えない。聴音網を広げられる静穏な収集期だけ、取得の道を明示する。
+        // 情報不足の強さは変えない。聴音網を広げられる静穏な序盤だけ、取得の道を明示する。
         if (B && (B.cols || B.nodes)) return { str, why: why + '・自軍未保有の聴音拠点を広げられる', aim: 'expand' };
         return { str, why };
     } },
