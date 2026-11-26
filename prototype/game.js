@@ -21349,12 +21349,13 @@ function comReactItems(c, P, hpF, retreating) {
 //   選択はAIの上位の方針として一定時間効く (COMの目的に上書きされない)。画面に出す見込みは「AIの推定」から作る (真の状態・先読みは使わない)
 var capMode = false, _capDec = null, _capRes = {}, _capKick = false, _capLast = {}, _capLastT = 0, _capStats = { asked: 0, auto: 0 };
 const CAP_SLOW = 0.08, CAP_LIMIT = 7;
+var _capSlowOff = false; // 第227弾: 選択肢の表示中に人が倍速を変えたら、その決断の間は超スローを解いて新しい倍速を即時に効かせる
 function toggleQte(on) { // メニューのQTE (艦長の判断) のオン・オフ — COM対戦中だけ
     if (!comDemo) return;
     capMode = on === undefined ? !capMode : !!on;
     if (comCfg) comCfg.cap = capMode;
     if (!capMode && _capDec) capChoose(_capDec.spec.rec, true); // 出ている決断は推奨で閉じる
-    if (!capMode) { _capRes = {}; const b = document.getElementById('cap-dec'); if (b) b.classList.remove('on'); if (_com) { _com.capHoldUntil = 0; _com.capAvoidUntil = 0; _com.standUntil = 0; _com.noFireUntil = 0; } }
+    if (!capMode) { _capRes = {}; _capSavedSpeed = null; const b = document.getElementById('cap-dec'); if (b) b.classList.remove('on'); if (_com) { _com.capHoldUntil = 0; _com.capAvoidUntil = 0; _com.standUntil = 0; _com.noFireUntil = 0; } } // 第227弾: QTEを切ったら倍速の保存も捨てる
     _syncQteBtn();
     uiToast('QTE (艦長の判断): ' + (capMode ? 'ON — 要所で選択を求められる' : 'OFF — AIが全部決める'), false);
 }
@@ -21384,7 +21385,7 @@ function capAsk(key, spec, cd) { // null=聞かない (AIが続ける) / {wait:t
 function capOpen(key, spec) {
     let box = document.getElementById('cap-dec');
     if (!box) { box = document.createElement('div'); box.id = 'cap-dec'; document.body.appendChild(box); }
-    _capDec = { key, spec, el: 0 }; _capStats.asked++;
+    _capDec = { key, spec, el: 0 }; _capStats.asked++; _capSlowOff = false; // 第227弾: 決断ごとに超スローへ戻す
     const rec = spec.rec;
     box.classList.toggle('cap-esc', !!spec.compass);
     if (spec.compass) { // 第200弾: 緊急離脱 — 8方向の矢印 (中央は自艦の艦首)
@@ -21498,7 +21499,10 @@ function capChoose(id, auto) {
     sfxUI('ui_close');
 }
 // 第195弾: QTE (AI操艦) 中、敵と思われる新しい接触 (見えた敵・艦影らしい信号。囮・ビーコンに騙されている場合も含む) があれば倍速を1倍に戻す
+// 第227弾 (オーナー「倍速が落ちる頻度を下げたい・落ちたら元に戻したい」): 信号は識別が溜まるまで落とさない (囮・ビーコン・自然の信号は識別の途中で艦影40%未満に落ちて外れる。実艦の信号は数秒で艦影寄りに固まる)。落とした時は直前の倍速を保存し、接敵が落ち着いたら自動で戻す (capSpeedRestore)。人の手動変更が入ったら保存は破棄され手動が正になる (setGameSpeed 側)。強制低下の直後は CAP_WATCH_CD の間、再低下しない
 var _capSeen = {}, _capW = 0;
+var _capSavedSpeed = null, _capSaveF = -1e9, _capWatchCDUntil = -1e9; // 第227弾: 強制低下の保存 (倍速・時刻) と再発火抑制の期限
+const CAP_WATCH_CD = 1800, CAP_RESTORE_F = 2700; // 第227弾: 再低下の抑制 30秒 / 自動復帰までの間隔 45秒 (どちらもゲーム内フレーム)
 function capContactWatch() {
     if (!capMode || !comDemo || !player || player.hp <= 0 || sectorCleared || ((_capW = (_capW || 0) + 1) % 8)) return;
     let hit = null;
@@ -21507,14 +21511,28 @@ function capContactWatch() {
         if (_capSeen[sid]) continue;
         if (_srcKnown[sid] || /^C-/.test(sid)) continue; // 海図に載せた発信元・輸送船は敵と思わない (囮・ビーコンは敵と思う。第215弾・指示書A T4: 旧は真値で自然・コンテナも即座に除いていた → 信念 (下の識別判定) で外れるまでは敵の可能性として扱う)
         const d = identInfo(sid), idi = _sigIdent[sid]; if ((idi && idi.sure && d.p < 0.5) || (d.known && d.p < 0.4)) continue; // 第215弾: 正体を確認した信号・識別で艦影40%未満の信号は敵と思わない (dud と同じ基準)
+        if (!d.known) continue; // 第227弾: まだ識別が溜まっていない信号では落とさない (見た瞬間に落とすと囮・ビーコン・自然の信号の全部に反応してしまう。識別が進めば上の条件で外れるか、艦影寄りに固まって初めて落とす)
         _capSeen[sid] = 1; hit = hit || ('SIG-' + (sigNo(sid) || '?') + ' を受信');
     }
-    if (hit && gameSpeed !== 1) { setGameSpeed(1); uiToast('◈ 敵と思われる接触 (' + hit + ') — 倍速を1倍に戻した', true); comThinkEvent('p', '敵と思われる接触 — 倍速を1倍に戻した'); }
+    if (hit && gameSpeed > 1 && _frameCount >= _capWatchCDUntil) { _capSavedSpeed = gameSpeed; _capSaveF = _frameCount; _capWatchCDUntil = _frameCount + CAP_WATCH_CD; setGameSpeed(1, true); uiToast('◈ 敵と思われる接触 (' + hit + ') — 倍速を1倍に戻した', true); comThinkEvent('p', '敵と思われる接触 — 倍速を1倍に戻した'); }
+}
+// 第227弾: 強制低下からの自動復帰。gameLoop から毎フレーム呼ばれる (保存が無ければ即戻る)。
+//   復帰の条件: 低下から CAP_RESTORE_F 過ぎ、かつ敵が目視内にいない。途中で人が倍速を変えていたら保存は消えているので何もしない
+function capSpeedRestore() {
+    if (_capSavedSpeed === null) return;
+    if (!capMode || !player || player.hp <= 0 || sectorCleared) { _capSavedSpeed = null; return; }
+    if (_frameCount - _capSaveF < CAP_RESTORE_F) return;
+    if (enemies.some(e => e.hp > 0 && !e._dying && e.inVision)) return; // まだ見えている間は戻さない
+    const v = _capSavedSpeed; _capSavedSpeed = null;
+    setGameSpeed(v, true);
+    const lb = v === 0.5 ? '0.5x' : v + 'x';
+    uiToast('◈ 接触が落ち着いた — 倍速を ' + lb + ' に戻した', false); comThinkEvent('p', '接触が落ち着いた — 倍速を ' + lb + ' に自動で戻した');
 }
 function capTick(dt) { // 実時間 (一時停止中は数えない)。gameLoop から毎フレーム
     capContactWatch();
     if (!_capDec) return;
     if (!player || player.hp <= 0 || sectorCleared) { const b = document.getElementById('cap-dec'); if (b) b.classList.remove('on'); _capDec = null; return; }
+    if (userPaused || gamePaused || _uiPause || _orientPaused || _draft) return; // 第227弾: 止めている間は制限時間を進めない (gameLoop からは通常その状態で呼ばれないが、凍結をここでも保証する)
     _capDec.el += dt;
     const left = Math.max(0, CAP_LIMIT - _capDec.el), bar = document.querySelector('#cap-dec .cap-bar'), sec = document.querySelector('#cap-dec .cap-sec'), bx = document.getElementById('cap-dec');
     if (bar) bar.style.width = (100 * left / CAP_LIMIT) + '%';
@@ -21525,8 +21543,9 @@ function capTick(dt) { // 実時間 (一時停止中は数えない)。gameLoop 
 document.addEventListener('keydown', (ev) => {
     if (!_capDec) return;
     const k = ev.key;
-    if (k >= '1' && k <= '9') { const o = _capDec.spec.opts[+k - 1]; if (o) capChoose(o.id, false); }
-    else if (k === ' ' || k === 'Enter') capChoose(_capDec.spec.rec, false);
+    if (k === ' ') { togglePause(); ev.preventDefault(); ev.stopImmediatePropagation(); return; } // 第227弾: Space は一時停止 (旧: 推奨の実行)。止めている間は制限時間も進まない (capTick の凍結)。もう一度押せば再開
+    if (k >= '1' && k <= '9') { const o = _capDec.spec.opts[+k - 1]; if (o) capChoose(o.id, false); else return; }
+    else if (k === 'Enter') capChoose(_capDec.spec.rec, false);
     else return;
     ev.preventDefault(); ev.stopImmediatePropagation();
 }, true);
@@ -22691,7 +22710,7 @@ function startComDemo() {
     saveComCfg();
     document.getElementById('com-overlay').classList.add('hidden');
     comDemo = true;
-    capMode = !!comCfg.cap; _capSeekUntil = 0; _capPlanLast = -1e9; _syncQteBtn(); _capDec = null; _capRes = {}; _capLast = {}; _capStats = { asked: 0, auto: 0 }; _com = null;
+    capMode = !!comCfg.cap; _capSeekUntil = 0; _capPlanLast = -1e9; _syncQteBtn(); _capDec = null; _capRes = {}; _capLast = {}; _capStats = { asked: 0, auto: 0 }; _com = null; _capSavedSpeed = null; _capSaveF = -1e9; _capWatchCDUntil = -1e9; _capSlowOff = false; // 第227弾: 倍速の保存・再低下抑制・超スロー解除も試合ごとに消す
     { const b = document.getElementById('cap-dec'); if (b) b.classList.remove('on'); }
     document.body.classList.add('com-demo');
     document.querySelectorAll('.enemy-select-btn').forEach(b => b.classList.toggle('active', b.dataset.type === comCfg.enemy));
@@ -22707,7 +22726,7 @@ function startComDemo() {
     _gen++; _useCache.p = {}; _useCache.e = {};
     withSimRng(() => startGame(comCfg.ship));
     toggleHiggsView(capMode ? false : !comCfg.higgsView); // AI操艦では霧の暗幕を外さない (相手が見えてしまう)
-    logMessage(capMode ? 'AI操艦: 自機はAIが操る。結果に効く場面で艦長の判断が求められる (1〜4キー / タップ・Spaceで推奨)' : 'COM対戦デモ: 自機もCOMが操作する (観戦のみ)。メニューで ヒッグス表示 / 思考ログ を切替、終わる時は「COM対戦を終えてロビーへ」', 'system-msg');
+    logMessage(capMode ? 'AI操艦: 自機はAIが操る。結果に効く場面で艦長の判断が求められる (数字キー / タップで選択・Enterで推奨・Spaceで一時停止。表示中でも倍速ボタンは即時に効く)' : 'COM対戦デモ: 自機もCOMが操作する (観戦のみ)。メニューで ヒッグス表示 / 思考ログ を切替、終わる時は「COM対戦を終えてロビーへ」', 'system-msg');
 }
 // デモは保存しないので、ページを読み直せば出撃前の状態 (戦歴・クレジット) に戻る
 function exitComDemo() { location.reload(); }
@@ -23297,7 +23316,7 @@ function gameLoop() {
         if (_hitStop > 0) _hitStop--;
         else if (!gamePaused && !userPaused && !_uiPause && !_orientPaused && !_draft) { // 第32弾: 部品を選んでいる間は止める
             // 第22弾: 倍速 = 1フレームにn回ロジックを進める。重くてフレームが詰まる時は打ち切る (固まらない)
-            _speedAcc += _capDec ? CAP_SLOW : gameSpeed; // 第182弾: 艦長の判断を待つ間は超スロー
+            _speedAcc += (_capDec && !_capSlowOff) ? CAP_SLOW : gameSpeed; // 第182弾: 艦長の判断を待つ間は超スロー (第227弾: 表示中に人が倍速を変えたら超スローを解いて即時に効かせる)
             const t0 = performance.now();
             if (_capDec) capTick(Math.min(0.1, (t0 - (_capLastT || t0)) / 1000));
             _capLastT = t0;
@@ -23308,6 +23327,7 @@ function gameLoop() {
                 if (!player || player.hp <= 0 || gamePaused) { _speedAcc = 0; break; }
             }
         }
+        if (_capSavedSpeed !== null) capSpeedRestore(); // 第227弾: 接敵で強制低下した倍速の自動復帰
         renderWorld();
         if ((_rcTick = (_rcTick + 1) & 15) === 0) updateRecenterChip(); // 第72弾: 一時停止中でも更新する
     } catch (err) {
@@ -24009,8 +24029,9 @@ function buyUpgrade(type) {
 });
 
 // ── ゲームスピードトグル ──────────────────────────────────────
-function setGameSpeed(v) {
+function setGameSpeed(v, forced) { // 第227弾: forced=true は接敵ウォッチの強制低下と自動復帰 (人の操作ではない)
     gameSpeed = GAME_SPEEDS.indexOf(v) >= 0 ? v : 1; _speedAcc = 0; _gameSpeedChanged();
+    if (!forced) { _capSavedSpeed = null; if (_capDec) _capSlowOff = true; } // 第227弾: 人の変更が正 — 自動復帰の保存は破棄する。選択肢の表示中なら超スローを解いて即時に効かせる
     const lb = gameSpeed === 0.5 ? '0.5x' : gameSpeed + 'x';
     const sp = document.querySelector('#btn-game-speed span'); // ラベルだけ (旧: textContent で丸ごと置換しアイコンが消えていた)
     if (sp) sp.textContent = 'SPD:' + lb;
@@ -24132,6 +24153,7 @@ let _uiPause = false; // 第172弾: メニュー・デバッグパネルが開�
 let userPaused = false;
 function togglePause(on) {
     userPaused = on === undefined ? !userPaused : !!on;
+    if (_capDec) _capLastT = 0; // 第227弾: 再開した瞬間の dt を 0 にして、選択肢の制限時間をポーズの分だけ正確に凍結する
     const b = document.getElementById('btn-pause');
     if (b) { b.classList.toggle('on', userPaused); b.textContent = userPaused ? '▶' : 'Ⅱ'; }
     const ind = document.getElementById('pause-ind');
