@@ -19818,7 +19818,7 @@ function stratFactsE(e) {
     if (e.itemBcn) for (const b in e.itemBcn) if (e.itemBcn[b] > 0) lures.push('bcn_' + b);
     const lk = B.est, near = !!(B.seen || (lk && (B.fresh || 0) > 0.25 && Math.hypot(lk.x - e.x, lk.y - e.y) < 6500));
     const hitAgo = e._lastHitF ? now - e._lastHitF : 1e9, pingAgo = now - (e._pingHeardF ?? -1e9);
-    return { side: 'e', px: e.x, py: e.y, estD: lk && (B.fresh || 0) > 0.25 ? Math.hypot(lk.x - e.x, lk.y - e.y) : 1e9, ammoOut: ammoOutOf(e), raid: !!raidTarget('e', e.x, e.y), cls, relays: ownRelaySites('enemy').length, slotsFree: enemySlotsMax(e) - enemySlotsUsed(e), lures, owned: structures.filter(q => q.type === 'colony' && q.owner === 'enemy'), near,
+    return { side: 'e', who: e, px: e.x, py: e.y, estD: lk && (B.fresh || 0) > 0.25 ? Math.hypot(lk.x - e.x, lk.y - e.y) : 1e9, ammoOut: ammoOutOf(e), raid: !!raidTarget('e', e.x, e.y), cls, relays: ownRelaySites('enemy').length, slotsFree: enemySlotsMax(e) - enemySlotsUsed(e), lures, owned: structures.filter(q => q.type === 'colony' && q.owner === 'enemy'), near,
         expo: hitAgo < 480 ? 3 : (pingAgo < 900 || e.inVision) ? 2 : 0, strong: (e.parts || []).length >= 3, early: comEarlyGather(enemySlotsUsed(e), enemySlotsMax(e), now, e.personality), hpF: e.hp / e.maxHp,
         hasScout: R.scout.stock > 0 || R.scout.live > 0, hasFtr: R.attack.stock > 0 || R.attack.live > 0, hasTech: R.mech.live > 0, hasBuild: R.build.stock > 0, hasBoard: R.boarder.stock > 0 || R.boarder.live > 0,
         canTech: cls === 'carrier' && R.mech.live === 0 && !(e._techT > 0) }; // 第135弾: 自機COMと同じく 作り直せる (旧: 敵は1試合に1回だけ)
@@ -20206,7 +20206,7 @@ function enemyStratStep(e, P) {
                 else if (k) { const bd = k.slice(4); e.itemBcn[bd]--; launchLure('e', 'ship', e.x, e.y, S.site.x, S.site.y, bd); } else S.id = 'ambush';
             }
         }
-        comThinkEvent('e', '戦略「' + jp[S.id] + '」(約' + Math.round((S.until - now) / 60) + '秒)' + (S.site ? ': ' + (S.site.lbl || 'コロニー') + 'の近く (' + _dirTxt(e.x, e.y, (S.spot || S.site).x, (S.spot || S.site).y) + ') ' + (S.id === 'bait' ? 'へ餌を置き、近くで待つ' : S.id === 'guard' ? 'を守る' : 'の霧/岩石帯で待ち伏せる') : ''), 'e' + e.uid);
+        comThinkEvent('e', '戦略「' + jp[S.id] + '」(約' + Math.round((S.until - now) / 60) + '秒)' + (pk.doc ? '・方針「' + (DOC_JP[pk.doc] || pk.doc) + '」' : '') + (S.site ? ': ' + (S.site.lbl || 'コロニー') + 'の近く (' + _dirTxt(e.x, e.y, (S.spot || S.site).x, (S.spot || S.site).y) + ') ' + (S.id === 'bait' ? 'へ餌を置き、近くで待つ' : S.id === 'guard' ? 'を守る' : 'の霧/岩石帯で待ち伏せる') : ''), 'e' + e.uid); // 第230弾: その時の方針も記録
     }
     if (STRAT_SHARED[S.id]) { // 第134弾: 霧に潜む・圧倒して狩る・ドローンで探る・拠点を守る は自機COMと同じ実行 (stratRun)
         const A = stratActorE(e), r2 = stratRun(A, S, now);
@@ -21472,7 +21472,7 @@ function comStratCtx(c, P) {
     const slotsFree = partSlotsMax() - partSlotsUsed();
     const _sa0 = lockedSignalId && _signalAnalysis[lockedSignalId], _est0 = _sa0 && _sa0.fix ? trackEstimate(_sa0, 0) : null;
     const near = !!(_est0 && Math.hypot(_est0.x - player.x, _est0.y - player.y) < 6500) || enemies.some(q => q.hp > 0 && !q._dying && q.inVision); // 第66弾: 相手が近い間は待ち伏せ・罠・Tech建造を始めない (選んでもすぐ中断していた)
-    return { side: 'p', px: player.x, py: player.y, estD: _est0 ? Math.hypot(_est0.x - player.x, _est0.y - player.y) : 1e9, ammoOut: ammoOutOf(player), raid: !!raidTarget('p', player.x, player.y), cls, has, lures, mobile, owned, slotsFree, near, relays: ownRelaySites('player').length, expo: playerExposureLevel, strong: playerSlotsStrong(), early: comEarlyGather(partSlotsUsed(), partSlotsMax(), _frameCount, P), hasBuild: has('build') && !playerDrones.some(d => d.type === 'build' && d.hp > 0), hasBoard: has('boarder') || mobile('boarder'), canTech: cls === 'carrier' && !mobile('mech') && !techBuilding(), hasScout: has('scout') || mobile('scout'), hasFtr: has('attack') || mobile('attack'), hasTech: mobile('mech'),
+    return { side: 'p', who: player, px: player.x, py: player.y, estD: _est0 ? Math.hypot(_est0.x - player.x, _est0.y - player.y) : 1e9, ammoOut: ammoOutOf(player), raid: !!raidTarget('p', player.x, player.y), cls, has, lures, mobile, owned, slotsFree, near, relays: ownRelaySites('player').length, expo: playerExposureLevel, strong: playerSlotsStrong(), early: comEarlyGather(partSlotsUsed(), partSlotsMax(), _frameCount, P), hasBuild: has('build') && !playerDrones.some(d => d.type === 'build' && d.hp > 0), hasBoard: has('boarder') || mobile('boarder'), canTech: cls === 'carrier' && !mobile('mech') && !techBuilding(), hasScout: has('scout') || mobile('scout'), hasFtr: has('attack') || mobile('attack'), hasTech: mobile('mech'),
         flash: has('flash'), noise: has('noise'), smoke: has('smoke'), spray: has('fogspray'), blow: has('fogblow'), hHere: getHiggsIntensity(player.x, player.y) };
 }
 // 第113弾 (段4): 戦略の重みと選び方は 自機COMも敵も同じ関数。x は行為者が「知っていること」: cls, slotsFree, lures[], owned[], near, hasScout/hasFtr/hasTech, hasBuild(砲台を持つ), canTech(空母でTechを作れる), strong(部品3つ以上), hpF, expo(兆候の段階), early(序盤)
@@ -21512,9 +21512,33 @@ function stratExtra(x) {
     { const _oq = side === 'p' ? null : enemies.find(q => q.hp > 0 && q.type !== 'fighter'); const _ov = side === 'p' ? beliefViewP(lockedSignalId).opp() : (_oq ? beliefViewE(_oq).opp() : null); o.oppAmmo = _ov ? _ov.ammo : 1; } // 第222弾 (指示書D 段4): 相手の補給推定 (補給狩りの材料。読めない間は1=満タン扱い)
     return o;
 }
+// ═══ 第230弾 (木の構造・作り込みフェーズ3「年輪と接続」): 戦略選択を幹 (原則・方針) に従属させる ═══
+//   接続は戦略選択のみ: stratWeights の末尾で、現在の方針 (第229弾の読み口 doctrineOf) が推す戦略束に
+//   入る戦略の重みへ適合項を掛ける。方針が無い/未成立の間は適合項なし = 従来どおり。
+//   適合の強さ: mul = 1 + DOC_FIT_MAX × min(1, 方針スコア / 0.5)。方針スコアは「原則の要求の平均の強さ」
+//   (0..1 規模) なので、要求の弱い方針は弱くしか押さない。最大でも ×1.4 の押し上げに留め、束の外の戦略は
+//   減らさない (押し上げのみ)。重み 0 の戦略は復活させない (ゲート・場面・適性の既存の効きは従来どおり)。
+//   束は STRAT_REG の実在IDだけで組む。棚上げ案の束にあった st_aggressive / st_silent / st_lurk /
+//   st_expand / st_patrol は戦略としては実在しないため、意味の近い実在戦略へ置き換えた
+//   (aggressive→board/screen、silent→fogHide と地形潜伏、lurk→ambush 系、expand→gather/net、patrol→outpost/orbit/guard)。
+const DOC_FIT_MAX = 0.4;
+const DOC_STRAT_BUNDLE = {
+    press:   ['push', 'raid', 'board', 'screen', 'hitflee', 'supply_hunt', 'wide_loop'], // 攻勢: 狩る・襲う・仕掛ける
+    veil:    ['fogHide', 'storm', 'heatcloud', 'rock', 'wreck', 'playdead', 'decoyship', 'hop'], // 情報戦: 潜む・紛れる・偽る・地形伝いに詰める
+    expand:  ['gather', 'net', 'salvage', 'tech', 'center', 'outpost', 'orbit', 'guard'], // 収集・占有: 集める・網を広げる・拠点を固める・建てる
+    ambush:  ['ambush', 'trap', 'bait', 'decoyship', 'hop', 'wide_loop'], // 待ち伏せ: 待つ・誘う・奇襲する
+    recover: ['restock', 'fallback', 'fogHide'], // 立て直し: 補給に戻る・拠点へ退く・潜んで癒す
+};
+function docFitFor(x) { // stratWeights / stratPick の x から行為者の現在の方針と適合倍率を引く (幹の読み口 doctrineOf 経由・両陣営対称)
+    if (!x || !x.side) return null;
+    const D = x.side === 'p' ? doctrineOf('p', null) : (x.who ? doctrineOf('e', x.who) : null);
+    if (!D || !D.id || !DOC_STRAT_BUNDLE[D.id]) return null;
+    return { id: D.id, mul: 1 + DOC_FIT_MAX * Math.min(1, Math.max(0, D.score || 0) / 0.5) };
+}
 function stratWeights(P, x) {
     x = Object.assign({}, x, stratExtra(x)); if (window.__stratDbg && x.side) { const sd = window.__stratDbg, cx = (k, v) => { if (v) sd['_' + k] = sd['_' + k] || { n: 0, pos: 0 }, sd['_' + k].n++; }; cx('ammoOut', x.ammoOut); cx('restockSite', x.restockSite); cx('expo>=2', x.expo >= 2); cx('hp<.5', x.hpF < 0.5); cx('expo2&hp<.5', x.expo >= 2 && x.hpF < 0.5); cx('hp<.65&owned', x.hpF < 0.65 && x.owned.length); cx('owned', x.owned.length); cx('estD4500-14000', x.estD < 14000 && x.estD > 4500); cx('salvageSite', x.salvageSite); cx('raid', x.raid); for (const id in STRAT_REG) { const d = sd[id] || (sd[id] = { n: 0, pos: 0 }); d.n++; if (STRAT_REG[id].w({ st: P.stealth ?? 0.4, ca: P.caution ?? 0.4, ag: P.aggression ?? 0.5, gr: P.greed ?? 0.4, early: x.early }, x) > 0) d.pos++; } } const k = { st: P.stealth ?? 0.4, ca: P.caution ?? 0.4, ag: P.aggression ?? 0.5, gr: P.greed ?? 0.4, early: x.early }, w = {};
     for (const id in STRAT_REG) { const R = STRAT_REG[id]; w[id] = R.w(k, x); if (x.near && R.near) w[id] = 0; if (x.side && !skillOn(x.side, 'st_' + id)) w[id] = 0; else if (w[id] > 0 && id !== 'gather') w[id] *= skillAff(P, 'st_' + id); if (w[id] > 0 && x.side) w[id] *= sitWeightMul(x.side, 'st_' + id); } // 第200弾: 場面と発動条件の一致度 // 第147弾: 性格面・新しい軸による適性 (優先度) // 第142弾: 切ったスキルは選ばない // 相手が近い間は 待ち伏せ・餌・罠・Tech建造を始めない
+    const _dfit = docFitFor(x); if (_dfit) for (const id of DOC_STRAT_BUNDLE[_dfit.id]) if (w[id] > 0) w[id] *= _dfit.mul; // 第230弾: 幹の方針への適合 (束に入る戦略だけを押し上げる。0 は復活させない)
     return w;
 }
 function stratPick(P, x, lastId, force) {
@@ -21524,7 +21548,9 @@ function stratPick(P, x, lastId, force) {
     let r = Math.random() * tot, pick = 'gather';
     for (const k of ids) { r -= v[k]; if (r <= 0) { pick = k; break; } }
     if (force && w[force] !== undefined) pick = force; // ヘッドレス検証用
-    return { pick, w };
+    const _df = docFitFor(x), doc = _df ? _df.id : null; // 第230弾: ピックに「その時の方針」を紐付ける (方針別ピックシェアの集計用)
+    if (window.__pickDbg && x && x.side) { const pd = window.__pickDbg, key = x.side + '|' + (doc || 'none'); const cell = pd[key] || (pd[key] = {}); cell[pick] = (cell[pick] || 0) + 1; }
+    return { pick, w, doc };
 }
 function comStratWeights(P, x, hpF) { return stratWeights(P, Object.assign({}, x, { hpF })); }
 function playerSlotsStrong() { return partsOn.length >= 3; }
@@ -21562,7 +21588,7 @@ function comStratStep(c, P, D, hpF, contact, te, lk, r) {
         }
         S = c.st = { id: pk.pick, t0: now, until: now + COM_STRAT_MIN + Math.random() * COM_STRAT_VAR, ph: 'go', hp0: player.hp, x0: player.x, y0: player.y };
         const ws = Object.keys(pk.w).map(k => k + ' ' + pk.w[k].toFixed(1)).join(' / ');
-        comThinkEvent('p', '戦略「' + COM_STRATS[S.id] + '」を選ぶ (約' + Math.round((S.until - now) / 60) + '秒) — 重み ' + ws);
+        comThinkEvent('p', '戦略「' + COM_STRATS[S.id] + '」を選ぶ (約' + Math.round((S.until - now) / 60) + '秒)' + (pk.doc ? '・方針「' + (DOC_JP[pk.doc] || pk.doc) + '」' : '') + ' — 重み ' + ws); // 第230弾: その時の方針も記録
         if (S.id === 'tech') S.until = now + 36000; // 集めて組み立てるので長く (最大10分)
         if (c._capStrat === S.id) { S.cap = true; S.until = Math.max(S.until, now + (S.id === 'tech' ? 72000 : 14400)); } // 第199弾: 艦長が選んだ方針は 成し遂げるか危険になるまで続ける (旧: 他の方針と同じ時間・小さな被弾で終わり、Tech建造は資材集めの途中で時間切れになった)
         c._capStrat = null;
