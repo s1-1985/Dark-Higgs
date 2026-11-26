@@ -5435,10 +5435,12 @@ class Ship {
             }
             // ── 第20弾: 補給 — 弾が尽きたら交戦を離れ、補給所か (自機がハックしていない) コロニーへ。600u以内に8秒留まれば満タン ──
             let _supplyActive = false, _waitS = false;
-            if (!_hideActive && this.type !== 'fighter' && this.ammoM !== undefined) {
+            const _outE = (this.ammoK || 0) <= 0 && (this.ammoM || 0) <= 0; // 第226弾: 両弾薬0なら潜伏中でも補給を先行させる (弾の無い潜伏は意味がない)
+            if ((!_hideActive || _outE) && this.type !== 'fighter' && this.ammoM !== undefined) {
                 const _profS = ENEMY_COMBAT[this.type] || ENEMY_COMBAT.destroyer;
                 // 第48弾: 弾を使う武器を積んでいる時だけ補給を考える (ビームだけの艦は弾の補給が要らない)。ミサイルを積んでいなければ実弾が25%を切った時だけ
       const _needS = supplyNeed({ hasAmmo: (this._fullK || 0) > 0 || (this._fullM || 0) > 0, K: this.ammoK, M: this.ammoM, fullK: this._fullK, fullM: this._fullM, prefKin: this._wpref(_profS.weaponEarly) === 'kinetic' }); // 第139弾: 自機COMと同じ判断
+                if (_needS && _hideActive) { this._hideT = 0; this._hiding = false; comThinkEvent('e', '弾が尽きた → 潜伏を解いて補給へ向かう', 'e' + this.uid); } // 第226弾: 潜伏の解除 (このフレームの _hideActive は残るが、翌フレームから潜伏分岐に入らない)
                 if (_needS && !this._supply) {
                     const ss = supplySite(this.x, this.y, c => c.owner === 'player', c => _colUsed(c, 'E')), best = ss && ss.obj, kind = ss && ss.wait ? 'コロニー(補給の復活待ち)' : 'コロニー';
                     if (best) {
@@ -15532,7 +15534,7 @@ var SKC = {
     st_screen: ['search|contact', 'expo<=2 hpF>=0.5 drones>=1'], st_fogHide: ['escape|hide|contact', 'hpF<=0.75 expo>=1'], st_push: ['contact|search', 'hpF>=0.7 parts>=2 expo<=2'],
     st_raid: ['quiet|search', 'hpF>=0.5 expo<=1'], st_guard: ['quiet|search', 'cols>=1 expo<=1'], st_tech: ['quiet|early|search', 'expo<=0 hpF>=0.6 cls:carrier'],
     st_board: ['contact|combat', 'estD<=12000 hpF>=0.5'], st_trap: ['quiet|search', 'expo<=1 hpF>=0.5'], st_fallback: ['escape|recover', 'hpF<=0.5 cols>=1'],
-    st_restock: ['escape|search|quiet|recover', 'ammo<=0.3'], st_playdead: ['escape', 'hpF<=0.35 expo>=2'], st_storm: ['hide|escape|search', 'expo>=1 hpF<=0.8'],
+    st_restock: ['escape|search|quiet|recover|combat|contact', 'ammo<=0.3'], st_playdead: ['escape', 'hpF<=0.35 expo>=2'], st_storm: ['hide|escape|search', 'expo>=1 hpF<=0.8'], // 第226弾: st_restock の場面に combat|contact を追加 (重みが立つのは ammoOut=弾がほぼ尽きた時だけ。交戦・接触の局面でも候補から落ちないように)
     st_heatcloud: ['hide|escape|search', 'expo>=1 hpF<=0.8'], st_surge: ['search|contact|quiet', 'lull'], st_wide_loop: ['contact|search', 'estD:5000..18000 hpF>=0.6'],
     st_center: ['quiet', 'expo<=0 hpF>=0.6'], st_orbit: ['quiet', 'cols>=1 expo<=0'], st_salvage: ['quiet|early', 'expo<=0 parts<=3'], st_net: ['quiet|search', 'expo<=1 H<=2.5'],
     st_rock: ['hide|escape|contact', 'hpF<=0.8 expo>=1'], st_wreck: ['hide|escape|contact', 'hpF<=0.8 expo>=1'], st_hop: ['contact', 'estD:5000..16000'],
@@ -21980,6 +21982,23 @@ function _comPilotStep0() {
         const cg = capRetreatGate(c, hpF, retreat);
         if (cg && cg.wait) return;
         if (cg && cg.id === 'stand') { c.standUntil = now + 2400; retreat = 0; comThinkEvent('p', '艦長の判断: 踏みとどまる (40秒は退かない)'); }
+    }
+    // 第226弾 (オーナー「双方が弾薬切れになると、ひたすらハックを撃ち合って試合が終わらない」): 両弾薬が尽きたら、退き際・潜伏より先に補給へ。
+    //   従来、補給の判断 (下の第20弾ブロック) は「1) 退く」より後にあり、損傷して退き際を割った艦は escape/潜伏の分岐で return し続け、
+    //   敵に圧力をかけられると supply⇔escape を往復して補給にたどり着けなかった (ヘッドレス再現: 損傷30%・両弾薬0・近距離 — 変更前は 86,400f 補給未成立)。
+    //   対象は「両弾薬0」の行き詰まりだけに絞る (尽きかけの判断は従来どおり第20弾ブロックと戦略 st_restock が担う)。
+    {
+        const loS0 = shipLoadout(gameState.shipType);
+        if (((loS0.ammoK || 0) > 0 || (loS0.ammoM || 0) > 0) && cargo.ammoK <= 0 && cargo.ammoM <= 0) {
+            const ss0 = supplySite(player.x, player.y, q => q._pObs === 'enemy', q => _colUsed(q, 'P'));
+            if (ss0) {
+                c.mode = 'supply'; _comCMOff();
+                _comGoTo(ss0.obj, RESUPPLY_R * 0.5, c);
+                comThink('p', 'supply', '弾が尽きた (実弾' + cargo.ammoK + '・ミサイル' + cargo.ammoM + ') → 退き際より先に交戦を離れてコロニーで補給' + (ss0.wait ? ' (使用済みは300秒で復活)' : '') + ' (' + _dirTxt(player.x, player.y, ss0.obj.x, ss0.obj.y) + ')');
+                _comStance(c, P);
+                return;
+            }
+        }
     }
     // 1) 退く
     if (hpF < retreat) {
