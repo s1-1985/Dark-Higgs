@@ -5886,13 +5886,13 @@ class Ship {
                         // 第33弾: 部品の枠が空いていれば、20秒気配が無いだけで部品を取りに出る (長い静けさを待たない)
                         // 第20弾: 長く何も聞こえない → 隠れ場所伝いに区間ごとに哨戒へ (行き先: 自分のものでないノード / コロニー / マップ中央)
                         let g = this._roamGoal;
-                        if (g && !(g.col || g.der || g.node)) { const _g2 = gatherWants(_pers, enemySlotsUsed(this), enemySlotsMax(this), _frameCount); if ((_g2.part && gatherPick('e', this.x, this.y, 'part', _g2.range)) || (_g2.greed && gatherPick('e', this.x, this.y, 'any', CAP_RANGE))) g = this._roamGoal = null; } // 第108弾: 取りに行く物があるなら 古い「聴いていない海域」の行き先は捨てる
+                        if (g && !(g.col || g.der || g.node)) { const _g2 = gatherWants(_pers, enemySlotsUsed(this), enemySlotsMax(this), _frameCount); if ((_g2.part && gatherPick('e', this.x, this.y, 'part', _g2.range, this)) || (_g2.greed && gatherPick('e', this.x, this.y, 'any', CAP_RANGE, this))) g = this._roamGoal = null; } // 第108弾: 取りに行く物があるなら 古い「聴いていない海域」の行き先は捨てる
                         if (g && g.der && g.der.salvaged) g = this._roamGoal = null; // 第33弾: 難破船は取られたら次へ
                         // 第33弾: 部品の枠が空いていれば、部品の取れる所 (まだ回収されていない難破船 / 部品をまだ取っていないノード・コロニー) を優先する
                         if (!g) { // 第107弾: 自機COMと同じ関数で 最寄りを選ぶ (部品の枠が空いていれば部品の取れる所 / 貪欲なら最寄りの拠点)
                             const gw = this._gw || gatherWants(_pers, enemySlotsUsed(this), enemySlotsMax(this), _frameCount);
-                            let ps = gw.part ? gatherPick('e', this.x, this.y, 'part', gw.range) : null, why = '気配なし・部品の枠が空いている';
-                            if (!ps && gw.greed) { ps = gatherPick('e', this.x, this.y, 'any', CAP_RANGE); why = '気配なし・拠点の占拠は報酬'; }
+                            let ps = gw.part ? gatherPick('e', this.x, this.y, 'part', gw.range, this) : null, why = '気配なし・部品の枠が空いている';
+                            if (!ps && gw.greed) { ps = gatherPick('e', this.x, this.y, 'any', CAP_RANGE, this); why = '気配なし・拠点の占拠は報酬'; }
                             if (ps) {
                                 const isDer = ps.type === 'derelict', isCol = ps.type === 'colony';
                                 g = this._roamGoal = { x: ps.x, y: ps.y, lbl: isDer ? '難破船 (部品)' : isCol ? 'コロニー (占有する)' : 'ノード (制圧する)', der: isDer ? ps : null, col: isCol ? ps : null, node: !isDer && !isCol ? ps : null };
@@ -15901,6 +15901,10 @@ function trunkStep(F, S, J) {
         if (str > topV) { topV = str; top = pr.id; }
     }
     holder._prin = { f: now, list: prin, top };
+    // ②.5 風の受け口 (第232弾): 自艦位置の環境 (sitAug が既に持つ fog/storm/thermal/rock/wreck/badZone) を
+    //   幹の判断材料として読める形に取り込む。物理そのものは変えず、受け口と方針導出への接続だけを作る。
+    const ENV = envIntake(S, now);
+    holder._env = ENV;
     // ③ 方針の導出 (原則が主役。性格は枝として小さな調節 0.9〜1.1 を掛けるだけ)
     const P = ctx.P;
     const pf = { press: 0.9 + 0.2 * persAx(P, 'aggression'), veil: 0.9 + 0.2 * Math.max(persAx(P, 'tech'), persAx(P, 'cunning')),
@@ -15917,6 +15921,12 @@ function trunkStep(F, S, J) {
     // 単純な合計だと、複数原則から弱く押される姿勢が単一原則の最大の要求を常に埋もれさせる
     // (検証: 両弾薬0で supply=1.0 でも recover が一度も立たなかった) ため平均に変えた (第229弾)。
     for (const id of DOC_IDS) scores[id] = (wsum[id] > 0 ? scores[id] / wsum[id] : 0) * pf[id];
+    // 第232弾 (風の接続): 覆いの中にいる艦は「隠れる」姿勢の要求が環境から押し上がる。接続は方針導出の入力
+    //   (姿勢スコア) のみ — 第230弾の方針適合 (方針が決まった後、戦略の重みへ最大×1.4) とは効く段が違い、
+    //   こちらは「どの姿勢を取るか」自体を最大で veil ×1.3 / ambush ×1.2 まで揺らす。露出の原則 (exposure)
+    //   の評価には触らない: あちらは信号露出の代償そのもので、覆いの有無で薄めるものではないため。
+    const envMul = { veil: 1, ambush: 1 };
+    if (ENV.cover >= ENV_COVER_MIN) { envMul.veil = 1 + ENV_VEIL_MAX * ENV.cover; envMul.ambush = 1 + ENV_AMBUSH_MAX * ENV.cover; scores.veil *= envMul.veil; scores.ambush *= envMul.ambush; }
     let D = holder[docKey];
     if (!D) D = holder[docKey] = { id: null, t0: -1e9, score: 0, why: '', prin: [], sw: 0, lastF: -1e9, all: null };
     let best = null, bv = -1;
@@ -15930,17 +15940,76 @@ function trunkStep(F, S, J) {
     D.id = pick; D.score = Math.round(scores[pick] * 1000) / 1000; D.prin = drivers; D.lastF = now;
     D.why = (drivers.length ? drivers.map(id => '「' + (PRINCIPLE_JP[id] || id) + '」').join('・') : '原則の要求なし') + ' (見通し ' + _STANCE_JP[O.stance] + ')';
     D.all = {}; for (const id of DOC_IDS) D.all[id] = Math.round(scores[id] * 1000) / 1000;
+    D.envCover = ENV.cover; D.envMul = { veil: Math.round(envMul.veil * 1000) / 1000, ambush: Math.round(envMul.ambush * 1000) / 1000 }; // 第232弾: 風の効きの記録 (検証用)
     if (changed) {
         if (from) D.sw++;
         D.t0 = now;
         try { comThinkEvent(side, (from ? '方針変更: ' + DOC_JP[from] + ' → ' : '方針: ') + DOC_JP[pick] + ' — 根拠原則 ' + D.why + '・局面 ' + (SIT_PHASE_JP[J.phase] || J.phase), side === 'e' ? 'e' + who.uid : undefined); } catch (er) {}
     }
+    // ④ 光と雨の材料 (第232弾): この艦の「不足」を幹の周期で記録する。報酬の価値判断 (rewardValueFor) の入力。
+    holder._reward = rewardNeeds(side, who, S, O, D);
     return D;
 }
 // 幹の読み口 (今後の読み手はここ経由で読む。本弾では読み手なし)
 function outlookOf(side, who) { const h = side === 'p' ? _com : who; return h ? (h._outlook || null) : null; }
 function principlesOf(side, who) { const h = side === 'p' ? _com : who; return h ? (h._prin || null) : null; }
 function doctrineOf(side, who) { if (side === 'p') return _com ? (_com.doc || null) : null; return who ? (who._doc || null) : null; }
+// ═══ 第232弾 (木の構造・作り込みフェーズ5「光と雨／風」): 報酬の価値判断と環境の判断経路 ═══
+//   光・雨 = アイテム等の報酬。対象物と反応的な使用・行きがけの回収は既にあるが、「自分に何が不足して
+//   いて、どの報酬を取りに行くべきか」という養分としての価値判断が無かった。本弾は (1) 幹の周期で
+//   艦ごとの不足 (弾薬・耐久・ドローン・資材・部品枠) を記録し、(2) 既知の報酬機会 (難破船/コロニー/
+//   ノード — 既存コードが既に知っている対象だけ) への価値を不足と幹の状態 (見通し・方針) から計算する
+//   読み口を用意し、(3) 回収先の選択 gatherPick のスコアに価値の項を控えめに足す (接続はこの1箇所)。
+//   風 = 地形等の環境。物理と事実層 (sitAug) は既にあるが判断側の受け口が無かった。本弾は自艦位置の
+//   環境を envIntake で幹の材料として取り込み、方針導出の入力にだけ接続する (trunkStep 内・上記参照)。
+// ── 風の受け口: 自艦位置の環境状態を幹の判断材料の形にする ──
+//   cover = 「今いる場所の覆いの濃さ」: 嵐・熱雲・岩石帯・残骸帯はそのまま、霧 (ヒッグス) は常在の媒体
+//   なので 0.6 倍で薄く数える。open はその裏 (開けている度合い)。badZone は sitAug の既存の印をそのまま。
+const ENV_COVER_MIN = 0.3;   // この濃さ未満の覆いは方針を揺らさない
+const ENV_VEIL_MAX = 0.30;   // 覆い cover=1 の時、姿勢 veil のスコアを最大 +30%
+const ENV_AMBUSH_MAX = 0.20; // 同じく ambush は最大 +20%
+function envIntake(S, now) {
+    const r3 = v => Math.round(v * 1000) / 1000;
+    const fog = S.fog || 0, storm = S.storm || 0, thermal = S.thermal || 0, rock = S.rock || 0, wreck = S.wreck || 0;
+    const cover = Math.max(storm, thermal, rock, wreck, fog * 0.6);
+    return { f: now, fog: r3(fog), storm: r3(storm), thermal: r3(thermal), rock: r3(rock), wreck: r3(wreck), badZone: !!S.badZone, cover: r3(cover), open: r3(1 - cover) };
+}
+function envOf(side, who) { const h = side === 'p' ? _com : who; return h ? (h._env || null) : null; }
+// ── 光と雨: 艦ごとの不足 (価値判断の材料)。trunkStep が幹の周期で記録する ──
+//   ammo/hp/drone は sitAug の S から (ドローンは matchOutlook の戦力換算と同じ /4 の物差し)、
+//   mat は積載に対する割合 (敵は艦隊共有プール enemyMat — 既存の仕様どおり)、part は部品枠の空き。
+function rewardNeeds(side, who, S, O, D) {
+    const c01 = v => Math.round(Math.max(0, Math.min(1, v)) * 1000) / 1000;
+    const ammo = (S.wK || S.wM) ? 1 - (S.ammo != null ? S.ammo : 1) : 0; // ビームのみの艦は弾薬の不足なし
+    const hp = 1 - (S.hpF || 0);
+    const drone = 1 - Math.min(1, (S.drones || 0) / 4);
+    let mat = 0;
+    if (side === 'p') { const cap = cargoMatCap(); mat = cap > 0 ? 1 - Math.min(1, (cargo.mat || 0) / cap) : 0; }
+    else { const cap = enemyMatCap(); mat = cap > 0 ? 1 - Math.min(1, (enemyMat || 0) / cap) : 0; }
+    let part = 0;
+    if (side === 'p') { const mx = partSlotsMax(); part = mx > 0 ? 1 - partSlotsUsed() / mx : 0; }
+    else if (who) { const mx = enemySlotsMax(who); part = mx > 0 ? 1 - enemySlotsUsed(who) / mx : 0; }
+    return { f: _frameCount, ammo: c01(ammo), hp: c01(hp), drone: c01(drone), mat: c01(mat), part: c01(part),
+        stance: O ? O.stance : 'even', doc: D ? D.id : null };
+}
+function rewardNeedsOf(side, who) { const h = side === 'p' ? _com : who; return h ? (h._reward || null) : null; }
+// ── 報酬の価値: 既知の機会 t (kind = 'derelict'|'colony'|'node') が、この艦にとってどれだけ養分になるか (0..1) ──
+//   中身は THEORY.base の「何が得られるか」に不足を掛けたもの: 難破船 = 部品・弾・資材の回収、
+//   コロニー = 補給 (弾)・部品・資材と、劣勢では支配の取り返し自体、ノード = 部品・資材 (制圧+4) と聴音網。
+//   幹の状態の効き: 見通しが劣勢なほど拠点の「争う価値」(contest) が上がり、方針 recover ではコロニーの
+//   補給価値が、方針 veil ではノードの聴音網の価値が少し上がる。不足が無ければ価値は低く付く (満タンの
+//   艦が補給先へ寄らないのはこのため)。幹の記録がまだ無い艦 (試合序盤) は価値 0 = 従来の近さ判断のまま。
+const REWARD_VALUE_MAX = 0.75; // gatherPick のスコアで、価値1の機会は見かけの距離を 1/(1+0.75) ≈ 0.57 倍まで縮める
+function rewardValueFor(side, who, t, kind) {
+    const N = rewardNeedsOf(side, who); if (!N || !t) return 0;
+    const pk = side === 'p' ? '_partP' : '_partE';
+    const contest = N.stance === 'behind' ? 1 : N.stance === 'even' ? 0.35 : 0; // 劣勢では支配の取り返し自体が養分になる
+    let v = 0;
+    if (kind === 'derelict') v = 0.50 * N.part + 0.30 * N.ammo + 0.20 * N.mat; // 回収で得る物: 部品・弾・資材
+    else if (kind === 'colony') { const partA = t[pk] ? 0 : N.part; v = 0.50 * N.ammo + 0.25 * partA + 0.15 * N.mat + 0.15 * contest; if (N.doc === 'recover') v += 0.20 * N.ammo; if (N.doc === 'expand') v += 0.10; }
+    else if (kind === 'node') { const partA = t[pk] ? 0 : N.part; v = 0.45 * partA + 0.30 * N.mat + 0.15 * contest + (N.doc === 'veil' ? 0.10 : 0); } // ノードは聴音網 — 情報戦の方針では少し重い
+    return Math.round(Math.max(0, Math.min(1, v)) * 1000) / 1000;
+}
 // 検証専用の読み出し (原則の強さ・見通し・方針の採取用。判断経路からは使わない)
 window.__trunkDbg = function () {
     const one = h => {
@@ -15949,7 +16018,8 @@ window.__trunkDbg = function () {
         const prin = {}; if (R) for (const id in R.list) prin[id] = R.list[id].str;
         return { outlook: O ? { stance: O.stance, score: O.score, phase: O.phase, sw: O.sw, why: O.why } : null,
             prin, prinTop: R ? R.top : null,
-            doc: D && D.id ? { id: D.id, score: D.score, sw: D.sw, prin: D.prin, why: D.why, all: D.all } : null };
+            doc: D && D.id ? { id: D.id, score: D.score, sw: D.sw, prin: D.prin, why: D.why, all: D.all, envCover: D.envCover, envMul: D.envMul } : null,
+            env: h._env || null, reward: h._reward || null }; // 第232弾: 風の受け口と不足の記録も採取できるように
     };
     const out = { p: _com ? one(_com) : null, e: [] };
     for (const e of enemies) if (e.type !== 'fighter') out.e.push(Object.assign({ uid: e.uid }, one(e) || {}));
@@ -19431,7 +19501,7 @@ function enemyHunterStep(e, heard, hard) {
             if (!skillOn('e', 'gt_stall')) return why('スキルOFF: 索敵行');
             // 索敵行: 長く気配が無ければ、相手が居そうな所 (まだ聴いていない海域・自分のものでないコロニー) へ、噴かしては漂いながら静かに向かう
             //   (旧: 待ち伏せの拠点で何分も止まり・忍び足 約12u/s でしか動かず、双方が離れたまま試合が終わった)
-            { const gw = gatherWants(P, enemySlotsUsed(e), enemySlotsMax(e), now); if (gw.part && gatherPick('e', e.x, e.y, 'part', gw.range)) return why('部品が先'); } // 第122弾: 部品の枠が空いていて取れる所があるうちは 索敵行に出ない (自機COMは取りに行くのが戦略・詰めより先。旧: 敵は序盤10分の約63%を索敵行に使い、自機COMの約半分しか拠点・部品を取らなかった)
+            { const gw = gatherWants(P, enemySlotsUsed(e), enemySlotsMax(e), now); if (gw.part && gatherPick('e', e.x, e.y, 'part', gw.range, e)) return why('部品が先'); } // 第122弾: 部品の枠が空いていて取れる所があるうちは 索敵行に出ない (自機COMは取りに行くのが戦略・詰めより先。旧: 敵は序盤10分の約63%を索敵行に使い、自機COMの約半分しか拠点・部品を取らなかった)
             const quietFor = now - Math.max(e._lastScentF || 0, e._huntEndF || 0, e._hpLossF || 0);
             if (prowlNudgeWants({ quiet: quietFor, P, now, nudgeF: e._nudgeF, ready: true, exposed: e.aiState === 'combat' || now - (e._lastHitF ?? -1e9) < 900 || now - (e._pingHeardF ?? -1e9) < 900 })) { // 第126弾: 自機COMと共通の「あえて弱いソナー」
                 e._nudgeF = now; firePingFromEnemy(e, { omni: true, power: 'weak' });
@@ -21508,18 +21578,24 @@ function gatherWants(P, used, max, now) {
     return { part: used < max && (D.partHunt || (early && skillOn(P._side, 'gt_part'))), early, greed: capWants(P), range: Math.max(D.partRange, early ? 12000 : 0) };
 }
 // 最寄りの拠点 (コロニー・ノード) と難破船。side 'p'|'e'。mode 'part' = 部品をまだ取っていない物 (難破船も) / 'any' = 自分のものでない拠点。難破船は自分が見つけた物だけ (自機は discovered・敵は 2500u 以内に入った物)
-function gatherPick(side, x, y, mode, range) {
+function gatherPick(side, x, y, mode, range, who) {
     const me = side === 'p' ? 'player' : 'enemy', pk = side === 'p' ? '_partP' : '_partE', P0 = persOfSide(side);
     // 第148弾: 序盤の収集にも性格差 — 距離をその種類への好みで割って選ぶ (貪欲=難破船・電脳=ノード (聴音局)・統率=コロニー (中継局))。既定 (0.4) では従来どおり最寄り
     const kw = { derelict: 0.9 + 0.3 * persAx(P0, 'greed'), node: 0.9 + 0.3 * persAx(P0, 'tech'), colony: 0.9 + 0.3 * persAx(P0, 'command') }, kd = 0.9 + 0.3 * 0.4;
+    // 第232弾 (光と雨の接続): スコアに価値の項を足す — 見かけの距離を (1 + REWARD_VALUE_MAX × 価値) で割る。
+    //   価値は幹が記録した艦ごとの不足 (rewardValueFor) から来るので、不足している艦ほど不足を埋める
+    //   機会へ寄り、万全な艦は従来どおり近さで選ぶ。近さの判断を置き換えるのではなく、項を1つ足すだけ。
+    const vw = who || (side === 'p' ? player : null);
     let best = null, bs = Infinity; const lim = range === undefined ? Infinity : range;
+    const gdb = window.__gatherDbg ? [] : null; // 検証専用の記録 (判断には使わない)
     for (const st of structures) {
         let ok = false;
         if (st.type === 'derelict') { if (mode === 'part' && !st.salvaged) { if (side === 'e' && !st._discE && Math.hypot(st.x - x, st.y - y) < 2500) st._discE = true; ok = (side === 'p' ? !!st.discovered : !!(st.discovered || st._discE)) && (derelictSosOn(st) || derelictSosIn(st) < 3600); } } // 第152弾: SOS が鳴っている (か間もなく鳴る) 難破船だけ
         else if (st.type === 'colony') ok = st.owner !== me && (mode === 'any' || !st[pk]);
-        if (!ok) continue; const d = Math.hypot(st.x - x, st.y - y); if (d >= lim) continue; const sc = d * kd / (kw[st.type] || kd); if (sc < bs) { bs = sc; best = st; }
+        if (!ok) continue; const d = Math.hypot(st.x - x, st.y - y); if (d >= lim) continue; const rv = rewardValueFor(side, vw, st, st.type); const sc = d * kd / ((kw[st.type] || kd) * (1 + REWARD_VALUE_MAX * rv)); if (gdb) gdb.push({ kind: st.type, d: Math.round(d), rv, sc: Math.round(sc) }); if (sc < bs) { bs = sc; best = st; }
     }
-    for (const n of resourceNodes) { if (n.owner === me || (mode === 'part' && n[pk])) continue; const d = Math.hypot(n.x - x, n.y - y); if (d >= lim) continue; const sc = d * kd / kw.node; if (sc < bs) { bs = sc; best = n; } }
+    for (const n of resourceNodes) { if (n.owner === me || (mode === 'part' && n[pk])) continue; const d = Math.hypot(n.x - x, n.y - y); if (d >= lim) continue; const rv = rewardValueFor(side, vw, n, 'node'); const sc = d * kd / (kw.node * (1 + REWARD_VALUE_MAX * rv)); if (gdb) gdb.push({ kind: 'node', d: Math.round(d), rv, sc: Math.round(sc) }); if (sc < bs) { bs = sc; best = n; } }
+    if (gdb) window.__gatherDbg.last = { side, mode, cands: gdb, pick: best ? (best.type || 'node') : null };
     return best;
 }
 function comEarlyGather(used, max, now, P) { if (P && P._side !== 'e' && capSeeking()) return false; const pl = earlyGatherPlan(P || PERS_DEF); return now < pl.dur && used < Math.min(pl.n, max); }
