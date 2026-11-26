@@ -4531,6 +4531,7 @@ class Ship {
             // 接触を断つと古い予測のまま撃つ→ステルス/沈黙で回避できる (プレイヤーと対称)。
             // 最終既知位置・鮮度は信念ボード this._B (est / fresh) で初期化済み (第216弾)
             this.personality = rollEnemyPersonality(type); // マッチ毎の気質 (艦種でレンジを縛る)
+            this._branch = branchOf(this.personality); // 第231弾: 枝 (性格) のレコードをロール時に導出して艦に持つ (状況適応で性格が変われば更新箇所で張り替える)
             this.upgFireCD = 1; this.upgDmg = 1; this.upgSpeed = 1; this.upgDetect = 1; // ノード奪取で変動
             this.enemyUpgLv = 0;
             this._desperateLogged = false;
@@ -4967,6 +4968,7 @@ class Ship {
                 const _ac = (this.aiState === 'hunting' || this.aiState === 'combat') && (this._B.fresh || 0) > 0.2;
                 const _am = adaptPersonality(this.personality, _ac, this.hp / this.maxHp);
                 if (_am) this._focusF = -1e9; // 第39弾: 性格が変われば航行モードも (第41弾: 下の場面ごとの選び方で選び直す)
+                if (_am) this._branch = branchOf(this.personality); // 第231弾: 性格が変われば枝も張り替える
                 if (_am && comDemo) comThinkEvent('e', '性格が変わる → ' + ADAPT_MODES[_am].label + ' (' + (_am === 'cautious' ? '耐久' + _pct(this.hp / this.maxHp) + ' < 40%' : _am === 'aggressive' ? '自機を掴んだ' : _am === 'greedy' ? '90秒手掛かりなし' : '見失って60秒') + ')', 'e' + this.uid);
             }
             // 第41弾: 航行モードは自機COMと同じく性格と場面で (comFocusPlan)。1秒ごとに見て、20秒は変えない (交戦・退く時はすぐ)
@@ -15959,6 +15961,20 @@ window.__docDbg = function () { // 棚上げ案の計測 (measure228) との互�
     for (const e of enemies) if (e.type !== 'fighter') out.e.push(Object.assign({ uid: e.uid }, one(e._doc) || { id: null }));
     return out;
 };
+// 検証専用の読み出し (第231弾: 枝の採取用。判断経路からは使わない)
+window.__branchDbg = function () {
+    const one = P => {
+        if (!P) return null;
+        const B = branchOf(P), r3 = v => Math.round(v * 1000) / 1000;
+        const cats = {}; for (const g in B.byCat) cats[g] = { n: B.byCat[g].n, mean: r3(B.byCat[g].mean), max: r3(B.byCat[g].max) };
+        const thick = Object.keys(B.skills).filter(id => B.skills[id].aff >= 1.4).sort((a, b) => B.skills[b].aff - B.skills[a].aff).slice(0, 12).map(id => id + ':' + Math.round(B.skills[id].aff * 100) / 100);
+        const thin = Object.keys(B.skills).filter(id => B.skills[id].aff <= 0.7).sort((a, b) => B.skills[a].aff - B.skills[b].aff).slice(0, 8).map(id => id + ':' + Math.round(B.skills[id].aff * 100) / 100);
+        return { top: B.top, traits: B.traits.slice(0, 3).map(t => t.id + ':' + Math.round(t.v * 100) / 100), cats, thick, thin };
+    };
+    const out = { p: _com ? one(_com.pp) : null, e: [] };
+    for (const e of enemies) if (e.type !== 'fighter') out.e.push(Object.assign({ uid: e.uid }, one(e.personality) || {}));
+    return out;
+};
 // 航行モードの4分類は局面からの導出に統一 (旧: 敵 _sit と自機COM sit が別実装・別材料だった)。
 //   潜伏は search に寄せる (敵の修復潜伏は低耐久の間 escape/recover が優先して立つため、retreat になるべき局面はそちらで拾える)
 function sitNavClass(J) {
@@ -18687,9 +18703,12 @@ function saveComCfg() { if (playReplay || /[?&]replay=1/.test(location.search)) 
 function comPersonalityFor(side) {
     const pre = side === 'p' ? comCfg.pPreset : comCfg.ePreset;
     // 第143弾: 性格に持ち主の印 (_side) を付ける — 性格だけを受け取る関数 (方針・拾い物・エンジン等) がスキルのオン・オフを見るため
-    if (pre === 'adaptive') return Object.assign(makeAdaptivePersonality(), { _side: side });
-    if (pre === 'random') return Object.assign(rollEnemyPersonality(COM_ITYPE[side === 'p' ? comCfg.ship : comCfg.enemy]), { _side: side });
-    return Object.assign({}, side === 'p' ? comCfg.pp : comCfg.ep, { _side: side });
+    let P;
+    if (pre === 'adaptive') P = Object.assign(makeAdaptivePersonality(), { _side: side });
+    else if (pre === 'random') P = Object.assign(rollEnemyPersonality(COM_ITYPE[side === 'p' ? comCfg.ship : comCfg.enemy]), { _side: side });
+    else P = Object.assign({}, side === 'p' ? comCfg.pp : comCfg.ep, { _side: side });
+    branchOf(P); // 第231弾: 枝は性格ロール時に先行導出する (適性の読みはこの枝を通る)
+    return P;
 }
 // ── 第147弾: 性格面 (複合) と スキルの適性 ──
 //   性格面 = 軸の組み合わせで決まる「気質」。強いもの上位が名前になり、その気質のスキルが選ばれやすくなる (スキルの適性 skillAff に加点)
@@ -18735,13 +18754,66 @@ const SKILL_AX = {
 };
 const SKILL_AX_PARSED = {};
 for (const id in SKILL_AX) { const o = {}; for (const tok of SKILL_AX[id].split(' ')) { const m = /^([a-z]{2})(-?[\d.]+)$/.exec(tok); if (m) o[_AX[m[1]]] = +m[2]; } SKILL_AX_PARSED[id] = o; }
-// 適性 (倍率): 軸の重み×(性格−0.45)×1.6 の和 + 性格面の加点 を指数で。1=普通・>1=得意 (優先され、頻度が上がる)・<1=苦手。0.15〜3.0
-function skillAff(P, id) {
-    const W = SKILL_AX_PARSED[id]; if (!W) return 1;
-    let e = 0; for (const a in W) e += W[a] * (persAx(P, a) - 0.45) * 1.6;
-    for (const t of PERS_TRAITS) if (t.ids.test(id)) e += 1.1 * Math.max(0, Math.min(1, t.f(P || {})) - 0.5); // 気質の強さが0.5を超えた分だけ加点
-    return Math.max(0.15, Math.min(3, Math.exp(e)));
+// ═══ 第231弾 (木の構造・作り込みフェーズ4「枝と葉」): 性格の枝 BRANCH ═══
+//   正本 tree-structure.md: 枝 = 性格、その枝の先にスキル (葉) が付く。従来は skillAff が性格軸
+//   (SKILL_AX) と気質 (PERS_TRAITS) から適性をその場で計算し、各セレクタへ直接バイアスとして
+//   流れていた — 「どの性格がどのスキル群へどう伸びているか」を点検する形 (枝) が無かった。
+//   本弾: 枝を点検可能なレコードとして明示化し、適性の計算を枝レコード経由に寄せる。
+//   枝レコード (branchOf(P) が返す):
+//     { sig, axes: {8軸の値}, traits: [{id, jp, v} 強い順], top: 最も太い気質の id,
+//       skills: { skillId: { aff, cat (系統), axes: {軸: 重み} | null, traits: [付いている気質id] } },
+//       byTrait: { 気質id: [skillId] }, byAxis: { 軸: [skillId] }, byCat: { 系統: { n, sum, mean, max } } }
+//   数値の同一性: aff は従来の skillAff と同一の式・同一の順序で枝の導出時に計算し、skillAff は枝から
+//   読むだけにする (本弾は構造の作り替えであり、適性の数値は変えない)。
+//   導出のタイミング: 性格ロール時 (comPersonalityFor / 艦の生成で先行導出) と初回参照時。
+//   状況適応で軸が変われば署名 (sig: 8軸の値) が変わり、次回参照で再導出する (古い枝は使わない)。
+//   艦ごとの保持: 敵艦は this._branch、自機COMは作業メモ c.branch にロール時点の枝を持つ
+//   (状況適応で変われば張り替える)。ただし適性の計算そのものは常に branchOf(P) を通す。
+const _AX8 = ['aggression', 'stealth', 'greed', 'caution', 'cunning', 'tech', 'command', 'patience'];
+const _branchCache = new WeakMap(); // 性格オブジェクト → { sig, rec }
+function _branchSig(P) { let s = ''; for (const k of _AX8) s += persAx(P, k) + '|'; return s; }
+function deriveBranch(P) {
+    P = P || {};
+    const traits = persTraits(P);
+    const skills = {}, byTrait = {}, byAxis = {}, byCat = {};
+    for (const t of PERS_TRAITS) byTrait[t.id] = [];
+    for (const k of _AX8) byAxis[k] = [];
+    const cats = {}; for (const sk of skillList()) cats[sk.id] = sk.g;
+    for (const id in SKILL_AX_PARSED) if (!(id in cats)) cats[id] = null; // SKILL_AX にだけある id も葉として持つ
+    for (const id in cats) {
+        const W = SKILL_AX_PARSED[id];
+        let aff = 1;
+        if (W) { // 従来の skillAff と同一式・同一順序 (軸の和 → 気質の加点 → 指数・クランプ)
+            let e = 0; for (const a in W) e += W[a] * (persAx(P, a) - 0.45) * 1.6;
+            for (const t of PERS_TRAITS) if (t.ids.test(id)) e += 1.1 * Math.max(0, Math.min(1, t.f(P || {})) - 0.5); // 気質の強さが0.5を超えた分だけ加点
+            aff = Math.max(0.15, Math.min(3, Math.exp(e)));
+        }
+        const trs = [];
+        for (const t of PERS_TRAITS) if (t.ids.test(id)) { trs.push(t.id); byTrait[t.id].push(id); }
+        if (W) for (const a in W) if (W[a]) byAxis[a].push(id);
+        skills[id] = { aff, cat: cats[id], axes: W || null, traits: trs };
+        if (cats[id]) { const c = byCat[cats[id]] || (byCat[cats[id]] = { n: 0, sum: 0, max: 0 }); c.n++; c.sum += aff; if (aff > c.max) c.max = aff; }
+    }
+    for (const g in byCat) byCat[g].mean = byCat[g].sum / byCat[g].n;
+    const axes = {}; for (const k of _AX8) axes[k] = persAx(P, k);
+    return { sig: _branchSig(P), axes, traits, top: traits.length ? traits[0].id : null, skills, byTrait, byAxis, byCat };
 }
+function branchOf(P) { // 枝の読み口: 性格から枝レコードを引く (署名が変わっていれば再導出)
+    if (!P || typeof P !== 'object') return deriveBranch(P);
+    const sig = _branchSig(P), c = _branchCache.get(P);
+    if (c && c.sig === sig) return c.rec;
+    const rec = deriveBranch(P);
+    _branchCache.set(P, { sig, rec });
+    return rec;
+}
+function branchOfShip(who) { // 艦から枝を引く読み口 (敵艦は艦自身の性格、自機は自機COMの性格)
+    if (!who) return null;
+    if (who === player) return branchOf(persOfSide('p'));
+    return who.personality ? branchOf(who.personality) : null;
+}
+// 適性 (倍率): 枝レコード経由で読む (第231弾で経路変更。中身は従来の skillAff と同一の値)。
+//   1=普通・>1=得意 (優先され、頻度が上がる)・<1=苦手。0.15〜3.0
+function skillAff(P, id) { const s = branchOf(P).skills[id]; return s ? s.aff : 1; }
 function persOfSide(side) {
     if (side === 'p') return comDemo ? ((_com && _com.pp) || (comCfg && comCfg.pp) || PERS_DEF) : PERS_DEF; // 人が操作する自艦には性格が無い (既定)
     const e = enemies.find(q => q.type !== 'fighter' && q.hp > 0); return (e && e.personality) || PERS_DEF;
@@ -20479,7 +20551,7 @@ const _dirTxt = (fx, fy, tx, ty) => '方位' + compassDeg(Math.atan2(ty - fy, tx
 // 例外はミサイル回避と離脱。旧: 0.5秒ごとに判断し航路をすぐ引き直していた (人間には真似できない小刻みな三角測量)
 const COM_TICK = 120, COM_LEG_HOLD = 1200, COM_GOAL_RANGE = 9000, COM_DEPLOY_GAP = 600, COM_HIDE_TIME = ENEMY_HIDE_TIME, COM_SEARCH_LEG = 4000, COM_SEARCH_PAUSE = 600; // 第39弾: 捜索で着いたら10秒止まって聴く
 const COM_SKIP = { '帰投': 1, 'ソナー': 1, '離脱': 1, '射撃': 1 }; // 自機COMが自分で決める (退く・撃つ) / 使わない (副長の「静寂ならソナー」は位置を晒すだけ)
-function comNewMemo() { return { pp: comPersonalityFor('p'), lastDeploy: -1e9, hideUntil: 0, flankUntil: 0, silentUntil: 0, mode: '', _sitJ: null }; } // _sitJ: 第218弾の局面メモ
+function comNewMemo() { const pp = comPersonalityFor('p'); return { pp, branch: branchOf(pp), lastDeploy: -1e9, hideUntil: 0, flankUntil: 0, silentUntil: 0, mode: '', _sitJ: null }; } // _sitJ: 第218弾の局面メモ / branch: 第231弾 自機COMの枝レコード (適性の計算は branchOf(pp) 経由で常に最新を読む)
 
 // ═══ 第22弾: 試合の記録 — 1秒ごとの位置と出来事を残し、試合が終わったら地図と時間のスライダーで振り返る ═══
 // (見た目だけ: 記録は判断に使わない。真の位置を記録するので、表示するのは試合が終わった後だけ)
@@ -21549,7 +21621,8 @@ function stratPick(P, x, lastId, force) {
     for (const k of ids) { r -= v[k]; if (r <= 0) { pick = k; break; } }
     if (force && w[force] !== undefined) pick = force; // ヘッドレス検証用
     const _df = docFitFor(x), doc = _df ? _df.id : null; // 第230弾: ピックに「その時の方針」を紐付ける (方針別ピックシェアの集計用)
-    if (window.__pickDbg && x && x.side) { const pd = window.__pickDbg, key = x.side + '|' + (doc || 'none'); const cell = pd[key] || (pd[key] = {}); cell[pick] = (cell[pick] || 0) + 1; }
+    if (window.__pickDbg && x && x.side) { const pd = window.__pickDbg, key = x.side + '|' + (doc || 'none'); const cell = pd[key] || (pd[key] = {}); cell[pick] = (cell[pick] || 0) + 1;
+        const B = branchOf(P), bk = x.side + '|br:' + (B.top || 'none'), bc = pd[bk] || (pd[bk] = {}); bc[pick] = (bc[pick] || 0) + 1; } // 第231弾: そのピックがどの枝 (最も太い気質) に付いたスキルかも記録する
     return { pick, w, doc };
 }
 function comStratWeights(P, x, hpF) { return stratWeights(P, Object.assign({}, x, { hpF })); }
@@ -22302,7 +22375,7 @@ function _comPilotStep0() {
     // 第21弾: 状況適応の性格 (自機COM) — 相手を掴んでいる=受信中の敵信号か有視界
     {
         const am = adaptPersonality(P, contact, hpF);
-        if (am) comThinkEvent('p', '性格が変わる → ' + ADAPT_MODES[am].label + ' (' + (am === 'cautious' ? '耐久' + _pct(hpF) + ' < 40%' : am === 'aggressive' ? '相手を掴んだ' : am === 'greedy' ? '90秒手掛かりなし' : '見失って60秒') + ')');
+        if (am) { if (_com) _com.branch = branchOf(P); comThinkEvent('p', '性格が変わる → ' + ADAPT_MODES[am].label + ' (' + (am === 'cautious' ? '耐久' + _pct(hpF) + ' < 40%' : am === 'aggressive' ? '相手を掴んだ' : am === 'greedy' ? '90秒手掛かりなし' : '見失って60秒') + ')'); } // 第231弾: 性格が変われば枝も張り替える
     }
     // 第183弾: 艦長が「息を潜める」「距離を取る」と決めた間は、危険が無ければその方針を続ける
     if (capMode && (c.capHoldUntil > now || c.capAvoidUntil > now)) {
