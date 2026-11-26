@@ -15728,8 +15728,237 @@ function sitJudgeAttach(F, S) {
     if (!holder) return null;
     const J = sitJudge(holder, S);
     if (J) S._J = J;
+    if (J) { try { trunkStep(F, S, J); } catch (er) { /* 第229弾: 幹は補助層 — 本体の判断を壊さない */ } }
     return J;
 }
+// ═══ 第229弾 (木の構造・作り込みフェーズ2「幹」): 基本原則 PRINCIPLES・勝敗の見通し matchOutlook・方針の再位置付け ═══
+//   幹の定義 (正本 tree-structure.md): 根っこ (基本理論 THEORY) の内容をもとに、基本原則 — どのように
+//   ゲームを進め勝敗を決めるのか、そのためにどのように動くべきなのか — を規定するもの。
+//   構成は3段: ①勝敗の見通し matchOutlook が試合全体を束ねて読む → ②基本原則 PRINCIPLES が THEORY の
+//   各節に紐付いて「今どれだけ強く働くか (0..1) と根拠」を返す → ③方針は原則の下で働く部品として、
+//   原則→姿勢の対応表 PRINCIPLE_POSTURE から導出する (棚上げした第228弾当初案の「複合スコアの最大」
+//   による選択から組み替え。方針は幹そのものではない)。
+//   入力は全て信念側だけ: sitAug した S (相手仮説は _oppRead 済み)・sitJudge の J・マップに表示される
+//   所有状態 (既存コードが両陣営分を参照している範囲)・当てた損害からの相手耐久の見積もり (sitOdds の前例)。
+//   敵の実HP等の真値は使わない。乱数も使わない。読み手は付けない (行動に影響を与えない並走)。
+//   状態: 敵は艦自身 (e._outlook / e._prin / e._doc)、自機COMは作業メモ (c._outlook / c._prin / c.doc)。
+const TRUNK_PERIOD = 1200;     // 見通し・原則・方針の再評価の周期 (20秒)
+const TRUNK_TRIG_GAP = 240;    // 局面転換での即時再評価の最小間隔
+const OUTLOOK_DWELL = 600;     // 見通しの優劣の最小保持 (10秒): 材料の明滅で優勢/劣勢が往復しないため
+const DOC_IDS = ['press', 'veil', 'expand', 'ambush', 'recover'];
+const DOC_JP = { press: '攻勢', veil: '情報戦', expand: '収集・占有', ambush: '待ち伏せ', recover: '立て直し' };
+const DOC_HYST = 1.15;         // 方針の継続ヒステリシス: 現方針は ×1.15 で評価し、新方針がそれを超えた時だけ切り替える
+const DOC_DWELL = 1200;        // 方針の最小滞在 (20秒)。局面 escape か両弾薬0の時だけ安全側として即時切替を許す
+const _STANCE_JP = { ahead: '優勢', even: '互角', behind: '劣勢' };
+// ── 勝敗の見通し: 試合全体の状態を束ねて読む (幹への入力) ──
+//   相手の戦力は推定だけを使う: 敵側は「当てた損害 _dmgToPlayer」からの見積もり (sitOdds と同じ前例)、
+//   自機側には当てた損害の信念側の記録が無いため相手耐久は未知 (=無傷) として扱い (これも sitOdds と同じ)、
+//   代わりに相手モデルの残弾推定 (S.oppAmmo) とドローン目撃数 (S.oppDrone) を相手戦力に織り込む。
+function matchOutlook(side, who, S, prev, now) {
+    const c01 = v => Math.max(0, Math.min(1, v)), cl = v => Math.max(-1, Math.min(1, v));
+    const mine = side === 'p' ? 'player' : 'enemy', foe = side === 'p' ? 'enemy' : 'player';
+    const ownCols = coloniesOwned(mine), foeCols = coloniesOwned(foe), ownNodes = nodesOwned(mine), foeNodes = nodesOwned(foe);
+    let totalCols = 0; for (const q of structures) if (q.type === 'colony') totalCols++;
+    const totalNodes = resourceNodes.length;
+    let oppF = 1, oppKnown = false; // 相手耐久の見積もり (信念側にある材料だけ)
+    if (side === 'e' && who && who._dmgToPlayer && player && player.maxHp) { oppF = c01(1 - who._dmgToPlayer / player.maxHp); oppKnown = true; }
+    const ammoF = (!S.wK && !S.wM) ? 1 : (S.ammo != null ? S.ammo : 1); // ビームのみの艦は弾薬の概念なし
+    const forceOwn = 0.55 * (S.hpF || 0) + 0.25 * ammoF + 0.20 * Math.min(1, (S.drones || 0) / 4);
+    const forceOpp = 0.55 * oppF + 0.25 * (S.oppAmmo != null ? S.oppAmmo : 1) + 0.20 * Math.min(1, (S.oppDrone || 0) / 6);
+    const ctrl = (totalCols ? (ownCols - foeCols) / totalCols : 0) * 0.30 + (totalNodes ? (ownNodes - foeNodes) / totalNodes : 0) * 0.10;
+    const score = cl((forceOwn - forceOpp) * 0.75 + ctrl);
+    const phase = now < THEORY.time.earlyUntil ? 'early' : now >= THEORY.time.earlyUntil * 4 ? 'late' : 'mid'; // 終盤の境界は序盤境界 (3分) の4倍 = 12分 (幹の評価用の位相であってゲームのルールではない)
+    const sd = gameState.mode === 'sd';
+    // 優劣はヒステリシス付き (入り ±0.18 / 出 ±0.10 + 最小保持) で保持し、材料の明滅で往復させない
+    let stance = prev ? prev.stance : 'even', stF = prev ? prev.stF : -1e9, sw = prev ? prev.sw : 0;
+    if (!prev || now - stF >= OUTLOOK_DWELL) {
+        const ns = score > 0.18 ? 'ahead' : score < -0.18 ? 'behind' : Math.abs(score) <= 0.10 ? 'even' : stance;
+        if (ns !== stance) { stance = ns; stF = now; sw++; }
+    }
+    const why = '戦力 自' + forceOwn.toFixed(2) + '/敵' + forceOpp.toFixed(2) + (oppKnown ? '' : ' (敵耐久は未知)') +
+        '・支配 コロニー' + ownCols + '-' + foeCols + ' ノード' + ownNodes + '-' + foeNodes +
+        (sd ? '・S&D進捗 自' + ownCols + '/' + totalCols : '');
+    return { stance, score: Math.round(score * 1000) / 1000, phase, forceOwn: Math.round(forceOwn * 1000) / 1000, forceOpp: Math.round(forceOpp * 1000) / 1000,
+        ownCols, foeCols, ownNodes, foeNodes, totalCols, totalNodes, sinkProg: oppKnown ? Math.round((1 - oppF) * 1000) / 1000 : null,
+        paths: { sink: true, hack: sd ? foeCols < totalCols : null, hackProg: sd && totalCols ? Math.round(ownCols / totalCols * 1000) / 1000 : null },
+        why, f: now, stF, sw };
+}
+// ── 基本原則: 点検可能な原則のリスト ──
+//   各原則は { id, jp (原則文), theory (THEORY の節への紐付け), eval(ctx) → { str: 0..1, why, aim? } }。
+//   eval が読むのは THEORY と信念側の材料 (ctx = { side, who, S, J, O (見通し), P, now }) だけ。
+//   原則は「規定」であって判断そのものではない: 強さと根拠を返すところまでで、姿勢への落とし込みは対応表が担う。
+const PRINCIPLES = [
+    { id: 'winpath', jp: '勝利の道筋を常に持つ', theory: 'win', eval: (c) => {
+        // THEORY.win: 勝敗は敵艦の全滅 (撃沈) で決まる。S&D では全コロニーのハックでも決まる
+        let str = 0.3, aim = 'sink', why = '撃沈の道は遠い (相手戦力の見積もりが無い)';
+        if (c.O.sinkProg != null) { str = 0.25 + 0.7 * c.O.sinkProg; why = '撃沈の道: 相手戦力は推定 ' + Math.round((1 - c.O.sinkProg) * 100) + '% 残り'; }
+        if (c.O.paths.hack) { const v = 0.2 + 0.75 * (c.O.paths.hackProg || 0); if (v >= str) { str = v; aim = 'hack'; why = 'ハックの道: 自軍コロニー ' + c.O.ownCols + '/' + c.O.totalCols; } }
+        return { str, why, aim };
+    } },
+    { id: 'infoFirst', jp: '情報なくして決戦しない', theory: 'sense', eval: (c) => {
+        // THEORY.sense / memory: 方位記録が溜まって初めて位置が締まる。推定が無ければまず集める
+        const S = c.S; let str, why;
+        if (S.seen) { str = 0.12; why = '相手は目視内 — 決戦の材料は足りている'; }
+        else if (S.est) { str = S.estRatio <= 0.35 ? 0.38 : 0.68; why = '推定はあるが精度は ' + (S.estRatio <= 0.35 ? 'まずまず' : 'まだ粗い') + ' (誤差比 ' + Math.round(Math.min(9, S.estRatio) * 100) / 100 + ')'; }
+        else { str = 0.95; why = '相手の推定が無い — 決戦の材料が無い'; }
+        if (!S.oppCls) str = Math.min(1, str + 0.08); // 艦種の仮説すら無い間は情報をさらに求める
+        return { str, why };
+    } },
+    { id: 'exposure', jp: '撃てば割れる — 露出を律する', theory: 'sense', eval: (c) => {
+        // THEORY.sense: 撃てば・動けば自分の信号も出る。露出は相手の推定を育てる
+        const S = c.S, str = Math.min(1, (S.expo || 0) * 0.28 + (S.seen ? 0.18 : 0) + (c.J.phase === 'combat' ? 0.08 : 0));
+        return { str, why: '露出 ' + (S.expo || 0) + (S.seen ? '・目視されている' : '・位置は割れていない') };
+    } },
+    { id: 'supply', jp: '弾と補給 — 補給圏外で尽かさない', theory: 'weapon', eval: (c) => {
+        // THEORY.weapon (弾数) + THEORY.base (コロニーは補給の港)。尽きた艦は撃ち合いを続けられない
+        const S = c.S;
+        if (!S.wK && !S.wM) return { str: 0, why: 'ビームのみ — 弾薬の概念なし' };
+        const ammoF = S.ammo != null ? S.ammo : 1;
+        const str = S.ammoOut ? 1 : ammoF < 0.45 ? Math.min(1, (0.45 - ammoF) / 0.45) * 0.9 : 0;
+        if (!str) return { str, why: '残弾 ' + Math.round(ammoF * 100) + '% — 補給の圧は無い' };
+        const site = _restockSite(c.side, c.who.x, c.who.y); // 補給先の見え方は信念側の既存の読み (stratExtra と同じ)
+        return { str, why: S.ammoOut ? '両弾薬0 — ' + (site ? '補給先は見えている' : '補給先が見えない') : '残弾 ' + Math.round(ammoF * 100) + '% — 補給を意識する水準' };
+    } },
+    { id: 'bases', jp: '拠点を争う — ノードは耳、コロニーは港と勝敗', theory: 'base', eval: (c) => {
+        // THEORY.base: ノードは聴音網と資源、コロニーは補給と S&D の勝敗。後れているなら争う
+        const O = c.O, diff = O.ownCols - O.foeCols, ndiff = O.ownNodes - O.foeNodes;
+        let str = 0.25 + (diff < 0 ? 0.22 * -diff : 0) + (ndiff < 0 ? 0.06 * -ndiff : 0) + (O.phase === 'early' ? 0.15 : 0);
+        if (gameState.mode === 'sd') str *= 1.3;
+        if (diff >= 2) str *= 0.6; // 支配で大きく先行していれば、さらに争う圧は下がる
+        return { str: Math.min(1, str), why: '支配 コロニー自' + O.ownCols + '-敵' + O.foeCols + '・ノード自' + O.ownNodes + '-敵' + O.foeNodes + (gameState.mode === 'sd' ? ' (S&Dではコロニーが勝敗そのもの)' : '') };
+    } },
+    { id: 'preserve', jp: '勝っていれば戦力を温存する', theory: 'win', eval: (c) => {
+        const O = c.O; let str = O.stance === 'ahead' ? 0.7 : O.stance === 'even' ? 0.3 : 0.05;
+        if (O.stance === 'ahead' && O.phase === 'late') str += 0.15; // 終盤の優勢は守り切る価値が高い
+        if (c.S.hpF < 0.35) str *= 0.5; // 大破していれば「温存」ではなく立て直し (supply) の領分
+        return { str: Math.min(1, str), why: '見通し ' + _STANCE_JP[O.stance] + (O.stance === 'ahead' ? ' — 消耗を避けて勝ち切る' : O.stance === 'behind' ? ' — 温存では覆らない' : ' — 互角では温存は半分だけ') };
+    } },
+    { id: 'decisive', jp: '負けていれば決戦を求める', theory: 'win', eval: (c) => {
+        const O = c.O; let str = O.stance === 'behind' ? 0.55 : O.stance === 'even' ? 0.2 : 0.1, why = '見通し ' + _STANCE_JP[O.stance];
+        if (O.stance === 'behind' && O.phase === 'late') { str = 0.85; why += '・終盤 — 決戦でしか覆らない'; }
+        else if (O.stance === 'even' && O.phase === 'late') { str = 0.45; why += '・終盤 — 決着を急ぐ'; }
+        if (O.sinkProg != null && O.sinkProg >= 0.65) { str = Math.max(str, 0.8); why = '相手戦力は推定 ' + Math.round((1 - O.sinkProg) * 100) + '% 残り — 仕留める時'; }
+        return { str, why };
+    } },
+    { id: 'time', jp: '時間を読む — 初動は聴く・序盤は情報と経済・収集期は積む、終盤は決着の圧力', theory: 'time', eval: (c) => {
+        // THEORY.time の3層で読む (オーナー判断: 「序盤」は文脈依存 — 初動90秒/序盤3分/収集期10分は別の窓)。
+        //   強さは位相 (early/mid/late) による従来どおりで変えていない。3層は「今どの窓が開いているか」の根拠に使う
+        //   (姿勢への効き方は対応表の time.early/mid/late が持つ)。
+        const T = THEORY.time, now = c.now, ph = c.O.phase;
+        const layers = [];
+        if (now < T.openingUntil) layers.push('初動');
+        if (now < T.earlyUntil) layers.push('序盤');
+        if (now < T.gatherUntil) layers.push('収集期');
+        const open = layers.length ? layers.join('・') + 'の窓が開いている' : '初動・序盤・収集期の窓は全て閉じた';
+        return { str: ph === 'early' ? 0.6 : ph === 'late' ? 0.8 : 0.3, why: (ph === 'early' ? '序盤 — 情報と経済の時間' : ph === 'late' ? '終盤 — 決着の圧力が高まる' : '中盤 — 局面次第の時間') + ' (' + open + ')' };
+    } },
+];
+const PRINCIPLE_JP = {}; for (const p of PRINCIPLES) PRINCIPLE_JP[p.id] = p.jp;
+// ── 原則→姿勢の対応表: 方針 (姿勢) は「今働いている原則が要求する姿勢」として導出する ──
+//   姿勢スコア = 原則全体から見た要求の平均の強さ (Σ 原則の強さ×重み / Σ 重み — 導出は trunkStep 参照)。winpath は生きている道 (aim) で行が分かれ、
+//   time は位相で行が分かれる。重みは全て 0..1 で、姿勢同士の絶対評価ではなく相対的な要求の強さ。
+const PRINCIPLE_POSTURE = {
+    'winpath.sink': { press: 0.9, veil: 0.2, expand: 0.1, ambush: 0.3, recover: 0 },
+    'winpath.hack': { press: 0.2, veil: 0.3, expand: 0.9, ambush: 0.2, recover: 0 },
+    infoFirst: { press: 0, veil: 0.9, expand: 0.4, ambush: 0.5, recover: 0.1 },
+    exposure:  { press: 0, veil: 0.4, expand: 0.1, ambush: 0.7, recover: 0.3 },
+    supply:    { press: 0, veil: 0, expand: 0.2, ambush: 0.1, recover: 1.0 },
+    bases:     { press: 0.3, veil: 0.3, expand: 0.9, ambush: 0.2, recover: 0 },
+    preserve:  { press: 0, veil: 0.4, expand: 0.5, ambush: 0.5, recover: 0.4 },
+    decisive:  { press: 1.0, veil: 0.1, expand: 0.2, ambush: 0.1, recover: 0 },
+    'time.early': { press: 0, veil: 0.7, expand: 0.8, ambush: 0.3, recover: 0 },
+    'time.mid':   { press: 0.2, veil: 0.3, expand: 0.3, ambush: 0.2, recover: 0 },
+    'time.late':  { press: 0.9, veil: 0.1, expand: 0.3, ambush: 0.1, recover: 0 },
+};
+// ── 幹の周期処理: 見通し → 原則 → 方針 を更新する (判定ティック sitJudgeAttach から呼ばれる) ──
+function trunkStep(F, S, J) {
+    if (!F || !S || !J) return null;
+    const side = F.side, who = S.who || (side === 'p' ? player : null);
+    if (!who || who.hp <= 0) return null;
+    const holder = side === 'p' ? (_com || F.who) : F.who;
+    if (!holder) return null;
+    const now = _frameCount, docKey = side === 'p' ? 'doc' : '_doc';
+    let T = holder._trunk;
+    if (!T) T = holder._trunk = { lastF: -1e9, _ph: null, _od: null };
+    const trigPh = T._ph !== null && J.phase !== T._ph && (J.phase === 'combat' || J.phase === 'escape' || J.phase === 'recover'); // 主局面が戦闘側へ変わったら即時
+    const trigOd = T._od !== null && J.odds !== T._od; // 勝算の反転も即時
+    T._ph = J.phase; T._od = J.odds;
+    const prevD = holder[docKey];
+    if (prevD && now - T.lastF < TRUNK_PERIOD && !(now - T.lastF >= TRUNK_TRIG_GAP && (trigPh || trigOd))) return prevD;
+    T.lastF = now;
+    // ① 見通し
+    const O = matchOutlook(side, who, S, holder._outlook || null, now);
+    holder._outlook = O;
+    // ② 原則の評価
+    const ctx = { side, who, S, J, O, P: F.P || PERS_DEF, now };
+    const prin = {}; let top = null, topV = -1;
+    for (const pr of PRINCIPLES) {
+        let r; try { r = pr.eval(ctx); } catch (er) { r = { str: 0, why: '評価に失敗' }; }
+        const str = Math.round(Math.max(0, Math.min(1, r.str || 0)) * 1000) / 1000;
+        prin[pr.id] = { str, why: r.why || '', aim: r.aim || null };
+        if (str > topV) { topV = str; top = pr.id; }
+    }
+    holder._prin = { f: now, list: prin, top };
+    // ③ 方針の導出 (原則が主役。性格は枝として小さな調節 0.9〜1.1 を掛けるだけ)
+    const P = ctx.P;
+    const pf = { press: 0.9 + 0.2 * persAx(P, 'aggression'), veil: 0.9 + 0.2 * Math.max(persAx(P, 'tech'), persAx(P, 'cunning')),
+        expand: 0.9 + 0.2 * persAx(P, 'greed'), ambush: 0.9 + 0.2 * Math.max(persAx(P, 'patience'), persAx(P, 'stealth')), recover: 0.9 + 0.2 * persAx(P, 'caution') };
+    const scores = {}, contrib = {}, wsum = {}, csum = {};
+    for (const id of DOC_IDS) { scores[id] = 0; contrib[id] = {}; wsum[id] = 0; csum[id] = 0; }
+    for (const pr of PRINCIPLES) {
+        const rec = prin[pr.id]; if (!rec) continue;
+        const rowKey = pr.id === 'winpath' ? 'winpath.' + (rec.aim || 'sink') : pr.id === 'time' ? 'time.' + O.phase : pr.id;
+        const row = PRINCIPLE_POSTURE[rowKey]; if (!row) continue;
+        for (const id of DOC_IDS) { const w = row[id] || 0; if (w) { const v = rec.str * w; scores[id] += v; wsum[id] += w; csum[id] += v; if (v) contrib[id][pr.id] = v; } }
+    }
+    // 姿勢スコア = 原則全体から見た「要求の平均の強さ」(Σ str×w / Σ w、wsum は str=0 の原則も含めた全行で取る)。
+    // 単純な合計だと、複数原則から弱く押される姿勢が単一原則の最大の要求を常に埋もれさせる
+    // (検証: 両弾薬0で supply=1.0 でも recover が一度も立たなかった) ため平均に変えた (第229弾)。
+    for (const id of DOC_IDS) scores[id] = (wsum[id] > 0 ? scores[id] / wsum[id] : 0) * pf[id];
+    let D = holder[docKey];
+    if (!D) D = holder[docKey] = { id: null, t0: -1e9, score: 0, why: '', prin: [], sw: 0, lastF: -1e9, all: null };
+    let best = null, bv = -1;
+    for (const id of DOC_IDS) { const v = scores[id] * (id === D.id ? DOC_HYST : 1); if (v > bv) { bv = v; best = id; } }
+    let pick = best;
+    const urgent = J.phase === 'escape' || (prin.supply && prin.supply.str >= 0.99); // 安全側: 離脱局面と弾薬切れは最小滞在を待たない
+    if (pick !== D.id && D.t0 > -1e9 && now - D.t0 < DOC_DWELL && !urgent) pick = D.id;
+    const changed = pick !== D.id, from = D.id;
+    const drivers = Object.keys(contrib[pick]).sort((a, b) => contrib[pick][b] - contrib[pick][a])
+        .filter(id => contrib[pick][id] >= 0.2 * Math.max(0.01, csum[pick])).slice(0, 3); // 選ばれた姿勢の根拠原則 (寄与シェア2割以上・大きい順・最大3件)
+    D.id = pick; D.score = Math.round(scores[pick] * 1000) / 1000; D.prin = drivers; D.lastF = now;
+    D.why = (drivers.length ? drivers.map(id => '「' + (PRINCIPLE_JP[id] || id) + '」').join('・') : '原則の要求なし') + ' (見通し ' + _STANCE_JP[O.stance] + ')';
+    D.all = {}; for (const id of DOC_IDS) D.all[id] = Math.round(scores[id] * 1000) / 1000;
+    if (changed) {
+        if (from) D.sw++;
+        D.t0 = now;
+        try { comThinkEvent(side, (from ? '方針変更: ' + DOC_JP[from] + ' → ' : '方針: ') + DOC_JP[pick] + ' — 根拠原則 ' + D.why + '・局面 ' + (SIT_PHASE_JP[J.phase] || J.phase), side === 'e' ? 'e' + who.uid : undefined); } catch (er) {}
+    }
+    return D;
+}
+// 幹の読み口 (今後の読み手はここ経由で読む。本弾では読み手なし)
+function outlookOf(side, who) { const h = side === 'p' ? _com : who; return h ? (h._outlook || null) : null; }
+function principlesOf(side, who) { const h = side === 'p' ? _com : who; return h ? (h._prin || null) : null; }
+function doctrineOf(side, who) { if (side === 'p') return _com ? (_com.doc || null) : null; return who ? (who._doc || null) : null; }
+// 検証専用の読み出し (原則の強さ・見通し・方針の採取用。判断経路からは使わない)
+window.__trunkDbg = function () {
+    const one = h => {
+        if (!h) return null;
+        const O = h._outlook, R = h._prin, D = h.doc || h._doc;
+        const prin = {}; if (R) for (const id in R.list) prin[id] = R.list[id].str;
+        return { outlook: O ? { stance: O.stance, score: O.score, phase: O.phase, sw: O.sw, why: O.why } : null,
+            prin, prinTop: R ? R.top : null,
+            doc: D && D.id ? { id: D.id, score: D.score, sw: D.sw, prin: D.prin, why: D.why, all: D.all } : null };
+    };
+    const out = { p: _com ? one(_com) : null, e: [] };
+    for (const e of enemies) if (e.type !== 'fighter') out.e.push(Object.assign({ uid: e.uid }, one(e) || {}));
+    return out;
+};
+window.__docDbg = function () { // 棚上げ案の計測 (measure228) との互換: 方針だけを同じ形で返す
+    const one = D => D && D.id ? { id: D.id, t0: D.t0, score: D.score, sw: D.sw, lastF: D.lastF, why: D.why, all: D.all } : null;
+    const out = { p: _com ? one(_com.doc) : null, e: [] };
+    for (const e of enemies) if (e.type !== 'fighter') out.e.push(Object.assign({ uid: e.uid }, one(e._doc) || { id: null }));
+    return out;
+};
 // 航行モードの4分類は局面からの導出に統一 (旧: 敵 _sit と自機COM sit が別実装・別材料だった)。
 //   潜伏は search に寄せる (敵の修復潜伏は低耐久の間 escape/recover が優先して立つため、retreat になるべき局面はそちらで拾える)
 function sitNavClass(J) {
@@ -18135,10 +18364,16 @@ const THEORY = {
         matPerSlot: MAT_PER_SLOT,       // 積載1枠 = 資材2個
         droneSpec: DRONE_SPEC,          // ドローンの枠・資材・建造時間・寿命・耐久
     },
-    // ── 時間の理論: 序盤は「まだ何も見えていない」時間。境界は3分。
-    //    (tc_early_listen の「序盤」は別の90秒を指す — 未形式化として CLAUDE.md に記録)
+    // ── 時間の理論: 「序盤」は文脈依存の語で、実際は3つの層が重なっている
+    //    (オーナー判断 2026-11-26: A = 3層のまま、名前を分けて残す。統一はしない)。
+    //    初動 90秒 = 戦術 tc_early_listen の窓 (出発前に止まって聴く時間) /
+    //    序盤 3分 = 戦略の重み (S.early・幹の位相 early の境界) /
+    //    収集期 10分 = COM_EARLY_GATHER (序盤収集プランの長さ)。
+    //    ここは3層の名前と値の記録であり、既存の参照先 (各リテラル・定数) の値と条件は変えない。
     time: {
+        openingUntil: 5400,             // 初動の境界 90秒 — 戦術 tc_early_listen の窓 (now < 5400) に対応する記録
         earlyUntil: 10800,              // 序盤の境界 3分 — sitAug の S.early に埋まっていた
+        gatherUntil: 36000,             // 収集期の境界 10分 — COM_EARLY_GATHER (= 36000) に対応する記録
     },
 };
 // パッシブ受信の到達距離 (方位ウェッジ生成・受信レベル表示で共通)
