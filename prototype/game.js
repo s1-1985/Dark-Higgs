@@ -15789,6 +15789,19 @@ function matchOutlook(side, who, S, prev, now) {
 //   各原則は { id, jp (原則文), theory (THEORY の節への紐付け), eval(ctx) → { str: 0..1, why, aim? } }。
 //   eval が読むのは THEORY と信念側の材料 (ctx = { side, who, S, J, O (見通し), P, now }) だけ。
 //   原則は「規定」であって判断そのものではない: 強さと根拠を返すところまでで、姿勢への落とし込みは対応表が担う。
+// 第233弾: 情報のない収集期には、公開マップ上の自軍未保有拠点も「情報を得る道」として読む。
+// 自軍保有か否か・既知の拠点座標・既存 CAP_RANGE のみ。相手が占有した真値は区別しない。
+function trunkBaseOpportunity(c) {
+    const { S, J, who, now, side } = c;
+    const out = { cols: 0, nodes: 0 };
+    if (!who || now >= THEORY.time.gatherUntil || S.seen || S.est || S.expo > 0 || S.ammoOut ||
+        (J.phase !== 'quiet' && J.phase !== 'search')) return out;
+    const me = side === 'p' ? 'player' : 'enemy';
+    const near = q => q.owner !== me && Math.hypot(q.x - who.x, q.y - who.y) < CAP_RANGE;
+    for (const q of structures) if (q.type === 'colony' && near(q)) out.cols++;
+    for (const q of resourceNodes) if (near(q)) out.nodes++;
+    return out;
+}
 const PRINCIPLES = [
     { id: 'winpath', jp: '勝利の道筋を常に持つ', theory: 'win', eval: (c) => {
         // THEORY.win: 勝敗は敵艦の全滅 (撃沈) で決まる。S&D では全コロニーのハックでも決まる
@@ -15804,6 +15817,9 @@ const PRINCIPLES = [
         else if (S.est) { str = S.estRatio <= 0.35 ? 0.38 : 0.68; why = '推定はあるが精度は ' + (S.estRatio <= 0.35 ? 'まずまず' : 'まだ粗い') + ' (誤差比 ' + Math.round(Math.min(9, S.estRatio) * 100) / 100 + ')'; }
         else { str = 0.95; why = '相手の推定が無い — 決戦の材料が無い'; }
         if (!S.oppCls) str = Math.min(1, str + 0.08); // 艦種の仮説すら無い間は情報をさらに求める
+        const B = c.baseOpp;
+        // 情報不足の強さは変えない。聴音網を広げられる静穏な収集期だけ、取得の道を明示する。
+        if (B && (B.cols || B.nodes)) return { str, why: why + '・自軍未保有の聴音拠点を広げられる', aim: 'expand' };
         return { str, why };
     } },
     { id: 'exposure', jp: '撃てば割れる — 露出を律する', theory: 'sense', eval: (c) => {
@@ -15827,7 +15843,15 @@ const PRINCIPLES = [
         let str = 0.25 + (diff < 0 ? 0.22 * -diff : 0) + (ndiff < 0 ? 0.06 * -ndiff : 0) + (O.phase === 'early' ? 0.15 : 0);
         if (gameState.mode === 'sd') str *= 1.3;
         if (diff >= 2) str *= 0.6; // 支配で大きく先行していれば、さらに争う圧は下がる
-        return { str: Math.min(1, str), why: '支配 コロニー自' + O.ownCols + '-敵' + O.foeCols + '・ノード自' + O.ownNodes + '-敵' + O.foeNodes + (gameState.mode === 'sd' ? ' (S&Dではコロニーが勝敗そのもの)' : '') };
+        const B = c.baseOpp;
+        // 既存の拠点差・序盤の係数を自軍未保有の機会にも適用。欠損と機会は足さず強い方を採る。
+        if (B && (B.cols || B.nodes)) {
+            let opportunity = 0.25 + 0.22 * B.cols + 0.06 * B.nodes + 0.15;
+            if (gameState.mode === 'sd') opportunity *= 1.3;
+            if (diff >= 2) opportunity *= 0.6;
+            str = Math.max(str, opportunity);
+        }
+        return { str: Math.min(1, str), why: '支配 コロニー自' + O.ownCols + '-敵' + O.foeCols + '・ノード自' + O.ownNodes + '-敵' + O.foeNodes + (gameState.mode === 'sd' ? ' (S&Dではコロニーが勝敗そのもの)' : '') + (B && (B.cols || B.nodes) ? '・収集圏内の自軍未保有 コロニー' + B.cols + ' ノード' + B.nodes : '') };
     } },
     { id: 'preserve', jp: '勝っていれば戦力を温存する', theory: 'win', eval: (c) => {
         const O = c.O; let str = O.stance === 'ahead' ? 0.7 : O.stance === 'even' ? 0.3 : 0.05;
@@ -15863,6 +15887,8 @@ const PRINCIPLE_POSTURE = {
     'winpath.sink': { press: 0.9, veil: 0.2, expand: 0.1, ambush: 0.3, recover: 0 },
     'winpath.hack': { press: 0.2, veil: 0.3, expand: 0.9, ambush: 0.2, recover: 0 },
     infoFirst: { press: 0, veil: 0.9, expand: 0.4, ambush: 0.5, recover: 0.1 },
+    // 情報を聴音網で得られる時は、既存の veil/expand の重みを交換する。新しい係数は設けない。
+    'infoFirst.expand': { press: 0, veil: 0.4, expand: 0.9, ambush: 0.5, recover: 0.1 },
     exposure:  { press: 0, veil: 0.4, expand: 0.1, ambush: 0.7, recover: 0.3 },
     supply:    { press: 0, veil: 0, expand: 0.2, ambush: 0.1, recover: 1.0 },
     bases:     { press: 0.3, veil: 0.3, expand: 0.9, ambush: 0.2, recover: 0 },
@@ -15893,6 +15919,7 @@ function trunkStep(F, S, J) {
     holder._outlook = O;
     // ② 原則の評価
     const ctx = { side, who, S, J, O, P: F.P || PERS_DEF, now };
+    ctx.baseOpp = trunkBaseOpportunity(ctx);
     const prin = {}; let top = null, topV = -1;
     for (const pr of PRINCIPLES) {
         let r; try { r = pr.eval(ctx); } catch (er) { r = { str: 0, why: '評価に失敗' }; }
@@ -15913,7 +15940,7 @@ function trunkStep(F, S, J) {
     for (const id of DOC_IDS) { scores[id] = 0; contrib[id] = {}; wsum[id] = 0; csum[id] = 0; }
     for (const pr of PRINCIPLES) {
         const rec = prin[pr.id]; if (!rec) continue;
-        const rowKey = pr.id === 'winpath' ? 'winpath.' + (rec.aim || 'sink') : pr.id === 'time' ? 'time.' + O.phase : pr.id;
+        const rowKey = pr.id === 'winpath' ? 'winpath.' + (rec.aim || 'sink') : pr.id === 'time' ? 'time.' + O.phase : pr.id === 'infoFirst' && rec.aim === 'expand' ? 'infoFirst.expand' : pr.id;
         const row = PRINCIPLE_POSTURE[rowKey]; if (!row) continue;
         for (const id of DOC_IDS) { const w = row[id] || 0; if (w) { const v = rec.str * w; scores[id] += v; wsum[id] += w; csum[id] += v; if (v) contrib[id][pr.id] = v; } }
     }
