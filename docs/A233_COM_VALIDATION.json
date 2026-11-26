@@ -1,0 +1,1321 @@
+{
+  "base": "9cc69b58d9f7e8ff575675d5b7b9722370c569ab",
+  "testedHead": "5e16b9c75b021b0b85c60ecb9c49b5dd0fee31dc",
+  "gameBlob": "d539b0a70f8bb0e1e6fad40ce0f8ce297db3377e",
+  "run": "https://github.com/s1-1985/Dark-Higgs/actions/runs/45856953950",
+  "conditions": "BR / fixed seed / 86400f max / 6 settings / before repeated; some historical ship pairs provisional; contact measured from record snapshots; no device test",
+  "jobResults": [
+    {
+      "name": "aggressive",
+      "version": "before",
+      "frames": 86400,
+      "docs": {
+        "p": {
+          "veil": 66660,
+          "press": 19680
+        },
+        "e": {
+          "veil": 53340,
+          "press": 33060
+        }
+      },
+      "picks": {
+        "p": {
+          "n": 4,
+          "by": {
+            "gather": 2,
+            "push": 1,
+            "screen": 1
+          },
+          "share": {
+            "gather": 0.5,
+            "push": 0.25,
+            "screen": 0.25
+          }
+        },
+        "e": {
+          "n": 2,
+          "by": {
+            "gather": 1,
+            "push": 1
+          },
+          "share": {
+            "gather": 0.5,
+            "push": 0.5
+          }
+        }
+      },
+      "fire": {
+        "e|_item": 1,
+        "e|tc_listen": 5,
+        "p|tc_listen": 11,
+        "p|_item": 35,
+        "e|tc_ping_step": 1,
+        "p|cb_blow_strike": 1,
+        "p|tc_sonar_fix": 5,
+        "e|tc_sonar_fix": 2,
+        "e|tc_raid_rush": 1,
+        "e|tc_kite": 2,
+        "p|tc_kite": 1,
+        "p|cb_decoy_drone": 1,
+        "e|tc_probe_evade": 1
+      },
+      "contact": 53520,
+      "seen": 780,
+      "stats": {
+        "startFrame": 0,
+        "firstContact": 61920,
+        "ambushes": 0,
+        "crits": 4,
+        "timesEngaged": 0,
+        "dmgDealt": 2876,
+        "dmgTaken": 630,
+        "pings": 0,
+        "escapeItems": 1,
+        "shots": 17,
+        "dmgShip": 2587
+      },
+      "winner": "none",
+      "errors": []
+    },
+    {
+      "name": "aggressive",
+      "version": "before-repeat",
+      "frames": 86400,
+      "docs": {
+        "p": {
+          "veil": 66660,
+          "press": 19680
+        },
+        "e": {
+          "veil": 53340,
+          "press": 33060
+        }
+      },
+      "picks": {
+        "p": {
+          "n": 4,
+          "by": {
+            "gather": 2,
+            "push": 1,
+            "screen": 1
+          },
+          "share": {
+            "gather": 0.5,
+            "push": 0.25,
+            "screen": 0.25
+          }
+        },
+        "e": {
+          "n": 2,
+          "by": {
+            "gather": 1,
+            "push": 1
+          },
+          "share": {
+            "gather": 0.5,
+            "push": 0.5
+          }
+        }
+      },
+      "fire": {
+        "e|_item": 1,
+        "e|tc_listen": 5,
+        "p|tc_listen": 11,
+        "p|_item": 35,
+        "e|tc_ping_step": 1,
+        "p|cb_blow_strike": 1,
+        "p|tc_sonar_fix": 5,
+        "e|tc_sonar_fix": 2,
+        "e|tc_raid_rush": 1,
+        "e|tc_kite": 2,
+        "p|tc_kite": 1,
+        "p|cb_decoy_drone": 1,
+        "e|tc_probe_evade": 1
+      },
+      "contact": 53520,
+      "seen": 780,
+      "stats": {
+        "startFrame": 0,
+        "firstContact": 61920,
+        "ambushes": 0,
+        "crits": 4,
+        "timesEngaged": 0,
+        "dmgDealt": 2876,
+        "dmgTaken": 630,
+        "pings": 0,
+        "escapeItems": 1,
+        "shots": 17,
+        "dmgShip": 2587
+      },
+      "winner": "none",
+      "errors": []
+    },
+    {
+      "name": "aggressive",
+      "version": "after",
+      "frames": 86400,
+      "docs": {
+        "p": {
+          "expand": 10800,
+          "veil": 55860,
+          "press": 19680
+        },
+        "e": {
+          "expand": 10800,
+          "veil": 42540,
+          "press": 33060
+        }
+      },
+      "picks": {
+        "p": {
+          "n": 4,
+          "by": {
+            "gather": 2,
+            "push": 1,
+            "screen": 1
+          },
+          "share": {
+            "gather": 0.5,
+            "push": 0.25,
+            "screen": 0.25
+          }
+        },
+        "e": {
+          "n": 2,
+          "by": {
+            "gather": 1,
+            "push": 1
+          },
+          "share": {
+            "gather": 0.5,
+            "push": 0.5
+          }
+        }
+      },
+      "fire": {
+        "e|_item": 1,
+        "e|tc_listen": 5,
+        "p|tc_listen": 11,
+        "p|_item": 35,
+        "e|tc_ping_step": 1,
+        "p|cb_blow_strike": 1,
+        "p|tc_sonar_fix": 5,
+        "e|tc_sonar_fix": 2,
+        "e|tc_raid_rush": 1,
+        "e|tc_kite": 2,
+        "p|tc_kite": 1,
+        "p|cb_decoy_drone": 1,
+        "e|tc_probe_evade": 1
+      },
+      "contact": 53520,
+      "seen": 780,
+      "stats": {
+        "startFrame": 0,
+        "firstContact": 61920,
+        "ambushes": 0,
+        "crits": 4,
+        "timesEngaged": 0,
+        "dmgDealt": 2876,
+        "dmgTaken": 630,
+        "pings": 0,
+        "escapeItems": 1,
+        "shots": 17,
+        "dmgShip": 2587
+      },
+      "winner": "none",
+      "errors": []
+    },
+    {
+      "name": "aggressive-cautious",
+      "version": "before",
+      "frames": 86160,
+      "docs": {
+        "p": {
+          "veil": 72720,
+          "press": 13080,
+          "recover": 300
+        },
+        "e": {
+          "veil": 85860,
+          "press": 240
+        }
+      },
+      "picks": {
+        "p": {
+          "n": 4,
+          "by": {
+            "gather": 2,
+            "push": 2
+          },
+          "share": {
+            "gather": 0.5,
+            "push": 0.5
+          }
+        },
+        "e": {
+          "n": 2,
+          "by": {
+            "gather": 1,
+            "ambush": 1
+          },
+          "share": {
+            "gather": 0.5,
+            "ambush": 0.5
+          }
+        }
+      },
+      "fire": {
+        "e|tc_early_listen": 1,
+        "e|tc_listen": 10,
+        "p|tc_listen": 10,
+        "e|_item": 12,
+        "p|_item": 23,
+        "e|tc_ping_step": 2,
+        "p|tc_ping_step": 1,
+        "e|tc_sonar_fix": 2,
+        "e|tc_kite": 3,
+        "e|tc_status_retreat": 1,
+        "p|tc_kite": 4,
+        "e|tc_probe_evade": 5,
+        "p|tc_probe_evade": 2,
+        "p|tc_sonar_fix": 1
+      },
+      "contact": 35400,
+      "seen": 3300,
+      "stats": {
+        "startFrame": 0,
+        "firstContact": 68160,
+        "ambushes": 0,
+        "crits": 4,
+        "timesEngaged": 0,
+        "dmgDealt": 3088,
+        "dmgTaken": 1630,
+        "pings": 1,
+        "escapeItems": 3,
+        "shots": 59,
+        "dmgShip": 3088
+      },
+      "winner": "player",
+      "errors": []
+    },
+    {
+      "name": "aggressive-cautious",
+      "version": "before-repeat",
+      "frames": 86160,
+      "docs": {
+        "p": {
+          "veil": 72720,
+          "press": 13080,
+          "recover": 300
+        },
+        "e": {
+          "veil": 85860,
+          "press": 240
+        }
+      },
+      "picks": {
+        "p": {
+          "n": 4,
+          "by": {
+            "gather": 2,
+            "push": 2
+          },
+          "share": {
+            "gather": 0.5,
+            "push": 0.5
+          }
+        },
+        "e": {
+          "n": 2,
+          "by": {
+            "gather": 1,
+            "ambush": 1
+          },
+          "share": {
+            "gather": 0.5,
+            "ambush": 0.5
+          }
+        }
+      },
+      "fire": {
+        "e|tc_early_listen": 1,
+        "e|tc_listen": 10,
+        "p|tc_listen": 10,
+        "e|_item": 12,
+        "p|_item": 23,
+        "e|tc_ping_step": 2,
+        "p|tc_ping_step": 1,
+        "e|tc_sonar_fix": 2,
+        "e|tc_kite": 3,
+        "e|tc_status_retreat": 1,
+        "p|tc_kite": 4,
+        "e|tc_probe_evade": 5,
+        "p|tc_probe_evade": 2,
+        "p|tc_sonar_fix": 1
+      },
+      "contact": 35400,
+      "seen": 3300,
+      "stats": {
+        "startFrame": 0,
+        "firstContact": 68160,
+        "ambushes": 0,
+        "crits": 4,
+        "timesEngaged": 0,
+        "dmgDealt": 3088,
+        "dmgTaken": 1630,
+        "pings": 1,
+        "escapeItems": 3,
+        "shots": 59,
+        "dmgShip": 3088
+      },
+      "winner": "player",
+      "errors": []
+    },
+    {
+      "name": "aggressive-cautious",
+      "version": "after",
+      "frames": 86160,
+      "docs": {
+        "p": {
+          "expand": 10800,
+          "veil": 61920,
+          "press": 13080,
+          "recover": 300
+        },
+        "e": {
+          "expand": 5880,
+          "veil": 79980,
+          "press": 240
+        }
+      },
+      "picks": {
+        "p": {
+          "n": 4,
+          "by": {
+            "gather": 2,
+            "push": 2
+          },
+          "share": {
+            "gather": 0.5,
+            "push": 0.5
+          }
+        },
+        "e": {
+          "n": 2,
+          "by": {
+            "gather": 1,
+            "ambush": 1
+          },
+          "share": {
+            "gather": 0.5,
+            "ambush": 0.5
+          }
+        }
+      },
+      "fire": {
+        "e|tc_early_listen": 1,
+        "e|tc_listen": 10,
+        "p|tc_listen": 10,
+        "e|_item": 12,
+        "p|_item": 23,
+        "e|tc_ping_step": 2,
+        "p|tc_ping_step": 1,
+        "e|tc_sonar_fix": 2,
+        "e|tc_kite": 3,
+        "e|tc_status_retreat": 1,
+        "p|tc_kite": 4,
+        "e|tc_probe_evade": 5,
+        "p|tc_probe_evade": 2,
+        "p|tc_sonar_fix": 1
+      },
+      "contact": 35400,
+      "seen": 3300,
+      "stats": {
+        "startFrame": 0,
+        "firstContact": 68160,
+        "ambushes": 0,
+        "crits": 4,
+        "timesEngaged": 0,
+        "dmgDealt": 3088,
+        "dmgTaken": 1630,
+        "pings": 1,
+        "escapeItems": 3,
+        "shots": 59,
+        "dmgShip": 3088
+      },
+      "winner": "player",
+      "errors": []
+    },
+    {
+      "name": "stealthy",
+      "version": "before",
+      "frames": 53820,
+      "docs": {
+        "p": {
+          "veil": 52200,
+          "press": 1560
+        },
+        "e": {
+          "veil": 50820,
+          "press": 1200,
+          "ambush": 1740
+        }
+      },
+      "picks": {
+        "p": {
+          "n": 3,
+          "by": {
+            "gather": 1,
+            "wide_loop": 1,
+            "rock": 1
+          },
+          "share": {
+            "gather": 0.3333333333333333,
+            "wide_loop": 0.3333333333333333,
+            "rock": 0.3333333333333333
+          }
+        },
+        "e": {
+          "n": 3,
+          "by": {
+            "gather": 1,
+            "rock": 1,
+            "guard": 1
+          },
+          "share": {
+            "gather": 0.3333333333333333,
+            "rock": 0.3333333333333333,
+            "guard": 0.3333333333333333
+          }
+        }
+      },
+      "fire": {
+        "e|tc_listen": 4,
+        "p|tc_early_listen": 1,
+        "e|tc_early_listen": 1,
+        "p|tc_listen": 14,
+        "e|cb_decoy_raid": 1,
+        "e|_item": 2,
+        "p|_item": 31,
+        "e|tc_ping_step": 2,
+        "p|cb_decoy_raid": 2,
+        "p|tc_sonar_fix": 1,
+        "p|tc_scout_ahead": 1,
+        "e|tc_sonar_fix": 1,
+        "e|tc_kite": 1,
+        "p|tc_probe_evade": 1
+      },
+      "contact": 18480,
+      "seen": 1980,
+      "stats": {
+        "startFrame": 0,
+        "firstContact": 51480,
+        "ambushes": 0,
+        "crits": 0,
+        "timesEngaged": 0,
+        "dmgDealt": 978,
+        "dmgTaken": 0,
+        "pings": 0,
+        "escapeItems": 6,
+        "shots": 3,
+        "dmgShip": 978
+      },
+      "winner": "player",
+      "errors": []
+    },
+    {
+      "name": "stealthy",
+      "version": "before-repeat",
+      "frames": 53820,
+      "docs": {
+        "p": {
+          "veil": 52200,
+          "press": 1560
+        },
+        "e": {
+          "veil": 50820,
+          "press": 1200,
+          "ambush": 1740
+        }
+      },
+      "picks": {
+        "p": {
+          "n": 3,
+          "by": {
+            "gather": 1,
+            "wide_loop": 1,
+            "rock": 1
+          },
+          "share": {
+            "gather": 0.3333333333333333,
+            "wide_loop": 0.3333333333333333,
+            "rock": 0.3333333333333333
+          }
+        },
+        "e": {
+          "n": 3,
+          "by": {
+            "gather": 1,
+            "rock": 1,
+            "guard": 1
+          },
+          "share": {
+            "gather": 0.3333333333333333,
+            "rock": 0.3333333333333333,
+            "guard": 0.3333333333333333
+          }
+        }
+      },
+      "fire": {
+        "e|tc_listen": 4,
+        "p|tc_early_listen": 1,
+        "e|tc_early_listen": 1,
+        "p|tc_listen": 14,
+        "e|cb_decoy_raid": 1,
+        "e|_item": 2,
+        "p|_item": 31,
+        "e|tc_ping_step": 2,
+        "p|cb_decoy_raid": 2,
+        "p|tc_sonar_fix": 1,
+        "p|tc_scout_ahead": 1,
+        "e|tc_sonar_fix": 1,
+        "e|tc_kite": 1,
+        "p|tc_probe_evade": 1
+      },
+      "contact": 18480,
+      "seen": 1980,
+      "stats": {
+        "startFrame": 0,
+        "firstContact": 51480,
+        "ambushes": 0,
+        "crits": 0,
+        "timesEngaged": 0,
+        "dmgDealt": 978,
+        "dmgTaken": 0,
+        "pings": 0,
+        "escapeItems": 6,
+        "shots": 3,
+        "dmgShip": 978
+      },
+      "winner": "player",
+      "errors": []
+    },
+    {
+      "name": "stealthy",
+      "version": "after",
+      "frames": 53820,
+      "docs": {
+        "p": {
+          "expand": 9600,
+          "veil": 42600,
+          "press": 1560
+        },
+        "e": {
+          "expand": 10800,
+          "veil": 40020,
+          "press": 1200,
+          "ambush": 1740
+        }
+      },
+      "picks": {
+        "p": {
+          "n": 3,
+          "by": {
+            "gather": 1,
+            "wide_loop": 1,
+            "rock": 1
+          },
+          "share": {
+            "gather": 0.3333333333333333,
+            "wide_loop": 0.3333333333333333,
+            "rock": 0.3333333333333333
+          }
+        },
+        "e": {
+          "n": 3,
+          "by": {
+            "gather": 1,
+            "rock": 1,
+            "guard": 1
+          },
+          "share": {
+            "gather": 0.3333333333333333,
+            "rock": 0.3333333333333333,
+            "guard": 0.3333333333333333
+          }
+        }
+      },
+      "fire": {
+        "e|tc_listen": 4,
+        "p|tc_early_listen": 1,
+        "e|tc_early_listen": 1,
+        "p|tc_listen": 14,
+        "e|cb_decoy_raid": 1,
+        "e|_item": 2,
+        "p|_item": 31,
+        "e|tc_ping_step": 2,
+        "p|cb_decoy_raid": 2,
+        "p|tc_sonar_fix": 1,
+        "p|tc_scout_ahead": 1,
+        "e|tc_sonar_fix": 1,
+        "e|tc_kite": 1,
+        "p|tc_probe_evade": 1
+      },
+      "contact": 18480,
+      "seen": 1980,
+      "stats": {
+        "startFrame": 0,
+        "firstContact": 51480,
+        "ambushes": 0,
+        "crits": 0,
+        "timesEngaged": 0,
+        "dmgDealt": 978,
+        "dmgTaken": 0,
+        "pings": 0,
+        "escapeItems": 6,
+        "shots": 3,
+        "dmgShip": 978
+      },
+      "winner": "player",
+      "errors": []
+    },
+    {
+      "name": "standard",
+      "version": "before",
+      "frames": 86400,
+      "docs": {
+        "p": {
+          "veil": 86340
+        },
+        "e": {
+          "veil": 86400
+        }
+      },
+      "picks": {
+        "p": {
+          "n": 2,
+          "by": {
+            "gather": 1,
+            "raid": 1
+          },
+          "share": {
+            "gather": 0.5,
+            "raid": 0.5
+          }
+        },
+        "e": {
+          "n": 4,
+          "by": {
+            "gather": 2,
+            "guard": 1,
+            "push": 1
+          },
+          "share": {
+            "gather": 0.5,
+            "guard": 0.25,
+            "push": 0.25
+          }
+        }
+      },
+      "fire": {
+        "e|_item": 1,
+        "p|tc_listen": 19,
+        "p|cb_decoy_raid": 5,
+        "e|tc_listen": 7,
+        "p|_item": 37,
+        "e|tc_ping_step": 2,
+        "p|tc_listen_spot": 2
+      },
+      "contact": 55140,
+      "seen": 0,
+      "stats": {
+        "startFrame": 0,
+        "firstContact": 35640,
+        "ambushes": 0,
+        "crits": 0,
+        "timesEngaged": 0,
+        "dmgDealt": 0,
+        "dmgTaken": 0,
+        "pings": 0,
+        "escapeItems": 2
+      },
+      "winner": "none",
+      "errors": []
+    },
+    {
+      "name": "standard",
+      "version": "before-repeat",
+      "frames": 86400,
+      "docs": {
+        "p": {
+          "veil": 86340
+        },
+        "e": {
+          "veil": 86400
+        }
+      },
+      "picks": {
+        "p": {
+          "n": 2,
+          "by": {
+            "gather": 1,
+            "raid": 1
+          },
+          "share": {
+            "gather": 0.5,
+            "raid": 0.5
+          }
+        },
+        "e": {
+          "n": 4,
+          "by": {
+            "gather": 2,
+            "guard": 1,
+            "push": 1
+          },
+          "share": {
+            "gather": 0.5,
+            "guard": 0.25,
+            "push": 0.25
+          }
+        }
+      },
+      "fire": {
+        "e|_item": 1,
+        "p|tc_listen": 19,
+        "p|cb_decoy_raid": 5,
+        "e|tc_listen": 7,
+        "p|_item": 37,
+        "e|tc_ping_step": 2,
+        "p|tc_listen_spot": 2
+      },
+      "contact": 55140,
+      "seen": 0,
+      "stats": {
+        "startFrame": 0,
+        "firstContact": 35640,
+        "ambushes": 0,
+        "crits": 0,
+        "timesEngaged": 0,
+        "dmgDealt": 0,
+        "dmgTaken": 0,
+        "pings": 0,
+        "escapeItems": 2
+      },
+      "winner": "none",
+      "errors": []
+    },
+    {
+      "name": "standard",
+      "version": "after",
+      "frames": 86400,
+      "docs": {
+        "p": {
+          "expand": 9600,
+          "veil": 76740
+        },
+        "e": {
+          "expand": 11760,
+          "veil": 74640
+        }
+      },
+      "picks": {
+        "p": {
+          "n": 2,
+          "by": {
+            "gather": 1,
+            "raid": 1
+          },
+          "share": {
+            "gather": 0.5,
+            "raid": 0.5
+          }
+        },
+        "e": {
+          "n": 4,
+          "by": {
+            "gather": 2,
+            "guard": 1,
+            "push": 1
+          },
+          "share": {
+            "gather": 0.5,
+            "guard": 0.25,
+            "push": 0.25
+          }
+        }
+      },
+      "fire": {
+        "e|_item": 1,
+        "p|tc_listen": 19,
+        "p|cb_decoy_raid": 5,
+        "e|tc_listen": 7,
+        "p|_item": 37,
+        "e|tc_ping_step": 2,
+        "p|tc_listen_spot": 2
+      },
+      "contact": 55140,
+      "seen": 0,
+      "stats": {
+        "startFrame": 0,
+        "firstContact": 35640,
+        "ambushes": 0,
+        "crits": 0,
+        "timesEngaged": 0,
+        "dmgDealt": 0,
+        "dmgTaken": 0,
+        "pings": 0,
+        "escapeItems": 2
+      },
+      "winner": "none",
+      "errors": []
+    },
+    {
+      "name": "schemer",
+      "version": "before",
+      "frames": 86400,
+      "docs": {
+        "p": {
+          "veil": 86340
+        },
+        "e": {
+          "veil": 86400
+        }
+      },
+      "picks": {
+        "p": {
+          "n": 5,
+          "by": {
+            "bait": 1,
+            "gather": 1,
+            "ambush": 1,
+            "outpost": 1,
+            "guard": 1
+          },
+          "share": {
+            "bait": 0.2,
+            "gather": 0.2,
+            "ambush": 0.2,
+            "outpost": 0.2,
+            "guard": 0.2
+          }
+        },
+        "e": {
+          "n": 3,
+          "by": {
+            "gather": 2,
+            "guard": 1
+          },
+          "share": {
+            "gather": 0.6666666666666666,
+            "guard": 0.3333333333333333
+          }
+        }
+      },
+      "fire": {
+        "e|cb_decoy_raid": 4,
+        "e|tc_listen": 1,
+        "p|cb_decoy_raid": 2,
+        "p|tc_early_listen": 1,
+        "e|tc_early_listen": 1,
+        "p|tc_listen": 17,
+        "e|_item": 1,
+        "p|_item": 42,
+        "p|cb_silence_raid": 1,
+        "e|tc_ping_step": 3,
+        "p|tc_sonar_fix": 1,
+        "p|tc_ping_step": 1
+      },
+      "contact": 3240,
+      "seen": 0,
+      "stats": {
+        "startFrame": 0,
+        "firstContact": -1,
+        "ambushes": 0,
+        "crits": 0,
+        "timesEngaged": 0,
+        "dmgDealt": 0,
+        "dmgTaken": 0,
+        "pings": 0,
+        "escapeItems": 4
+      },
+      "winner": "none",
+      "errors": []
+    },
+    {
+      "name": "schemer",
+      "version": "before-repeat",
+      "frames": 86400,
+      "docs": {
+        "p": {
+          "veil": 86340
+        },
+        "e": {
+          "veil": 86400
+        }
+      },
+      "picks": {
+        "p": {
+          "n": 5,
+          "by": {
+            "bait": 1,
+            "gather": 1,
+            "ambush": 1,
+            "outpost": 1,
+            "guard": 1
+          },
+          "share": {
+            "bait": 0.2,
+            "gather": 0.2,
+            "ambush": 0.2,
+            "outpost": 0.2,
+            "guard": 0.2
+          }
+        },
+        "e": {
+          "n": 3,
+          "by": {
+            "gather": 2,
+            "guard": 1
+          },
+          "share": {
+            "gather": 0.6666666666666666,
+            "guard": 0.3333333333333333
+          }
+        }
+      },
+      "fire": {
+        "e|cb_decoy_raid": 4,
+        "e|tc_listen": 1,
+        "p|cb_decoy_raid": 2,
+        "p|tc_early_listen": 1,
+        "e|tc_early_listen": 1,
+        "p|tc_listen": 17,
+        "e|_item": 1,
+        "p|_item": 42,
+        "p|cb_silence_raid": 1,
+        "e|tc_ping_step": 3,
+        "p|tc_sonar_fix": 1,
+        "p|tc_ping_step": 1
+      },
+      "contact": 3240,
+      "seen": 0,
+      "stats": {
+        "startFrame": 0,
+        "firstContact": -1,
+        "ambushes": 0,
+        "crits": 0,
+        "timesEngaged": 0,
+        "dmgDealt": 0,
+        "dmgTaken": 0,
+        "pings": 0,
+        "escapeItems": 4
+      },
+      "winner": "none",
+      "errors": []
+    },
+    {
+      "name": "schemer",
+      "version": "after",
+      "frames": 86400,
+      "docs": {
+        "p": {
+          "expand": 1200,
+          "veil": 77940,
+          "press": 7200
+        },
+        "e": {
+          "expand": 10800,
+          "veil": 75600
+        }
+      },
+      "picks": {
+        "p": {
+          "n": 2,
+          "by": {
+            "bait": 1,
+            "ambush": 1
+          },
+          "share": {
+            "bait": 0.5,
+            "ambush": 0.5
+          }
+        },
+        "e": {
+          "n": 3,
+          "by": {
+            "gather": 1,
+            "net": 1,
+            "ambush": 1
+          },
+          "share": {
+            "gather": 0.3333333333333333,
+            "net": 0.3333333333333333,
+            "ambush": 0.3333333333333333
+          }
+        }
+      },
+      "fire": {
+        "e|cb_decoy_raid": 2,
+        "e|tc_listen": 8,
+        "p|cb_decoy_raid": 1,
+        "p|tc_early_listen": 1,
+        "e|tc_early_listen": 1,
+        "p|tc_listen": 21,
+        "e|_item": 5,
+        "p|_item": 38,
+        "e|tc_ping_step": 2,
+        "p|tc_sonar_fix": 2,
+        "p|cb_saturate": 1,
+        "p|tc_kite": 1,
+        "e|tc_sonar_fix": 2,
+        "p|cb_decoy_drone": 1,
+        "e|tc_raid_rush": 1,
+        "p|tc_raid_rush": 1,
+        "e|tc_flash_open": 1,
+        "p|cb_silence_raid": 1
+      },
+      "contact": 24420,
+      "seen": 420,
+      "stats": {
+        "startFrame": 0,
+        "firstContact": 55320,
+        "ambushes": 1,
+        "crits": 1,
+        "timesEngaged": 0,
+        "dmgDealt": 139,
+        "dmgTaken": 141,
+        "pings": 0,
+        "escapeItems": 6,
+        "shots": 1
+      },
+      "winner": "none",
+      "errors": []
+    },
+    {
+      "name": "hunter",
+      "version": "before",
+      "frames": 36000,
+      "docs": {
+        "p": {
+          "veil": 34740,
+          "ambush": 1200
+        },
+        "e": {
+          "veil": 31860,
+          "ambush": 4080
+        }
+      },
+      "picks": {
+        "p": {
+          "n": 1,
+          "by": {
+            "gather": 1
+          },
+          "share": {
+            "gather": 1
+          }
+        },
+        "e": {
+          "n": 2,
+          "by": {
+            "gather": 1,
+            "net": 1
+          },
+          "share": {
+            "gather": 0.5,
+            "net": 0.5
+          }
+        }
+      },
+      "fire": {
+        "e|tc_listen": 4,
+        "p|tc_listen": 10,
+        "e|tc_early_listen": 1,
+        "p|tc_early_listen": 1,
+        "e|cb_decoy_raid": 2,
+        "e|_item": 5,
+        "p|cb_decoy_raid": 1,
+        "p|_item": 21,
+        "p|tc_sonar_fix": 2,
+        "e|tc_ping_step": 1,
+        "e|tc_scout_ahead": 1,
+        "e|tc_raid_rush": 1,
+        "e|cb_silence_raid": 1,
+        "e|tc_sonar_fix": 1,
+        "e|tc_kite": 2,
+        "e|tc_status_retreat": 1,
+        "p|tc_probe_evade": 2,
+        "p|tc_kite": 1
+      },
+      "contact": 13140,
+      "seen": 1740,
+      "stats": {
+        "startFrame": 0,
+        "firstContact": -1,
+        "ambushes": 0,
+        "crits": 2,
+        "timesEngaged": 0,
+        "dmgDealt": 819,
+        "dmgTaken": 402,
+        "pings": 0,
+        "escapeItems": 3,
+        "dmgShip": 819,
+        "shots": 1
+      },
+      "winner": "player",
+      "errors": []
+    },
+    {
+      "name": "hunter",
+      "version": "before-repeat",
+      "frames": 36000,
+      "docs": {
+        "p": {
+          "veil": 34740,
+          "ambush": 1200
+        },
+        "e": {
+          "veil": 31860,
+          "ambush": 4080
+        }
+      },
+      "picks": {
+        "p": {
+          "n": 1,
+          "by": {
+            "gather": 1
+          },
+          "share": {
+            "gather": 1
+          }
+        },
+        "e": {
+          "n": 2,
+          "by": {
+            "gather": 1,
+            "net": 1
+          },
+          "share": {
+            "gather": 0.5,
+            "net": 0.5
+          }
+        }
+      },
+      "fire": {
+        "e|tc_listen": 4,
+        "p|tc_listen": 10,
+        "e|tc_early_listen": 1,
+        "p|tc_early_listen": 1,
+        "e|cb_decoy_raid": 2,
+        "e|_item": 5,
+        "p|cb_decoy_raid": 1,
+        "p|_item": 21,
+        "p|tc_sonar_fix": 2,
+        "e|tc_ping_step": 1,
+        "e|tc_scout_ahead": 1,
+        "e|tc_raid_rush": 1,
+        "e|cb_silence_raid": 1,
+        "e|tc_sonar_fix": 1,
+        "e|tc_kite": 2,
+        "e|tc_status_retreat": 1,
+        "p|tc_probe_evade": 2,
+        "p|tc_kite": 1
+      },
+      "contact": 13140,
+      "seen": 1740,
+      "stats": {
+        "startFrame": 0,
+        "firstContact": -1,
+        "ambushes": 0,
+        "crits": 2,
+        "timesEngaged": 0,
+        "dmgDealt": 819,
+        "dmgTaken": 402,
+        "pings": 0,
+        "escapeItems": 3,
+        "dmgShip": 819,
+        "shots": 1
+      },
+      "winner": "player",
+      "errors": []
+    },
+    {
+      "name": "hunter",
+      "version": "after",
+      "frames": 36000,
+      "docs": {
+        "p": {
+          "expand": 10800,
+          "veil": 23940,
+          "ambush": 1200
+        },
+        "e": {
+          "expand": 10800,
+          "veil": 21060,
+          "ambush": 4080
+        }
+      },
+      "picks": {
+        "p": {
+          "n": 1,
+          "by": {
+            "gather": 1
+          },
+          "share": {
+            "gather": 1
+          }
+        },
+        "e": {
+          "n": 2,
+          "by": {
+            "gather": 1,
+            "net": 1
+          },
+          "share": {
+            "gather": 0.5,
+            "net": 0.5
+          }
+        }
+      },
+      "fire": {
+        "e|tc_listen": 4,
+        "p|tc_listen": 10,
+        "e|tc_early_listen": 1,
+        "p|tc_early_listen": 1,
+        "e|cb_decoy_raid": 2,
+        "e|_item": 5,
+        "p|cb_decoy_raid": 1,
+        "p|_item": 21,
+        "p|tc_sonar_fix": 2,
+        "e|tc_ping_step": 1,
+        "e|tc_scout_ahead": 1,
+        "e|tc_raid_rush": 1,
+        "e|cb_silence_raid": 1,
+        "e|tc_sonar_fix": 1,
+        "e|tc_kite": 2,
+        "e|tc_status_retreat": 1,
+        "p|tc_probe_evade": 2,
+        "p|tc_kite": 1
+      },
+      "contact": 13140,
+      "seen": 1740,
+      "stats": {
+        "startFrame": 0,
+        "firstContact": -1,
+        "ambushes": 0,
+        "crits": 2,
+        "timesEngaged": 0,
+        "dmgDealt": 819,
+        "dmgTaken": 402,
+        "pings": 0,
+        "escapeItems": 3,
+        "dmgShip": 819,
+        "shots": 1
+      },
+      "winner": "player",
+      "errors": []
+    }
+  ]
+}
