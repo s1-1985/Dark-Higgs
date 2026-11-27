@@ -15394,7 +15394,8 @@ function itemFactsP(c, P, hpF) {
     const sa = lockedSignalId && _signalAnalysis[lockedSignalId], te = sa && sa.fix ? trackEstimate(sa, 0) : null;
     return { side: 'p', who: player, bcn: ['heat', 'optic', 'em', 'higgs'].find(b => drones.includes('bcn_' + b) && (cargo.stock['bcn_' + b] || 0) > 0) || null, estX: te ? te.x : 0, estY: te ? te.y : 0, estAng: te && Math.hypot(te.x - player.x, te.y - player.y) > 300 ? Math.atan2(te.y - player.y, te.x - player.x) : null, P, hpF, hitAgo: playerHitLog.length ? now - playerHitLog[playerHitLog.length - 1].f : 1e9,
         nearD: seenEn.length ? Math.min(...seenEn.map(q => Math.hypot(q.x - player.x, q.y - player.y))) : 1e9, seen: seenEn.length > 0, exposure: playerExposureLevel,
-        quietF: now - (c.lastContactF || 0), busy: !!c.item, hHere: getHiggsIntensity(player.x, player.y), hiding: c.mode === 'hide' || !!(c.st && HIDE_STRATS[c.st.id] && (playerCoasting || player.currentSpeed < 0.3)), // 第150弾: 隠れて待つ戦略の最中も「隠れている」(旧: 退いた後の潜伏だけ) kit: (player._kitT || 0) > 0, missing: player.maxHp - player.hp,
+        quietF: now - (c.lastContactF || 0), busy: !!c.item, hHere: getHiggsIntensity(player.x, player.y), hiding: c.mode === 'hide' || !!(c.st && HIDE_STRATS[c.st.id] && (playerCoasting || player.currentSpeed < 0.3)), // 第150弾: 隠れて待つ戦略の最中も「隠れている」(旧: 退いた後の潜伏だけ)
+        kit: (player._kitT || 0) > 0, missing: player.maxHp - player.hp,
         mslIn: THREATS.some(t => t.kind === 'msl'), estD: te ? Math.hypot(te.x - player.x, te.y - player.y) : 1e9,
         hacked: enemies.some(q => q._hackSess && q._hackSess.tgt === player && q._hackSess.p > 60),
         estR: te ? te.r : 1e9, ammoOut: ammoOutOf(player), dazed: statusDazed(player), lull: lullPhase !== 'none' || surgePhase === 'warn' || surgePhase === 'active', get: k => c[k], set: (k, v) => { c[k] = v; },
@@ -15928,8 +15929,8 @@ function trunkStep(F, S, J) {
     T._ph = J.phase; T._od = J.odds;
     const prevD = holder[docKey];
     const hullRecovery = trunkHullRecovery({ side, S, J });
-    // 前回の評価値と比較し、修理機会の出入りを既存の即時評価間隔で拾う。
-    const trigHull = !!hullRecovery !== !!T.hullRecovery;
+    // 修理機会の出入りと、修理可能・修理中の切り替わりを既存の即時評価間隔で拾う。
+    const trigHull = hullRecovery !== (T.hullRecovery ?? null);
     if (prevD && now - T.lastF < TRUNK_PERIOD && !(now - T.lastF >= TRUNK_TRIG_GAP && (trigPh || trigOd || trigHull))) return prevD;
     const wasHullRecovery = !!T.hullRecovery;
     T.hullRecovery = hullRecovery;
