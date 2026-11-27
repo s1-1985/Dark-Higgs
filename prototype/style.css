@@ -2519,8 +2519,8 @@ body.in-game.com-demo.think-on #think-panel.wide { max-height: 62%; }
     .com-box .brief-lead { display: none; }
     .com-box { padding-top: 10px; padding-bottom: 6px; }
 }
-/* 第25弾: 倍速ボタンを画面端 (ズームの上) に常時表示 */
-body.in-game #zoom-ctl #btn-speed-fixed { font-size: 12px; font-weight: bold; font-family: Orbitron, sans-serif; }
+/* 倍速の選択と20倍速のショートカット */
+body.in-game #zoom-ctl :is(#btn-speed-fixed, #btn-speed-max) { font-size: 12px; font-weight: bold; font-family: Orbitron, sans-serif; }
 body.in-game #zoom-ctl #btn-speed-fixed.on { background: rgba(80,60,0,0.85); color: #ffe08a; border-color: #ffcc55; }
 
 /* ═══ 第32弾: 部品 (ドラフト・一覧・上帯のチップ) ═══ */
@@ -2890,6 +2890,7 @@ body.play-replay #hud-right { pointer-events: none; opacity: 1; }
 body.prp-epov #hud-left, body.prp-epov #status-strip, body.prp-epov #hud-top { box-shadow: inset 0 0 0 1px rgba(255,90,90,0.35); }
 body.play-replay #band-tuner, body.play-replay #ss-cp { pointer-events: none; }
 body.prp-epov #combat-bar, body.prp-epov #recenter-chip { display: none !important; }
+body.play-replay #btn-speed-max { display: none; }
 body.play-replay #zoom-ctl #zoom-stack { flex-wrap: wrap-reverse; max-height: calc(100vh - var(--hud-top) - 80px); align-content: flex-end; flex-direction: column; }
 
 /* ═══ 第90弾 ═══ */
@@ -3229,7 +3230,7 @@ body.in-game #action-popover .act-icon-btn span { font-family: Orbitron, sans-se
 #cap-dec { position: fixed; left: 50%; bottom: 74px; transform: translateX(-50%) translateY(14px); z-index: 60; width: min(640px, calc(100vw - 32px)); padding: 10px 12px 8px; display: none; pointer-events: auto;
     background: linear-gradient(180deg, rgba(8,22,30,0.93), rgba(2,8,12,0.95)); box-shadow: inset 0 0 0 1px rgba(255,190,80,0.55), 0 0 28px rgba(255,170,40,0.18);
     clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px); font-family: 'Share Tech Mono', monospace; color: #cfeee6; }
-#cap-dec.on { display: block; animation: capIn .18s ease-out forwards; }
+#cap-dec.on { max-height: calc(100dvh - 90px); overflow-y: auto; overscroll-behavior: contain; display: block; animation: capIn .18s ease-out forwards; }
 @keyframes capIn { to { transform: translateX(-50%) translateY(0); } }
 #cap-dec .cap-head { display: flex; gap: 10px; align-items: baseline; letter-spacing: 2px; font-size: 12px; }
 #cap-dec .cap-head b { color: #ffbe50; font-family: Orbitron, sans-serif; }
@@ -3249,6 +3250,17 @@ body.in-game #action-popover .act-icon-btn span { font-family: Orbitron, sans-se
 #cap-dec .cap-sec { font-family: Orbitron, sans-serif; font-size: 26px; line-height: 1; min-width: 26px; text-align: center; color: #7dffb0; }
 #cap-dec .cap-track { flex: 1; height: 10px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18); }
 #cap-dec .cap-bar { height: 100%; background: #7dffb0; box-shadow: 0 0 10px rgba(125,255,176,0.6); }
+#cap-dec .cap-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+#cap-dec .cap-actions button, #speed-picker button {
+    min-height: 38px; padding: 5px 10px; cursor: pointer; border: 1px solid #41796c;
+    border-radius: 4px; color: #d6fff2; background: #102d29; font-size: 12px;
+}
+#cap-dec .cap-speed[aria-pressed="true"], #speed-picker button[aria-pressed="true"] { color: #ffe0a0; border-color: #ffbe50; }
+#speed-picker {
+    position: fixed; z-index: 71; display: grid; grid-template-columns: repeat(4, minmax(46px, 1fr));
+    gap: 6px; padding: 8px; border: 1px solid #5caca0; border-radius: 6px; background: #0b201e;
+}
+#speed-picker[hidden] { display: none; }
 #cap-dec.warn .cap-sec { color: #ffbe50; } #cap-dec.warn .cap-bar { background: #ffbe50; box-shadow: 0 0 10px rgba(255,190,80,0.7); }
 #cap-dec.crit .cap-sec { color: #ff5a4a; animation: capPulse .5s ease-in-out infinite; } #cap-dec.crit .cap-bar { background: #ff5a4a; box-shadow: 0 0 12px rgba(255,90,74,0.8); }
 #cap-dec.crit { box-shadow: 0 0 0 1px #ff5a4a, 0 0 22px rgba(255,90,74,0.45); }
