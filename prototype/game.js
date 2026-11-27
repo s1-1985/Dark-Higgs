@@ -679,6 +679,7 @@ function drawSpriteCentered(ctx, img, targetLen) {
 // Call after the existing rotation and (for Tech) flip. The stack offset
 // is in screen-up direction; targeting, camera, and hull origin stay in world space.
 function drawMobileSprite(ctx, img, role, len, angle, flipped, screenScale, square = false) {
+    if (window.Experimental3D && Experimental3D.captureSprite(ctx, img, role, len, angle)) return true;
     const longest = Math.max(img.naturalWidth, img.naturalHeight);
     const w = square ? len : len * img.naturalWidth / longest;
     const h = square ? len : len * img.naturalHeight / longest;
@@ -2194,7 +2195,7 @@ function drawFogHoles(ctx, holes, fogCol, fogAlpha) {
     //   「見えている強さの逆数(0〜1)」としての完全な範囲を持たせ、fogAlphaによる暗さの調整は
     //   「暗闇オーバーレイを画面に貼る時」にだけ掛ける(下の ctx.globalAlpha = fogAlpha)。
     fc.fillStyle = fogCol; fc.globalAlpha = 1; fc.fillRect(0, 0, w, h);
-    fc.setTransform(z, 0, 0, z, -camera.x * z, -camera.y * z);
+    fc.setTransform(...viewWorldTransform(z));
     fc.globalCompositeOperation = 'destination-out'; fc.fillStyle = '#000';
     for (const [k, a] of FOG_HOLE_LAYERS) {
         fc.globalAlpha = a;
@@ -2232,10 +2233,9 @@ function drawFogOfWar(ctx) {
     const fogCol = hHere > 0.5 ? '#04162c' : hHere > 0.2 ? '#030e22' : '#01030e';
 
     // 描画範囲: カメラビュー + マージン
-    const vw = cssW  / camera.zoom;
-    const vh = cssH / camera.zoom;
-    const mx = camera.x - 500;
-    const my = camera.y - 500;
+    const viewport = viewBounds(), vw = viewport.w, vh = viewport.h;
+    const mx = viewport.x - 500;
+    const my = viewport.y - 500;
     const mw = vw + 1000;
     const mh = vh + 1000;
 
@@ -2255,7 +2255,7 @@ function drawFogOfWar(ctx) {
         if (_cloudCv.width !== _fogMaskW || _cloudCv.height !== _fogMaskH) { _cloudCv.width = _fogMaskW; _cloudCv.height = _fogMaskH; }
         const cc = _cloudCx;
         cc.setTransform(1, 0, 0, 1, 0, 0); cc.globalCompositeOperation = 'source-over'; cc.globalAlpha = 1; cc.clearRect(0, 0, _fogMaskW, _fogMaskH);
-        cc.setTransform(_fogMaskZ, 0, 0, _fogMaskZ, -camera.x * _fogMaskZ, -camera.y * _fogMaskZ);
+        cc.setTransform(...viewWorldTransform(_fogMaskZ));
         cc.imageSmoothingEnabled = true;
         cc.drawImage(higgsCloudCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
         // 第246弾: ここから3つ、まだワールド座標変換のまま(=higgsCloudCanvasのアルファ形状の中だけに効く)で雲を進化させる
@@ -2765,7 +2765,8 @@ function centerCameraOnPlayer() {
     // コンソールに隠れていない「実フィールド」の中心に自機を置く
     const ins = uiInsets();
     camera.x = player.x - (ins.left + (cw - ins.left - ins.right) / 2) / camera.zoom;
-    camera.y = player.y - (ins.top + (ch - ins.top - ins.bottom) / 2) / camera.zoom;
+    const focusY = ins.top + (ch - ins.top - ins.bottom) / 2;
+    camera.y = player.y - (ch / 2 + (focusY - ch / 2) / view3DScaleY()) / camera.zoom;
     clampCamera();
 }
 
@@ -2836,17 +2837,33 @@ function _tickZoomAnim() {
     else zoomAt(z, rect.left + cx, rect.top + cy);
 }
 
+// Experimental 3D changes projection only. The simulation remains in its original XY plane.
+function view3DActive() { return !!(window.Experimental3D && Experimental3D.isActive()); }
+function view3DScaleY() { return view3DActive() ? Experimental3D.projection.cos : 1; }
+function viewWorldTransform(scale) {
+    const tilt = view3DScaleY(), screenScale = scale / camera.zoom;
+    return [scale, 0, 0, scale * tilt, -camera.x * scale, cssH * screenScale / 2 * (1 - tilt) - camera.y * scale * tilt];
+}
+function viewBounds() {
+    const h = cssH / camera.zoom / view3DScaleY();
+    return { x: camera.x, y: camera.y + cssH / camera.zoom / 2 - h / 2, w: cssW / camera.zoom, h };
+}
+function toggleField3D() {
+    if (!player || !window.Experimental3D) return;
+    Experimental3D.toggle(message => logMessage(message, 'system-msg'));
+}
 // スクリーン座標 → ワールド座標変換 (getBoundingClientRect でCSS/canvas解像度差を補正)
 function screenToWorld(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
     const cx = (clientX - rect.left) * (cssW / rect.width);
     const cy = (clientY - rect.top) * (cssH / rect.height);
-    return { x: cx / camera.zoom + camera.x, y: cy / camera.zoom + camera.y };
+    if (!view3DActive()) return { x: cx / camera.zoom + camera.x, y: cy / camera.zoom + camera.y };
+    return { x: cx / camera.zoom + camera.x, y: (cssH / 2 + (cy - cssH / 2) / view3DScaleY()) / camera.zoom + camera.y };
 }
 function worldToScreen(wx, wy) {
     return {
         sx: (wx - camera.x) * camera.zoom,
-        sy: (wy - camera.y) * camera.zoom
+        sy: view3DActive() ? cssH / 2 + ((wy - camera.y) * camera.zoom - cssH / 2) * view3DScaleY() : (wy - camera.y) * camera.zoom
     };
 }
 // ドラッグ差分をワールド単位に変換 (CSS/canvas解像度差を補正)
@@ -2854,7 +2871,7 @@ function dragDeltaWorld(dClientX, dClientY) {
     const rect = canvas.getBoundingClientRect();
     return {
         dx: dClientX * (cssW / rect.width) / camera.zoom,
-        dy: dClientY * (cssH / rect.height) / camera.zoom
+        dy: dClientY * (cssH / rect.height) / camera.zoom / view3DScaleY()
     };
 }
 
@@ -14081,7 +14098,8 @@ function drawMinimap() {
     minimapCtx.globalAlpha = 1;
     // Viewport
     minimapCtx.strokeStyle = 'rgba(255,255,0,0.5)'; minimapCtx.lineWidth = 1;
-    minimapCtx.strokeRect(camera.x * mmScale + offX, camera.y * mmScale + offY, (cssW / camera.zoom) * mmScale, (cssH / camera.zoom) * mmScale);
+    const viewport = viewBounds();
+    minimapCtx.strokeRect(viewport.x * mmScale + offX, viewport.y * mmScale + offY, viewport.w * mmScale, viewport.h * mmScale);
 
     // Structures (discovered/identified: with icon; unknown: hidden)
     structures.forEach(st => {
@@ -14271,52 +14289,34 @@ function drawMinimap() {
     minimapCtx.restore();
 }
 
-function handleMinimapInteraction(e) {
-    if (cameraFollowPlayer) { cameraFollowPlayer = false; updateCameraFollowBtn(); }
-    const r = minimapCanvas.getBoundingClientRect();
-    const mapX = e.clientX - r.left; const mapY = e.clientY - r.top;
-    const mW = minimapCanvas.width / minimapDpr, mH = minimapCanvas.height / minimapDpr;
-    const mmScale = Math.min(mW, mH) / FIELD_SIZE;
-    const offX = (mW - FIELD_SIZE * mmScale) / 2;
-    const offY = (mH - FIELD_SIZE * mmScale) / 2;
-    const wX = (mapX - offX) / mmScale;
-    const wY = (mapY - offY) / mmScale;
-    camera.x = wX - (cssW / 2 / camera.zoom); camera.y = wY - (cssH / 2 / camera.zoom);
-    clampCamera();
-}
-let isMinimapDragging = false;
+// Radar tap: experimental 3D / original 2D. A drag is ignored and never moves the camera.
 let _mmDownPos = null, _mmMoved = false;
-minimapCanvas.addEventListener('mousedown', e => { isMinimapDragging = true; _mmDownPos = { x: e.clientX, y: e.clientY }; _mmMoved = false; });
-minimapCanvas.addEventListener('mousemove', e => {
-    if (!isMinimapDragging) return;
-    if (_mmDownPos && Math.hypot(e.clientX - _mmDownPos.x, e.clientY - _mmDownPos.y) > 6) { _mmMoved = true; handleMinimapInteraction(e); }
-});
-window.addEventListener('mouseup', () => { if (isMinimapDragging && !_mmMoved) toggleMapMode(); isMinimapDragging = false; _mmDownPos = null; });
-
-// ミニマップ タッチ対応
-function handleMinimapTouchInteraction(t) {
-    if (cameraFollowPlayer) { cameraFollowPlayer = false; updateCameraFollowBtn(); }
-    const r = minimapCanvas.getBoundingClientRect();
-    const mapX = t.clientX - r.left;
-    const mapY = t.clientY - r.top;
-    const mW = minimapCanvas.width / minimapDpr, mH = minimapCanvas.height / minimapDpr;
-    const mmScale = Math.min(mW, mH) / FIELD_SIZE;
-    const offX = (mW - FIELD_SIZE * mmScale) / 2;
-    const offY = (mH - FIELD_SIZE * mmScale) / 2;
-    const wX = (mapX - offX) / mmScale;
-    const wY = (mapY - offY) / mmScale;
-    camera.x = wX - (cssW / 2 / camera.zoom);
-    camera.y = wY - (cssH / 2 / camera.zoom);
-    clampCamera();
-}
-// タップ=マップモード切替 / ドラッグ=カメラパン (移動量で判別)
-minimapCanvas.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); const t = e.touches[0]; _mmDownPos = { x: t.clientX, y: t.clientY }; _mmMoved = false; }, { passive: false });
-minimapCanvas.addEventListener('touchmove', (e) => {
+minimapCanvas.addEventListener('pointerdown', e => {
+    if (!e.isPrimary) { _mmMoved = true; return; }
+    if (e.button !== 0) return;
     e.preventDefault(); e.stopPropagation();
-    const t = e.touches[0];
-    if (_mmDownPos && Math.hypot(t.clientX - _mmDownPos.x, t.clientY - _mmDownPos.y) > 10) { _mmMoved = true; handleMinimapTouchInteraction(t); }
-}, { passive: false });
-minimapCanvas.addEventListener('touchend', (e) => { e.preventDefault(); e.stopPropagation(); if (!_mmMoved) toggleMapMode(); _mmDownPos = null; }, { passive: false });
+    minimapCanvas.setPointerCapture(e.pointerId);
+    _mmDownPos = { x: e.clientX, y: e.clientY, id: e.pointerId }; _mmMoved = false;
+});
+minimapCanvas.addEventListener('pointermove', e => {
+    if (!_mmDownPos || e.pointerId !== _mmDownPos.id) return;
+    if (Math.hypot(e.clientX - _mmDownPos.x, e.clientY - _mmDownPos.y) > 8) _mmMoved = true;
+});
+minimapCanvas.addEventListener('pointerup', e => {
+    if (!_mmDownPos || e.pointerId !== _mmDownPos.id) return;
+    e.preventDefault(); e.stopPropagation();
+    const tap = !_mmMoved && Math.hypot(e.clientX - _mmDownPos.x, e.clientY - _mmDownPos.y) <= 8;
+    _mmDownPos = null;
+    if (tap) toggleField3D();
+});
+minimapCanvas.addEventListener('pointercancel', () => { _mmDownPos = null; });
+minimapCanvas.addEventListener('lostpointercapture', () => { _mmDownPos = null; });
+minimapCanvas.addEventListener('keydown', e => {
+    if (!e.repeat && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggleField3D(); }
+});
+
+// Keep legacy touch handlers on the rest of the HUD from interpreting radar taps as field input.
+for (const type of ['touchstart', 'touchmove', 'touchend']) minimapCanvas.addEventListener(type, e => { e.preventDefault(); e.stopPropagation(); }, { passive: false });
 
 // Background grid system
 // ── パララックス・スターフィールド (スクリーン空間・事前焼き付けタイル) ──
@@ -14502,14 +14502,14 @@ function _drawGiantStars(ctx) {
 function drawBackground(ctx) {
     if (PERF_DISABLE_BG) {
         const vw = cssW / camera.zoom;
-        const vh = cssH / camera.zoom;
+        const bounds = viewBounds();
         ctx.fillStyle = 'rgb(1,3,14)';
-        ctx.fillRect(camera.x, camera.y, vw, vh);
+        ctx.fillRect(bounds.x, bounds.y, vw, bounds.h);
         return;
     }
     const vw = cssW / camera.zoom;
-    const vh = cssH / camera.zoom;
-    const cx = camera.x, cy = camera.y;
+    const viewport = viewBounds(), vh = viewport.h;
+    const cx = viewport.x, cy = viewport.y;
 
     // 宇宙背景テクスチャ (事前生成、ゲーム毎に異なる星雲配置)
     if (spaceBgCanvas) {
@@ -25496,6 +25496,7 @@ function renderWorld() {
         _tickZoomAnim();
         // カメラ追従
         const _pov = prpPov(); // プレイ画面のリプレイ: 敵の席
+        if (window.Experimental3D) Experimental3D.beginFrame({ width: cssW, height: cssH, dpr: _dpr, zoom: camera.zoom, enemyReplay: !!_pov });
         if (cameraFollowPlayer && player) { if (_pov) { const _px = player.x, _py = player.y; player.x = _pov.x; player.y = _pov.y; centerCameraOnPlayer(); player.x = _px; player.y = _py; } else centerCameraOnPlayer(); }
 
         // Rendering — ベース変換を _dpr 倍に固定 (高精細でくっきり)。以降の描画は全てCSS px基準。
@@ -25503,7 +25504,9 @@ function renderWorld() {
         ctx.clearRect(0, 0, cssW, cssH);
 
         ctx.save();
-        ctx.scale(camera.zoom, camera.zoom);
+        const _viewCos = view3DScaleY();
+        ctx.translate(0, cssH / 2 * (1 - _viewCos));
+        ctx.scale(camera.zoom, camera.zoom * _viewCos);
 
         // Screen Shake calculation
         let sx = 0, sy = 0;
@@ -25522,8 +25525,9 @@ function renderWorld() {
         // ズームアウト時 or デバッグフラグでshadowBlurをスキップ (描画コスト削減)
         const _blurEnabled = !PERF_DISABLE_SHADOW_BLUR && camera.zoom >= 0.12;
         // ビューポート境界 (ワールド座標)
-        const _vpX = camera.x, _vpY = camera.y;
-        const _vpW = cssW / camera.zoom, _vpH = cssH / camera.zoom;
+        const _viewport = viewBounds();
+        const _vpX = _viewport.x, _vpY = _viewport.y;
+        const _vpW = _viewport.w, _vpH = _viewport.h;
 
         // Render scrap (rotating data fragment squares, fades over time)
         scrapDrops.forEach(s => {
@@ -25654,6 +25658,8 @@ function renderWorld() {
 
         ctx.restore();
 
+        // Present the existing world layer plus supported 3D sprites; screen HUD stays on the input canvas.
+        if (window.Experimental3D && Experimental3D.present(canvas)) ctx.clearRect(0, 0, cssW, cssH);
         drawHiggsMedium(ctx);
         flushTags(ctx); // 第40弾: 地図の名札 (画面座標でまとめて)
         if (_pov) prpSeat(_pov, () => { drawHUDOverlay(ctx); drawAlertFx(ctx); }); else { drawHUDOverlay(ctx); drawAlertFx(ctx); }
