@@ -5430,7 +5430,7 @@ class Ship {
             if (this._strat && _frameCount % COM_TICK === 0) {
                 const review = strategyReview(this._strat, doctrineOf('e', this), outlookOf('e', this), this._prin?.list?.winpath,
                     _hardDetect || this._sitJ?.phase === 'escape' || stratNearE(this) || incomingMissile(this, true), _frameCount,
-                    reactionForReview(this, this.personality, this._B.fresh > 0.25 && !this._B.guess));
+                    reactionForReview(this, this._B.fresh > 0.25 && !this._B.guess));
                 if (review) endEnemyStrat(this, review, true);
             }
             // ── 第17弾: 潜伏 — 後退した敵は濃い霧/岩石帯で止まって修復し、45秒で狩りに戻る ──
@@ -5506,7 +5506,9 @@ class Ship {
                         if (sp.col) _colUsedMark(sp.col, 'E');
                         const refilled = this.ammoK < this._fullK || this.ammoM < this._fullM;
                         observeRestockP(this, refilled);
-                        reactionEvent(this, 'supply', refilled || (sp.col && enemyMat < enemyMatCap()));
+                        const mat = sp.col ? Math.max(0, Math.min(COLONY_SUPPLY_MAT, enemyMatCap() - enemyMat)) : 0;
+                        reactionEvent(this, 'supply', reactionSupplyAmount(Math.max(0, this._fullK - this.ammoK),
+                            Math.max(0, this._fullM - this.ammoM), this._fullK, this._fullM, mat));
                         this.ammoK = this._fullK; this.ammoM = this._fullM; this._kMag = KINETIC_MAG; this._kReload = 0; this._mReload = 0; if (sp.col) enemyAddMat(COLONY_SUPPLY_MAT); // 第199弾: 資材+2 (自機と同じ)
                         this._supply = null;
                         this.aiState = 'hunting'; this.huntTimer = 900; this.lurking = false;
@@ -5610,7 +5612,7 @@ class Ship {
                     const oppW = _obsF && _frameCount - _obsF.f < 1200 && this._B.fresh > 0.3 ? _obsF.type : null;
                     const cp = this._cmPlan;
                     if (!cp || _frameCount - cp.f >= CM_HOLD || cp.oppW !== oppW || (cp.hp >= 0.5) !== (hpFrac >= 0.5)) {
-                        const ch = comChooseManeuver(pers, hpFrac, _plannedW, oppW, reactionRead(this, pers));
+                        const ch = comChooseManeuver(pers, hpFrac, _plannedW, oppW, reactionRead(this));
                         if (killInstinct) ch.prio = 'attack';
                         if (outmatched) { ch.D = Math.max(ch.D, CM_RANGE.missile); ch.prio = 'evade'; }
                         this._cmPlan = { f: _frameCount, oppW, hp: hpFrac, mode: ch.mode, prio: ch.prio, D: ch.D };
@@ -8824,8 +8826,10 @@ function updateResupply() {
     _resupply.p += gameSpeedFactor / RESUPPLY_TIME;
     if (_resupply.p < 1) return;
     // 第26弾 (オーナー指示): 1つのコロニーで1回だけ — 弾は積み込み計画まで満タン・資材は+3個まで。完成品・リペアキット・修理は無し
-    { const gotA = refillAmmo(); observeRestockE(gotA > 0); const gotM = addMaterials(COLONY_SUPPLY_MAT); _colUsedMark(best, 'P');
-      reactionEvent(player, 'supply', gotA + gotM);
+    { const beforeK = cargo.ammoK, beforeM = cargo.ammoM, lo = shipLoadout(gameState.shipType);
+      const gotA = refillAmmo(); observeRestockE(gotA > 0); const gotM = addMaterials(COLONY_SUPPLY_MAT); _colUsedMark(best, 'P');
+      reactionEvent(player, 'supply', reactionSupplyAmount(cargo.ammoK - beforeK, cargo.ammoM - beforeM,
+          lo.ammoK * AMMO_PER_SLOT.kinetic, lo.ammoM * AMMO_PER_SLOT.missile, gotM));
       matchRecEvent('supplyP', best.x, best.y, '自艦: コロニーで補給');
       logMessage('補給: コロニーで弾を満タン' + (gotA ? ' (+' + gotA + ')' : '') + (gotM ? '・資材+' + gotM + '個' : '') + ' — ' + cargoSummaryNow() + '。このコロニーでの補給はこれで終わり', 'system-msg'); }
     if (comDemo) comThinkEvent('p', '補給完了 (実弾' + cargo.ammoK + '・ミサイル' + cargo.ammoM + ')');
@@ -8963,7 +8967,9 @@ function updateEnemyColonySupply() {
         if ((e._colSup.t += gameSpeedFactor) < RESUPPLY_TIME) continue;
         const refilled = e.ammoK < e._fullK || e.ammoM < e._fullM;
         observeRestockP(e, refilled);
-        reactionEvent(e, 'supply', refilled || enemyMat < enemyMatCap());
+        const mat = Math.max(0, Math.min(COLONY_SUPPLY_MAT, enemyMatCap() - enemyMat));
+        reactionEvent(e, 'supply', reactionSupplyAmount(Math.max(0, e._fullK - e.ammoK),
+            Math.max(0, e._fullM - e.ammoM), e._fullK, e._fullM, mat));
         _colUsedMark(best, 'E'); e.ammoK = e._fullK; e.ammoM = e._fullM; enemyAddMat(COLONY_SUPPLY_MAT); e._colSup = null;
         comThinkEvent('e', 'コロニーで補給 (弾を満タン・資材+' + COLONY_SUPPLY_MAT + ' → ' + enemyMat + '個)', 'e' + e.uid);
     }
@@ -15688,7 +15694,17 @@ function sitAug(F, A) {
     S.fog = F.hHere; S.storm = getStormIntensity(x, y); S.thermal = getThermalIntensity(x, y); S.rock = getDebrisIntensity(x, y); S.wreck = getWreckIntensity(x, y); S.badZone = S.storm >= 0.3 || S.wreck >= 0.3;
     S.hitS = F.hitAgo / 60; S.quietS = F.quietF / 60; S.expo = F.exposure; S.msl = F.mslIn; S.est = F.estAng !== null; S.estRatio = F.estR < 1e8 && F.estD < 1e8 ? F.estR / Math.max(1, F.estD) : 9;
     S.early = now < THEORY.time.earlyUntil; S.hpF = F.hpF; // 第228弾: 序盤の境界は THEORY (根っこ) へ集約
-    const mob = {}; if (side === 'p') { for (const d of playerDrones) if (d.hp > 0) mob[d.type] = (mob[d.type] || 0) + 1; } else for (const f of enemies) if (f.type === 'fighter' && f._home === who && f.hp > 0 && !f._dying) { const k = _eCtrlKind(f); mob[k] = (mob[k] || 0) + 1; }
+    const mob = {};
+    S.escort = false;
+    const addDrone = (d, k) => {
+        mob[k] = (mob[k] || 0) + 1;
+        if ((k === 'attack' || k === 'mech') && !d._boarded && Math.hypot(d.x - x, d.y - y) <= DRONE_RELAY_R) S.escort = true;
+    };
+    if (side === 'p') {
+        for (const d of playerDrones) if (d.hp > 0) addDrone(d, d.type);
+    } else {
+        for (const f of enemies) if (f.type === 'fighter' && f._home === who && f.hp > 0 && !f._dying) addDrone(f, _eCtrlKind(f));
+    }
     S.mob = mob; S.drones = Object.values(mob).reduce((a, b) => a + b, 0) + (A ? ['scout', 'attack', 'build'].filter(k => A.have(k)).length : 0);
     S.eDrones = side === 'p' ? enemies.some(f => f.type === 'fighter' && f.hp > 0 && !f._dying) : playerDrones.some(d => d.hp > 0 && (d.type === 'attack' || d.type === 'mech' || d.type === 'scout'));
     S.hackWin = side === 'p' ? !!(_hackWinP && now < _hackWinP.until) : !!(who && who._hackWin && now < who._hackWin.until);
@@ -15978,83 +15994,139 @@ const PRINCIPLE_POSTURE = {
     'time.mid':   { press: 0.2, veil: 0.3, expand: 0.3, ambush: 0.2, recover: 0 },
     'time.late':  { press: 0.9, veil: 0.1, expand: 0.3, ambush: 0.1, recover: 0 },
 };
-// 第240弾: 年輪の反応。艦ごとの試合内の記憶。性格の8軸は反応の強さ・閾値・残り方を決める。
-const REACTION_HALF_SEC = { counter: 75, guard: 32, confidence: 110, impatience: 95, calm: 45 };
+// 感情パラメータ（年輪）。艦ごとの試合内の記憶を、性格（枝）による反応と閾値に結び付ける。
 function reactionPersonality(ship) { return ship === player ? (_com?.pp || PERS_DEF) : (ship.personality || PERS_DEF); }
 function reactionLevel(v) { return Math.max(0, Math.min(100, v)); }
-function reactionDecay(R, id, P, now) {
-    const hold = 0.8 + 0.6 * persAx(P, 'patience');
-    return R.values[id] * Math.pow(0.5, Math.max(0, now - R.f) / (60 * REACTION_HALF_SEC[id] * hold));
+function reactionProfile(P) {
+    const ag = persAx(P, 'aggression'), ca = persAx(P, 'caution'), pa = persAx(P, 'patience');
+    const st = persAx(P, 'stealth') - 0.4, gr = persAx(P, 'greed') - 0.4;
+    const cu = persAx(P, 'cunning') - 0.4, te = persAx(P, 'tech') - 0.4, co = persAx(P, 'command') - 0.4;
+    return {
+        threshold: {
+            counter: 56 + 25 * ca - 24 * ag,
+            guard: 55 - 25 * ca - 8 * st,
+            confidence: 45 + 12 * ca - 10 * ag,
+            impatience: 37 + 30 * pa + 9 * cu - 8 * gr,
+            calm: 42 + 10 * ca - 9 * st,
+        },
+        halfLife: {
+            counter: 75 * (0.8 + 0.3 * pa + 0.30 * ag),
+            guard: 32 * (0.8 + 0.4 * pa + 0.28 * ca + 0.18 * st),
+            confidence: 110 * (0.85 + 0.35 * pa + 0.15 * co),
+            impatience: 95 * (0.8 + 0.6 * pa),
+            calm: 45 * (0.85 + 0.32 * pa + 0.35 * st),
+        },
+        counterOnDamage: 0.35 + 0.85 * ag,
+        guardOnDamage: 0.45 + 0.85 * ca,
+        unknownThreat: 1.25 + 0.25 * st - 0.30 * te,
+        knownThreat: 0.8,
+        fogComfort: 0.9 + 0.75 * st,
+        supplyConfidence: 1 + 0.45 * gr,
+        progressRelief: 1 + 0.5 * te,
+        emptyWait: 1.2 - 0.6 * pa + 0.3 * gr - 0.25 * cu,
+        failedPlan: 1 - 0.55 * cu,
+        support: 0.24 + 0.45 * co,
+        guardPerSecond: 0.7 + 0.9 * ca,
+    };
 }
-function reactionAdvance(ship, P, now) {
-    const R = ship._reaction || (ship._reaction = { f: now, tick: now, values: { counter: 0, guard: 0, confidence: 0, impatience: 0, calm: 0 } });
-    if (R.f === now) return R;
-    for (const id in R.values) R.values[id] = reactionDecay(R, id, P, now);
-    R.f = now;
+function reactionDecay(R, id, now) {
+    return Math.pow(0.5, Math.max(0, now - R.f) / (60 * R.halfLife[id]));
+}
+function reactionAdvance(ship, profile, now) {
+    const R = ship._reaction || (ship._reaction = {
+        f: now, tick: now, halfLife: profile.halfLife, directedCounter: 0,
+        values: { counter: 0, guard: 0, confidence: 0, impatience: 0, calm: 0 },
+    });
+    if (R.f !== now) {
+        for (const id in R.values) R.values[id] *= reactionDecay(R, id, now);
+        R.directedCounter *= reactionDecay(R, 'counter', now);
+        R.f = now;
+    }
+    R.halfLife = profile.halfLife;
     return R;
 }
 function reactionEvent(ship, kind, amount, source = null) {
     if (!ship || ship.hp <= 0 || !(amount > 0) || (ship === player ? !comDemo : !ENEMY_CLASS[ship.type])) return;
-    const P = reactionPersonality(ship), R = reactionAdvance(ship, P, _frameCount), v = R.values;
-    const aggression = persAx(P, 'aggression'), caution = persAx(P, 'caution');
+    const profile = reactionProfile(reactionPersonality(ship));
+    const R = reactionAdvance(ship, profile, _frameCount), v = R.values;
     if (kind === 'damage') {
         const severity = Math.min(1, amount / Math.max(1, ship.maxHp) / 0.20);
         const force = (6 + 29 * severity) * Math.min(1, amount / 10);
-        // 目撃した別の相手に、前の相手への反撃欲を丸ごと引き継がない。
-        if (source && R.source && source !== R.source) v.counter *= 0.25;
-        if (source) R.source = source;
-        v.counter += force * (0.35 + 0.85 * aggression);
-        v.guard += force * (0.45 + 0.85 * caution) * (source ? 0.8 : 1.25);
+        // 発信元を見失った被弾を、前に見た艦の攻撃と決め付けない。
+        if (source && R.source !== source) {
+            v.counter = Math.max(0, v.counter - R.directedCounter);
+            R.directedCounter = 0;
+            R.source = source;
+        }
+        const gain = Math.min(100 - v.counter, force * profile.counterOnDamage);
+        if (source) R.directedCounter += gain;
+        v.counter += gain;
+        v.guard += force * profile.guardOnDamage * (source ? profile.knownThreat : profile.unknownThreat);
         v.confidence -= force * 0.45;
         v.calm -= force;
     } else if (kind === 'hit') {
         v.confidence += 8 + 16 * Math.min(1, amount / 450);
         v.impatience -= 18;
     } else if (kind === 'supply') {
-        v.calm += 33;
-        v.confidence += 14;
+        const scale = 0.55 + 0.45 * Math.min(1, amount);
+        v.calm += 33 * scale;
+        v.confidence += 14 * scale * profile.supplyConfidence;
+        v.impatience -= 8 * scale * profile.supplyConfidence;
     } else if (kind === 'part') {
-        v.confidence += 19;
-        v.impatience -= 10;
+        v.confidence += 19 * profile.supplyConfidence;
+        v.impatience -= 10 * profile.supplyConfidence;
+    } else if (kind === 'setback') {
+        v.impatience += 12 * profile.failedPlan;
+        v.confidence -= 6 * profile.failedPlan;
     }
     for (const id in v) v[id] = reactionLevel(v[id]);
 }
-function reactionRead(ship, P, now = _frameCount, target = null) {
+function reactionRead(ship, now = _frameCount, target = null) {
     const R = ship?._reaction;
     if (!R) return null;
-    const ag = persAx(P, 'aggression'), ca = persAx(P, 'caution'), pa = persAx(P, 'patience');
-    const thresholds = { counter: 56 + 25 * ca - 24 * ag, guard: 55 - 25 * ca,
-        confidence: 45 + 12 * ca - 10 * ag, impatience: 37 + 30 * pa, calm: 42 + 10 * ca };
+    const thresholds = reactionProfile(reactionPersonality(ship)).threshold;
     const values = {}, pressure = {};
     for (const id in R.values) {
-        const value = reactionDecay(R, id, P, now);
+        const decay = reactionDecay(R, id, now);
+        const value = R.values[id] * decay;
         values[id] = value;
-        pressure[id] = Math.max(0, (value - thresholds[id]) / (100 - thresholds[id]));
+        const usable = id === 'counter' && target && R.source && target !== R.source
+            ? Math.max(0, value - R.directedCounter * decay) * 0.65 : value;
+        pressure[id] = Math.max(0, (usable - thresholds[id]) / (100 - thresholds[id]));
     }
-    if (target && R.source && target !== R.source) pressure.counter = 0;
     return { values, thresholds, pressure, source: R.source ?? null };
 }
-// 地形と局面の効果は経過時間分だけ入れる。待ち伏せの見直しは獲物を捉えていない時に限る。
-function reactionTick(ship, P, S, J, outlook, now) {
-    const R = reactionAdvance(ship, P, now);
+// 局面と地形を同じ艦の記憶に反映する。確かな新しい手掛かりと味方の援護には、時間とともに反応する。
+function reactionTick(ship, S, J, outlook, now) {
+    const profile = reactionProfile(reactionPersonality(ship));
+    const R = reactionAdvance(ship, profile, now);
     const seconds = Math.min(4, Math.max(0, now - R.tick) / 60);
     if (seconds === 0) return;
     R.tick = now;
-    const v = R.values, env = envIntake(S, now), search = J.phase === 'search' || J.phase === 'quiet' || J.phase === 'hide';
+    const v = R.values, env = envIntake(S, now);
+    const search = J.phase === 'search' || J.phase === 'quiet' || J.phase === 'hide';
     const danger = S.msl || S.expo >= 2 || S.seen || S.hitS < 10;
     const safe = !danger && (search || J.phase === 'recover');
     const track = S.seen || (S.est && S.estRatio <= 0.45 && !S.msl);
+    // 援護は展開済みの攻撃機だけ。飛来するミサイルや攻撃元の分からない被害への警戒は薄めない。
+    const escort = track && !S.msl && S.escort;
     if (danger) {
-        v.guard = reactionLevel(v.guard + seconds * (0.7 + 0.9 * persAx(P, 'caution')) * (S.msl ? 2 : 1));
+        const rise = profile.guardPerSecond * (S.msl ? 2 : 1) * (escort ? 1 - profile.support : 1);
+        v.guard = reactionLevel(v.guard + seconds * rise);
         v.calm = reactionLevel(v.calm - seconds * 4);
     } else if (safe) {
-        v.calm = reactionLevel(v.calm + seconds * (env.cover * 0.9 + (S.kit ? 2.4 : 0)));
-        v.guard = reactionLevel(v.guard - seconds * (env.cover * 0.7 + (S.kit ? 0.8 : 0)));
+        v.calm = reactionLevel(v.calm + seconds * (env.cover * profile.fogComfort + (S.kit ? 2.4 : 0)));
+        v.guard = reactionLevel(v.guard - seconds * (env.cover * profile.fogComfort * 0.8 + (S.kit ? 0.8 : 0)));
     }
     const futile = safe && search && !track && !S.kit && !S.early && S.quietS > 45 &&
         (outlook?.stance === 'behind' || S.quietS > 120);
-    if (futile) v.impatience = reactionLevel(v.impatience + seconds * (1.2 - 0.6 * persAx(P, 'patience')));
-    else if (track || S.kit) v.impatience = reactionLevel(v.impatience - seconds);
+    if (futile) v.impatience = reactionLevel(v.impatience + seconds * profile.emptyWait);
+    else if (track || S.kit) v.impatience = reactionLevel(v.impatience - seconds * profile.progressRelief);
+}
+function reactionSupplyAmount(gotK, gotM, fullK, fullM, gotMat) {
+    // 局面評価と同じくミサイル1発を実弾16発に換算する。
+    const ammo = (gotK + gotM * 16) / Math.max(1, fullK + fullM * 16);
+    return Math.min(1, ammo + Math.max(0, gotMat) / COLONY_SUPPLY_MAT * 0.25);
 }
 function reactionPosture(scores, R, S, O, repair) {
     if (!R) return;
@@ -16070,18 +16142,19 @@ function reactionPosture(scores, R, S, O, repair) {
         scores.ambush *= 1 - 0.15 * impatience;
     }
 }
-function reactionForReview(ship, P, contact) {
-    const R = reactionRead(ship, P);
+function reactionForReview(ship, contact) {
+    const R = reactionRead(ship);
     return R ? { pressure: R.pressure, contact } : null;
 }
 function reactionFireThreshold(P, ship, hpF, retreat, reliable, target) {
-    const base = fireThreshold(P), R = reactionRead(ship, P, _frameCount, target);
+    const base = fireThreshold(P), R = reactionRead(ship, _frameCount, target);
     if (!R) return base;
     const { counter, guard, confidence } = R.pressure;
     const attack = reliable && hpF >= retreat + 0.08 && !ammoOutOf(ship) &&
         !repairProtected(doctrineOf(ship === player ? 'p' : 'e', ship), false);
     const push = attack ? Math.max(0, Math.max(counter, confidence * 0.6) - guard) : 0;
-    return Math.max(0.15, Math.min(0.95, base + 0.12 * guard - 0.10 * push));
+    const delta = 0.12 * guard - 0.10 * push;
+    return delta === 0 ? base : Math.max(Math.min(base, 0.15), Math.min(Math.max(base, 0.95), base + delta));
 }
 // ── 幹の周期処理: 見通し → 原則 → 方針 を更新する (判定ティック sitJudgeAttach から呼ばれる) ──
 function trunkStep(F, S, J) {
@@ -16095,7 +16168,7 @@ function trunkStep(F, S, J) {
     if (!T) T = holder._trunk = { lastF: -1e9, _ph: null, _od: null };
     const trigPh = T._ph !== null && J.phase !== T._ph && (J.phase === 'combat' || J.phase === 'escape' || J.phase === 'recover'); // 主局面が戦闘側へ変わったら即時
     const trigOd = T._od !== null && J.odds !== T._od; // 勝算の反転も即時
-    reactionTick(who, F.P || PERS_DEF, S, J, holder._outlook, now);
+    reactionTick(who, S, J, holder._outlook, now);
     const prevD = holder[docKey];
     const hullRecovery = trunkHullRecovery({ side, S, J });
     // 修理機会の出入りと、修理可能・修理中の切り替わりを既存の即時評価間隔で拾う。
@@ -16146,7 +16219,7 @@ function trunkStep(F, S, J) {
     //   の評価には触らない: あちらは信号露出の代償そのもので、覆いの有無で薄めるものではないため。
     const envMul = { veil: 1, ambush: 1 };
     if (ENV.cover >= ENV_COVER_MIN) { envMul.veil = 1 + ENV_VEIL_MAX * ENV.cover; envMul.ambush = 1 + ENV_AMBUSH_MAX * ENV.cover; scores.veil *= envMul.veil; scores.ambush *= envMul.ambush; }
-    reactionPosture(scores, reactionRead(who, P, now, side === 'p' ? lockedSignalId : 'player'), S, O, prin.preserve.aim === 'recover');
+    reactionPosture(scores, reactionRead(who, now, side === 'p' ? lockedSignalId : 'player'), S, O, prin.preserve.aim === 'recover');
     let D = holder[docKey];
     if (!D) D = holder[docKey] = { id: null, t0: -1e9, score: 0, why: '', prin: [], sw: 0, lastF: -1e9, all: null };
     let best = null, bv = -1;
@@ -16286,7 +16359,7 @@ window.__trunkDbg = function () {
         const O = h._outlook, R = h._prin, D = h.doc || h._doc;
         const prin = {}; if (R) for (const id in R.list) prin[id] = R.list[id].str;
         const ship = h === _com ? player : h;
-        return { reaction: ship ? reactionRead(ship, reactionPersonality(ship)) : null, outlook: O ? { stance: O.stance, score: O.score, phase: O.phase, sw: O.sw, why: O.why } : null,
+        return { emotion: ship ? reactionRead(ship) : null, outlook: O ? { stance: O.stance, score: O.score, phase: O.phase, sw: O.sw, why: O.why } : null,
             prin, prinTop: R ? R.top : null,
             doc: D && D.id ? { id: D.id, score: D.score, sw: D.sw, prin: D.prin, why: D.why, all: D.all, envCover: D.envCover, envMul: D.envMul, hullRecovery: D.hullRecovery || null } : null,
             env: h._env || null, reward: h._reward || null }; // 第232弾: 風の受け口と不足の記録も採取できるように
@@ -19777,7 +19850,7 @@ function huntWeights(F) {
     const preferred = doc ? DOC_HUNT_AFFINITY[doc.id] : null;
     for (const id in HUNT_REG) { w[id] = HUNT_REG[id].w(k, F); if (F.side && !skillOn(F.side, 'hu_' + id)) w[id] = 0; else if (w[id] > 0) w[id] *= skillAff(P, 'hu_' + id) * (F.side ? sitWeightMul(F.side, 'hu_' + id, F.who) : 1); } // 第200弾: 場面と発動条件の一致度 // 第147弾: 適性 // 第142弾
     if (preferred) for (const id of preferred) if (w[id] > 0) w[id] *= actionFit(doc);
-    const reaction = reactionRead(F.who, P, _frameCount, F.side === 'p' ? lockedSignalId : 'player');
+    const reaction = reactionRead(F.who, _frameCount, F.side === 'p' ? lockedSignalId : 'player');
     if (reaction) {
         const { counter, guard, confidence } = reaction.pressure;
         const push = !repairProtected(doc, false) && F.hpF > retreatThreshold(P) + 0.08
@@ -19808,7 +19881,7 @@ function enemyHunterStep(e, heard, hard) {
     if (est && est.age < 600) { const mv = e._mvMem || (e._mvMem = { vh: [] }); const v = _huntVel(mv, est); if (v && Math.hypot(v.vx, v.vy) > 0.25) e._lastMove = { x: est.x, y: est.y, vx: v.vx, vy: v.vy, f: now }; }
     const toCombat = () => { e.aiState = 'combat'; e.lurking = false; e.detectionState = 'alerted'; e.huntTimer = Math.max(e.huntTimer || 0, 600); };
     if (e._hpLast !== undefined && e.hp < e._hpLast) e._hpLossF = now; e._hpLast = e.hp;
-    const end = (why, combat, cd) => { say('【' + H.jp + '】終了 — ' + why); e._hunt = null; e._huntEndF = now; if (H.k === 'netkill') e._nkEndF = now; /* 第217弾: 聴音網潰しの連鎖防止 (終了後90秒は再抽選しない) */ e._sendTo = null;
+    const end = (why, combat, cd) => { if (!combat && cd === undefined && !H.strikes && H.k !== 'prowl') reactionEvent(e, 'setback', 1); say('【' + H.jp + '】終了 — ' + why); e._hunt = null; e._huntEndF = now; if (H.k === 'netkill') e._nkEndF = now; /* 第217弾: 聴音網潰しの連鎖防止 (終了後90秒は再抽選しない) */ e._sendTo = null;
         if (H.k !== 'prowl') { if (H.strikes > 0) e._huntFails = 0; else if (!combat) e._huntFails = Math.min(4, (e._huntFails || 0) + 1); } /* 仕掛けて撃てずに終わった回数 — 重なると焦れて突撃しやすく・撃つ基準も甘くなる (人間らしい焦り) */ e._huntCD = now + (cd !== undefined ? cd : HUNT_CD * (0.6 + 0.8 * Math.random())); if (combat) toCombat(); return false; };
     const ms = e._maxSpeeds() || { silent: 0.6, cruise: 1.2, flank: 1.8 };
     // ── 任務を選ぶ ──
@@ -20826,7 +20899,7 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
     const now = _frameCount, ag = P.aggression, st = P.stealth, ca = P.caution, gr = P.greed;
     let H = c.hunt;
     const say = (t) => comThinkEvent('p', t);
-    const end = (why, cd) => { cancelHuntShot(H); say('【' + H.jp + '】終了 — ' + why); if (H.k === 'netkill') c.nkEndF = now; /* 第217弾: 聴音網潰しの連鎖防止 (終了後90秒は再抽選しない) */ if (H.sent) { droneOrder('attack', 'return'); if (playerDrones.some(d => d.hp > 0 && d.type === 'mech')) droneOrder('mech', 'return'); } if (H.strikes > 0) c.huntFails = 0; else if (cd === undefined) c.huntFails = Math.min(4, (c.huntFails || 0) + 1); c.hunt = null; c.huntCD = now + (cd !== undefined ? cd : HUNT_CD * (0.6 + 0.8 * Math.random())); if (playerCoasting) toggleCoast(false); return false; };
+    const end = (why, cd) => { if (cd === undefined && !H.strikes && H.k !== 'prowl') reactionEvent(player, 'setback', 1); cancelHuntShot(H); say('【' + H.jp + '】終了 — ' + why); if (H.k === 'netkill') c.nkEndF = now; /* 第217弾: 聴音網潰しの連鎖防止 (終了後90秒は再抽選しない) */ if (H.sent) { droneOrder('attack', 'return'); if (playerDrones.some(d => d.hp > 0 && d.type === 'mech')) droneOrder('mech', 'return'); } if (H.strikes > 0) c.huntFails = 0; else if (cd === undefined) c.huntFails = Math.min(4, (c.huntFails || 0) + 1); c.hunt = null; c.huntCD = now + (cd !== undefined ? cd : HUNT_CD * (0.6 + 0.8 * Math.random())); if (playerCoasting) toggleCoast(false); return false; };
     const seen = !!(te && lk && lk.full);
     const estNow = comHunterEst(lockedSignalId);
     if (estNow && estNow.age < 600) {
@@ -22147,7 +22220,7 @@ function stratWeights(P, x) {
     for (const id in STRAT_REG) { const R = STRAT_REG[id]; w[id] = R.w(k, x); if (x.near && R.near) w[id] = 0; if (x.side && !skillOn(x.side, 'st_' + id)) w[id] = 0; else if (w[id] > 0 && id !== 'gather') w[id] *= skillAff(P, 'st_' + id); if (w[id] > 0 && x.side) w[id] *= sitWeightMul(x.side, 'st_' + id, x.who); } // 第200弾: 場面と発動条件の一致度 // 第147弾: 性格面・新しい軸による適性 (優先度) // 第142弾: 切ったスキルは選ばない // 相手が近い間は 待ち伏せ・餌・罠・Tech建造を始めない
     const _dfit = docFitFor(x); if (_dfit) for (const id of DOC_STRAT_BUNDLE[_dfit.id]) if (w[id] > 0) w[id] *= _dfit.mul; // 第230弾: 幹の方針への適合 (束に入る戦略だけを押し上げる。0 は復活させない)
     const ship = x.side === 'p' ? player : x.who;
-    const pressure = reactionRead(ship, P)?.pressure;
+    const pressure = reactionRead(ship)?.pressure;
     if (pressure && !x.near && x.expo < 2) {
         if (x.hpF < 0.85) w.fallback *= 1 + 0.15 * pressure.calm;
         if (x.ammoOut) w.restock *= 1 + 0.15 * pressure.calm;
@@ -22853,7 +22926,7 @@ function _comPilotStep0() {
     comExtrasStep(c, P, D, hpF, contact);
     comReactItems(c, P, hpF, hpF < retreat); // 第58弾: かく乱 (閃光・ノイズ・煙幕・偽装)
     if (c.st) {
-        const review = strategyReview(c.st, doctrineOf('p'), outlookOf('p'), c._prin?.list?.winpath, comEngaged() || c._sitJ?.phase === 'escape' || THREATS.some(t => t.kind === 'msl'), now, reactionForReview(player, P, contact));
+        const review = strategyReview(c.st, doctrineOf('p'), outlookOf('p'), c._prin?.list?.winpath, comEngaged() || c._sitJ?.phase === 'escape' || THREATS.some(t => t.kind === 'msl'), now, reactionForReview(player, contact));
         if (review) { c.goalLeg = null; player.setTarget(player.x, player.y); endComStrat(c, review); }
     }
     { const why = comEngaged(); if (why && now - (c.recallF || -1e9) > 600) { if (comDroneRecall(c, why)) c.recallF = now; } } // 第73弾: 会敵したら呼び戻す
@@ -23096,7 +23169,7 @@ function _comPilotStep0() {
             const _obsFP = beliefViewP(enemySid(te)).lastFire; // 第223弾: 材料は観測した発射種別だけ (旧: te._lastFireType の真値読み)
             const oppW = _obsFP && now - _obsFP.f < 1200 ? _obsFP.type : null;
             if (!c.cm || now - c.cm.f >= CM_HOLD || c.cm.oppW !== oppW || (c.cm.hp >= 0.5) !== (hpF >= 0.5)) {
-                let ch = comChooseManeuver(P, hpF, wWant, oppW, reactionRead(player, P, now, enemySid(te)));
+                let ch = comChooseManeuver(P, hpF, wWant, oppW, reactionRead(player, now, enemySid(te)));
                 if (capMode) { // 第182弾: 撃ち合いの組み立ては艦長が決める (正対 / 回り込み / 回避優先)
                     const cg = capManeuverGate(c, ch, lk, oppW);
                     if (cg && cg.wait) return true;
