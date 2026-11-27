@@ -6,13 +6,21 @@ const start = source.indexOf('function strategyReview(');
 const end = source.indexOf('function tacticFit(', start);
 assert(start >= 0 && end > start);
 const sim = new Function(`
-    const structures = [], disabled = new Set();
+    const structures = [], disabled = new Set(), reactions = [];
+    const THEORY = {memory:{searchForget:10800}};
+    const persAx = (P, axis) => P?.[axis] ?? 0.4;
+    const rewardValueFor = (_, __, site) => site.reward || 0;
+    const getHiggsIntensity = () => 0, getStormIntensity = () => 0, getThermalIntensity = () => 0, getWreckIntensity = () => 0;
+    const envIntake = S => ({cover: Math.max(S.fog * 0.6, S.rock, S.storm, S.thermal, S.wreck)});
+    const getDebrisIntensity = x => structures.find(t => t.x === x)?.rock || 0;
+    const reactionEvent = (_, kind, amount) => reactions.push([kind, amount]);
+    const doctrineOf = (_, who) => who?.doc;
     const COLONY_HACK_R = 600, DRONE_AUTO_DIST = 6000, CAP_RANGE = 16000;
     const skillOn = (_, id) => !disabled.has(id);
-    const repairProtected = doc => doc?.id === 'recover' && doc.hullRecovery;
+    const repairProtected = (doc, urgent) => !urgent && doc?.id === 'recover' && doc.hullRecovery;
     const findCoverSpot = () => ({x:1000, y:0}), _dirTxt = () => '東';
     ${source.slice(start, end)}
-    return { strategyReview, makeOperation, runOperation, structures, disabled };
+    return { strategyReview, makeOperation, runOperation, operationReviewActive, operationSitePenalty, structures, disabled, reactions };
 `)();
 
 const old = {id:'ambush', ph:'wait', t0:0, waitingSince:0};
@@ -24,8 +32,9 @@ const first = {type:'colony', x:3000, y:0, owner:'neutral'};
 const second = {type:'colony', x:7000, y:0, owner:'enemy'};
 sim.structures.push(first, second, {type:'derelict', x:200, y:0, owner:'neutral'});
 const calls = [], wing = {};
-let kit = false, contested = null, estimate = null;
-const A = {side:'p', owner:'player', x:0, y:0, expo:0,
+let kit = false, contested = null, estimate = null, hasContact = false;
+const A = {side:'p', owner:'player', x:0, y:0, expo:0, who:{},
+    contact: () => hasContact, listened: () => calls.push('listened'),
     est: () => estimate, next: () => ({x:-3000, y:0}), kit: () => kit, can: () => true,
     use: k => { calls.push(k); kit = true; }, contested: site => site === contested,
     scout: () => wing, scoutWaiting: () => true, releaseScout: s => calls.push(s),
@@ -43,12 +52,19 @@ contested = first;
 assert(sim.runOperation(A, holder, 4400, false));
 assert.equal(holder._operation.target, second);
 assert(holder._operation.retried);
+assert.equal(holder._operationReport.result, 'setback');
+assert.equal(sim.operationSitePenalty(holder, first, 4400), 1.5);
+assert.equal(sim.operationSitePenalty({}, first, 4400), 0);
+assert.equal(sim.operationSitePenalty(holder, first, 15200), 0);
+assert.equal(sim.reactions.length, 0);
 A.x = second.x;
 assert(sim.runOperation(A, holder, 5000, false));
 assert.equal(holder._operation.phase, 'capture');
 second.owner = A.owner;
 assert(!sim.runOperation(A, holder, 5480, false));
 assert.equal(holder._operation, null);
+assert.equal(holder._operationReport.result, 'success');
+assert.deepEqual(sim.reactions.at(-1), ['operationProgress',0.65]);
 A.x = 0; contested = null; estimate = {x:3000,y:0,r:500};
 assert.equal(sim.makeOperation(A, review, 5500).goal, 'search');
 sim.disabled.add('gt_stall');
@@ -84,4 +100,32 @@ assert(sim.runOperation(A, holder, 8100, false));
 assert.equal(holder._operation.phase, 'listen');
 assert(!sim.runOperation(A, holder, 9000, false));
 assert.equal(holder._operation, null);
+assert.equal(calls.at(-1), 'listened');
+assert.equal(holder._operationReport.result, 'success');
+A.x = 0;
+holder._operation = sim.makeOperation(A, search, 9050);
+hasContact = true;
+assert(!sim.runOperation(A, holder, 9050, false));
+assert.equal(holder._operationReport.result, 'contact');
+assert.deepEqual(sim.reactions.at(-1), ['operationProgress',0.65]);
+hasContact = false;
+
+second.owner = 'neutral';
+second.x = 3400;
+second.reward = 1;
+second.rock = 1;
+assert.equal(sim.makeOperation(A, review, 10000).target, second);
+second.reward = 0;
+second.rock = 0;
+assert.equal(sim.makeOperation(A, review, 10000).target, first);
+assert.equal(sim.makeOperation(A, review, 10000, null, false, holder).target, second);
+assert.equal(sim.makeOperation(A, review, 16000, null, false, holder).target, first);
+
+holder._operation = sim.makeOperation(A, review, 16000);
+A.who.doc = {id:'recover',hullRecovery:'available'};
+sim.operationReviewActive(A, holder, 16000, true);
+assert.equal(holder._operation.goal, 'colony');
+sim.operationReviewActive(A, holder, 16000, false);
+assert.equal(holder._operation.goal, 'repair');
+assert.equal(holder._operationReport.result, 'interrupted');
 console.log('COM operation replanning regressions passed');
