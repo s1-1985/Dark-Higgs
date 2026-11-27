@@ -1,7 +1,7 @@
-name: A234 COM comparison (temporary)
+name: A235 COM comparison (temporary)
 on:
   push:
-    branches: [claude/chatgpt-a234-hull-recovery]
+    branches: [claude/chatgpt-a235-repair-state]
 permissions:
   contents: read
 jobs:
@@ -23,6 +23,7 @@ jobs:
       - run: npm install --no-save --no-package-lock playwright && npx playwright install --with-deps chromium
       - run: |
           python3 -m http.server 8099 >/tmp/a234-http.log 2>&1 &
+          sed -i 's/44533d4f2a829f7062e0e1b4b070699e480ec02b/faf4549548c696683ec0a1e5acf721cf486a13d9/' tools/measure_a234.cjs
           A234_CASE=${{ matrix.case }} node tools/measure_a234.cjs
       - uses: actions/upload-artifact@v4
         if: always()

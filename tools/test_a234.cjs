@@ -29,4 +29,18 @@ for(const [opts,phase] of [[{n:()=>0},'recover'],[{missing:560},'recover'],[{see
 let t=after();t.setSkill(false);eq(t.step().hullRecovery,null);eq(t.step({kit:true,n:()=>0},'p',13200).hullRecovery,'active');
 t=after();const initial=t.step({n:()=>0},'p',12000);eq(initial.hullRecovery,null);eq(t.step({},'p',12100).hullRecovery,null);eq(t.step({},'p',12240).id,'recover');eq(t.step({n:()=>0},'p',12300).hullRecovery,'available');let end=t.step({n:()=>0},'p',12480);eq(end.hullRecovery,null);eq(end.id,before().step({n:()=>0},'p',12480).id);
 t=after();t.step({},'p',12000);eq(t.step({seen:true},'p',12240,'combat').hullRecovery,null);
+// 修理開始や再開の可否も、両陣営で同じ間隔で判断に反映される。
+for (const side of ['p', 'e']) {
+ const sim = after();
+ const available = sim.step({}, side, 12000);
+ eq(available.hullRecovery, 'available');
+ eq(sim.step({kit:true,n:()=>0}, side, 12239).hullRecovery, 'available');
+ const active = sim.step({kit:true,n:()=>0}, side, 12240);
+ eq(active.hullRecovery, 'active');
+ ok(active.why.includes('修理中'));
+ eq(active.t0, available.t0);
+ eq(active.sw, available.sw);
+ eq(sim.step({}, side, 12479).hullRecovery, 'active');
+ eq(sim.step({}, side, 12480).hullRecovery, 'available');
+}
 console.log('A234 stage assertions:',checks,'PASS; baseline',JSON.stringify(before().step()),'candidate',JSON.stringify(a));

@@ -15928,8 +15928,8 @@ function trunkStep(F, S, J) {
     T._ph = J.phase; T._od = J.odds;
     const prevD = holder[docKey];
     const hullRecovery = trunkHullRecovery({ side, S, J });
-    // 前回の評価値と比較し、修理機会の出入りを既存の即時評価間隔で拾う。
-    const trigHull = !!hullRecovery !== !!T.hullRecovery;
+    // 修理機会の出入りと、修理可能・修理中の切り替わりを既存の即時評価間隔で拾う。
+    const trigHull = hullRecovery !== (T.hullRecovery ?? null);
     if (prevD && now - T.lastF < TRUNK_PERIOD && !(now - T.lastF >= TRUNK_TRIG_GAP && (trigPh || trigOd || trigHull))) return prevD;
     const wasHullRecovery = !!T.hullRecovery;
     T.hullRecovery = hullRecovery;
