@@ -23,6 +23,7 @@ const test = new Function(`
     const ENGINE_MAIN = {thermonuclear: 'heat', pulse: 'em', higgs: 'higgs', photon: 'optic'};
     const enemySid = target => 'e-' + target.uid;
     const comThinkEvent = () => {};
+    const comDemo = false, reactionEvent = () => {};
     const persAx = () => 0.4;
     const clampToMapCircle = (x, y) => ({x, y});
     ${fragment('const OPP_CLS =', '// 自機側の発射観測 (被弾・ビーム軌跡の経路から)')}
