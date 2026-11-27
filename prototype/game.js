@@ -382,19 +382,19 @@ function searchMark(who, x, y, R, neg) {
         for (let i = 0; i < SEARCH_N; i++) { const cx = _scell(i), dx = cx - x, dy = cy - y; if (dx * dx + dy * dy < r2) m[j * SEARCH_N + i] = _frameCount; } }
 }
 // まだ聴いていない (か、聴いてから時間がたった) マスのうち、近くて・マップの内側寄りの所
-function searchNext(who, x, y) {
+function searchNext(who, x, y, excluded = null) {
     const m = searchMem(who), nm = searchNegMem(who); // 第222弾: 不在レイヤーも読む
     // 第62弾 (オーナー「COMが同じ所をぐるぐる回る」): 一度選んだ行き先は、着く(＝聴いた)か90秒たつまで変えない。
     // 旧: 呼ばれるたびに選び直し、聴いたマスの更新と乱数で1万5千u離れたマスの間を24秒ごとに往復していた (自機COM・敵とも同じ関数)
     const sg = who._sGoal;
-    if (sg && _frameCount - sg.f < THEORY.memory.goalHold) { // 第228弾: 保持の長さは THEORY (根っこ) へ集約
+    if (sg && (!excluded || Math.hypot(sg.x - excluded.x, sg.y - excluded.y) >= SEARCH_CELL) && _frameCount - sg.f < THEORY.memory.goalHold) { // 第228弾: 保持の長さは THEORY (根っこ) へ集約
         const gi = Math.max(0, Math.min(SEARCH_N - 1, Math.floor((sg.x - (MAP_CX - SEARCH_N * SEARCH_CELL / 2)) / SEARCH_CELL))), gj = Math.max(0, Math.min(SEARCH_N - 1, Math.floor((sg.y - (MAP_CY - SEARCH_N * SEARCH_CELL / 2)) / SEARCH_CELL)));
         if (Math.min(SEARCH_FORGET, _frameCount - m[gj * SEARCH_N + gi]) >= SEARCH_FORGET * 0.5 && Math.hypot(sg.x - x, sg.y - y) >= SEARCH_CELL) return { x: sg.x, y: sg.y };
     }
     let best = null, bv = -Infinity;
     for (let j = 0; j < SEARCH_N; j++) for (let i = 0; i < SEARCH_N; i++) {
         const cx = _scell(i), cy = _scell(j), dc = Math.hypot(cx - MAP_CX, cy - MAP_CY);
-        if (dc > MAP_RADIUS - 4000) continue;
+        if (dc > MAP_RADIUS - 4000 || (excluded && Math.hypot(cx - excluded.x, cy - excluded.y) < SEARCH_CELL)) continue;
         const age = Math.min(SEARCH_FORGET, _frameCount - m[j * SEARCH_N + i]);
         if (age < SEARCH_FORGET * 0.5) continue;
         const d = Math.hypot(cx - x, cy - y);
@@ -410,7 +410,7 @@ function searchNext(who, x, y) {
         if (v > bv) { bv = v; best = { x: cx, y: cy }; }
     }
     if (best) { who._sGoal = { x: best.x, y: best.y, f: _frameCount }; who._sDir = Math.atan2(best.y - y, best.x - x); }
-    return best || { x: MAP_CX, y: MAP_CY };
+    return best || (excluded ? null : { x: MAP_CX, y: MAP_CY });
 }
 // 第219弾 (指示書B 段階4): 記録源の追加 — 母艦だけでなく、自軍の聴音局 (ノード/コロニー) と哨戒機が聴いている範囲も探索マップへ。
 // 半径は母艦と同じ流儀 (受信距離 × SEARCH_HEAR_FRAC)。聴音局は listeningPosts の R (ノード6000/コロニー8000/自機哨戒機6000)。
@@ -5431,12 +5431,20 @@ class Ship {
                 const review = strategyReview(this._strat, doctrineOf('e', this), outlookOf('e', this), this._prin?.list?.winpath,
                     _hardDetect || this._sitJ?.phase === 'escape' || stratNearE(this) || incomingMissile(this, true), _frameCount,
                     reactionForReview(this, this._B.fresh > 0.25 && !this._B.guess));
-                if (review) endEnemyStrat(this, review, true);
+                if (review && (review.goal === 'repair' || !this._hunt)) {
+                    const A = operationActorE(this), next = makeOperation(A, review, _frameCount, this._strat.spot);
+                    if (next) {
+                        endEnemyStrat(this, review.why, true);
+                        this._roamGoal = null;
+                        this._operation = next;
+                        announceOperation(A, next);
+                    }
+                }
             }
             // ── 第17弾: 潜伏 — 後退した敵は濃い霧/岩石帯で止まって修復し、45秒で狩りに戻る ──
             // (旧: 後退中も全速で動き続け熱が最大になるため、追われて沈むまで殴り合いになっていた)
             let _hideActive = false;
-            if (this._hideT > 0) {
+            if (this._hideT > 0 && this._operation?.goal !== 'repair') {
                 const hs = this._hideSpot;
                 const lkH = this._B.est;
                 const near = lkH && this._B.fresh > 0.8 && Math.hypot(lkH.x - this.x, lkH.y - this.y) < 1200;
@@ -5523,7 +5531,13 @@ class Ship {
             // 状態別AI実行
             // ──────────────────────────────────────
             let _planActive = false;
-            if (!_hideActive && !_supplyActive && this.type !== 'fighter') _planActive = !!pilotLadder({ plan: () => !this._hunt && enemyPlanStep(this), // 第137弾: 自機COMと同じ並び (PILOT_LADDER: 作戦 → 拾い物 → 狩人の任務)。旧: 狩人 → 拾い物 → 作戦 (自機COMは 作戦 → 拾い物 → 狩人)
+            if (this._operation) {
+                const urgent = _hardDetect || stratNearE(this) || !!incomingMissile(this, true) ||
+                    this._sitJ?.phase === 'escape' || (this._operation.goal !== 'repair' &&
+                    (_hideActive || this.hp / this.maxHp < retreatThreshold(this.personality || PERS_DEF)));
+                if (!_supplyActive || urgent) _planActive = runOperation(operationActorE(this), this, _frameCount, urgent);
+            }
+            if (!_planActive && !_hideActive && !_supplyActive && this.type !== 'fighter') _planActive = !!pilotLadder({ plan: () => !this._hunt && enemyPlanStep(this), // 第137弾: 自機COMと同じ並び (PILOT_LADDER: 作戦 → 拾い物 → 狩人の任務)。旧: 狩人 → 拾い物 → 作戦 (自機COMは 作戦 → 拾い物 → 狩人)
             grab: () => enemyGrabStep(this) || enemyItemStep(this), hunt: () => enemyHunterStep(this, playerSigDetected, _hardDetect) }); // 第80弾: 狩人の頭脳 (忍び寄り・偽装の罠・待ち伏せ) / 第46弾: 作戦「囮で誘い背後を取る」
             if (_hideActive || _supplyActive || _planActive) {
                 // 潜伏中 (上で処理済み)
@@ -16269,18 +16283,127 @@ function repairProtected(doc, urgent) {
 function strategyReview(S, doc, outlook, win, urgent, now, reaction) {
     if (urgent || !S) return null;
     if (repairProtected(doc, urgent) && ['push', 'surge', 'screen', 'raid', 'ambush', 'bait', 'trap', 'supply_hunt'].includes(S.id)) {
-        return '戦略を見直す・安全に耐久を回復できる';
+        return { goal: 'repair', why: '安全に耐久を回復できる' };
     }
     if (!S.cap && S.id === 'ambush' && S.ph === 'wait' && now - S.t0 >= 3600 &&
         doc?.id === 'expand' && now - doc.t0 >= 1800 && win?.aim === 'hack' &&
         outlook?.paths.hack && outlook.paths.hackProg >= 0.5) {
-        return '戦略を見直す・待ち伏せからコロニー制圧へ';
+        return { goal: 'colony', why: '制圧が勝ち筋になった' };
     }
     if (!S.cap && S.id === 'ambush' && S.ph === 'wait' && now - (S.waitingSince ?? now) >= 3600 &&
         reaction && !reaction.contact && reaction.pressure.impatience >= 0.2) {
-        return '戦略を見直す・手掛かりのない待ち伏せを切り上げる';
+        return { goal: 'search', why: '待ち伏せを続けても手掛かりがない' };
     }
     return null;
+}
+// 年輪での再計画。中止理由を目的・行き先・段階へ変換し、両陣営が同じ順序で実行する。
+function operationColonyThreat(site, est) {
+    return est && est.r <= 2500 && Math.hypot(est.x - site.x, est.y - site.y) < 3500;
+}
+function operationTarget(A, goal, excluded) {
+    if (goal === 'repair') {
+        if (A.kit() || (skillOn(A.side, 'it_repair') && A.can('repair'))) {
+            const est = A.est();
+            const avoid = est ? Math.atan2(est.y - A.y, est.x - A.x) : null;
+            const cover = !A.kit() && findCoverSpot(A.x, A.y, 1200, avoid);
+            return cover || { x: A.x, y: A.y };
+        }
+        return null;
+    }
+    if (goal === 'search') return skillOn(A.side, 'gt_stall') ? A.next(excluded) : null;
+    if (!skillOn(A.side, 'st_gather')) return null;
+    const threat = A.est();
+    let best = null, score = Infinity;
+    for (const site of structures) {
+        if (site === excluded || site.type !== 'colony' || site.owner === A.owner) continue;
+        const d = Math.hypot(site.x - A.x, site.y - A.y);
+        if (d > CAP_RANGE) continue;
+        if (operationColonyThreat(site, threat)) continue;
+        if (d < score) { best = site; score = d; }
+    }
+    return best;
+}
+const OPERATION_JP = { colony: 'コロニーを制圧', search: '未聴取の海域を索敵', repair: '安全な場所で修理' };
+function makeOperation(A, review, now, excluded = null, retried = false) {
+    let goal = review.goal, target = operationTarget(A, goal, excluded), why = review.why;
+    if (!target && goal === 'colony') {
+        goal = 'search';
+        why += '。近くに安全に向かえる制圧先がない';
+        target = operationTarget(A, goal, excluded);
+    }
+    if (!target) return null;
+    return { goal, target, why, phase: 'prepare', until: now + (goal === 'repair' ? 7200 : 18000), retried };
+}
+// スキル停止、危険、目標達成、詰まりを確認してから、その時点の段階だけ実行する。
+function operationStep(A, M, now, urgent) {
+    if (urgent || A.expo >= 2) return 'end:危険を察知';
+    const { goal, target } = M, d = Math.hypot(target.x - A.x, target.y - A.y);
+    if (goal === 'colony') {
+        if (target.owner === A.owner) return 'end:制圧完了';
+        if (!skillOn(A.side, 'st_gather')) return 'end:制圧を無効化';
+        if (A.contested(target)) return 'retry:制圧が競合';
+        if (operationColonyThreat(target, A.est())) return 'retry:制圧先で相手の気配を捉えた';
+    }
+    if (goal === 'search' && !skillOn(A.side, 'gt_stall')) return 'end:索敵を無効化';
+    if (now > M.until) return goal === 'colony' ? 'retry:制圧の期限切れ' : 'end:期限切れ';
+    if (goal === 'repair') {
+        if (A.kit()) { M.phase = 'repair'; A.hold(true); return true; }
+        if (M.phase === 'repair') return 'end:修理完了';
+        if (!skillOn(A.side, 'it_repair') || !A.can('repair')) return 'end:修理キットが使えない';
+    }
+    if (M.phase === 'prepare') {
+        // 通信範囲内へ先に送り、報告待ちを12秒に制限する。哨戒機が無くても作戦は続く。
+        M.scout = goal === 'colony' && d > COLONY_HACK_R && d <= DRONE_AUTO_DIST * 0.6 ? A.scout(target) : null;
+        M.phase = M.scout ? 'scout' : 'go';
+        M.phaseF = now;
+        if (M.scout) A.say('再計画・制圧先へ哨戒機を先行させる');
+    }
+    if (M.phase === 'scout') {
+        if (now - M.phaseF < 720 && A.scoutWaiting(M.scout, target)) { A.hold(true); return true; }
+        A.releaseScout(M.scout);
+        M.scout = null;
+        M.phase = 'go';
+    }
+    const near = goal === 'colony' ? COLONY_HACK_R * 0.6 : goal === 'repair' ? 300 : 800;
+    if (d > near) {
+        if (M.bestDist === undefined || d <= M.bestDist - 150) { M.bestDist = d; M.progressF = now; }
+        if (now - M.progressF > 3600) return goal === 'colony' ? 'retry:制圧先へ進めない' : 'end:行き先へ進めない';
+        A.go(target.x, target.y, 180, goal !== 'repair' && d > 5200 ? 'cruise' : 'silent');
+        return true;
+    }
+    A.hold(true);
+    if (goal === 'repair') {
+        if (M.phase !== 'startRepair') { M.phase = 'startRepair'; M.phaseF = now; A.use('repair'); }
+        else if (now - M.phaseF >= 180) return 'end:修理を開始できない';
+        return true;
+    }
+    if (goal === 'colony') {
+        if (M.phase !== 'capture') { M.phase = 'capture'; M.phaseF = now; A.say('再計画・到着したコロニーで制圧を開始'); }
+        return now - M.phaseF >= 1800 ? 'retry:制圧が進まない' : true;
+    }
+    if (M.phase !== 'listen') { M.phase = 'listen'; M.phaseF = now; A.say('再計画・到着した海域で機関を止めて聴く'); }
+    return now - M.phaseF >= 900 ? 'end:聴取完了' : true;
+}
+function announceOperation(A, M) {
+    A.say('再計画・' + M.why + ' → ' + OPERATION_JP[M.goal] + ' (' + _dirTxt(A.x, A.y, M.target.x, M.target.y) + ')');
+}
+function runOperation(A, holder, now, urgent, expectsRepair) {
+    const M = holder._operation;
+    if (!M || (expectsRepair !== undefined && (M.goal === 'repair') !== expectsRepair)) return false;
+    const result = operationStep(A, M, now, urgent);
+    if (result === true) return true;
+    if (M.scout) A.releaseScout(M.scout);
+    const [outcome, why] = result.split(':');
+    holder._operation = outcome === 'retry' && !M.retried
+        ? makeOperation(A, { goal: M.goal, why }, now, M.target, true) : null;
+    if (holder._operation) {
+        announceOperation(A, holder._operation);
+        // 同じティックに交代先を実行する。再度失敗したら再抽選せずに終了させる。
+        return runOperation(A, holder, now, urgent);
+    }
+    if (result === 'end:修理完了') A.recovered?.();
+    A.say('再計画を終了・' + why);
+    return false;
 }
 function tacticFit(doc, category, id, cover, needsFix) {
     const preferred = !!doc && DOC_TACTIC_AFFINITY[doc.id] === category && (category !== 'info' || needsFix);
@@ -16359,7 +16482,9 @@ window.__trunkDbg = function () {
         const O = h._outlook, R = h._prin, D = h.doc || h._doc;
         const prin = {}; if (R) for (const id in R.list) prin[id] = R.list[id].str;
         const ship = h === _com ? player : h;
-        return { emotion: ship ? reactionRead(ship) : null, outlook: O ? { stance: O.stance, score: O.score, phase: O.phase, sw: O.sw, why: O.why } : null,
+        const M = h._operation;
+        const operation = M ? { goal: M.goal, phase: M.phase, why: M.why, target: { x: M.target.x, y: M.target.y }, until: M.until } : null;
+        return { operation, emotion: ship ? reactionRead(ship) : null, outlook: O ? { stance: O.stance, score: O.score, phase: O.phase, sw: O.sw, why: O.why } : null,
             prin, prinTop: R ? R.top : null,
             doc: D && D.id ? { id: D.id, score: D.score, sw: D.sw, prin: D.prin, why: D.why, all: D.all, envCover: D.envCover, envMul: D.envMul, hullRecovery: D.hullRecovery || null } : null,
             env: h._env || null, reward: h._reward || null }; // 第232弾: 風の受け口と不足の記録も採取できるように
@@ -17988,7 +18113,7 @@ function enemyScoutStep(f) {
     // 捜索先: 母艦の推定があればその周り・無ければ母艦から前方 (母艦から6000u以内に収める)
     let cx, cy;
     const lk = carrier._B.est && (carrier._B.fresh || 0) > 0.1 ? carrier._B.est : null;
-    if (lk) { cx = lk.x; cy = lk.y; } else if (carrier._outpost && _frameCount < carrier._outpost.until) { cx = carrier._outpost.x; cy = carrier._outpost.y; } else if (carrier._sendTo && _frameCount < carrier._sendTo.until) { cx = carrier._sendTo.x; cy = carrier._sendTo.y; } else { cx = carrier.x + Math.cos(f._sa0 = (f._sa0 ?? Math.random() * 6.28) + 0.0006) * 3800; cy = carrier.y + Math.sin(f._sa0) * 3800; }
+    if (lk) { cx = lk.x; cy = lk.y; } else if (f._operationPatrol && !au) { cx = f._operationPatrol.x; cy = f._operationPatrol.y; } else if (carrier._outpost && _frameCount < carrier._outpost.until) { cx = carrier._outpost.x; cy = carrier._outpost.y; } else if (carrier._sendTo && _frameCount < carrier._sendTo.until) { cx = carrier._sendTo.x; cy = carrier._sendTo.y; } else { cx = carrier.x + Math.cos(f._sa0 = (f._sa0 ?? Math.random() * 6.28) + 0.0006) * 3800; cy = carrier.y + Math.sin(f._sa0) * 3800; }
     const dd = Math.hypot(cx - carrier.x, cy - carrier.y);
     if (dd > DRONE_AUTO_DIST * 0.9 && !(carrier._outpost && _frameCount < carrier._outpost.until && cx === carrier._outpost.x)) { cx = carrier.x + (cx - carrier.x) / dd * DRONE_AUTO_DIST * 0.9; cy = carrier.y + (cy - carrier.y) / dd * DRONE_AUTO_DIST * 0.9; }
     const Rr = 1500, a = Math.atan2(f.y - cy, f.x - cx), d = Math.hypot(f.x - cx, f.y - cy);
@@ -20729,14 +20854,71 @@ const HIDE_STRATS = { rock: 1, wreck: 1, fogHide: 1, ambush: 1, bait: 1, trap: 1
 const STRAT_NEW = { fallback: 1, restock: 1, playdead: 1, storm: 1, heatcloud: 1, surge: 1, wide_loop: 1, center: 1, orbit: 1, salvage: 1, net: 1, rock: 1, wreck: 1, hop: 1, decoyship: 1, supply_hunt: 1, hitflee: 1 }, STRAT_KEEP = { board: 1, rock: 1, wreck: 1, fogHide: 1, screen: 1, fallback: 1, playdead: 1, storm: 1, heatcloud: 1, restock: 1 }; // 第146弾: 新しい戦略 / 相手が近くても続ける戦略
 const STRAT_SHARED = { board: 1, rock: 1, wreck: 1, hop: 1, decoyship: 1, fogHide: 1, push: 1, screen: 1, guard: 1, tech: 1, raid: 1, fallback: 1, restock: 1, playdead: 1, storm: 1, heatcloud: 1, surge: 1, wide_loop: 1, center: 1, orbit: 1, salvage: 1, net: 1, supply_hunt: 1, hitflee: 1 };
 // 自機COMのアダプタ
+function operationActorP(c, hpF) {
+    const A = stratActorP(c, hpF, null, null);
+    return { ...A,
+        recovered() { c.hideUntil = _frameCount; c.retreatS = null; },
+        go(x, y, tolerance, stance) {
+            if (playerCoasting) toggleCoast(false);
+            if (powerStance !== stance) setStance(stance, true);
+            A.go(x, y, tolerance, stance);
+        },
+    };
+}
+function operationActorE(e) {
+    const A = stratActorE(e);
+    return { ...A,
+        recovered() { e._hideT = 0; e._hiding = false; e._hideCD = 3600; },
+        go(x, y, tolerance, stance) {
+            e._quietRun = stance === 'silent';
+            const ms = e._maxSpeeds();
+            e._moveHeading(Math.atan2(y - e.y, x - e.x), ms ? ms[stance] : 0.6);
+        },
+        hold() { e._quietRun = true; A.hold(); },
+    };
+}
+function operationScout(who, target, launch) {
+    const side = who === player ? 'p' : 'e';
+    if (!skillOn(side, 'dr_order')) return null;
+    const scouts = () => (side === 'p' ? playerDrones : enemies).find(d =>
+        d.hp > 0 && !d._dying && !d._boarded && (side === 'p' ? d.type === 'scout' && d._no && !d._own && !droneOrders.scout : d._home === who && d._kind === 'scout' && !d._operationPatrol));
+    let d = scouts();
+    if (!d && !(side === 'p' && droneOrders.scout) && launch()) d = scouts();
+    if (!d) return null;
+    if (side === 'p') {
+        droneOrder('scout', 'patrol', target.x, target.y, d._no);
+        return { d, order: d._own };
+    }
+    const order = { x: target.x, y: target.y };
+    d._operationPatrol = order;
+    return { d, order };
+}
+function operationScoutWaiting(scout, target, who) {
+    const { d, order } = scout;
+    if (d.hp <= 0 || d._dying || d._boarded) return false;
+    if ((who === player ? d._own : d._operationPatrol) !== order) return false;
+    return d._auto || Math.hypot(d.x - target.x, d.y - target.y) >= 1800;
+}
+function releaseOperationScout(scout, who) {
+    const { d, order } = scout;
+    if (who !== player) { if (d._operationPatrol === order) d._operationPatrol = null; return; }
+    if (d._own !== order) return;
+    if (d.hp > 0 && !d._boarded && skillOn('p', 'dr_recall')) droneOrder('scout', 'return', 0, 0, d._no);
+    else { d._own = null; if (d._order === order) d._order = null; }
+}
 function stratActorP(c, hpF, te, lk) {
     const sa = beliefViewP(lockedSignalId).sa; // 第213弾: 信念ボード経由 (値は従来の信号解析の参照と同じ)
     const stockK = { scout: 'scout', attack: 'attack', build: 'build' }, itemK = { noise: 'noise', spray: 'fogspray', repair: 'repair', blow: 'fogblow' };
     const stock = (k) => (SHIP_DRONES[gameState.shipType] || []).includes(k) && (cargo.stock[k] || 0) > 0;
     const execLaunchP = (t) => { if (droneCtrlFits('p', null, t)) deployDrone(t); }; // 第220弾: 実行だけの口 (判断は droneOpsLaunch / 編成表が持つ)
     return { side: 'p', owner: 'player', engine: gameState.engineType, x: player.x, y: player.y, hpF, expo: playerExposureLevel, hHere: getHiggsIntensity(player.x, player.y), seen: !!(te && lk && lk.full), ag: (c.pp ? c.pp.aggression : 0.5), partsN: partsOn.length,
+        scout: (target) => operationScout(player, target, () => !droneRoster('p').scout.live && stock('scout') && droneCtrlFits('p', null, 'scout') &&
+            skillOn('p', 'dr_scout') && (execLaunchP('scout'), true)),
+        scoutWaiting: (scout, target) => operationScoutWaiting(scout, target, player),
+        releaseScout: (scout) => releaseOperationScout(scout, player),
+        contested: (site) => _capturing?.obj === site && _capturing.contested,
         oppRestockF: (S) => _oppModelP[S.sid]?.restockF ?? -1,
-        estName: 'SIG-' + sigNo(lockedSignalId), est: () => sa && sa.fix ? trackEstimate(sa, 0) : null, next: () => searchNext(player, player.x, player.y), kit: () => (player._kitT || 0) > 0,
+        estName: 'SIG-' + sigNo(lockedSignalId), est: () => sa && sa.fix ? trackEstimate(sa, 0) : null, next: (excluded) => searchNext(player, player.x, player.y, excluded), kit: () => (player._kitT || 0) > 0,
         go: (x, y, tol, stance) => { c.mode = 'strat'; _comCMOff(); if (!(player.state === 'moving' && Math.hypot(player.targetX - x, player.targetY - y) < tol) && _comCanSteer(c)) { player.setTarget(x, y); _comSteered(c, 'leg'); }
             if (stance === 'silent') { if (powerStance !== 'silent') setStance('silent', true); } else if (stance === 'flank') { if (powerStance !== 'flank') setStance('flank', true); } else if (stance === 'cruise' && powerStance === 'silent' && (c.pp ? c.pp.stealth : 0.4) < 0.5) setStance('cruise', true); },
         hold: (coast) => { _comHold(c); if (coast && !playerCoasting) toggleCoast(true); },
@@ -20760,8 +20942,13 @@ function stratActorE(e) {
     const execLaunchE = (t) => { if (t === 'build') { e.turretStock--; spawnEnemyDrone(e, 'turret'); } else if (t === 'scout') { e.scoutStock--; spawnEnemyDrone(e, 'scout'); } else { e.droneStock--; _eLaunchFighter(e, { x: e.x, y: e.y }); } }; // 第220弾: 実行だけの口 (判断は droneOpsLaunch / 編成表が持つ)
     return { side: 'e', owner: 'enemy', engine: e.engine, x: e.x, y: e.y, hpF: e.hp / e.maxHp, expo: hitAgo < 480 ? 3 : (pingAgo < 900 || e.inVision) ? 2 : 0, hHere: getHiggsIntensity(e.x, e.y), seen: !!e.inVision, ag: P.aggression ?? 0.5, partsN: (e.parts || []).length,
         hasBoard: () => (e.boardStock || 0) > 0 || enemies.some(f => f._kind === 'boarder' && f._home === e && f.hp > 0), boarding: () => !!(player && player._board && player._board.side === 'e'),
+        scout: (target) => operationScout(e, target, () => !droneRoster('e', e).scout.live && e.scoutStock > 0 && droneCtrlFits('e', e, 'scout') &&
+            skillOn('e', 'dr_scout') && (execLaunchE('scout'), true)),
+        scoutWaiting: (scout, target) => operationScoutWaiting(scout, target, e),
+        releaseScout: (scout) => releaseOperationScout(scout, e),
+        contested: (site) => e._sawPlayerF === now && B.est && Math.hypot(B.est.x - site.x, B.est.y - site.y) <= COLONY_HACK_R,
         oppRestockF: () => e._B.opp?.restockF ?? -1,
-        estName: '自機', est: () => B.sa && B.sa.fix ? trackEstimate(B.sa, 0) : null, next: () => searchNext(e, e.x, e.y), kit: () => (e._kitT || 0) > 0,
+        estName: '自機', est: () => B.sa && B.sa.fix ? trackEstimate(B.sa, 0) : null, next: (excluded) => searchNext(e, e.x, e.y, excluded), kit: () => (e._kitT || 0) > 0,
         go: (x, y, tol) => { if (!(e.state === 'moving' && Math.hypot(e.targetX - x, e.targetY - y) < tol)) { e.setTarget(x, y); e._roam = 'strat'; } },
         hold: () => { if (e.state === 'moving') e.setTarget(e.x, e.y); e._roam = null; },
         can: (k) => k === 'noise' ? (e.itemNoise || 0) > 0 : k === 'spray' ? (e.itemSpray || 0) > 0 : k === 'repair' ? (e.itemRepair || 0) > 0 : (e.itemBlow || 0) > 0,
@@ -22925,9 +23112,26 @@ function _comPilotStep0() {
     if (c.shipLike) c.lastShipF = now;
     comExtrasStep(c, P, D, hpF, contact);
     comReactItems(c, P, hpF, hpF < retreat); // 第58弾: かく乱 (閃光・ノイズ・煙幕・偽装)
-    if (c.st) {
+    if (c.st && !capManualOn() && !capSeeking() && !(c.capHoldUntil > now || c.capAvoidUntil > now || c.standUntil > now)) {
         const review = strategyReview(c.st, doctrineOf('p'), outlookOf('p'), c._prin?.list?.winpath, comEngaged() || c._sitJ?.phase === 'escape' || THREATS.some(t => t.kind === 'msl'), now, reactionForReview(player, contact));
-        if (review) { c.goalLeg = null; player.setTarget(player.x, player.y); endComStrat(c, review); }
+        if (review && (review.goal === 'repair' || !c.hunt)) {
+            const A = operationActorP(c, hpF), next = makeOperation(A, review, now, c.st.spot);
+            if (next) {
+                c.goalLeg = null; c.item = null; c.legF = -1e9;
+                player.setTarget(player.x, player.y);
+                endComStrat(c, review.why);
+                if (c.hunt) cancelHuntShot(c.hunt);
+                c._operation = next;
+                announceOperation(A, next);
+            }
+        }
+    }
+    if (c._operation && (comEngaged() || c._sitJ?.phase === 'escape' || THREATS.some(t => t.kind === 'msl') ||
+        capManualOn() || capSeeking() || c.capHoldUntil > now || c.capAvoidUntil > now || c.standUntil > now)) {
+        const M = c._operation;
+        if (M.scout) releaseOperationScout(M.scout, player);
+        c._operation = null;
+        comThinkEvent('p', '再計画を中断・危険への対処または艦長の指示を優先');
     }
     { const why = comEngaged(); if (why && now - (c.recallF || -1e9) > 600) { if (comDroneRecall(c, why)) c.recallF = now; } } // 第73弾: 会敵したら呼び戻す
     // 第41弾: エンジンは試合の始めに選ぶ (始めの10秒なら切替の惰性なし)。第42弾: 性格と居る所の環境で (敵と同じ comEngineEval)・試合中も場面で替える (下)
@@ -23053,6 +23257,8 @@ function _comPilotStep0() {
             }
         }
     }
+    if (c._operation?.goal === 'repair' &&
+        runOperation(operationActorP(c, hpF), c, now, false, true)) return;
     // 1) 退く
     if (hpF < retreat) {
         if (c.hunt) cancelHuntShot(c.hunt);
@@ -23115,6 +23321,7 @@ function _comPilotStep0() {
             }
         }
     }
+    if (c._operation && runOperation(operationActorP(c, hpF), c, now, hpF < retreat, false)) return;
     // 3) 撃つ
     const te = bestFireTarget(), lk = te ? playerLockInfo(te) : null;
     comDatumNote(c, te, lk); // 第71弾: 相手を掴んだ位置を覚える
