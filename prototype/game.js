@@ -3574,7 +3574,7 @@ function applyStrikeBonuses(byPlayer, attacker, target, hitAng, wType, fromDrone
     // 第221弾 (指示書D 段2): 自機側の発射観測 — 被弾した兵装の種別は観測できる (敵側 observeFireE と対称)。艦載機の攻撃は母艦のドローン目撃として数える
     // 第223弾: 発射種別の観測記録 (observeFireP の _lastFireP) は艦載機でも対象自身の sid に残す (読み手は対象の信念を引くため。相手モデルへの集計は従来どおり主対象の時だけ)
     if (!byPlayer && target === player && attacker && attacker.hp > 0 && !attacker.isPlayer) {
-        if (attacker.type === 'fighter') oppDroneSeenP(attacker);
+        if (attacker.type === 'fighter') oppDroneSeenP(attacker, !!attacker.inVision);
         observeFireP(enemySid(attacker), wType);
     }
     if (!byPlayer && target === player && attacker && attacker.hp > 0 && !attacker.isPlayer &&
@@ -5173,8 +5173,9 @@ class Ship {
                 }
                 // 第50弾 (オーナー): 自機のドローンも音を出す — 敵には自艦かドローンか分からない。見えれば (視線が通れば) ドローンと分かる
                 for (const dr of playerDrones) {
-                    if (dr.hp <= 0 || !dr.sigOf('heat') || _fk.has(dr)) continue;
+                    if (dr.hp <= 0 || !dr.sigOf('heat')) continue;
                     if (_seeIt(dr)) { oppDroneSeenE(this, dr); continue; } // 第221弾: ドローンの目視は相手モデル (艦種証拠) へ
+                    if (_fk.has(dr)) continue; // 音で識別済みでも、後から目視で機種を確認できる
                     const h = hearSource(dr, 'e' + this.uid, this.x, this.y, dr.x, dr.y, b => dr.sigOf(b), sigRange, enemyBands(this), bandGainE(this));
                     if (h) _heardF.push([dr, 'small', h]);
                 }
@@ -5182,7 +5183,7 @@ class Ship {
                 const _k = _heardF.length + _fieldH.length + (_hP ? 1 : 0);
                 this._kHear = _k;
                 for (const [o, tr, h] of _heardF) {
-                    if (identStepE(this, o, tr, h, _k)) { _fk.add(o); if (tr === 'small') oppDroneSeenE(this, o); if (this.type !== 'fighter') comThinkEvent('e', (tr === 'noise' ? 'ノイズメーカー' : tr === 'lure' ? '偽艦影' : 'ドローン') + 'の音と判断 (帯域が平坦) — 自機ではない', 'e' + this.uid); continue; } // 第221弾: ドローンと判断した音も目撃として数える
+                    if (identStepE(this, o, tr, h, _k)) { _fk.add(o); if (tr === 'small') oppDroneSeenE(this, o, false); if (this.type !== 'fighter') comThinkEvent('e', (tr === 'noise' ? 'ノイズメーカー' : tr === 'lure' ? '偽艦影' : 'ドローン') + 'の音と判断 (帯域が平坦) — 自機ではない', 'e' + this.uid); continue; } // 第221弾: ドローンと判断した音も目撃として数える
                     if (h.sig > detectedSigStrength) { detectedSigStrength = h.sig; _noiseSrc = o; _hNoise = h.noise; _hBand = h.band; }
                 }
                 if (_noiseSrc) playerSigDetected = true;
@@ -11881,7 +11882,7 @@ function checkPassiveDetection() {
         if (_sigIdent[c.sourceId]) _sigIdent[c.sourceId].band = c.band; // 第40弾: 一番よく聞こえた帯域 (自然の信号の種類の手掛かり)
         // 第221弾 (指示書D 段2): 相手モデルへの証拠 — 主対象の帯域サンプル (識別の確定度で重み付け) と、艦載機の信号を小型と判断した時の目撃
         if (c.sourceId === lockedSignalId) { const _te2 = enemyBySid(c.sourceId); if (_te2 && _te2.type !== 'fighter') { const _inf = identInfo(c.sourceId); const _lv = { heat: 0, optic: 0, em: 0, higgs: 0 }; hearLevels(_te2, c.sourceId, player.x, player.y, _te2.x, _te2.y, b => sigToward(_te2, b, player.x, player.y), range, _lv, sensorOrder, bandGainP); _oppBandObs(oppRecP(c.sourceId), _lv, _inf.known ? _inf.p : 0); } }
-        { const _fo = enemyBySid(c.sourceId); if (_fo && _fo.type === 'fighter' && _fo._home) { const _fid = _sigIdent[c.sourceId]; if (_fid && _fid.n >= IDENT_MIN_N && 1 / (1 + Math.exp(-_fid.L)) <= 0.4) oppDroneSeenP(_fo); } }
+        { const _fo = enemyBySid(c.sourceId); if (_fo && _fo.type === 'fighter' && _fo._home) { const _fid = _sigIdent[c.sourceId]; if (_fid && _fid.n >= IDENT_MIN_N && 1 / (1 + Math.exp(-_fid.L)) <= 0.4) oppDroneSeenP(_fo, false); } }
         if (tracked) {
             const _te = enemyBySid(c.sourceId);
             if (_te && _te.hp > 0 && !_te._dying) applyTrackContact(_te, sa);
@@ -19800,7 +19801,7 @@ function _oppTopCheck(rec, axis) {
     for (const k in A.L) { const v = A.L[k]; if (v > bv) { sv = bv; bv = v; best = k; } else if (v > sv) sv = v; }
     if (!best || best === A.top) return;
     const cur = A.top ? A.L[A.top] : sv; // 未確定の間は2位との差で見る
-    if (bv - cur < 0.5) return;
+    if (bv - cur < 0.5 || (axis === 'cls' && bv - sv < 0.5)) return;
     const from = A.top; A.top = best;
     if (rec._say) { try { rec._say('相手像: ' + OPP_AXIS_JP[axis] + 'は ' + (from ? OPP_JP[from] : '不明') + ' → ' + OPP_JP[best] + ' と見る (証拠' + Math.round(A.n) + '件・' + (rec.why || '') + ')'); } catch (er) {} }
 }
@@ -19885,29 +19886,32 @@ function observeFireP(sid, wType) {
     _lastFireP[sid] = { type: wType, f: _frameCount };
     if (sid === lockedSignalId) _oppFire(oppRecP(sid), wType);
 }
-// ドローン目撃 → 艦種証拠 (艦種ごとの運用範囲は SHIP_DRONES が根拠: Tech は空母だけ・攻撃/砲台は潜航型が出せない・哨戒は攻撃型が出せない)
+// 確認したドローン機種は、搭載できる艦種の候補を絞る。共通機種の目撃だけで片方を優遇しない。
 const OPP_DRONE_CLS = {
     mech:   { carrier: 1.2, assault: -0.4, stealth: -0.4 },
-    attack: { carrier: 0.25, assault: 0.15, stealth: -0.25 },
-    build:  { carrier: 0.25, assault: 0.15, stealth: -0.25 },
+    attack: { carrier: 0.15, assault: 0.15, stealth: -0.25 },
+    build:  { carrier: 0.15, assault: 0.15, stealth: -0.25 },
     scout:  { carrier: 0.2, stealth: 0.2, assault: -0.25 },
 };
 function _oppDrone(rec, obj, kind) {
     if (!rec || !obj) return;
-    const seen = rec._droneSeen || (rec._droneSeen = new Set());
-    if (seen.has(obj)) return; // 同じ個体は1回だけ数える
-    seen.add(obj);
-    rec.drones++; rec.lastF = _frameCount;
+    const seen = rec._droneSeen || (rec._droneSeen = new Map());
+    const known = seen.get(obj);
+    if (known != null || (known === null && kind == null)) return;
+    seen.set(obj, kind ?? null);
+    if (known === undefined) rec.drones++; // 音→目視で機種が判明しても、機数は同じ
+    rec.lastF = _frameCount;
     const d = OPP_DRONE_CLS[kind];
-    if (d) _oppAddM(rec, 'cls', d, 'ドローン目撃 (' + (DRONE_SPEC && DRONE_SPEC[kind] ? DRONE_SPEC[kind].label : kind) + ')');
-    if (rec.drones === 3 || rec.drones === 6) _oppAddM(rec, 'cls', { carrier: 0.4 }, 'ドローン目撃が累積 (持続的な運用は空母寄り)');
+    if (d) _oppAddM(rec, 'cls', d, 'ドローン機種を確認 (' + (DRONE_SPEC[kind]?.label || kind) + ')');
     if (kind === 'scout') _oppAddM(rec, 'sty', { cautious: 0.1 }, '哨戒機を目撃 (情報戦寄り)');
 }
-function oppDroneSeenE(e, dr) { _oppDrone(oppRecE(e), dr, dr && dr.type); }
-function oppDroneSeenP(f) { // 敵の艦載機/ドローン個体 → 母艦 (_home) の記録へ。主対象の母艦の時だけ
+function oppDroneSeenE(e, dr, visual = true) {
+    _oppDrone(oppRecE(e), dr, visual ? dr?.type : null);
+}
+function oppDroneSeenP(f, visual = true) {
     const home = f && f._home; if (!home) return;
     const sid = enemySid(home); if (sid !== lockedSignalId) return;
-    _oppDrone(oppRecP(sid), f, _droneKindOfE(f));
+    _oppDrone(oppRecP(sid), f, visual ? _droneKindOfE(f) : null);
 }
 // 瞬時行動推定 (predictedBehavior) の反復 → 様式への弱い蓄積。10秒に1回まで。ノイズ由来の推定を追っている間は入れない
 function oppBehaviorE(e, pb, tainted) {
