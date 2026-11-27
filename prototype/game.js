@@ -15803,6 +15803,16 @@ function trunkBaseOpportunity(c) {
     for (const q of resourceNodes) if (near(q)) out.nodes++;
     return out;
 }
+// 第234弾: 立て直しは耐久の不足そのものではなく、実行できる修理の機会として読む。
+// 既存 sitRaw の退き際・被弾・露出条件を使用。潜伏は recover より優先されるため hide も読む。
+// 自艦の在庫と修理状態だけを参照。拠点は耐久を自動回復しないので、保有数を修理能力とみなさない。
+function trunkHullRecovery(c) {
+    const S = c.S, J = c.J;
+    if ((J.phase !== 'recover' && J.phase !== 'hide') || !sitRaw(S).recover || S.seen || S.msl) return null;
+    if (S.kit) return 'active';
+    if (typeof S.n === 'function' && S.n('repair') > 0 && S.missing > REPAIR_KIT_HP * 0.8 && skillOn(c.side, 'it_repair')) return 'available';
+    return null;
+}
 const PRINCIPLES = [
     { id: 'winpath', jp: '勝利の道筋を常に持つ', theory: 'win', eval: (c) => {
         // THEORY.win: 勝敗は敵艦の全滅 (撃沈) で決まる。S&D では全コロニーのハックでも決まる
@@ -15857,7 +15867,9 @@ const PRINCIPLES = [
     { id: 'preserve', jp: '勝っていれば戦力を温存する', theory: 'win', eval: (c) => {
         const O = c.O; let str = O.stance === 'ahead' ? 0.7 : O.stance === 'even' ? 0.3 : 0.05;
         if (O.stance === 'ahead' && O.phase === 'late') str += 0.15; // 終盤の優勢は守り切る価値が高い
-        if (c.S.hpF < 0.35) str *= 0.5; // 大破していれば「温存」ではなく立て直し (supply) の領分
+        // 既存の局面確信度をそのまま立て直し要求に使う (数値は追加しない)。
+        if (c.hullRecovery) return { str: sitConf(c.S, null, 'recover'), aim: 'recover', why: c.hullRecovery === 'active' ? '退き際以下・修理中 — 回復を守る' : '退き際以下・修理可能 — 戦力を立て直す' };
+        if (c.S.hpF < 0.35) str *= 0.5; // 修理機会がなければ従来の温存評価
         return { str: Math.min(1, str), why: '見通し ' + _STANCE_JP[O.stance] + (O.stance === 'ahead' ? ' — 消耗を避けて勝ち切る' : O.stance === 'behind' ? ' — 温存では覆らない' : ' — 互角では温存は半分だけ') };
     } },
     { id: 'decisive', jp: '負けていれば決戦を求める', theory: 'win', eval: (c) => {
@@ -15894,6 +15906,8 @@ const PRINCIPLE_POSTURE = {
     supply:    { press: 0, veil: 0, expand: 0.2, ambush: 0.1, recover: 1.0 },
     bases:     { press: 0.3, veil: 0.3, expand: 0.9, ambush: 0.2, recover: 0 },
     preserve:  { press: 0, veil: 0.4, expand: 0.5, ambush: 0.5, recover: 0.4 },
+    // 実行可能な修理を守る姿勢。既存供給原則の recover=1 と同じ要求。
+    'preserve.recover': { press: 0, veil: 0, expand: 0, ambush: 0, recover: 1 },
     decisive:  { press: 1.0, veil: 0.1, expand: 0.2, ambush: 0.1, recover: 0 },
     'time.early': { press: 0, veil: 0.7, expand: 0.8, ambush: 0.3, recover: 0 },
     'time.mid':   { press: 0.2, veil: 0.3, expand: 0.3, ambush: 0.2, recover: 0 },
@@ -15913,7 +15927,12 @@ function trunkStep(F, S, J) {
     const trigOd = T._od !== null && J.odds !== T._od; // 勝算の反転も即時
     T._ph = J.phase; T._od = J.odds;
     const prevD = holder[docKey];
-    if (prevD && now - T.lastF < TRUNK_PERIOD && !(now - T.lastF >= TRUNK_TRIG_GAP && (trigPh || trigOd))) return prevD;
+    const hullRecovery = trunkHullRecovery({ side, S, J });
+    // 前回の評価値と比較し、修理機会の出入りを既存の即時評価間隔で拾う。
+    const trigHull = !!hullRecovery !== !!T.hullRecovery;
+    if (prevD && now - T.lastF < TRUNK_PERIOD && !(now - T.lastF >= TRUNK_TRIG_GAP && (trigPh || trigOd || trigHull))) return prevD;
+    const wasHullRecovery = !!T.hullRecovery;
+    T.hullRecovery = hullRecovery;
     T.lastF = now;
     // ① 見通し
     const O = matchOutlook(side, who, S, holder._outlook || null, now);
@@ -15921,6 +15940,7 @@ function trunkStep(F, S, J) {
     // ② 原則の評価
     const ctx = { side, who, S, J, O, P: F.P || PERS_DEF, now };
     ctx.baseOpp = trunkBaseOpportunity(ctx);
+    ctx.hullRecovery = hullRecovery;
     const prin = {}; let top = null, topV = -1;
     for (const pr of PRINCIPLES) {
         let r; try { r = pr.eval(ctx); } catch (er) { r = { str: 0, why: '評価に失敗' }; }
@@ -15941,7 +15961,7 @@ function trunkStep(F, S, J) {
     for (const id of DOC_IDS) { scores[id] = 0; contrib[id] = {}; wsum[id] = 0; csum[id] = 0; }
     for (const pr of PRINCIPLES) {
         const rec = prin[pr.id]; if (!rec) continue;
-        const rowKey = pr.id === 'winpath' ? 'winpath.' + (rec.aim || 'sink') : pr.id === 'time' ? 'time.' + O.phase : pr.id === 'infoFirst' && rec.aim === 'expand' ? 'infoFirst.expand' : pr.id;
+        const rowKey = pr.id === 'winpath' ? 'winpath.' + (rec.aim || 'sink') : pr.id === 'time' ? 'time.' + O.phase : pr.id === 'infoFirst' && rec.aim === 'expand' ? 'infoFirst.expand' : pr.id === 'preserve' && rec.aim === 'recover' ? 'preserve.recover' : pr.id;
         const row = PRINCIPLE_POSTURE[rowKey]; if (!row) continue;
         for (const id of DOC_IDS) { const w = row[id] || 0; if (w) { const v = rec.str * w; scores[id] += v; wsum[id] += w; csum[id] += v; if (v) contrib[id][pr.id] = v; } }
     }
@@ -15959,14 +15979,18 @@ function trunkStep(F, S, J) {
     if (!D) D = holder[docKey] = { id: null, t0: -1e9, score: 0, why: '', prin: [], sw: 0, lastF: -1e9, all: null };
     let best = null, bv = -1;
     for (const id of DOC_IDS) { const v = scores[id] * (id === D.id ? DOC_HYST : 1); if (v > bv) { bv = v; best = id; } }
-    let pick = best;
-    const urgent = J.phase === 'escape' || (prin.supply && prin.supply.str >= 0.99); // 安全側: 離脱局面と弾薬切れは最小滞在を待たない
+    // 安全な修理機会は、決戦・収集より先に守るべき原則上の要求。スコア自体は盛らない。
+    const repairPriority = prin.preserve.aim === 'recover';
+    let pick = repairPriority ? 'recover' : best;
+    const urgent = J.phase === 'escape' || (prin.supply && prin.supply.str >= 0.99) || repairPriority || wasHullRecovery; // 修理機会の終了時も最小滞在で縛らない
     if (pick !== D.id && D.t0 > -1e9 && now - D.t0 < DOC_DWELL && !urgent) pick = D.id;
     const changed = pick !== D.id, from = D.id;
     const drivers = Object.keys(contrib[pick]).sort((a, b) => contrib[pick][b] - contrib[pick][a])
         .filter(id => contrib[pick][id] >= 0.2 * Math.max(0.01, csum[pick])).slice(0, 3); // 選ばれた姿勢の根拠原則 (寄与シェア2割以上・大きい順・最大3件)
     D.id = pick; D.score = Math.round(scores[pick] * 1000) / 1000; D.prin = drivers; D.lastF = now;
     D.why = (drivers.length ? drivers.map(id => '「' + (PRINCIPLE_JP[id] || id) + '」').join('・') : '原則の要求なし') + ' (見通し ' + _STANCE_JP[O.stance] + ')';
+    D.hullRecovery = repairPriority ? hullRecovery : null;
+    if (repairPriority) D.why = '修理機会を優先 — ' + prin.preserve.why + '・' + D.why;
     D.all = {}; for (const id of DOC_IDS) D.all[id] = Math.round(scores[id] * 1000) / 1000;
     D.envCover = ENV.cover; D.envMul = { veil: Math.round(envMul.veil * 1000) / 1000, ambush: Math.round(envMul.ambush * 1000) / 1000 }; // 第232弾: 風の効きの記録 (検証用)
     if (changed) {
@@ -16046,7 +16070,7 @@ window.__trunkDbg = function () {
         const prin = {}; if (R) for (const id in R.list) prin[id] = R.list[id].str;
         return { outlook: O ? { stance: O.stance, score: O.score, phase: O.phase, sw: O.sw, why: O.why } : null,
             prin, prinTop: R ? R.top : null,
-            doc: D && D.id ? { id: D.id, score: D.score, sw: D.sw, prin: D.prin, why: D.why, all: D.all, envCover: D.envCover, envMul: D.envMul } : null,
+            doc: D && D.id ? { id: D.id, score: D.score, sw: D.sw, prin: D.prin, why: D.why, all: D.all, envCover: D.envCover, envMul: D.envMul, hullRecovery: D.hullRecovery || null } : null,
             env: h._env || null, reward: h._reward || null }; // 第232弾: 風の受け口と不足の記録も採取できるように
     };
     const out = { p: _com ? one(_com) : null, e: [] };
