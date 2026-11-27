@@ -15,7 +15,7 @@ function make(s){
   const S={side,who,hpF:.2,retreatT:.29,ammo:1,wK:true,wM:true,expo:0,hitS:30,quietS:60,drones:0,oppDrone:0,seen:false,est:false,msl:false,kit:false,missing:800,n:()=>1,...opts};
   who.hp=who.maxHp*S.hpF;const F={side,who,P:PERS_DEF},J={phase,odds:'even'};
   const d=trunkStep(F,S,J),h=side==='p'?_com:e;
-  return JSON.parse(JSON.stringify({id:d.id,score:d.score,all:d.all,why:d.why,hullRecovery:d.hullRecovery||null,principles:h._prin.list,t0:d.t0,sw:d.sw}));
+  return JSON.parse(JSON.stringify({id:d.id,score:d.score,all:d.all,why:d.why,hullRecovery:d.hullRecovery||null,principles:h._prin.list,t0:d.t0,sw:d.sw,lastF:d.lastF}));
  },setSkill(v){enabled=v}};
  `)();
 }
@@ -42,6 +42,14 @@ for (const side of ['p', 'e']) {
  eq(active.sw, available.sw);
  eq(sim.step({}, side, 12479).hullRecovery, 'active');
  eq(sim.step({}, side, 12480).hullRecovery, 'available');
+}
+// 再評価間隔の中で起きた局面転換は、次に評価できるフレームで処理する。
+for (const side of ['p', 'e']) {
+ const sim = after();
+ const noKit = {n:()=>0};
+ eq(sim.step(noKit, side, 12000, 'search').lastF, 12000);
+ eq(sim.step({...noKit, seen:true}, side, 12100, 'combat').lastF, 12000);
+ eq(sim.step({...noKit, seen:true}, side, 12240, 'combat').lastF, 12240);
 }
 // 実際の自機COMの事実層から、修理中フラグと耐久の不足量を取得できる。
 const playerFacts = new Function(`
