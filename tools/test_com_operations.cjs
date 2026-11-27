@@ -18,9 +18,10 @@ const sim = new Function(`
     const COLONY_HACK_R = 600, DRONE_AUTO_DIST = 6000, CAP_RANGE = 16000;
     const skillOn = (_, id) => !disabled.has(id);
     const repairProtected = (doc, urgent) => !urgent && doc?.id === 'recover' && doc.hullRecovery;
+    const clampToMapCircle = (x, y) => ({x,y}), engineSpeedFactor = () => 1;
     const findCoverSpot = () => ({x:1000, y:0}), _dirTxt = () => '東';
     ${source.slice(start, end)}
-    return { strategyReview, makeOperation, runOperation, operationReviewActive, operationSitePenalty, structures, disabled, reactions };
+    return { strategyReview, makeOperation, runOperation, operationReviewActive, operationSitePenalty, operationObserveSite, structures, disabled, reactions };
 `)();
 
 const old = {id:'ambush', ph:'wait', t0:0, waitingSince:0};
@@ -34,6 +35,7 @@ sim.structures.push(first, second, {type:'derelict', x:200, y:0, owner:'neutral'
 const calls = [], wing = {};
 let kit = false, contested = null, estimate = null, hasContact = false;
 const A = {side:'p', owner:'player', x:0, y:0, expo:0, who:{},
+    contender: () => 'e-1', canScout: () => true,
     contact: () => hasContact, listened: () => calls.push('listened'),
     est: () => estimate, next: () => ({x:-3000, y:0}), kit: () => kit, can: () => true,
     use: k => { calls.push(k); kit = true; }, contested: site => site === contested,
@@ -128,4 +130,35 @@ assert.equal(holder._operation.goal, 'colony');
 sim.operationReviewActive(A, holder, 16000, false);
 assert.equal(holder._operation.goal, 'repair');
 assert.equal(holder._operationReport.result, 'interrupted');
+// Identification, source age and area coverage all matter when correcting a conflict.
+const conflict = { _operationSites: new Map([[first, {conflict:{at:20000,sid:'e-1'}}]]) };
+sim.operationObserveSite(conflict, first, 'e-2', {x:8000,y:0,r:500}, 20100);
+sim.operationObserveSite(conflict, first, 'e-1', {x:8000,y:0,r:500}, 19999);
+sim.operationObserveSite(conflict, first, 'e-1', {x:3000,y:0,r:300}, 20100, true);
+assert(sim.operationSitePenalty(conflict, first, 20100) > 0);
+sim.operationObserveSite(conflict, first, 'e-1', {x:8000,y:0,r:500}, 20100);
+assert.equal(sim.operationSitePenalty(conflict, first, 20100), 0);
+assert.equal(conflict._operationHistory.at(-1).result, 'updated');
+
+A.who.doc = null;
+const revisit = { _operationSites: new Map([[first, {conflict:{at:20000,sid:'e-1'}}]]) };
+revisit._operation = sim.makeOperation(A, review, 20100, second, false, revisit);
+assert(revisit._operation.recheck);
+assert(sim.runOperation(A, revisit, 20100, false));
+assert.equal(revisit._operation.phase, 'scout');
+A.scoutEvidence = () => null;
+assert(sim.runOperation(A, revisit, 20101, false));
+assert(sim.operationSitePenalty(revisit, first, 20101) > 0);
+A.scoutEvidence = () => ({kind:'clear'});
+assert(sim.runOperation(A, revisit, 20102, false));
+assert.equal(revisit._operation.phase, 'go');
+assert.equal(sim.operationSitePenalty(revisit, first, 20102), 0);
+
+const stranded = {_operation: { ...sim.makeOperation(A, review, 22000), phase:'go', bestDist:2000, progressF:22000 }};
+assert(sim.runOperation(A, stranded, 25601, false));
+assert.equal(stranded._operation.target, first);
+assert(stranded._operation.via && stranded._operation.via.y !== 0);
+assert.deepEqual(calls.at(-1), [stranded._operation.via.x, stranded._operation.via.y]);
+assert.equal(stranded._operationHistory[0].why, '制圧先へ進めない');
+assert.equal(sim.operationSitePenalty({}, first, 25601), 0);
 console.log('COM operation replanning regressions passed');
