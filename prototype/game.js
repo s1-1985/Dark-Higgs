@@ -676,6 +676,17 @@ function drawSpriteCentered(ctx, img, targetLen) {
     const s = targetLen / Math.max(iw, ih);
     ctx.drawImage(img, -iw * s / 2, -ih * s / 2, iw * s, ih * s);
 }
+// Call after the existing rotation and (for Tech) flip. The stack offset
+// is in screen-up direction; targeting, camera, and hull origin stay in world space.
+function drawMobileSprite(ctx, img, role, len, angle, flipped, screenScale, square = false) {
+    const longest = Math.max(img.naturalWidth, img.naturalHeight);
+    const w = square ? len : len * img.naturalWidth / longest;
+    const h = square ? len : len * img.naturalHeight / longest;
+    if (typeof MobileSpriteStack !== 'undefined' &&
+        MobileSpriteStack.draw(ctx, img, role, w, h, angle, flipped, screenScale)) return true;
+    ctx.drawImage(img, -w / 2, -h / 2, w, h);
+    return false;
+}
 // 第204弾: スプライトスタッキング (疑似3D) — 層ごとの画像 (同じ絵の中で既に相対スケールが決まっている) を
 // 画面の「上」方向(回転の影響を受けない)へ段々ずらして重ね描きし、構造物に高さがあるように見せる。
 // ctx は呼び出し側で既に position へ translate 済みのこと。rotAngle は各層に同じ角度で (オフセットより後に) かける
@@ -6142,7 +6153,7 @@ class Ship {
                     });
                 }
                 ctx.globalAlpha = 1;
-                drawSpriteCentered(ctx, _psprite, this.radius * 6.4); // 第16弾: 透過スプライトをそのまま不透明で
+                drawMobileSprite(ctx, _psprite, _pstype, this.radius * 6.4, this.angle, false, camera.zoom);
                 ctx.restore();
                 return;
             }
@@ -6489,7 +6500,8 @@ class Ship {
         } else {
             // ── 敵スプライト描画 (読み込めていればベクターより優先) ──
             const _ep = this._kind === 'mech' ? techPose(this) : '', _eskey0 = _ep && spriteReady(SPRITES[dsk('drone_mech_' + _ep, 'e')]) ? dsk('drone_mech_' + _ep, 'e') : dsk('drone_mech', 'e');
-            const _eskey = this._kind === 'mech' ? _eskey0 : this._kind === 'scout' ? dsk('drone_scout_e', 'e') : this._kind === 'turret' ? 'drone_turret' : this._kind === 'boarder' ? dsk('drone_boarder', 'e') : (this.type === 'fighter' ? dsk('e_fighter', 'e') : factionShipKey('e', { destroyer: 'assault', corvette: 'stealth', carrier: 'carrier' }[this.type] || 'assault'));
+            const _eClass = { destroyer: 'assault', corvette: 'stealth', carrier: 'carrier' }[this.type];
+            const _eskey = this._kind === 'mech' ? _eskey0 : this._kind === 'scout' ? dsk('drone_scout_e', 'e') : this._kind === 'turret' ? 'drone_turret' : this._kind === 'boarder' ? dsk('drone_boarder', 'e') : (this.type === 'fighter' ? dsk('e_fighter', 'e') : factionShipKey('e', _eClass || 'assault'));
             const _eFlip = this._kind === 'mech' && Math.cos(this.angle) < 0; // 第165弾: Techの絵は右が前・左へ向かう時は上下を反転
             const _esprite = SPRITES[_eskey];
             if (spriteReady(_esprite)) {
@@ -6504,11 +6516,13 @@ class Ship {
                 const _eLen = this.radius * (isFlashing ? 6.2 : 5.6) * (_ep === 'thrust' || _ep === 'slash' ? 1.2 : _ep ? 1.1 : 1);
                 ctx.globalAlpha = 1;
                 ctx.save(); if (_eFlip) ctx.scale(1, -1);
-                drawSpriteCentered(ctx, _esprite, _eLen);
-                ctx.globalCompositeOperation = 'lighter';
-                ctx.globalAlpha = 0.3;
-                drawSpriteCentered(ctx, _esprite, _eLen);
-                ctx.globalCompositeOperation = 'source-over';
+                const _role = _eClass || (this._kind === 'mech' ? 'mech' : this.type === 'fighter' && (!this._kind || this._kind === 'attack') ? 'fighter' : null);
+                const _stacked = drawMobileSprite(ctx, _esprite, _role, _eLen, this.angle, _eFlip, camera.zoom);
+                if (!_stacked) {
+                    ctx.globalCompositeOperation = 'lighter';
+                    ctx.globalAlpha = 0.3;
+                    drawSpriteCentered(ctx, _esprite, _eLen);
+                }
                 ctx.restore();
                 // HP bar below sprite (local space, counter-rotate for axis-aligned bar)
                 const _hpRatio = Math.max(0, this.hp / this.maxHp);
@@ -17819,7 +17833,8 @@ class Drone {
               ctx.globalCompositeOperation = 'source-over'; }
             ctx.restore();
             ctx.translate(0, _bob);
-            if (_posed) { const _ps = _pose === 'thrust' || _pose === 'slash' ? 52 : 44; ctx.drawImage(_psp, -_ps / 2, -_ps / 2, _ps, _ps); } else ctx.drawImage(SPRITES[dsk('drone_mech', 'p')], -20, -20, 40, 40);
+            const _ps = _posed ? (_pose === 'thrust' || _pose === 'slash' ? 52 : 44) : 40;
+            drawMobileSprite(ctx, _posed ? _psp : SPRITES[dsk('drone_mech', 'p')], 'mech', _ps, _rot + _lean, _left, camera.zoom * _zs, true);
             ctx.save(); ctx.rotate(Math.PI / 2);
             if (!_posed && this._flashF && _frameCount - this._flashF < 4) { // 小銃の発砲の閃光
                 ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = 'rgba(255,230,140,0.9)'; ctx.beginPath(); ctx.arc(-13, -19, 3 + Math.random() * 2, 0, Math.PI * 2); ctx.fill(); ctx.globalCompositeOperation = 'source-over';
@@ -17858,8 +17873,9 @@ class Drone {
             const _sp = _droneSprite;
             if (spriteReady(_sp)) {
                 ctx.rotate(this.angle);
-                if (this.type === 'boarder') ctx.drawImage(_sp, -21, -21, 42, 42); else
-                ctx.drawImage(_sp, -16, -16, 32, 32);
+                if (this.type === 'attack') drawMobileSprite(ctx, _sp, 'fighter', 32, this.angle, false, camera.zoom * _zs, true);
+                else if (this.type === 'boarder') ctx.drawImage(_sp, -21, -21, 42, 42);
+                else ctx.drawImage(_sp, -16, -16, 32, 32);
                 ctx.rotate(-this.angle);
             } else {
                 const col = this.type === 'attack' ? '#00ffaa' : '#66ccff';
