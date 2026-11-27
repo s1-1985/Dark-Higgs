@@ -7141,7 +7141,12 @@ let _logDedup = {};
 var _logHist = [], _xoHist = []; // var: 初期化中に logMessage が呼ばれても落ちない
 function uiToast(msg, warn) {
     let d = document.getElementById('ui-toast');
-    if (!d) { d = document.createElement('div'); d.id = 'ui-toast'; d.style.cssText = 'position:fixed;left:124px;bottom:46px;z-index:9000;max-width:46vw;padding:8px 14px;border-radius:6px;font:13px/1.45 sans-serif;text-align:center;pointer-events:none'; document.body.appendChild(d); }
+    if (!d) { d = document.createElement('div'); d.id = 'ui-toast'; d.style.cssText = 'position:fixed;z-index:9000;max-width:46vw;padding:8px 14px;border-radius:6px;font:13px/1.45 sans-serif;text-align:center;pointer-events:none'; document.body.appendChild(d); }
+    // 第247弾 (オーナー「経過時間の右側に移動して・状態異常の表示に被ってもいい」): 旧は固定座標(左下)だったので画面サイズで
+    //   ズレることがあった → 下の帯の経過時間 (#ss-time) の実際の画面位置から毎回右隣に出す (状態異常チップに重なるのは許容)
+    const t = document.getElementById('ss-time');
+    if (t) { const r = t.getBoundingClientRect(); d.style.left = (r.right + 8) + 'px'; d.style.right = 'auto'; d.style.top = 'auto'; d.style.bottom = Math.max(4, innerHeight - r.bottom) + 'px'; }
+    else { d.style.left = '124px'; d.style.bottom = '46px'; } // 下の帯が無い画面 (タイトル等) のフォールバック
     d.style.background = warn ? 'rgba(40,20,8,0.94)' : 'rgba(8,24,34,0.94)'; d.style.border = '1px solid ' + (warn ? '#ffb070' : '#66ddff'); d.style.color = warn ? '#ffe0c0' : '#c8f4ff';
     d.textContent = msg; d.style.display = 'block'; clearTimeout(d._t); d._t = setTimeout(() => { d.style.display = 'none'; }, 4200);
 }
@@ -11332,8 +11337,8 @@ function drawAlertFx(ctx) {
     // ── 第193弾: ハックの進捗パネル (撃った側=シアン・撃たれた側=マゼンタ) と結果の表示 ──
     { let by = T + 12 + (THREATS.some(t => t.kind === 'beam') ? 30 : 0);
       const SS = S, AS = !_seatOn() ? hackSessP : null;
-      if (SS) { _drawHackPanel(ctx, L, Rr, by, SS, false, now); by += 82; }
-      if (AS && AS.tgt) { _drawHackPanel(ctx, L, Rr, by, AS, true, now); by += 82; }
+      if (SS) by += _drawHackPanel(ctx, L, Rr, by, SS, false, now);
+      if (AS && AS.tgt) by += _drawHackPanel(ctx, L, Rr, by, AS, true, now);
       by = drawBoardAlert(ctx, L, T, Rr, B, now, by); // 第197弾: 強襲
       _drawHackBanner(ctx, L, Rr, by - (SS || AS ? 0 : 0)); }
     // ── ミサイル接近: その方向の画面の縁が赤く脈打ち、矢印と文字 ──
@@ -11362,29 +11367,45 @@ function drawAlertFx(ctx) {
     }
     ctx.restore();
 }
+function _wrapClauses(ctx, text, maxW) { // 第247弾: ' ・ ' 区切りの節を、幅に収まるだけまとめて行に詰める (情報は削らず行数だけ増やす)
+    const parts = text.split(' ・ '); const lines = []; let cur = '';
+    for (const p of parts) {
+        const cand = cur ? cur + ' ・ ' + p : p;
+        if (cur && ctx.measureText(cand).width > maxW) { lines.push(cur); cur = p; } else cur = cand;
+    }
+    if (cur) lines.push(cur);
+    return lines;
+}
 function _drawHackPanel(ctx, L, Rr, by, S, mine, now) {
+    // 第247弾 (オーナー「ハックのダイアログをもっとコンパクトに・情報量は減らさなくていい」): 幅480→最大400・高さ固定74px→
+    //   可変(情報行が収まる分だけ)にし、フォント・余白を詰めた。4段の進捗バーの仕様(今の段が光る・✓表示)は変えていない
     const col = mine ? '#66ddff' : '#ff3fd0', soft = mine ? '#a8ecff' : '#ffb0e0', bg = mine ? 'rgba(0,22,34,0.92)' : 'rgba(40,0,20,0.92)';
-    const u = Math.min(1, S.p / S.need), E = HACK_EFFECTS[S.effect] || {}, bw = Math.min(480, Rr - L - 20), bx = L + (Rr - L - bw) / 2, bh = 74;
+    const u = Math.min(1, S.p / S.need), E = HACK_EFFECTS[S.effect] || {}, bw = Math.min(400, Rr - L - 20), bx = L + (Rr - L - bw) / 2;
     const link = Math.round((S.link ?? 1) * 100), left = Math.max(0, Math.ceil((S.need - S.p) / 60)), flash = S.stageF && _frameCount - S.stageF < 24 ? 1 - (_frameCount - S.stageF) / 24 : 0;
+    const infoText = mine
+        ? '回線 ' + link + '% ・ 残り約' + left + '秒 ・ 成功の見込み ' + (S.chance >= 0.7 ? '高' : S.chance >= 0.45 ? '中' : '低') + ' ・ 相手が離れる/濃い霧/断線で中断'
+        : (() => { const A = S.att, deg = A ? compassDeg(Math.atan2(A.y - player.y, A.x - player.x)) : null; return '回線 ' + link + '%' + (deg !== null ? ' (方位' + deg + '°から)' : '') + ' ・ 残り約' + left + '秒 ・ 切る: 離れる / 濃いヒッグス / 断線パルス'; })();
+    ctx.font = '10px sans-serif'; const infoLines = _wrapClauses(ctx, infoText, bw - 20);
+    const barY = by + 16, barH = 8, infoY = barY + barH + 13, bh = infoY - by + infoLines.length * 11 + 5;
     ctx.save(); ctx.globalAlpha = 0.94; ctx.fillStyle = bg; ctx.fillRect(bx, by, bw, bh);
     ctx.globalAlpha = 0.55 + 0.45 * flash; ctx.strokeStyle = col; ctx.lineWidth = 1.5 + flash * 1.5; ctx.strokeRect(bx, by, bw, bh);
     ctx.globalAlpha = 1; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
-    ctx.font = 'bold 13px sans-serif'; ctx.fillStyle = soft; ctx.fillText((S.counter ? (mine ? '⇄ 逆ハック実行中 — ' : '⚠ 逆ハックを受けている — ') : (mine ? '◆ ハック侵入中 — ' : '⚠ 侵入を受けている — ')) + (E.jp || ''), bx + 10, by + 6);
-    ctx.textAlign = 'right'; ctx.font = 'bold 15px monospace'; ctx.fillStyle = col; ctx.fillText(Math.round(u * 100) + '%', bx + bw - 10, by + 5); ctx.textAlign = 'left';
+    ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = soft; ctx.fillText((S.counter ? (mine ? '⇄ 逆ハック実行中 — ' : '⚠ 逆ハックを受けている — ') : (mine ? '◆ ハック侵入中 — ' : '⚠ 侵入を受けている — ')) + (E.jp || ''), bx + 8, by + 4);
+    ctx.textAlign = 'right'; ctx.font = 'bold 13px monospace'; ctx.fillStyle = col; ctx.fillText(Math.round(u * 100) + '%', bx + bw - 8, by + 3); ctx.textAlign = 'left';
     // 4段の進捗バー (今の段は光が流れる)
-    const sx0 = bx + 10, sw = (bw - 20 - 9) / 4, sy = by + 27;
+    const sx0 = bx + 8, sw = (bw - 16 - 9) / 4, sy = barY;
     for (let k = 0; k < 4; k++) {
         const x = sx0 + k * (sw + 3), seg = Math.max(0, Math.min(1, 4 * u - k));
-        ctx.globalAlpha = 0.28; ctx.fillStyle = col; ctx.fillRect(x, sy, sw, 9);
-        ctx.globalAlpha = 0.95; ctx.fillStyle = col; ctx.fillRect(x, sy, sw * seg, 9);
-        if (seg > 0 && seg < 1) { const gx = x + ((now * 1.6 + k * 0.17) % 1) * sw * seg; ctx.globalAlpha = 0.85; ctx.fillStyle = '#ffffff'; ctx.fillRect(Math.min(gx, x + sw * seg - 6), sy, 6, 9); }
-        ctx.globalAlpha = seg >= 1 ? 1 : seg > 0 ? 0.95 : 0.5; ctx.font = (seg > 0 && seg < 1 ? 'bold ' : '') + '10px sans-serif'; ctx.fillStyle = seg > 0 ? '#ffffff' : soft;
-        ctx.fillText((seg >= 1 ? '✓ ' : '') + HACK_STAGES[k], x, sy + 12);
+        ctx.globalAlpha = 0.28; ctx.fillStyle = col; ctx.fillRect(x, sy, sw, barH);
+        ctx.globalAlpha = 0.95; ctx.fillStyle = col; ctx.fillRect(x, sy, sw * seg, barH);
+        if (seg > 0 && seg < 1) { const gx = x + ((now * 1.6 + k * 0.17) % 1) * sw * seg; ctx.globalAlpha = 0.85; ctx.fillStyle = '#ffffff'; ctx.fillRect(Math.min(gx, x + sw * seg - 6), sy, 6, barH); }
+        ctx.globalAlpha = seg >= 1 ? 1 : seg > 0 ? 0.95 : 0.5; ctx.font = (seg > 0 && seg < 1 ? 'bold ' : '') + '9px sans-serif'; ctx.fillStyle = seg > 0 ? '#ffffff' : soft;
+        ctx.fillText((seg >= 1 ? '✓ ' : '') + HACK_STAGES[k], x, sy + barH + 1);
     }
-    ctx.globalAlpha = 1; ctx.font = '11px sans-serif'; ctx.fillStyle = soft;
-    if (mine) ctx.fillText('回線 ' + link + '% ・ 残り約' + left + '秒 ・ 成功の見込み ' + (S.chance >= 0.7 ? '高' : S.chance >= 0.45 ? '中' : '低') + ' ・ 相手が離れる/濃い霧/断線で中断', bx + 10, by + 56);
-    else { const A = S.att, deg = A ? compassDeg(Math.atan2(A.y - player.y, A.x - player.x)) : null; ctx.fillText('回線 ' + link + '%' + (deg !== null ? ' (方位' + deg + '°から)' : '') + ' ・ 残り約' + left + '秒 ・ 切る: 離れる / 濃いヒッグス / 断線パルス', bx + 10, by + 56); }
+    ctx.globalAlpha = 1; ctx.font = '10px sans-serif'; ctx.fillStyle = soft;
+    for (let i = 0; i < infoLines.length; i++) ctx.fillText(infoLines[i], bx + 8, infoY + i * 11);
     ctx.restore();
+    return bh + 6; // 呼び出し側はこの戻り値ぶん by を進める (旧: 固定82px)
 }
 function _drawHackBanner(ctx, L, Rr, by) {
     const b = _hackBanner; if (!b) return;
@@ -22942,7 +22963,7 @@ function comReactItems(c, P, hpF, retreating) {
 //   通常の決断は設定倍率で進み、差し迫った危険だけ一時減速する。
 //   選択はAIの上位の方針として一定時間効く (COMの目的に上書きされない)。画面に出す見込みは「AIの推定」から作る (真の状態・先読みは使わない)
 var capMode = false, _capDec = null, _capRes = {}, _capKick = false, _capLast = {}, _capLastT = 0, _capStats = { asked: 0, auto: 0 };
-const CAP_SLOW = 0.08, CAP_LIMIT = 7, CAP_PLAN_LIFETIME = 3600;
+const CAP_SLOW = 0.08, CAP_LIMIT = 7;
 const CAP_URGENT = new Set(['missile', 'beam', 'escape']);
 function capUrgent(key, spec) { return CAP_URGENT.has(key) || spec.urgent === true; }
 const CAP_REPEAT_GAP = 5400; // 同じスキルの提示は試合内で最低90秒あける
@@ -23015,6 +23036,11 @@ function capOpen(key, spec) {
     box.classList.add('on');
     box.querySelectorAll('.cap-opt').forEach(b => b.addEventListener('click', (ev) => { ev.stopPropagation(); capChoose(b.dataset.id, false); }));
     sfxUI('ui_panel_open');
+    // 第247弾 (オーナー「QTEダイアログと右下の丸ボタンの展開パネルが被る」): CSS の --hud-right 頼りの計算は
+    //   #zoom-ctl が position:absolute (祖先次第でズレうる) なので、開く瞬間の実際の画面位置から直接 right を決め直す
+    //   (zoom-ctl の左端のすぐ左で止める。展開(.open)していても #zoom-row の幅までしか広がらないので毎回これで足りる)
+    const zc = document.getElementById('zoom-ctl');
+    if (zc) { const r = zc.getBoundingClientRect(); if (r.width > 0) box.style.right = Math.max(8, innerWidth - r.left + 12) + 'px'; }
 }
 // ═══ 第200弾 (オーナー「ゴーストを認識した段階で ミニマップの右に緊急離脱ボタン。押すとQTEと同じスロー・7秒で8方向から逃げる方角を選ぶ。向いている向きの逆ほど時間がかかる」) ═══
 var _escGo = null, _escBtn = null, _escConfirmBox = null;
@@ -23132,15 +23158,15 @@ function capTick(dt) { // 実時間 (一時停止中は数えない)。gameLoop 
     if (!_capDec) return;
     if (!player || player.hp <= 0 || sectorCleared) { const b = document.getElementById('cap-dec'); if (b) b.classList.remove('on'); _capDec = null; return; }
     if (userPaused || gamePaused || _uiPause || _orientPaused || _draft) return; // 第227弾: 止めている間は制限時間を進めない (gameLoop からは通常その状態で呼ばれないが、凍結をここでも保証する)
+    // 第247弾 (オーナー「倍速で進行中のダイアログが3秒くらいで消える、速すぎる」): 旧は `frames`(ゲームフレーム基準の60秒予算)を
+    //   そのまま期限にしていたため、非緊急(slow:false)の決断は倍速が速いほど実時間が短くなり、20倍速では3秒で消えていた
+    //   (3600フレーム÷(60fps×20) = 3秒)。`el`(実時間・ポーズ中は進まない)だけを基準にし、倍速に関わらず常に CAP_LIMIT 秒にする。
     _capDec.el += dt;
-    const frames = CAP_PLAN_LIFETIME - (_frameCount - _capDec.frame);
-    const timeLeft = CAP_LIMIT - _capDec.el;
-    const running = !_capDec.slow && !_capDec.urgent;
-    const left = Math.max(0, running ? Math.min(timeLeft, frames / (60 * gameSpeed)) : timeLeft), bar = document.querySelector('#cap-dec .cap-bar'), sec = document.querySelector('#cap-dec .cap-sec'), bx = document.getElementById('cap-dec');
+    const left = Math.max(0, CAP_LIMIT - _capDec.el), bar = document.querySelector('#cap-dec .cap-bar'), sec = document.querySelector('#cap-dec .cap-sec'), bx = document.getElementById('cap-dec');
     if (bar) bar.style.width = (100 * left / CAP_LIMIT) + '%';
     if (sec) sec.textContent = Math.ceil(left);
     if (bx) { bx.classList.toggle('warn', left <= 4 && left > 2); bx.classList.toggle('crit', left <= 2); }
-    if (timeLeft <= 0 || running && frames <= 0) capChoose(_capDec.spec.rec, true);
+    if (left <= 0) capChoose(_capDec.spec.rec, true);
 }
 document.addEventListener('keydown', (ev) => {
     if (!_capDec || ev.target.closest?.('#cap-dec button, #speed-picker button')) return;
@@ -25789,7 +25815,6 @@ if (speedPicker) {
         speedPicker.style.top = (r.top > innerHeight / 2 ? r.top - speedPicker.offsetHeight - 8 : r.bottom + 8) + 'px';
         speedPicker.querySelector('[aria-pressed="true"]')?.focus();
     });
-    document.getElementById('btn-speed-max')?.addEventListener('click', (ev) => { ev.stopPropagation(); closeSpeedPicker(); setGameSpeed(20); });
     document.addEventListener('click', ev => { if (!speedPicker.contains(ev.target)) closeSpeedPicker(); });
     document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && speedAnchor) { const anchor = speedAnchor; closeSpeedPicker(); anchor.focus(); ev.stopImmediatePropagation(); } }, true);
     window.addEventListener('resize', closeSpeedPicker);
@@ -25904,14 +25929,17 @@ let userPaused = false;
 function togglePause(on) {
     userPaused = on === undefined ? !userPaused : !!on;
     if (_capDec) _capLastT = 0; // 第227弾: 再開した瞬間の dt を 0 にして、選択肢の制限時間をポーズの分だけ正確に凍結する
-    const b = document.getElementById('btn-pause');
-    if (b) { b.classList.toggle('on', userPaused); b.textContent = userPaused ? '▶' : 'Ⅱ'; }
+    for (const id of ['btn-pause', 'btn-pause-fixed']) { // 第247弾: 常時表示の丸ボタン列にも一時停止ボタンを置いたので両方更新
+        const b = document.getElementById(id);
+        if (b) { b.classList.toggle('on', userPaused); b.textContent = userPaused ? '▶' : 'Ⅱ'; }
+    }
     const ind = document.getElementById('pause-ind');
     if (ind) ind.classList.toggle('hidden', !userPaused);
     sfxUI(userPaused ? 'sys_pause_on' : 'sys_pause_off');
     updateZoomFab();
 }
 document.getElementById('btn-pause')?.addEventListener('click', () => togglePause());
+document.getElementById('btn-pause-fixed')?.addEventListener('click', () => togglePause());
 (function initUiPause() { // 第172弾: メニュー・デバッグパネルが開いている間は進行を止める
     const m = document.getElementById('mobile-menu-modal'), d = document.getElementById('debug-panel'); if (!m || !d) return;
     const f = () => { _uiPause = !m.classList.contains('hidden') || d.style.display === 'flex'; };

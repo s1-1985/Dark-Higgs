@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest?v=165">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261127c246">
+    <link rel="stylesheet" href="style.css?v=20261127d247">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -359,7 +359,9 @@
                     <button id="zoom-out" onclick="zoomStep(1 / 1.6)" title="縮小 (−)">－</button>
                 </div>
                 <div id="zoom-row">
-                    <button id="btn-speed-max" title="20倍速に切り替える">20×</button>
+                    <!-- 第247弾 (オーナー「20倍速ボタンを常時表示ではなく一時停止ボタンに」): 常時表示は瞬時に使う操作向けなので、
+                         いつでも1タップで止められる一時停止に置き換えた (倍速の選択は展開した #zoom-stack の方で行う) -->
+                    <button id="btn-pause-fixed" title="一時停止 (P) — 止めている間も地図を見て指示を出せる">Ⅱ</button>
                     <!-- 第167弾 (オーナー): 受信中でロックできる信号の一覧 — AIの評価・解析の進み・タップでロック -->
                     <button id="btn-siglist" title="受信中の信号の一覧 (タップでロック)"><i class="ico" style="--ico:url(assets/icons/icon_siglist.png)"></i><small id="siglist-n"></small></button>
                     <button id="zoom-fab" title="倍速・一時停止・拡大縮小 (タップで開く)"><i class="ico" id="zoom-fab-ico" style="--ico:url(assets/icons/icon_speed.png)"></i><small id="zoom-fab-sub"></small></button>
@@ -915,7 +917,7 @@
     </script>
     <div id="speed-picker" role="group" aria-label="倍速を選ぶ" hidden></div>
     <script src="sprite-stack.js?v=20261127c246"></script>
-    <script src="game.js?v=20261127c246"></script>
+    <script src="game.js?v=20261127d247"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
