@@ -676,6 +676,17 @@ function drawSpriteCentered(ctx, img, targetLen) {
     const s = targetLen / Math.max(iw, ih);
     ctx.drawImage(img, -iw * s / 2, -ih * s / 2, iw * s, ih * s);
 }
+// Call after the existing rotation and (for Tech) flip. The stack offset
+// is in screen-up direction; targeting, camera, and hull origin stay in world space.
+function drawMobileSprite(ctx, img, role, len, angle, flipped, screenScale, square = false) {
+    const longest = Math.max(img.naturalWidth, img.naturalHeight);
+    const w = square ? len : len * img.naturalWidth / longest;
+    const h = square ? len : len * img.naturalHeight / longest;
+    if (typeof MobileSpriteStack !== 'undefined' &&
+        MobileSpriteStack.draw(ctx, img, role, w, h, angle, flipped, screenScale)) return true;
+    ctx.drawImage(img, -w / 2, -h / 2, w, h);
+    return false;
+}
 // 第204弾: スプライトスタッキング (疑似3D) — 層ごとの画像 (同じ絵の中で既に相対スケールが決まっている) を
 // 画面の「上」方向(回転の影響を受けない)へ段々ずらして重ね描きし、構造物に高さがあるように見せる。
 // ctx は呼び出し側で既に position へ translate 済みのこと。rotAngle は各層に同じ角度で (オフセットより後に) かける
@@ -6221,7 +6232,7 @@ class Ship {
                     });
                 }
                 ctx.globalAlpha = 1;
-                drawSpriteCentered(ctx, _psprite, this.radius * 6.4); // 第16弾: 透過スプライトをそのまま不透明で
+                drawMobileSprite(ctx, _psprite, _pstype, this.radius * 6.4, this.angle, false, camera.zoom);
                 ctx.restore();
                 return;
             }
@@ -6568,7 +6579,8 @@ class Ship {
         } else {
             // ── 敵スプライト描画 (読み込めていればベクターより優先) ──
             const _ep = this._kind === 'mech' ? techPose(this) : '', _eskey0 = _ep && spriteReady(SPRITES[dsk('drone_mech_' + _ep, 'e')]) ? dsk('drone_mech_' + _ep, 'e') : dsk('drone_mech', 'e');
-            const _eskey = this._kind === 'mech' ? _eskey0 : this._kind === 'scout' ? dsk('drone_scout_e', 'e') : this._kind === 'turret' ? 'drone_turret' : this._kind === 'boarder' ? dsk('drone_boarder', 'e') : (this.type === 'fighter' ? dsk('e_fighter', 'e') : factionShipKey('e', { destroyer: 'assault', corvette: 'stealth', carrier: 'carrier' }[this.type] || 'assault'));
+            const _eClass = { destroyer: 'assault', corvette: 'stealth', carrier: 'carrier' }[this.type];
+            const _eskey = this._kind === 'mech' ? _eskey0 : this._kind === 'scout' ? dsk('drone_scout_e', 'e') : this._kind === 'turret' ? 'drone_turret' : this._kind === 'boarder' ? dsk('drone_boarder', 'e') : (this.type === 'fighter' ? dsk('e_fighter', 'e') : factionShipKey('e', _eClass || 'assault'));
             const _eFlip = this._kind === 'mech' && Math.cos(this.angle) < 0; // 第165弾: Techの絵は右が前・左へ向かう時は上下を反転
             const _esprite = SPRITES[_eskey];
             if (spriteReady(_esprite)) {
@@ -6583,11 +6595,13 @@ class Ship {
                 const _eLen = this.radius * (isFlashing ? 6.2 : 5.6) * (_ep === 'thrust' || _ep === 'slash' ? 1.2 : _ep ? 1.1 : 1);
                 ctx.globalAlpha = 1;
                 ctx.save(); if (_eFlip) ctx.scale(1, -1);
-                drawSpriteCentered(ctx, _esprite, _eLen);
-                ctx.globalCompositeOperation = 'lighter';
-                ctx.globalAlpha = 0.3;
-                drawSpriteCentered(ctx, _esprite, _eLen);
-                ctx.globalCompositeOperation = 'source-over';
+                const _role = _eClass || (this._kind === 'mech' ? 'mech' : this.type === 'fighter' && (!this._kind || this._kind === 'attack') ? 'fighter' : null);
+                const _stacked = drawMobileSprite(ctx, _esprite, _role, _eLen, this.angle, _eFlip, camera.zoom);
+                if (!_stacked) {
+                    ctx.globalCompositeOperation = 'lighter';
+                    ctx.globalAlpha = 0.3;
+                    drawSpriteCentered(ctx, _esprite, _eLen);
+                }
                 ctx.restore();
                 // HP bar below sprite (local space, counter-rotate for axis-aligned bar)
                 const _hpRatio = Math.max(0, this.hp / this.maxHp);
@@ -8944,7 +8958,7 @@ function updateNodesAndColonies() {
         for (const n of resourceNodes) {
             if (n.owner === 'enemy') { n.capE = 0; continue; }
             if (Math.hypot(e.x - n.x, e.y - n.y) < NODE_CAP_R) {
-                e._commsF = _frameCount; n.capE = (n.capE || 0) + gameSpeedFactor / NODE_CAP_TIME;
+                e._commsF = n._capEF = _frameCount; n.capE = (n.capE || 0) + gameSpeedFactor / NODE_CAP_TIME;
                 if (n.capE >= 1) { n.capE = 0; enemyCaptureNode(e, n); e.resourcePoints = (e.resourcePoints || 0) + 1; if (e.gatherTarget === n) { e.gatherTarget = null; e._capT = 0; if (e.aiState === 'gathering') { e.aiState = 'lurking'; e.lurking = true; } } }
             } else if (n.capE > 0) n.capE = Math.max(0, n.capE - 0.004);
         }
@@ -8954,6 +8968,7 @@ function updateNodesAndColonies() {
         if (n.owner === 'player') { n.capP = 0; continue; }
         const d = Math.hypot(player.x - n.x, player.y - n.y);
         if (d < NODE_CAP_R) {
+            n._capPF = _frameCount;
             n.capP = (n.capP || 0) + gameSpeedFactor / NODE_CAP_TIME;
             n.identified = true;
             _capturing = { kind: 'node', obj: n, p: n.capP };
@@ -15530,8 +15545,8 @@ function itemReactPlan(F0) {
     // 第142弾: だまし — 身代わり離脱 (ノイズを相手の方へ走らせ、自分は横へ離れる) / 煙幕転進 (煙幕の陰で進路を90°変える) / 偽SOSの足跡 (逃げる方向と反対へ偽SOSを並べる)
     if (on('dc_ghost') && F.n('noise') > 0 && eA !== null && F.estD < 9000 && (hit < 900 || F.exposure >= 2) && !F.hiding && F.cd('ghostF', 60)) { const sd = rr(); F.mark('noiseF'); return go('noise', '身代わり離脱 — ノイズメーカーを相手の方へ走らせ、自分は横へ静かに離れる', 'ghostF', { aim: eA + (Math.random() - 0.5) * 0.5, slip: eA + sd * Math.PI / 2 }); }
     if (on('dc_pivot') && F.n('smoke') > 0 && eA !== null && F.exposure >= 2 && F.estD < 6000 && !F.hiding && F.cd('pivotF', 70)) { F.mark('smokeF'); return go('smoke', '煙幕転進 — 煙幕の陰で進路を90°変える', 'pivotF', { slip: eA + rr() * Math.PI / 2 }); }
-    if (on('dc_trail') && F.n('sos') > 0 && eA !== null && F.estD < 10000 && (hit < 900 || F.exposure >= 2) && F.cd('trailF', 120)) { const sd = rr(); return go('sos2', '偽SOSの足跡 — 逃げる方向と反対へ偽SOSを2つ並べて誘導する', 'trailF', { away: eA + sd * Math.PI / 2 }); }
-    if (on('dc_flashrun') && F.n('flash') > 0 && eA !== null && F.estD < 3000 && (F.exposure >= 2 || hit < 600) && hp < 0.75 && F.cd('flashF', 30)) return go('flash', '閃光ダッシュ — 閃光で目を焼いて、すぐ反対へ走る', 'flashF', { slip: eA + Math.PI });
+    if (on('dc_trail') && F.n('sos') >= 2 && eA !== null && F.estD < 10000 && (hit < 900 || F.exposure >= 2) && F.cd('trailF', 120)) { const sd = rr(); return go('sos2', '偽SOSの足跡 — 逃げる方向と反対へ偽SOSを2つ並べて誘導する', 'trailF', { away: eA + sd * Math.PI / 2 }); }
+    if (on('dc_flashrun') && F.n('flash') > 0 && eA !== null && F.estD <= 2500 && (F.exposure >= 2 || hit < 600) && hp < 0.75 && F.cd('flashF', 30)) return go('flash', '閃光ダッシュ — 閃光で目を焼いて、すぐ反対へ走る', 'flashF', { slip: eA + Math.PI });
     if (on('dc_beacon') && F.bcn && eA !== null && F.estD < 12000 && F.exposure >= 1 && F.cd('bcnF', 100)) return go('beacon', '帯域ビーコン — 横へ偽の' + ({ heat: '熱', optic: '光', em: '電磁波', higgs: '霧' })[F.bcn] + '信号を置いて相手の耳をそちらへ向ける', 'bcnF', { band: F.bcn, ang: eA + rr() * Math.PI / 2 });
     if (on('dc_silent') && eA !== null && F.exposure === 1 && F.estD > 2500 && F.estD < 7000 && !F.hiding && F.cd('silentF', 90)) return go('silent', '息を殺す — 機関を止めて潜航し、通り過ぎるのを待つ', 'silentF');
     if (on('dc_mirror') && F.n('lure') > 2 && eA !== null && F.estD > 3000 && F.estD < 9000 && F.exposure < 3 && F.cd('mirrorF', 150)) return go('mirror', '偽艦影の挟み — 相手の推定の左右に偽艦影を置いて狙いを割る', 'mirrorF', { ex: F.estX, ey: F.estY, ang: eA });
@@ -15548,14 +15563,22 @@ function itemReactPlan(F0) {
     if (on('it_spray') && F.n('spray') > 0 && (st >= 0.3 || ca >= 0.5) && (hit < 900 || F.exposure >= 2) && F.hHere < 0.5 && !F.hiding && F.cd('sprayF', 120)) return go('spray', '照射を受けている/撃たれた → 散布弾で霧を濃くして身を隠す', 'sprayF');
     // 吹き飛ばし: 攻撃的で、濃い霧の中・推定が4000u以内なのに見えない時
     if (on('it_blow') && F.n('blow') > 0 && ag >= 0.55 && F.hHere > 0.55 && !F.seen && F.estD < 4000 && F.cd('blowF', 90)) return go('blow', '推定が' + Math.round(F.estD / 100) * 100 + 'u以内なのに見えない → 吹き飛ばし弾で霧を晴らす', 'blowF');
-    // 第200弾: 固い条件に当たらなくても、場面と発動条件の表に 0.5〜0.7 以上合えば使う (一致度の高い順)
+    // 表による補助候補も、全条件と使用可否を確認してから選ぶ。
     {
-        const S = sitAug(Object.assign({}, F0, { retreatT: retreatThreshold(P) })), thr = 0.5 + 0.2 * Math.random();
+        const S = sitAug(Object.assign({}, F0, { retreatT: retreatThreshold(P) }));
         sitJudgeAttach(F0, S); // 第218弾: 局面メモを更新し、この S の場面は sitJudge 経由で導出する
         const T = [['it_repair', 'repair'], ['it_flash', 'flash'], ['it_noise', 'noise'], ['it_smoke', 'smoke'], ['it_sos', 'sos'], ['it_fake', 'fake'], ['it_spray', 'spray'], ['it_blow', 'blow'],
             ['dc_pivot', 'smoke', () => ({ slip: eA + rr() * Math.PI / 2 })], ['dc_flashrun', 'flash', () => ({ slip: eA + Math.PI })], ['dc_silent', 'silent', () => ({})], ['dc_beacon', 'beacon', () => ({ band: F.bcn, ang: eA + rr() * Math.PI / 2 })]];
         const L = [];
-        for (const [id, key, ex] of T) { if (!on(id)) continue; const m = skillMatch(S, id, null); if (m && m.sceneOK && m.needOK && m.frac >= thr && F0.cd('sk_' + id, m.cd)) L.push({ id, key, ex, m }); }
+        for (const [id, key, ex] of T) {
+            if (!on(id)) continue;
+            if (key === 'repair' && (F.kit || F.mslIn || F.missing < REPAIR_KIT_HP * 0.8)) continue;
+            if (key === 'flash' && !F.mslIn && F.nearD > 2500) continue;
+            if ((key === 'sos' || key === 'fake') && F.n(key) <= 1) continue;
+            if ((key === 'beacon' || key === 'blow' || ex && key === 'smoke') && eA === null) continue;
+            const m = skillMatch(S, id, null);
+            if (m && m.sceneOK && m.needOK && m.frac === 1 && F0.cd('sk_' + id, m.cd)) L.push({ id, key, ex, m });
+        }
         L.sort((a, b) => b.m.frac * skillAff(P, b.id) - a.m.frac * skillAff(P, a.id));
         if (L.length) { const t = L[0]; F.mark('sk_' + t.id); return go(t.key, ((_skillInfo(t.id) || {}).jp || t.id) + ' — 場面「' + skillScenesJp(t.id) + '」の条件に ' + Math.round(t.m.frac * 100) + '% 合う', null, t.ex ? t.ex() : undefined); }
     }
@@ -15598,15 +15621,17 @@ function _skillSlipE(e, ang) { const tp = clampToMapCircle(e.x + Math.cos(ang) *
 function comboRules(F, A, X, R) {
     const eA = F.estAng, rr = () => (Math.random() < 0.5 ? 1 : -1), hit = F.hitAgo, say = (t) => A.say(t);
     const hasFtr = () => A.have('attack') || A.mobile('attack');
+    const canOrder = skillOn(F.side, 'dr_order');
+    const baitCount = F.n('sos') + Math.max(0, F.n('lure') - 1);
     // 閃光→突撃: 至近で撃たれている/照射されているなら、閃光で目を焼いている間にドローンを突っ込ませる
-    R('cb_flash_strike', () => (F.n('flash') > 0 && eA !== null && F.estD < 2400 && (F.exposure >= 2 || hit < 900) && (hasFtr() || A.mobile('mech')) && F.cd('cbFlashF', 60)), () => {
+    R('cb_flash_strike', () => (canOrder && F.n('flash') > 0 && eA !== null && F.estD < 2400 && (F.exposure >= 2 || hit < 900) && (hasFtr() || A.mobile('mech')) && F.cd('cbFlashF', 60)), () => {
         F.mark('cbFlashF'); F.mark('flashF');
         if (A.have('attack')) A.launch('attack');
         X.doI({ k: 'flash', why: '閃光→突撃 — 閃光で相手の目を焼き、その間に戦闘機・Techを突っ込ませる' });
         A.order(['attack', 'mech'], 'attack', F.estX, F.estY); return true;
     });
     // ドローン陽動: 追われている時、戦闘機を横へ飛ばして相手の耳を引きつけ、自分は反対へ静かに離れる
-    R('cb_decoy_drone', () => (eA !== null && F.estD < 10000 && F.exposure >= 1 && (hit < 1500 || F.exposure >= 2) && hasFtr() && F.cd('cbDecoyF', 150)), () => {
+    R('cb_decoy_drone', () => (canOrder && eA !== null && F.estD < 10000 && F.exposure >= 1 && (hit < 1500 || F.exposure >= 2) && hasFtr() && F.cd('cbDecoyF', 150)), () => {
         const sd = rr(), px = A.x + Math.cos(eA + sd * Math.PI / 2) * 4500, py = A.y + Math.sin(eA + sd * Math.PI / 2) * 4500; F.mark('cbDecoyF');
         if (A.have('attack')) A.launch('attack');
         A.order(['attack'], 'patrol', px, py);
@@ -15614,7 +15639,7 @@ function comboRules(F, A, X, R) {
         X.slip(eA - sd * Math.PI / 2); return true;
     });
     // 見張り付きの餌: 気配が薄い間に、遠くへ偽SOS/偽艦影を置き、哨戒機をその周りに張り付ける
-    R('cb_watch_bait', () => ((F.n('sos') > 0 || F.n('lure') > 1) && (A.have('scout') || A.mobile('scout')) && F.exposure <= 1 && F.quietF > 1800 && F.cd('cbWatchF', 200)), () => {
+    R('cb_watch_bait', () => (canOrder && baitCount > 0 && (A.have('scout') || A.mobile('scout')) && F.exposure <= 1 && F.quietF > 1800 && F.cd('cbWatchF', 200)), () => {
         const ang = (eA !== null ? eA + rr() * Math.PI / 2 : Math.random() * Math.PI * 2), tp = clampToMapCircle(A.x + Math.cos(ang) * 5000, A.y + Math.sin(ang) * 5000, 1500); F.mark('cbWatchF');
         X.bait(F.n('sos') > 0 ? 'sos' : 'lure', tp.x, tp.y);
         if (A.have('scout')) A.launch('scout');
@@ -15636,20 +15661,20 @@ function comboRules(F, A, X, R) {
         return true;
     });
     // 煙幕の陰の回り込み: 煙幕で自分の姿を隠し、戦闘機を相手の推定の裏側へ回して挟む。自分は煙の中で動かない
-    R('cb_smoke_flank', () => (F.n('smoke') > 0 && eA !== null && F.estD < 8000 && F.exposure >= 2 && hit < 1500 && hasFtr() && F.cd('cbSmokeF', 120)), () => {
+    R('cb_smoke_flank', () => (canOrder && F.n('smoke') > 0 && eA !== null && F.estD < 8000 && F.exposure >= 2 && hit < 1500 && hasFtr() && F.cd('cbSmokeF', 120)), () => {
         F.mark('cbSmokeF'); F.mark('smokeF');
         if (A.have('attack')) A.launch('attack');
         X.doI({ k: 'smoke', why: '煙幕の陰の回り込み — 煙幕で姿を隠し、戦闘機を相手の裏側へ回す' });
         A.order(['attack', 'mech'], 'attack', F.estX + Math.cos(eA) * 1800, F.estY + Math.sin(eA) * 1800); return true;
     });
     // Tech建造の護り: Techを組み立てている間は動けず信号も大きい — 偽信号を両脇へ置いて、見つけた相手の足を迷わせる
-    R('cb_tech_guard', () => (A.techBuilding() && (F.n('sos') > 0 || F.n('lure') > 1) && F.cd('cbGuardF', 150)), () => {
+    R('cb_tech_guard', () => (A.techBuilding() && baitCount >= 2 && F.cd('cbGuardF', 150)), () => {
         F.mark('cbGuardF'); const a0 = (eA !== null ? eA : Math.random() * Math.PI * 2);
         for (const sd of [1, -1]) { const tp = clampToMapCircle(A.x + Math.cos(a0 + sd * Math.PI / 2) * 5500, A.y + Math.sin(a0 + sd * Math.PI / 2) * 5500, 1500); X.bait(F.n('sos') > 0 ? 'sos' : 'lure', tp.x, tp.y); }
         say('Tech建造の護り — 建造中の大きな信号の両脇に偽の信号を置いて、見つけた相手の足を迷わせる'); return true;
     });
     // 呼び込み砲台: 砲台の射程の向こう側へ偽SOSを置き、哨戒機をその先に立てる。誘われた相手が砲台の射程に入る
-    R('cb_scout_turret', () => { const tur2 = X.turret(); return tur2 && (F.n('sos') > 0 || F.n('lure') > 1) && (A.have('scout') || A.mobile('scout')) && F.exposure <= 1 && F.cd('cbScTuF', 200); }, () => { const tur2 = X.turret();
+    R('cb_scout_turret', () => { const tur2 = X.turret(); return canOrder && tur2 && baitCount > 0 && (A.have('scout') || A.mobile('scout')) && F.exposure <= 1 && F.cd('cbScTuF', 200); }, () => { const tur2 = X.turret();
         F.mark('cbScTuF'); const ang = eA !== null ? eA : Math.random() * Math.PI * 2, bx = tur2.x + Math.cos(ang) * 1700, by = tur2.y + Math.sin(ang) * 1700;
         X.bait(F.n('sos') > 0 ? 'sos' : 'lure', bx, by);
         if (A.have('scout')) A.launch('scout');
@@ -15657,13 +15682,13 @@ function comboRules(F, A, X, R) {
         say('呼び込み砲台 — 砲台の射程の向こうに偽の信号を置き、哨戒機を先へ立てた。誘われた相手を砲台が迎え撃つ'); return true;
     });
     // 鹵獲機の特攻: ハックで奪った戦闘機/Techは 失っても惜しくない — 相手の推定の脇へ突っ込ませて撃ち合いに引き込み、自分は離れる
-    R('cb_captured', () => (A.captured() && eA !== null && F.estD < 12000 && F.cd('cbCapF', 90)), () => {
+    R('cb_captured', () => (canOrder && (A.mobile('attack') || A.mobile('mech')) && A.captured() && eA !== null && F.estD < 12000 && F.cd('cbCapF', 90)), () => {
         F.mark('cbCapF'); const sd = rr();
         A.order(['attack', 'mech'], 'attack', F.estX + Math.cos(eA + sd * Math.PI / 2) * 1500, F.estY + Math.sin(eA + sd * Math.PI / 2) * 1500);
         say('鹵獲機の特攻 — 奪った機を相手の推定の脇へ突っ込ませ、相手の注意を引く'); if (F.exposure >= 1) X.slip(eA + Math.PI + sd * 0.6); return true;
     });
     // 吹き飛ばし→突撃: 推定が近いのに見えず自分は濃い霧の中 → 霧を吹き飛ばし、戦闘機を推定へ突っ込ませる
-    R('cb_blow_strike', () => (F.n('blow') > 0 && eA !== null && F.estD < 4000 && !F.seen && F.hHere > 0.55 && F.exposure <= 2 && hasFtr() && F.cd('cbBlowF', 150)), () => {
+    R('cb_blow_strike', () => (canOrder && F.n('blow') > 0 && eA !== null && F.estD < 4000 && !F.seen && F.hHere > 0.55 && F.exposure <= 2 && hasFtr() && F.cd('cbBlowF', 150)), () => {
         F.mark('cbBlowF'); F.mark('blowF'); if (A.have('attack')) A.launch('attack');
         X.doI({ k: 'blow', why: '吹き飛ばし→突撃 — 近いのに見えない → 霧を晴らして戦闘機を突っ込ませる' });
         A.order(['attack', 'mech'], 'attack', F.estX, F.estY); return true;
@@ -15674,13 +15699,19 @@ function comboRules(F, A, X, R) {
         X.doI({ k: 'smoke', why: '煙幕の下の修理 — まず煙幕で姿を隠す' }); X.doI({ k: 'repair', why: '煙幕の下の修理 — その下でリペアキットを使う' }); return true;
     });
     // 第212弾: 陽動襲撃 — 偽の信号を一方の拠点へ向け、反対側の拠点を襲いに行く
-    R('cb_decoy_raid', () => ((F.n('lure') > 0 || F.n('sos') > 0) && F.exposure <= 1 && F.quietF > 1200 && F.cd('cbDecRaidF', 200)), () => {
-        const vis = {}, s1 = stratPickSite(F.side, A.x, A.y, vis); if (!s1) return false;
-        let s2 = stratPickSite(F.side, A.x, A.y, vis); if (s2 && Math.hypot(s2.x - s1.x, s2.y - s1.y) < 2000) s2 = null;
+    let baitSite, raidSite;
+    R('cb_decoy_raid', () => {
+        if (!baitCount || F.exposure > 1 || F.quietF <= 1200 || !F.cd('cbDecRaidF', 200)) return false;
+        baitSite = stratPickSite(F.side, A.x, A.y, {});
+        if (!baitSite) return false;
+        raidSite = stratPickSite(F.side, A.x, A.y, {}, baitSite);
+        return !!raidSite;
+    }, () => {
+        const s1 = baitSite, s2 = raidSite;
         F.mark('cbDecRaidF');
-        X.bait(F.n('lure') > 0 ? 'lure' : 'sos', s1.x, s1.y);
+        X.bait(F.n('sos') > 0 ? 'sos' : 'lure', s1.x, s1.y);
         say('陽動襲撃 — 偽の信号を' + s1.lbl + ' (' + _dirTxt(A.x, A.y, s1.x, s1.y) + ') へ向け、守りを引きつける');
-        if (s2) { X.slip(Math.atan2(s2.y - A.y, s2.x - A.x)); say('本命は反対側の' + s2.lbl + ' (' + _dirTxt(A.x, A.y, s2.x, s2.y) + ') — 静かに回り込む'); }
+        X.slip(Math.atan2(s2.y - A.y, s2.x - A.x)); say('本命は別の' + s2.lbl + ' (' + _dirTxt(A.x, A.y, s2.x, s2.y) + ') — 静かに回り込む');
         return true;
     });
     // 第212弾: 沈黙の襲撃 — ノイズで耳を引きつけ、自分は潜航で静かに推定へ近づく
@@ -16882,8 +16913,8 @@ function tacticDecide(F, A, X, act, doAct) {
         if (F.exposure >= 2 && F.hitAgo < 900 && F.estD < 9000) { c('sat_ctx'); if (F.n('noise') > 0) c('sat_ctx_noise'); if (F.n('noise') > 0 && (F.n('lure') > 2 || F.bcn)) c('sat_ctx_all'); } if (F.hpF < 0.5 && F.hitAgo < 900) { c('repair_ctx'); if (F.n('smoke') > 0) c('repair_ctx_smoke'); if (F.n('smoke') > 0 && F.n('repair') > 0) c('repair_ctx_smoke_repair'); if (F.n('smoke') > 0 && F.n('repair') > 0 && !F.kit) c('repair_ctx_all'); } if (F.estAng !== null && F.estD < 4000 && !F.seen) c('blow_ctx_est'); }
     // 聴き耳の最中: 止まって聴く (見えた・撃たれた・攻撃を受けたら中断)
     if ((F.get('tacHold') || 0) > now) { if (F.seen || F.hitAgo < 900 || F.exposure >= 3) F.set('tacHold', 0); else { A.hold(true); return true; } }
-    // 第200弾: スキルの発動条件の表 (SKC) — 場面が合い・必須が揃い・条件の一致度が 0.5〜0.7 以上なら、旧来の固い条件を満たさなくても候補に入れる
-    const S = sitAug(Object.assign({}, F, { retreatT: retreatThreshold(F.P || PERS_DEF) }), A), thr = 0.5 + 0.2 * Math.random();
+    // 個別ルールが発動可否を決める。SKC は発動可能な候補の採点に使う。
+    const S = sitAug(Object.assign({}, F, { retreatT: retreatThreshold(F.P || PERS_DEF) }), A);
     sitJudgeAttach(F, S); // 第218弾: 局面メモを更新 (同一フレームでは itemReactPlan 側の更新が先行し、ここは冪等)
     const doc = doctrineOf(F.side, F.who);
     const cover = S.badZone ? 0 : envIntake(S, now).cover;
@@ -16893,13 +16924,13 @@ function tacticDecide(F, A, X, act, doAct) {
         const capP = capMode && F.side === 'p'; // 第185弾: AI操艦では 条件が揃ったスキルを全部 候補にして艦長に見せる (使うかの乱数窓は通常の自動実行のときだけ)
         if (!(capP ? skillOn(F.side, id) : skillUse(F.side, id))) { if (dbg) { const d = dbg[id] || (dbg[id] = { n: 0, on: 0, cond: 0, tbl: 0, side: { p: 0, e: 0 } }); d.n++; } return; }
         let ok = false; try { ok = !!cond(); } catch (er) { ok = false; }
-        const m = skillMatch(S, id, A); let frac = 1, viaT = false;
-        if (!ok && m && m.sceneOK && m.needOK && m.frac >= thr && F.cd('sk_' + id, m.cd)) { ok = true; viaT = true; frac = m.frac; }
-        else if (ok && m) frac = m.sceneOK ? Math.max(0.5, m.frac) : 0.4;
-        if (dbg) { const d = dbg[id] || (dbg[id] = { n: 0, on: 0, cond: 0, tbl: 0, side: { p: 0, e: 0 } }); d.n++; d.on++; if (ok) { d.cond++; d.side[F.side]++; if (viaT) d.tbl = (d.tbl || 0) + 1; } }
+        const m = skillMatch(S, id, A);
+        if (ok && m && m.cd > 0) ok = F.cd('sk_' + id, m.cd);
+        const frac = m ? (m.sceneOK ? Math.max(0.5, m.frac) : 0.4) : 1;
+        if (dbg) { const d = dbg[id] || (dbg[id] = { n: 0, on: 0, cond: 0, tbl: 0, side: { p: 0, e: 0 } }); d.n++; d.on++; if (ok) { d.cond++; d.side[F.side]++; } }
         if (!ok) return;
-        const run2 = () => { let r = false; try { r = !!run(); } catch (er) { r = false; } if (r) { F.mark('sk_' + id); if (viaT) A.say('場面「' + skillScenesJp(id) + '」の条件に ' + Math.round(frac * 100) + '% 合う → ' + ((_skillInfo(id) || {}).jp || id)); } return r; };
-        cands.push({ id, run: run2, sc: tacScore(F, id, doc, cover, needsFix) * (0.5 + 0.7 * frac), use: capP ? skillUse(F.side, id) : true, frac, viaT });
+        const run2 = () => { let r = false; try { r = !!run(); } catch (er) { r = false; } if (r) F.mark('sk_' + id); return r; };
+        cands.push({ id, run: run2, sc: tacScore(F, id, doc, cover, needsFix) * (0.5 + 0.7 * frac), use: capP ? skillUse(F.side, id) : true, frac });
     };
     if (act) cands.push({ id: '_item', act, use: true, run: () => { for (const k of (act._marks || [])) F.mark(k); doAct(act); return true; }, sc: 1.6 * (0.7 + 0.6 * Math.random()) * (0.7 + 0.35 * (F.exposure || 0)) * (act.k === 'repair' && doc?.id === 'recover' ? actionFit(doc) : 1) });
     comboRules(F, A, X, R); tacticRules(F, A, X, R);
@@ -16936,11 +16967,11 @@ function tacticRules(F, A, X, R) {
         return true;
     });
     // 第212弾: ノード急襲 — 相手が制圧を進めているノードへ、完了前に割り込んで横取りする
-    R('tc_node_dash', () => (nodeDashTarget(F.side, A.x, A.y) && F.exposure <= 2 && F.hpF >= 0.5 && F.cd('tcNodeDashF', 180)), () => { // 第217弾: クールダウン 60秒→180秒
-        const n = nodeDashTarget(F.side, A.x, A.y); if (!n) return false;
+    R('tc_node_dash', () => ((F.side !== 'p' || !capManualOn() && _comCanSteer(_com)) && nodeDashTarget(F.side, F.who, A.x, A.y) && F.exposure <= 2 && F.hpF >= 0.5 && F.cd('tcNodeDashF', 180)), () => { // 第217弾: クールダウン 60秒→180秒
+        const n = nodeDashTarget(F.side, F.who, A.x, A.y); if (!n) return false;
         F.mark('tcNodeDashF');
         A.go(n.x, n.y, 200, 'flank');
-        say('ノード急襲 — 制圧のEM漏れ: 相手が進めているノード (' + _dirTxt(A.x, A.y, n.x, n.y) + ') へ割り込んで横取りする');
+        say('ノード急襲 — 制圧のEM漏れ: 相手が進めているノード (' + _dirTxt(A.x, A.y, n.x, n.y) + ') へ割り込んで制圧を妨害する');
         return true;
     });
     R('tc_listen_spot', () => { if (F.hiding || F.seen || F.exposure > 1 || F.hpF < 0.5 || !F.cd('tcSpotF', 90)) return false; const sI = getStormIntensity(A.x, A.y), wI = getWreckIntensity(A.x, A.y); return (sI >= 0.3 || wI >= 0.3) && (F.quietF > 300 || F.estD < 1e8); }, () => {
@@ -16953,11 +16984,11 @@ function tacticRules(F, A, X, R) {
         F.mark('tcListenF'); F.set('tacHold', now + 1200); say('聴き耳 — 気配を見失った → 止まって静かに20秒聴く'); A.hold(true); return true;
     });
     // ソナーで点にする: 推定が広いまま距離が近い (ソナーが届く) → 全周囲ソナーで位置を確定する (自分の位置は割れる)
-    R('tc_sonar_fix', () => (wideEst && F.estD < 3000 && F.exposure <= 1 && F.hpF > 0.6 && hit > 1800 && F.cd('tcFixF', 120)), () => {
+    R('tc_sonar_fix', () => ((F.side === 'p' ? omniSonarCooldown <= 0 : !(F.who?._pingCD > 0)) && wideEst && F.estD < 3000 && F.exposure <= 1 && F.hpF > 0.6 && hit > 1800 && F.cd('tcFixF', 120)), () => {
         F.mark('tcFixF'); if (X.sonar('std')) { say('ソナーで点にする — 推定が広い (幅' + Math.round(F.estR) + 'u) が近い → 全周囲ソナーで位置を確定する'); return true; }
     });
     // ピン&ステップ: 長く気配が無い時、弱いソナーを一度だけ打ち、返事が来る前に横へ離れる (打った所に来た相手の裏をかく)
-    R('tc_ping_step', () => (F.quietF > 14400 && !F.busy && F.exposure === 0 && F.hpF > 0.5 && F.cd('tcPingF', 480)), () => {
+    R('tc_ping_step', () => ((F.side === 'p' ? omniSonarCooldown <= 0 : !(F.who?._pingCD > 0)) && F.quietF > 14400 && !F.busy && F.exposure === 0 && F.hpF > 0.5 && F.cd('tcPingF', 480)), () => {
         F.mark('tcPingF'); if (X.sonar('weak')) { say('ピン&ステップ — 弱いソナーを打ってすぐ横へ離れる'); X.slip(Math.random() * Math.PI * 2); return true; }
     });
     // 航行モードの切替: 推定が広い=解析 / 推定が絞れて近い=兵装 / 静かに待っている=探知。20〜40秒は自動の選び直しを止める
@@ -16984,8 +17015,8 @@ function tacticRules(F, A, X, R) {
         if (F.n('noise') > 0 && F.hpF < 0.8) X.doI({ k: 'noise', why: '探信回避: ノイズを反対へ', aim: a + Math.PI, slip: a }); else X.slip(a); return true;
     });
     // 斥候を先行: 推定が遠い (6〜14km) 間に、哨戒機を推定の手前へ先に出して見張らせる
-    R('tc_scout_ahead', () => (eA !== null && F.estD > 6000 && F.estD < 14000 && F.exposure <= 1 && (A.have('scout') || A.mobile('scout')) && F.cd('tcScoutF', 150)), () => {
-        F.mark('tcScoutF'); if (A.have('scout')) A.launch('scout'); const px = A.x + Math.cos(eA) * (F.estD - 2500), py = A.y + Math.sin(eA) * (F.estD - 2500);
+    R('tc_scout_ahead', () => (skillOn(F.side, 'dr_order') && eA !== null && F.estD > 6000 && F.estD < 14000 && F.exposure <= 1 && (A.have('scout') || A.mobile('scout')) && F.cd('tcScoutF', 150)), () => {
+        F.mark('tcScoutF'); if (A.have('scout')) A.launch('scout'); const range = Math.min(DRONE_AUTO_DIST * 0.8, F.estD - 2500), px = A.x + Math.cos(eA) * range, py = A.y + Math.sin(eA) * range;
         A.order(['scout'], 'patrol', px, py); say('斥候を先行 — 推定 (' + _dirTxt(A.x, A.y, F.estX, F.estY) + '・' + Math.round(F.estD / 100) * 100 + 'u) の手前へ哨戒機を先に出す'); return true;
     });
     // 閃光の先制: 推定が絞れて近いのに見えない、攻撃的な性格 → 閃光で相手のセンサーを焼いて、見られる前に詰める
@@ -17014,7 +17045,7 @@ function tacticRules(F, A, X, R) {
         F.mark('tcEScoutF'); const sn = A.next(); A.launch('scout'); if (sn) A.order(['scout'], 'patrol', sn.x, sn.y); say('初動の斥候 — 集めに出る前に哨戒機を未踏の海域へ出す (統率)'); return false;
     });
     // 初動の測定: 電脳の高い性格は、序盤に弱いソナーを一度だけ打って周りの様子を掴む
-    R('tc_early_sonar', () => (now > 1800 && now < 7200 && persAx(P, 'tech') >= 0.55 && F.exposure === 0 && !F.seen && F.cd('tcESonarF', 9999)), () => {
+    R('tc_early_sonar', () => ((F.side === 'p' ? omniSonarCooldown <= 0 : !(F.who?._pingCD > 0)) && now > 1800 && now < 7200 && persAx(P, 'tech') >= 0.55 && F.exposure === 0 && !F.seen && F.cd('tcESonarF', 9999)), () => {
         F.mark('tcESonarF'); if (X.sonar('weak')) { say('初動の測定 — 弱いソナーを一度打って周りの様子を掴む (電脳)'); return true; } return false;
     });
     return false;
@@ -17881,7 +17912,8 @@ class Drone {
               ctx.globalCompositeOperation = 'source-over'; }
             ctx.restore();
             ctx.translate(0, _bob);
-            if (_posed) { const _ps = _pose === 'thrust' || _pose === 'slash' ? 52 : 44; ctx.drawImage(_psp, -_ps / 2, -_ps / 2, _ps, _ps); } else ctx.drawImage(SPRITES[dsk('drone_mech', 'p')], -20, -20, 40, 40);
+            const _ps = _posed ? (_pose === 'thrust' || _pose === 'slash' ? 52 : 44) : 40;
+            drawMobileSprite(ctx, _posed ? _psp : SPRITES[dsk('drone_mech', 'p')], 'mech', _ps, _rot + _lean, _left, camera.zoom * _zs, true);
             ctx.save(); ctx.rotate(Math.PI / 2);
             if (!_posed && this._flashF && _frameCount - this._flashF < 4) { // 小銃の発砲の閃光
                 ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = 'rgba(255,230,140,0.9)'; ctx.beginPath(); ctx.arc(-13, -19, 3 + Math.random() * 2, 0, Math.PI * 2); ctx.fill(); ctx.globalCompositeOperation = 'source-over';
@@ -17920,8 +17952,9 @@ class Drone {
             const _sp = _droneSprite;
             if (spriteReady(_sp)) {
                 ctx.rotate(this.angle);
-                if (this.type === 'boarder') ctx.drawImage(_sp, -21, -21, 42, 42); else
-                ctx.drawImage(_sp, -16, -16, 32, 32);
+                if (this.type === 'attack') drawMobileSprite(ctx, _sp, 'fighter', 32, this.angle, false, camera.zoom * _zs, true);
+                else if (this.type === 'boarder') ctx.drawImage(_sp, -21, -21, 42, 42);
+                else ctx.drawImage(_sp, -16, -16, 32, 32);
                 ctx.rotate(-this.angle);
             } else {
                 const col = this.type === 'attack' ? '#00ffaa' : '#66ccff';
@@ -19489,7 +19522,7 @@ var SKILL_EXTRA = [
     { id: 'cb_decoy_raid', g: '複合', jp: '陽動襲撃', desc: '偽艦影を一方の拠点へ向け、守りが寄った隙に反対側の拠点を襲いに行く' },
     { id: 'cb_silence_raid', g: '複合', jp: '沈黙の襲撃', desc: 'ノイズで耳を引きつけ、自分は潜航で静かに推定へ近づく襲撃の踏み込み' },
     { id: 'tc_raid_rush', g: '戦術', jp: '襲撃の踏み込み', desc: '推定が締まった瞬間、全速で一気に距離を詰めて襲撃圏に入る' },
-    { id: 'tc_node_dash', g: '戦術', jp: 'ノード急襲', desc: '相手が制圧を進めているノードへ、完了前に割り込んで横取りする' },
+    { id: 'tc_node_dash', g: '戦術', jp: 'ノード急襲', desc: '相手が制圧を進めている近くのノードへ、完了前に接近して妨害する' },
 ];
 var HUNT_DESC = { charge: '推定へまっすぐ詰めて撃ち合う', stalk: '背後へ静かに回り込み、気付かれる前に撃つ', lure: '囮を置き、相手が向かう線の横で待ち伏せる', feint: '撃たれたらノイズを逃げる向きに流して横へ滑り、忍び寄りへ', fakebox: '偽コンテナを相手の行く先に置き、爆発で位置が割れたら撃つ', hold: '近づいてくる相手を機関を止めて待つ', screen: '艦載機を先に送り、見つけたら挟み撃ちにする', rush: '霧伝いに近づいて実弾の至近戦に持ち込む', snipe: 'ビームのチャージ警告の外から狙撃する', shadow: '相手の後ろにつき、方位を貯めて真後ろから撃つ', netkill: '相手の聴音局ノードを奪い、相手の目 (聴音網) を痩せさせる' };
 // 第144弾: ドローン運用のスキル — 哨戒機 dr_scout・戦闘機 dr_ftr・砲台 dr_turret を出す / 指示を出す dr_order / 会敵で呼び戻す dr_recall。自機COMも敵も同じ
@@ -22582,9 +22615,24 @@ function netkillTarget(side, x, y) { // 第212弾: 相手の聴音局ノード (
     for (const n of resourceNodes) if (n.owner === opp) { const d = Math.hypot(n.x - x, n.y - y); if (d < bd) { bd = d; best = n; } }
     return best;
 }
-function nodeDashTarget(side, x, y) { // 第212弾: 相手が制圧を進めているノード (制圧のEM漏れで分かる範囲) (第217弾: 進行の敷居 0.05→0.3・範囲 11000→5000 — 完了前に実際に駆けつけられる所だけ)
-    const foe = side === 'p' ? 'capE' : 'capP'; let best = null, bd = 5000;
-    for (const n of resourceNodes) { if ((n[foe] || 0) < 0.3) continue; const d = Math.hypot(n.x - x, n.y - y); if (d < bd) { bd = d; best = n; } }
+function nodeDashTarget(side, ship, x, y) {
+    if (!ship) return null;
+    const foe = side === 'p' ? 'capE' : 'capP';
+    const pulse = side === 'p' ? '_capEF' : '_capPF';
+    if (ship._haltTimer > 0) return null;
+    const speed = side === 'p'
+        ? shipCruiseSpeed(gameState.shipType, genAlloc.engine, STANCE_GAIN.flank) * engineSpeedFactor(gameState.engineType, getHiggsIntensity(x, y)) * PM.speed
+        : ship._maxSpeeds()?.cruise;
+    if (!(speed > 0)) return null;
+    let best = null, earliest = Infinity;
+    for (const n of resourceNodes) {
+        const progress = n[foe] || 0;
+        if (progress < 0.15 || _frameCount - (n[pulse] ?? -Infinity) > 1) continue;
+        const d = Math.hypot(n.x - x, n.y - y);
+        const travel = Math.max(0, d - NODE_CAP_R) / Math.max(0.1, speed);
+        if (travel + 60 >= NODE_CAP_TIME * (1 - progress) || travel >= earliest) continue;
+        best = n; earliest = travel;
+    }
     return best;
 }
 function raidTarget(side, x, y) {
@@ -22757,14 +22805,14 @@ function comStratWeights(P, x, hpF) { return stratWeights(P, Object.assign({}, x
 function playerSlotsStrong() { return partsOn.length >= 3; }
 function comPickStrat(c, P, x, hpF) { return stratPick(P, Object.assign({}, x, { hpF }), c.lastStrat, window.__stratForce); }
 // 拠点の候補: 相手が取りに来そうな所 (自分のでないコロニー・見つけた難破船・自分のでないノード) — 自機COMも敵も同じ関数 (side 'p'|'e')
-function stratPickSite(side, x, y, vis) {
+function stratPickSite(side, x, y, vis, awayFrom) {
     const me = side === 'p' ? 'player' : 'enemy', out = [];
     for (const s of structures) {
         if (s.type === 'colony' && s.owner !== me) out.push({ x: s.x, y: s.y, lbl: (side === 'p' ? s._pObs === 'enemy' : s.owner === 'player') ? '相手のコロニー' : 'コロニー', w: 1.2 });
         else if (s.type === 'derelict' && !s.salvaged && (side === 'p' ? s.discovered : (s.discovered || s._discE))) out.push({ x: s.x, y: s.y, lbl: '難破船', w: 1 });
     }
     for (const n of resourceNodes) if (n.owner !== me) out.push({ x: n.x, y: n.y, lbl: 'ノード', w: 0.8 });
-    const cand = out.map(o => ({ o, d: Math.hypot(o.x - x, o.y - y) })).filter(o => o.d > 1500 && o.d < 15000)
+    const cand = out.map(o => ({ o, d: Math.hypot(o.x - x, o.y - y) })).filter(o => o.d > 1500 && o.d < 15000 && (!awayFrom || Math.hypot(o.o.x - awayFrom.x, o.o.y - awayFrom.y) >= 2000))
         .map(o => ({ o, k: o.o.w * (0.5 + Math.random()) / (1 + o.d / 9000) * (_frameCount - (vis[Math.round(o.o.x) + ',' + Math.round(o.o.y)] || -1e9) < 21600 ? 0.25 : 1) }))
         .sort((a, b) => b.k - a.k);
     if (!cand.length) return null;
@@ -22891,17 +22939,21 @@ function comReactItems(c, P, hpF, retreating) {
     return false;
 }
 // ═══ 第182弾: AI操艦モード (オーナー「AIが操艦し、人は要所で意思決定だけする」) ═══
-//   決断を出すのは「結果に効く」局面だけ (撃つか絞るか・ミサイルへの対処・退くか踏みとどまるか)。出している間は超スロー (CAP_SLOW倍)・制限時間 (実時間) のあとはAIの推奨が実行される。
+//   通常の決断は設定倍率で進み、差し迫った危険だけ一時減速する。
 //   選択はAIの上位の方針として一定時間効く (COMの目的に上書きされない)。画面に出す見込みは「AIの推定」から作る (真の状態・先読みは使わない)
 var capMode = false, _capDec = null, _capRes = {}, _capKick = false, _capLast = {}, _capLastT = 0, _capStats = { asked: 0, auto: 0 };
-const CAP_SLOW = 0.08, CAP_LIMIT = 7;
-var _capSlowOff = false; // 第227弾: 選択肢の表示中に人が倍速を変えたら、その決断の間は超スローを解いて新しい倍速を即時に効かせる
+const CAP_SLOW = 0.08, CAP_LIMIT = 7, CAP_PLAN_LIFETIME = 3600;
+const CAP_URGENT = new Set(['missile', 'beam', 'escape']);
+function capUrgent(key, spec) { return CAP_URGENT.has(key) || spec.urgent === true; }
+const CAP_REPEAT_GAP = 5400; // 同じスキルの提示は試合内で最低90秒あける
+let _capOffered = new Map();
+function capEffectiveSpeed() { return _capDec?.slow ? Math.min(gameSpeed, CAP_SLOW) : gameSpeed; }
 function toggleQte(on) { // メニューのQTE (艦長の判断) のオン・オフ — COM対戦中だけ
     if (!comDemo) return;
     capMode = on === undefined ? !capMode : !!on;
     if (comCfg) comCfg.cap = capMode;
     if (!capMode && _capDec) capChoose(_capDec.spec.rec, true); // 出ている決断は推奨で閉じる
-    if (!capMode) { _capRes = {}; _capSavedSpeed = null; const b = document.getElementById('cap-dec'); if (b) b.classList.remove('on'); if (_com) { _com.capHoldUntil = 0; _com.capAvoidUntil = 0; _com.standUntil = 0; _com.noFireUntil = 0; } } // 第227弾: QTEを切ったら倍速の保存も捨てる
+    if (!capMode) { _capRes = {}; const b = document.getElementById('cap-dec'); if (b) b.classList.remove('on'); if (_com) { _com.capHoldUntil = 0; _com.capAvoidUntil = 0; _com.standUntil = 0; _com.noFireUntil = 0; } }
     _syncQteBtn();
     uiToast('QTE (艦長の判断): ' + (capMode ? 'ON — 要所で選択を求められる' : 'OFF — AIが全部決める'), false);
 }
@@ -22916,8 +22968,16 @@ function capAsk(key, spec, cd) { // null=聞かない (AIが続ける) / {wait:t
     if (!capMode || sectorCleared) return null;
     const fight = CAP_FIGHT_KEYS.includes(key);
     if (!fight && CAP_PLAN_PROB[key] === undefined) return null;
-    const r = _capRes[key]; if (r) { delete _capRes[key]; return r; }
-    if (_capDec) return { wait: true };
+    const r = _capRes[key];
+    if (r) {
+        delete _capRes[key];
+        const valid = spec.validIds || spec.opts.map(o => o.id);
+        if (_frameCount - r.frame <= COM_TICK && r.context === spec.context && valid.includes(r.id)) return r;
+        return null;
+    }
+    if (_capDec?.key === key) return { wait: true };
+    if (_capDec?.urgent) return { wait: true };
+    if (_capDec && !capUrgent(key, spec)) return null;
     if (_frameCount - (_capLast[key] ?? -1e9) < cd) return null;
     if (!fight) {
         if (!['search', 'mstone'].includes(key) && _com && !_com.searchAsked && _frameCount < 3600) return null; // 序盤は まず「何を探す？」を先に
@@ -22931,7 +22991,11 @@ function capAsk(key, spec, cd) { // null=聞かない (AIが続ける) / {wait:t
 function capOpen(key, spec) {
     let box = document.getElementById('cap-dec');
     if (!box) { box = document.createElement('div'); box.id = 'cap-dec'; document.body.appendChild(box); }
-    _capDec = { key, spec, el: 0 }; _capStats.asked++; _capSlowOff = false; // 第227弾: 決断ごとに超スローへ戻す
+    const urgent = capUrgent(key, spec);
+    _capDec = { key, spec, el: 0, frame: _frameCount, urgent, slow: urgent };
+    _capStats.asked++;
+    for (const o of spec.opts) if (o.skill) _capOffered.set(capSkillFamily(o.skill), _frameCount);
+    box.classList.remove('warn', 'crit');
     const rec = spec.rec;
     box.classList.toggle('cap-esc', !!spec.compass);
     if (spec.compass) { // 第200弾: 緊急離脱 — 8方向の矢印 (中央は自艦の艦首)
@@ -22940,14 +23004,14 @@ function capOpen(key, spec) {
             + '<div class="esc-grid">' + spec.opts.map((o, i) => '<button class="cap-opt esc-d esc-' + pos[i] + (o.id === rec ? ' rec' : '') + '" data-id="' + o.id + '"><b>' + o.label + (o.id === rec ? ' <u>推奨</u>' : '') + '</b><span>' + o.sub + '</span></button>').join('')
             + '<div class="esc-ship"><i style="transform:rotate(' + spec.head + 'deg)">▲</i><span>艦首 ' + spec.headDeg + '°</span></div></div>'
             + '<div class="cap-time"><b class="cap-sec">' + CAP_LIMIT + '</b><div class="cap-track"><div class="cap-bar"></div></div><span>秒後に 推奨の方角へ離脱</span></div>';
-        box.classList.add('on');
-        box.querySelectorAll('.cap-opt').forEach(b => b.addEventListener('click', (ev) => { ev.stopPropagation(); capChoose(b.dataset.id, false); }));
-        sfxUI('ui_panel_open'); return;
-    }
-    box.innerHTML = '<div class="cap-head"><b>◈ 艦長の判断</b><span>' + spec.title + '</span></div>'
+    } else box.innerHTML = '<div class="cap-head"><b>◈ 艦長の判断</b><span>' + spec.title + '</span></div>'
         + '<div class="cap-sit">' + spec.sit + '</div>'
         + '<div class="cap-opts">' + spec.opts.map((o, i) => '<button class="cap-opt' + (o.id === rec ? ' rec' : '') + '" data-id="' + o.id + '"><i>' + (i + 1) + '</i><b>' + o.label + (o.id === rec ? ' <u>AI推奨</u>' : '') + '</b><span>' + o.sub + '</span></button>').join('') + '</div>'
-        + '<div class="cap-time"><b class="cap-sec">' + CAP_LIMIT + '</b><div class="cap-track"><div class="cap-bar"></div></div><span>秒後に AI推奨 を自動実行</span></div>';
+        + '<div class="cap-time"><b class="cap-sec">' + CAP_LIMIT + '</b><div class="cap-track"><div class="cap-bar"></div></div><span>秒後に ' + (urgent ? 'AI推奨を実行' : 'AIに任せる') + '</span></div>';
+    box.insertAdjacentHTML('beforeend', '<div class="cap-actions"><button type="button" class="cap-speed"></button><button type="button" class="cap-delegate">' + (spec.compass ? '推奨の方向へ' : 'AIに任せる') + '</button></div>');
+    box.querySelector('.cap-speed').onclick = (ev) => { ev.stopPropagation(); capSetSlow(!_capDec.slow); };
+    box.querySelector('.cap-delegate').onclick = (ev) => { ev.stopPropagation(); capChoose(rec, false, true); };
+    capSyncSpeed();
     box.classList.add('on');
     box.querySelectorAll('.cap-opt').forEach(b => b.addEventListener('click', (ev) => { ev.stopPropagation(); capChoose(b.dataset.id, false); }));
     sfxUI('ui_panel_open');
@@ -23034,60 +23098,52 @@ function _escConfirmOpen() {
     _escConfirmBox.style.bottom = Math.round(innerHeight - r.top + 8) + 'px';
     _escConfirmBox.classList.add('on');
 }
-function capChoose(id, auto) {
+function capSyncSpeed() {
+    const b = document.querySelector('#cap-dec .cap-speed');
+    if (b && _capDec) {
+        b.textContent = _capDec.slow ? gameSpeed + '×で進める' : gameSpeed + '×で進行中 · 減速';
+        b.setAttribute('aria-pressed', String(_capDec.slow));
+    }
+}
+function capSetSlow(on) {
+    if (!_capDec) return;
+    _capDec.slow = on;
+    if (on) _speedAcc = 0;
+    capSyncSpeed();
+}
+function capChoose(id, auto, delegate = false) {
     if (!_capDec) return;
     const d = _capDec, o = d.spec.opts.find(x => x.id === id) || d.spec.opts.find(x => x.id === d.spec.rec);
-    if (d.key === 'escape') { _capDec = null; const box = document.getElementById('cap-dec'); if (box) box.classList.remove('on', 'cap-esc'); escapeChoose(o.ang); uiToast('緊急離脱 → ' + o.label + (auto ? ' (時間切れ — 推奨)' : ''), false); return; } // 第200弾
-    _capRes[d.key] = { id: o.id, auto: !!auto }; _capDec = null; _capKick = true; if (auto) _capStats.auto++;
-    const box = document.getElementById('cap-dec'); if (box) box.classList.remove('on');
-    uiToast('艦長: ' + o.label + (auto ? ' (時間切れ — AI推奨)' : '') + ' → AIが実行', false);
-    if (player) matchRecEvent('cap', player.x, player.y, '艦長の判断「' + d.spec.title + '」→ ' + o.label + (auto ? ' (時間切れ)' : ''));
+    _capDec = null;
+    _capLast[d.key] = _frameCount;
+    document.getElementById('cap-dec')?.classList.remove('on', 'cap-esc');
+    _speedAcc = 0;
+    if (d.key === 'escape') { escapeChoose(o.ang); uiToast('緊急離脱 → ' + o.label, false); return; }
+    _capKick = true;
+    if (auto) _capStats.auto++;
+    if (!(auto || delegate) || d.urgent) {
+        _capRes[d.key] = { id: o.id, auto: !!auto, frame: _frameCount, context: d.spec.context };
+        uiToast('艦長: ' + o.label + (auto ? ' (AI推奨)' : '') + ' → AIが実行', false);
+        if (player) matchRecEvent('cap', player.x, player.y, '艦長の判断「' + d.spec.title + '」→ ' + o.label);
+    }
     sfxUI('ui_close');
 }
-// 第195弾: QTE (AI操艦) 中、敵と思われる新しい接触 (見えた敵・艦影らしい信号。囮・ビーコンに騙されている場合も含む) があれば倍速を1倍に戻す
-// 第227弾 (オーナー「倍速が落ちる頻度を下げたい・落ちたら元に戻したい」): 信号は識別が溜まるまで落とさない (囮・ビーコン・自然の信号は識別の途中で艦影40%未満に落ちて外れる。実艦の信号は数秒で艦影寄りに固まる)。落とした時は直前の倍速を保存し、接敵が落ち着いたら自動で戻す (capSpeedRestore)。人の手動変更が入ったら保存は破棄され手動が正になる (setGameSpeed 側)。強制低下の直後は CAP_WATCH_CD の間、再低下しない
-var _capSeen = {}, _capW = 0;
-var _capSavedSpeed = null, _capSaveF = -1e9, _capWatchCDUntil = -1e9; // 第227弾: 強制低下の保存 (倍速・時刻) と再発火抑制の期限
-const CAP_WATCH_CD = 1800, CAP_RESTORE_F = 2700; // 第227弾: 再低下の抑制 30秒 / 自動復帰までの間隔 45秒 (どちらもゲーム内フレーム)
-function capContactWatch() {
-    if (!capMode || !comDemo || !player || player.hp <= 0 || sectorCleared || ((_capW = (_capW || 0) + 1) % 8)) return;
-    let hit = null;
-    for (const e of enemies) if (e.hp > 0 && !e._dying && e.inVision && !_capSeen['v' + e.uid]) { _capSeen['v' + e.uid] = 1; hit = '敵影を目視'; }
-    for (const sid of sigListSids()) {
-        if (_capSeen[sid]) continue;
-        if (_srcKnown[sid] || /^C-/.test(sid)) continue; // 海図に載せた発信元・輸送船は敵と思わない (囮・ビーコンは敵と思う。第215弾・指示書A T4: 旧は真値で自然・コンテナも即座に除いていた → 信念 (下の識別判定) で外れるまでは敵の可能性として扱う)
-        const d = identInfo(sid), idi = _sigIdent[sid]; if ((idi && idi.sure && d.p < 0.5) || (d.known && d.p < 0.4)) continue; // 第215弾: 正体を確認した信号・識別で艦影40%未満の信号は敵と思わない (dud と同じ基準)
-        if (!d.known) continue; // 第227弾: まだ識別が溜まっていない信号では落とさない (見た瞬間に落とすと囮・ビーコン・自然の信号の全部に反応してしまう。識別が進めば上の条件で外れるか、艦影寄りに固まって初めて落とす)
-        _capSeen[sid] = 1; hit = hit || ('SIG-' + (sigNo(sid) || '?') + ' を受信');
-    }
-    if (hit && gameSpeed > 1 && _frameCount >= _capWatchCDUntil) { _capSavedSpeed = gameSpeed; _capSaveF = _frameCount; _capWatchCDUntil = _frameCount + CAP_WATCH_CD; setGameSpeed(1, true); uiToast('◈ 敵と思われる接触 (' + hit + ') — 倍速を1倍に戻した', true); comThinkEvent('p', '敵と思われる接触 — 倍速を1倍に戻した'); }
-}
-// 第227弾: 強制低下からの自動復帰。gameLoop から毎フレーム呼ばれる (保存が無ければ即戻る)。
-//   復帰の条件: 低下から CAP_RESTORE_F 過ぎ、かつ敵が目視内にいない。途中で人が倍速を変えていたら保存は消えているので何もしない
-function capSpeedRestore() {
-    if (_capSavedSpeed === null) return;
-    if (!capMode || !player || player.hp <= 0 || sectorCleared) { _capSavedSpeed = null; return; }
-    if (_frameCount - _capSaveF < CAP_RESTORE_F) return;
-    if (enemies.some(e => e.hp > 0 && !e._dying && e.inVision)) return; // まだ見えている間は戻さない
-    const v = _capSavedSpeed; _capSavedSpeed = null;
-    setGameSpeed(v, true);
-    const lb = v === 0.5 ? '0.5x' : v + 'x';
-    uiToast('◈ 接触が落ち着いた — 倍速を ' + lb + ' に戻した', false); comThinkEvent('p', '接触が落ち着いた — 倍速を ' + lb + ' に自動で戻した');
-}
 function capTick(dt) { // 実時間 (一時停止中は数えない)。gameLoop から毎フレーム
-    capContactWatch();
     if (!_capDec) return;
     if (!player || player.hp <= 0 || sectorCleared) { const b = document.getElementById('cap-dec'); if (b) b.classList.remove('on'); _capDec = null; return; }
     if (userPaused || gamePaused || _uiPause || _orientPaused || _draft) return; // 第227弾: 止めている間は制限時間を進めない (gameLoop からは通常その状態で呼ばれないが、凍結をここでも保証する)
     _capDec.el += dt;
-    const left = Math.max(0, CAP_LIMIT - _capDec.el), bar = document.querySelector('#cap-dec .cap-bar'), sec = document.querySelector('#cap-dec .cap-sec'), bx = document.getElementById('cap-dec');
+    const frames = CAP_PLAN_LIFETIME - (_frameCount - _capDec.frame);
+    const timeLeft = CAP_LIMIT - _capDec.el;
+    const running = !_capDec.slow && !_capDec.urgent;
+    const left = Math.max(0, running ? Math.min(timeLeft, frames / (60 * gameSpeed)) : timeLeft), bar = document.querySelector('#cap-dec .cap-bar'), sec = document.querySelector('#cap-dec .cap-sec'), bx = document.getElementById('cap-dec');
     if (bar) bar.style.width = (100 * left / CAP_LIMIT) + '%';
     if (sec) sec.textContent = Math.ceil(left);
     if (bx) { bx.classList.toggle('warn', left <= 4 && left > 2); bx.classList.toggle('crit', left <= 2); }
-    if (_capDec.el >= CAP_LIMIT) capChoose(_capDec.spec.rec, true);
+    if (timeLeft <= 0 || running && frames <= 0) capChoose(_capDec.spec.rec, true);
 }
 document.addEventListener('keydown', (ev) => {
-    if (!_capDec) return;
+    if (!_capDec || ev.target.closest?.('#cap-dec button, #speed-picker button')) return;
     const k = ev.key;
     if (k === ' ') { togglePause(); ev.preventDefault(); ev.stopImmediatePropagation(); return; } // 第227弾: Space は一時停止 (旧: 推奨の実行)。止めている間は制限時間も進まない (capTick の凍結)。もう一度押せば再開
     if (k >= '1' && k <= '9') { const o = _capDec.spec.opts[+k - 1]; if (o) capChoose(o.id, false); else return; }
@@ -23103,22 +23159,30 @@ function capFireGate(c, te, w, hc, sa, lk, now) {
     const opts = [], best = { id: null, h: -1 };
     for (const x of ws) {
         const h = comHitChance(te, x, lk, sa);
+        if (lk.dist > weaponRange(x) || h <= 0) continue;
         opts.push({ id: 'fire:' + x, label: _WPN_JP[x] + 'で撃つ', sub: '命中見込み ' + _pct(h) + ' / 威力 ' + (x === 'beam' ? BEAM_DMG : MISSILE_DMG) + ' / 外れても位置が割れる' });
         if (h > best.h) { best.h = h; best.id = 'fire:' + x; }
     }
+    if (!opts.length) return null;
     opts.push({ id: 'refine', label: '待って絞る', sub: '30秒撃たず方位を取り直す — 見込みは上がる可能性/その間に見つかるリスク' });
-    const cg = capAsk('fire', { title: '推定位置へ撃てる', sit: 'SIG-' + sigNo(enemySid(te)) + ' 推定 ' + Math.round(lk.dist / 100) * 100 + 'u' + (wid ? ' (幅±' + wid + 'u)' : '') + '。当たれば大きい — 外せば相手に射手の方角を教える', opts, rec: best.id }, 1500);
+    const cg = capAsk('fire', { title: '推定位置へ撃てる', context: enemySid(te), sit: 'SIG-' + sigNo(enemySid(te)) + ' 推定 ' + Math.round(lk.dist / 100) * 100 + 'u' + (wid ? ' (幅±' + wid + 'u)' : '') + '。当たれば大きい — 外せば相手に射手の方角を教える', opts, rec: best.id }, 1500);
     if (!cg || cg.wait) return cg;
     return cg.id;
 }
 // 接触 (艦影らしい信号を掴んだ・まだ見えていない): 追う / 息を潜める / 避ける
-function capContactGate(c, P, D, ang, est) {
+function capSignalCredible(sid) {
+    if (!sid || _srcKnown[sid] || /^C-/.test(sid) || !sigLockable(sid)) return false;
+    const d = identInfo(sid);
+    return d.known && d.p >= GHOST_SOLID_OFF;
+}
+function capContactGate(c, P, sid, ang, est) {
+    if (!capSignalCredible(sid) || !est || est.r >= 4500 || saAge(_signalAnalysis[sid]) > 1800) return null;
     const opts = [
         { id: 'track', label: '追って測量する', sub: '場所を変えて聴き位置を絞る — 動く分だけ自艦も聞かれる' },
         { id: 'hold', label: '息を潜めて待つ', sub: '40秒 機関停止・潜航 — 気付かれにくいが相手が来なければ時間を使う' },
         { id: 'avoid', label: '距離を取る', sub: '反対へ約5000u離れる — 接触を避ける/拠点集めに戻れる' }];
     const rec = P.stealth >= 0.6 ? 'hold' : P.caution >= 0.7 && P.aggression < 0.5 ? 'avoid' : 'track';
-    return capAsk('contact', { title: '接触 — 艦影らしい信号', sit: '方位' + compassDeg(ang) + '°' + (est ? ' 推定 ' + Math.round(Math.hypot(est.x - player.x, est.y - player.y) / 100) * 100 + 'u (幅±' + Math.round(est.r / 50) * 50 + 'u)' : ' — 距離はまだ不明') + '。まだ見えていない', opts, rec }, 4800);
+    return capAsk('contact', { title: '接触 — 艦影らしい信号', context: sid, sit: '方位' + compassDeg(ang) + '°' + (est ? ' 推定 ' + Math.round(Math.hypot(est.x - player.x, est.y - player.y) / 100) * 100 + 'u (幅±' + Math.round(est.r / 50) * 50 + 'u)' : ' — 距離はまだ不明') + '。まだ見えていない', opts, rec }, 4800);
 }
 // ビームの高エネルギー反応 (チャージ中)
 function capBeamGate(c, th) {
@@ -23135,7 +23199,7 @@ function capGrabGate(c, P, best, bd) {
     const opts = [
         { id: 'take', label: (isC ? 'コンテナを開ける' : '難破船を回収する'), sub: '部品・弾・資材が手に入る' + (isC ? ' — 偽コンテナの罠なら耐久30%の爆発＋位置が割れる' : ' — SOSが鳴っている間だけ') },
         { id: 'skip', label: '見送る', sub: '90秒は取りに行かない — 安全だが戦力が増えない' }];
-    return capAsk('grab', { title: (isC ? '漂流コンテナ' : '難破船') + 'の分かれ道', sit: Math.round(bd / 100) * 100 + 'u 先に ' + (isC ? '漂流コンテナ' : '難破船') + '。拾えば戦力が上がる', opts, rec: P.caution >= 0.75 ? 'skip' : 'take' }, 3600);
+    return capAsk('grab', { title: (isC ? '漂流コンテナ' : '難破船') + 'の分かれ道', context: best.sid ?? best, sit: Math.round(bd / 100) * 100 + 'u 先に ' + (isC ? '漂流コンテナ' : '難破船') + '。拾えば戦力が上がる', opts, rec: P.caution >= 0.75 ? 'skip' : 'take' }, 3600);
 }
 // ハック波を撃つか
 function capHackGate(r, H) {
@@ -23150,50 +23214,82 @@ function _skillInfo(id) { if (!window._skInfo) { window._skInfo = {}; for (const
 function _capTag(P, id) { const a = skillAff(P, id); return a >= 1.4 ? '【得意 ×' + (Math.round(a * 10) / 10) + '】' : a < 0.7 ? '【苦手 ×' + (Math.round(a * 10) / 10) + '】' : ''; }
 function _capScn(id) { const S = sitNow('p'), m = S ? skillMatch(S, id, null) : null; return m && m.sceneOK ? '〔場面一致 ' + Math.round(m.frac * 100) + '%〕' : ''; } // 第200弾
 function _capVoice(P, recJp) { return 'AI (' + persTraitLabel(P) + ') の提案: ' + recJp; }
+function capSkillFamily(id) {
+    return ['tc_node_dash', 'st_raid', 'st_hitflee', 'hu_netkill', 'cb_decoy_raid'].includes(id) ? 'node-attack' : id;
+}
+function capCanOffer(id) {
+    return _frameCount - (_capOffered.get(capSkillFamily(id)) ?? -Infinity) >= CAP_REPEAT_GAP;
+}
+function capRankSkills(entries, key, min, max, skillOf, scoreOf) {
+    const current = _capRes[key] || _capDec?.key === key;
+    const ranked = entries.slice().sort((a, b) => scoreOf(b) - scoreOf(a));
+    const families = new Set();
+    const eligible = current ? ranked : ranked.filter(x => {
+        const id = skillOf(x), family = capSkillFamily(id);
+        if (families.has(family) || !capCanOffer(id)) return false;
+        families.add(family);
+        return true;
+    });
+    return eligible.length < (_capRes[key] ? 1 : min) ? [] : eligible.slice(0, max);
+}
 function capStratGate(c, P, pk) {
-    const w = pk.w, ids = Object.keys(w).filter(k => w[k] > 0.02).sort((a, b) => w[b] - w[a]).slice(0, 4);
-    if (ids.length < 2) return null;
+    const w = pk.w, validIds = Object.keys(w).filter(k => w[k] > 0.02);
+    const ids = capRankSkills(validIds, 'strat', 2, 4, k => 'st_' + k, k => w[k]);
+    if (!ids.length) return null;
     const rec = ids.includes(pk.pick) ? pk.pick : ids[0];
-    const opts = ids.map(k => ({ id: k, label: STRAT_REG[k].jp, sub: _capTag(P, 'st_' + k) + _capScn('st_' + k) + ' ' + String(STRAT_REG[k].desc || '').slice(0, 70) }));
-    return capAsk('strat', { title: '次の方針', sit: _capVoice(P, STRAT_REG[rec].jp) + '。しばらくの間 何をする？', opts, rec }, 600);
+    const opts = ids.map(k => ({ id: k, skill: 'st_' + k, label: STRAT_REG[k].jp, sub: _capTag(P, 'st_' + k) + _capScn('st_' + k) + ' ' + String(STRAT_REG[k].desc || '').slice(0, 70) }));
+    return capAsk('strat', { title: '次の方針', sit: _capVoice(P, STRAT_REG[rec].jp) + '。しばらくの間 何をする？', opts, rec, validIds }, 600);
 }
 // 第201弾 (オーナー「試合の進め方の段階 — 強化の節目で 狩りに出る/さらに強化/ドローンの網/拠点固め、を尋ねて」): 部品2個か拠点2つという節目で1回・平易な4択に絞って尋ねる
 const CAP_MSTONE_IDS = ['push', 'screen', 'guard', 'trap', 'gather', 'tech', 'raid', 'outpost'];
 function capMilestoneGate(c, P, pk) {
     const w = pk.w;
-    let ids = CAP_MSTONE_IDS.filter(k => (w[k] || 0) > 0.01).sort((a, b) => w[b] - w[a]).slice(0, 4);
-    if (ids.length < 2) ids = Object.keys(w).filter(k => w[k] > 0.02).sort((a, b) => w[b] - w[a]).slice(0, 4);
-    if (ids.length < 2) return null;
+    const validIds = Object.keys(w).filter(k => w[k] > 0.02 || CAP_MSTONE_IDS.includes(k) && w[k] > 0.01);
+    const rank = pool => capRankSkills(pool, 'mstone', 2, 4, k => 'st_' + k, k => w[k]);
+    let ids = rank(validIds.filter(k => CAP_MSTONE_IDS.includes(k)));
+    if (!ids.length) ids = rank(validIds);
+    if (!ids.length) return null;
     const rec = ids.includes(pk.pick) ? pk.pick : ids[0];
-    const opts = ids.map(k => ({ id: k, label: STRAT_REG[k].jp, sub: _capTag(P, 'st_' + k) + _capScn('st_' + k) + ' ' + String(STRAT_REG[k].desc || '').slice(0, 70) }));
-    return capAsk('mstone', { title: '強化の節目 — 次はどうする？', sit: '部品・拠点が揃ってきた。' + _capVoice(P, STRAT_REG[rec].jp) + '。', opts, rec }, 1800);
+    const opts = ids.map(k => ({ id: k, skill: 'st_' + k, label: STRAT_REG[k].jp, sub: _capTag(P, 'st_' + k) + _capScn('st_' + k) + ' ' + String(STRAT_REG[k].desc || '').slice(0, 70) }));
+    return capAsk('mstone', { title: '強化の節目 — 次はどうする？', sit: '部品・拠点が揃ってきた。' + _capVoice(P, STRAT_REG[rec].jp) + '。', opts, rec, validIds }, 1800);
 }
 function capHuntGate(c, P, w, D) {
-    const ids = Object.keys(w).filter(k => w[k] > 0.05).sort((a, b) => w[b] - w[a]).slice(0, 4);
-    if (ids.length < 2) return null;
+    const validIds = Object.keys(w).filter(k => w[k] > 0.05);
+    const ids = capRankSkills(validIds, 'hunt', 2, 4, k => 'hu_' + k, k => w[k]);
+    if (!ids.length) return null;
     const jp = (k) => k === 'charge' ? '突撃' : HUNT_REG[k].jp;
-    const opts = ids.map(k => ({ id: k, label: jp(k), sub: _capTag(P, 'hu_' + k) + _capScn('hu_' + k) + ' ' + (HUNT_DESC[k] || '') }));
-    return capAsk('hunt', { title: '作戦の選択', sit: '相手の推定 ' + Math.round(D / 100) * 100 + 'u。' + _capVoice(P, jp(ids[0])), opts, rec: ids[0] }, 1800);
+    const opts = ids.map(k => ({ id: k, skill: 'hu_' + k, label: jp(k), sub: _capTag(P, 'hu_' + k) + _capScn('hu_' + k) + ' ' + (HUNT_DESC[k] || '') }));
+    return capAsk('hunt', { title: '作戦の選択', sit: '相手の推定 ' + Math.round(D / 100) * 100 + 'u。' + _capVoice(P, jp(ids[0])), opts, rec: ids[0], validIds }, 1800);
 }
 function capTacticGate(F, cands) {
-    const L = cands.filter(c => !/^tc_focus_/.test(c.id)).slice(0, 3);
-    if (!L.length) return null;
+    // ノード制圧は数秒で終わる。倍速中は短い割り込みを COM に委ねる。
+    const legal = cands.filter(c => !/^tc_focus_/.test(c.id) && (c.id !== 'tc_node_dash' || gameSpeed <= 1));
+    const skill = c => c.id === '_item' ? 'item:' + c.act.k : c.id;
+    const L = capRankSkills(legal, 'tactic', 1, 3, skill, c => c.sc);
+    if (!L.length) {
+        if (_capDec?.key === 'tactic') capChoose(_capDec.spec.rec, false, true);
+        return null;
+    }
     const P = F.P || {};
-    const opts = L.map(c => { const info = _skillInfo(c.id); return { id: c.id, label: c.id === '_item' ? '搭載品で対処' : (info ? info.jp : c.id), sub: c.id === '_item' ? String((c.act && (c.act.why || c.act.k)) || '').slice(0, 70) : _capTag(P, c.id) + (c.frac != null ? '〔場面一致 ' + Math.round(c.frac * 100) + '%〕' : '') + ' ' + String(info ? info.desc : '').slice(0, 70) }; });
+    const opts = L.map(c => { const info = _skillInfo(c.id); return { id: skill(c), skill: skill(c), label: c.id === '_item' ? '搭載品で対処' : (info ? info.jp : c.id), sub: c.id === '_item' ? String((c.act && (c.act.why || c.act.k)) || '').slice(0, 70) : _capTag(P, c.id) + (c.frac != null ? '〔場面一致 ' + Math.round(c.frac * 100) + '%〕' : '') + ' ' + String(info ? info.desc : '').slice(0, 70) }; });
     opts.push({ id: '_none', label: '様子を見る', sub: '今は仕掛けず AI の通常行動に任せる' });
-    const cg = capAsk('tactic', { title: '戦術の機会', sit: _capVoice(P, opts[0].label) + '。条件が揃った — 仕掛ける？', opts, rec: L[0].id }, 1500);
+    const cg = capAsk('tactic', { title: '戦術の機会', sit: _capVoice(P, opts[0].label) + '。条件が揃った — 仕掛ける？', opts, rec: skill(L[0]), validIds: [...legal.map(skill), '_none'] }, 1500);
     if (!cg || cg.wait) return cg;
     if (cg.id === '_none') return { none: true };
-    return { cand: cands.find(c => c.id === cg.id), none: !cands.find(c => c.id === cg.id) };
+    const cand = legal.find(c => skill(c) === cg.id);
+    return cand ? { cand } : null;
 }
 // いま打てる一手: 静かな間に、持ち物と性格で選んだ「仕掛け」を提案する (各スキルの適性で並ぶ)
 function capPlayList(c, P, te) {
-    const st = (k) => (cargo.stock && cargo.stock[k]) || 0, out = [], now = _frameCount;
+    const st = (k) => (SHIP_DRONES[gameState.shipType] || []).includes(k) && (cargo.stock[k] || 0) > 0;
+    const out = [], now = _frameCount;
+    const canLaunch = (type, skill) => st(type) && skillOn('p', skill) && droneCtrlFits('p', null, type);
+    const canOrder = skillOn('p', 'dr_order');
     const ang = () => Math.random() * Math.PI * 2, spot = (d) => { const a = ang(); return clampToMapCircle(player.x + Math.cos(a) * d, player.y + Math.sin(a) * d, 1500); };
     const add = (id, skill, label, sub, run, base) => out.push({ id, skill, label, sub: _capTag(P, skill) + ' ' + sub, run, base: base || 1 });
     const scouts = playerDrones.filter(d => d.hp > 0 && d.type === 'scout');
-    if (st('scout') > 0 && !scouts.length && drOK('p', 'scout')) add('scout', 'dr_scout', '哨戒機を出す', '周りを見張らせる — 信号が増える/先に相手を見つける', () => deployDrone('scout'));
-    if (scouts.length) add('scout_far', 'tc_scout_ahead', '哨戒機を先へ送る', '7000u先を偵察させる — 母艦は動かず先に情報を取る', () => { const t = spot(7000); droneOrder('scout', 'patrol', t.x, t.y); });
+    if (canLaunch('scout', 'dr_scout') && !scouts.length) add('scout', 'dr_scout', '哨戒機を出す', '周りを見張らせる — 信号が増える/先に相手を見つける', () => deployDrone('scout'));
+    if (canOrder && scouts.some(d => !d._auto && d._order?.kind !== 'patrol')) add('scout_far', 'tc_scout_ahead', '哨戒機を先へ送る', '4500u先を偵察させる — 母艦は動かず先に情報を取る', () => { const t = spot(4500); droneOrder('scout', 'patrol', t.x, t.y); });
     if (st('fsos') > 0) add('fsos', 'it_sos', '偽SOSを置く', '遠くへ偽の遭難信号 — 相手を引き寄せ/足止めする', () => { const t = spot(5000); _comUseItem('fsos', t.x, t.y); });
     if (st('lure') > 0) add('lure', 'dc_mirror', '偽艦影を流す', '艦のような偽信号を遠くへ — 本物の位置をぼかす', () => { const t = spot(4500); _comUseItem('lure', t.x, t.y); });
     if (st('fakecache') > 0) add('fake', 'it_fake', '偽コンテナを置く', '艦尾に罠の箱 — 開けた相手は爆発し位置が割れる', () => _comUseItem('fakecache', player.x - Math.cos(player.angle) * 700, player.y - Math.sin(player.angle) * 700));
@@ -23208,17 +23304,17 @@ function capPlayList(c, P, te) {
     add('weapon', 'tc_focus_weapon', '兵装に演算力を回す', '40秒 兵装重視 — 装填が速い/他が弱くなる', () => _tacFocusP(c, 'weapon', 40), 0.6);
     // 第188弾: ドローン・アイテムを積極的に — 戦闘機・砲台・デコイ・ノイズ・リペア・呼び戻し。戦略に応じて重みが変わる
     const est = capEstPos(te), hurt = player.hp / player.maxHp < 0.85;
-    if (st('attack') > 0 && drOK('p', 'attack')) {
-        if (est) add('ftr_strike', 'cb_decoy_drone', '戦闘機を出して攻撃させる', (est.vis ? '見えている相手' : '推定位置') + 'へ戦闘機を送る — 手数が増える/母艦の位置は変わらない・撃墜されることもある', () => { deployDrone('attack'); droneOrder('attack', 'attack', est.x, est.y); }, 1.2);
+    if (canLaunch('attack', 'dr_ftr')) {
+        if (est && canOrder && Math.hypot(est.x - player.x, est.y - player.y) <= DRONE_AUTO_DIST * 0.8) add('ftr_strike', 'cb_decoy_drone', '戦闘機を出して攻撃させる', (est.vis ? '見えている相手' : '推定位置') + 'へ戦闘機を送る — 手数が増える/母艦の位置は変わらない・撃墜されることもある', () => { deployDrone('attack'); droneOrder('attack', 'attack', est.x, est.y); }, 1.2);
         else add('ftr_escort', 'dr_ftr', '戦闘機を出して護衛させる', '艦の周りを守らせる — 近づく敵や艦載機を迎撃/信号が増える', () => deployDrone('attack'), 0.9);
     }
-    if (st('build') > 0 && drOK('p', 'build')) add('turret', 'dr_turret', '砲台を据える', '艦の近くに設置 (射程2200u) — 近づく相手を撃つ/設置中は動けず信号が出る', () => deployDrone('build'), 0.9);
+    if (canLaunch('build', 'dr_turret') && !playerDrones.some(d => d.type === 'build' && d.hp > 0)) add('turret', 'dr_turret', '砲台を据える', '艦の近くに設置 (射程2200u) — 近づく相手を撃つ/設置中は動けず信号が出る', () => deployDrone('build'), 0.9);
     if (st('decoy') > 0 && est) add('decoy', 'dc_mirror', 'デコイを敵の方へ流す', '熱源を放って相手を引きつける — 狙いが逸れる/信号が増える', () => { const a = Math.atan2(est.y - player.y, est.x - player.x), t = clampToMapCircle(player.x + Math.cos(a + 0.5) * 2500, player.y + Math.sin(a + 0.5) * 2500, 1500); _comUseItem('decoy', t.x, t.y); }, 1.0);
     if (st('noise') > 0) add('noise', 'dc_silent', 'ノイズメーカーを流す', '偽の音源を走らせる — 相手が音を取り違える/自分の位置は変わらない', () => { player.targetEntity = null; useNoise(est ? Math.atan2(player.y - est.y, player.x - est.x) + (Math.random() - 0.5) : undefined); }, 0.9);
-    if (st('repair') > 0 && hurt && !(_frameCount - (player._lastHitF ?? -1e9) < 600)) add('repair', 'it_repair', 'リペアキットで修理', '6秒かけて耐久+700 — 撃たれていない今のうちに/修理中は熱とEMが漏れる', () => _comUseItem('repair'), 1.6);
-    if (st('flash') > 0 && est && est.vis) add('flash', 'cb_flash_strike', '閃光弾で目を焼く', '半径2500uの敵のセンサーを5秒焼く — 先制のチャンス/自分の位置が見える', () => _comUseItem('flash'), 0.8);
+    if (st('repair') > 0 && hurt && !(player._kitT > 0) && player.maxHp - player.hp >= REPAIR_KIT_HP * 0.8 && !(_frameCount - (player._lastHitF ?? -1e9) < 600)) add('repair', 'it_repair', 'リペアキットで修理', '6秒かけて耐久+700 — 撃たれていない今のうちに/修理中は熱とEMが漏れる', () => _comUseItem('repair'), 1.6);
+    if (st('flash') > 0 && est && est.vis && Math.hypot(est.x - player.x, est.y - player.y) <= 2500) add('flash', 'cb_flash_strike', '閃光弾で目を焼く', '半径2500uの敵のセンサーを5秒焼く — 先制のチャンス/自分の位置が見える', () => _comUseItem('flash'), 0.8);
     const far = playerDrones.filter(d => d.hp > 0 && (d.type === 'attack' || d.type === 'mech' || d.type === 'scout') && Math.hypot(d.x - player.x, d.y - player.y) > 3500);
-    if (far.length && drOK('p', 'attack')) add('recall', 'dr_recall', 'ドローンを呼び戻す', '遠くのドローン' + far.length + '機を母艦へ — 通信が切れる前に/偵察は止まる', () => { for (const t of ['attack', 'mech', 'scout']) droneOrder(t, 'return', player.x, player.y); }, 0.7);
+    if (far.some(d => d._order?.kind !== 'return') && skillOn('p', 'dr_recall')) add('recall', 'dr_recall', 'ドローンを呼び戻す', '遠くのドローン' + far.length + '機を母艦へ — 通信が切れる前に/偵察は止まる', () => { for (const t of ['attack', 'mech', 'scout']) droneOrder(t, 'return', player.x, player.y); }, 0.7);
     // 戦略に応じた重み
     const sid = c.st && c.st.id, B = CAP_STRAT_BOOST[sid];
     if (B) for (const a of out) if (B[a.id]) { a.base *= B[a.id]; a.strat = true; }
@@ -23298,18 +23394,25 @@ const CAP_STRAT_BOOST = { screen: { ftr_strike: 1.9, scout_far: 1.7, ftr_escort:
 // 推定位置 (見えている相手 → 追跡中の信号 → 絞れている信号)。ドローンを送る・デコイを流す先
 function capEstPos(te) {
     if (te && te.hp > 0 && te.inVision) return { x: te.x, y: te.y, vis: true };
-    const pick = (sid) => { const sa = _signalAnalysis[sid]; if (!sa || !sa.fix) return null; const e = trackEstimate(sa, 0); return e && e.r < 4500 ? { x: e.x, y: e.y, vis: false } : null; };
+    const pick = (sid) => {
+        const sa = _signalAnalysis[sid];
+        if (!sa?.fix || !capSignalCredible(sid) || saAge(sa) > 1800) return null;
+        const e = trackEstimate(sa, 0);
+        return e && e.r < 4500 ? { x: e.x, y: e.y, vis: false } : null;
+    };
     if (lockedSignalId) { const r = pick(lockedSignalId); if (r) return r; }
     for (const sid in _signalAnalysis) { const r = pick(sid); if (r) return r; }
     return null;
 }
 function capPlayGate(c, P, fight, te) {
-    const A = capPlayList(c, P, te).filter(a => !fight || ['ftr_strike', 'ftr_escort', 'turret', 'decoy', 'noise', 'repair', 'flash', 'smoke', 'spray', 'recall'].includes(a.id));
-    const ranked = A.map(a => ({ a, sc: a.base * Math.pow(skillAff(P, a.skill), 1.2) * (0.75 + 0.5 * Math.random()) })).sort((x, y) => y.sc - x.sc).slice(0, 4).map(x => x.a);
-    if (ranked.length < 2) return null;
-    const opts = ranked.map(a => ({ id: a.id, label: a.label, sub: a.sub })); opts.push({ id: '_none', label: '何もしない', sub: '今は静かに進む' });
+    const key = fight ? 'playf' : 'play';
+    const A = capPlayList(c, P, te).filter(a => skillOn('p', a.skill) && autoPlayTravelOK(a, c.st?.id) && (!fight || AUTO_FIGHT_IDS.includes(a.id)));
+    const scores = new Map(A.map(a => [a.id, a.base * Math.pow(skillAff(P, a.skill), 1.2) * (0.75 + 0.5 * Math.random())]));
+    const ranked = capRankSkills(A, key, 2, 4, a => a.skill, a => scores.get(a.id));
+    if (!ranked.length) return null;
+    const opts = ranked.map(a => ({ id: a.id, skill: a.skill, label: a.label, sub: a.sub })); opts.push({ id: '_none', label: '何もしない', sub: '今は静かに進む' });
     const sj = c.st && STRAT_REG[c.st.id] ? '方針「' + STRAT_REG[c.st.id].jp + '」の最中 — ' : '';
-    const cg = capAsk(fight ? 'playf' : 'play', { title: fight ? '交戦中の一手' : 'いま打てる一手', sit: sj + _capVoice(P, ranked[0].label) + (fight ? '。相手が見えている — ドローン・アイテムを使う？' : '。静かな間に仕掛ける？'), opts, rec: ranked[0].id }, fight ? 99999 : 10800);
+    const cg = capAsk(key, { title: fight ? '交戦中の一手' : 'いま打てる一手', sit: sj + _capVoice(P, ranked[0].label) + (fight ? '。相手が見えている — ドローン・アイテムを使う？' : '。静かな間に仕掛ける？'), opts, rec: ranked[0].id, validIds: [...A.map(a => a.id), '_none'] }, fight ? 99999 : 10800);
     if (!cg || cg.wait) return cg;
     if (cg.id === '_none') return { none: true };
     const act = A.find(a => a.id === cg.id); return act ? { act } : { none: true };
@@ -23329,16 +23432,16 @@ function capStrikeGate(c, H, est, D, hc) {
     const opts = [
         { id: 'fire', label: _WPN_JP[H.w] + 'で撃つ', sub: '命中見込み ' + _pct(hc) + ' / 威力 ' + dmg + ' — 気付かれていなければ奇襲 (威力×' + (H.w === 'beam' ? '1.5' : '3.5') + ')。外せば位置が割れる' },
         { id: 'refine', label: '絞って待つ', sub: '25秒撃たない — 推定が絞れれば見込みが上がる/動かれると外れやすくなる・見つかる危険' }];
-    return capAsk('strike', { title: '仕掛ける瞬間', sit: '相手の推定 ' + Math.round(D / 100) * 100 + 'u (幅±' + Math.round(est.r / 50) * 50 + 'u)。射程に入った — 今が一撃の機会', opts, rec: 'fire' }, 900);
+    return capAsk('strike', { title: '仕掛ける瞬間', context: H, sit: '相手の推定 ' + Math.round(D / 100) * 100 + 'u (幅±' + Math.round(est.r / 50) * 50 + 'u)。射程に入った — 今が一撃の機会', opts, rec: 'fire' }, 900);
 }
 // 迫るミサイル: 避けるか・逸らすか・受けるか (どれも代償がある)
 function capMissileGate(c, r, now) {
     const stock = (k) => (cargo.stock && cargo.stock[k]) || 0;
-    const msl = projectiles.filter(q => q.active && q.type === 'missile' && !q.isPlayer).sort((a, b) => Math.hypot(a.x - player.x, a.y - player.y) - Math.hypot(b.x - player.x, b.y - player.y))[0];
+    const msl = incomingMissile(player, false);
     const eta = msl ? Math.round(Math.hypot(msl.x - player.x, msl.y - player.y) / ((Math.hypot(msl.vx || 0, msl.vy || 0) || 6) * 60) * 10) / 10 : null;
     const opts = [{ id: 'evade', label: '横へ回避', sub: '直角に舵を切る — 避けられれば無傷。速度が落ちると当たる' }];
     if (stock('decoy') > 0) opts.push({ id: 'decoy', label: 'デコイで逸らす', sub: '熱源を放つ — 外れやすいが信号が増える' });
-    if (stock('flash') > 0) opts.push({ id: 'flash', label: '閃光弾', sub: 'ミサイルの誘導を切る (2500u) — 敵のセンサーも焼く/自分の位置が見える' });
+    if (stock('flash') > 0 && msl && Math.hypot(msl.x - player.x, msl.y - player.y) <= 2500) opts.push({ id: 'flash', label: '閃光弾', sub: 'ミサイルの誘導を切る (2500u) — 敵のセンサーも焼く/自分の位置が見える' });
     if (!(boostCD > 0)) opts.push({ id: 'boost', label: '緊急噴射', sub: '速度×2を数秒 — 振り切れるが機関が過熱し熱が最大' });
     opts.push({ id: 'brace', label: '針路を保つ', sub: '被弾 約' + MISSILE_DMG + ' を受けて信号を出さない — 迎撃・装甲に賭ける' });
     const rec = r.act.label === 'デコイ' && stock('decoy') > 0 ? 'decoy' : 'evade';
@@ -23348,7 +23451,7 @@ function capRetreatGate(c, hpF, retreat) {
     const opts = [
         { id: 'retreat', label: '離脱する', sub: '隠れ場所へ・修理。追撃されるリスク/相手に主導権を渡す' },
         { id: 'stand', label: '踏みとどまる', sub: '40秒は退かず撃ち合う — 相手を沈めれば勝ち。次の被弾で沈むかもしれない' }];
-    return capAsk('retreat', { title: '船体が危険域', sit: '耐久 ' + _pct(hpF) + ' (' + Math.round(player.hp) + ') — 退き際 ' + _pct(retreat) + ' を割った', opts, rec: 'retreat' }, 5400);
+    return capAsk('retreat', { title: '船体が危険域', urgent: !!comEngaged(), sit: '耐久 ' + _pct(hpF) + ' (' + Math.round(player.hp) + ') — 退き際 ' + _pct(retreat) + ' を割った', opts, rec: 'retreat' }, 5400);
 }
 // 第192弾: 序盤の「何を探す？」(敵艦 / アイテム=部品 / コロニー・ノード)。選んだ内容は AI の既存の機構 (c.item・索敵行) にそのまま渡すだけ
 var _capSeekUntil = 0;
@@ -23376,11 +23479,12 @@ function capSearchApply(c, id) {
 }
 // 第192弾: 追跡 (ロックオン) する信号の選択 — 候補が複数ある時、AIの推奨を添えて尋ねる
 function capLockGate(c, P, cands, best, sigs) {
-    const L = cands.slice(0, 3);
+    const L = cands.filter(x => capSignalCredible(x.sid) && saAge(_signalAnalysis[x.sid]) <= 1800).slice(0, 3);
     if (L.length < 2) return null;
+    if (!L.some(x => x.sid === best)) best = L[0].sid;
     const opts = L.map(x => { const d = identInfo(x.sid), b = sigs[x.sid], est = _signalAnalysis[x.sid] && _signalAnalysis[x.sid].fix ? trackEstimate(_signalAnalysis[x.sid], 0) : null;
         return { id: x.sid, label: 'SIG-' + sigNo(x.sid) + ' を追跡', sub: (d.known ? '艦影の見込み ' + Math.round(d.p * 100) + '%' : '正体不明') + (est ? ' / 推定 ' + Math.round(Math.hypot(est.x - player.x, est.y - player.y) / 100) * 100 + 'u (±' + Math.round(est.r / 50) * 50 + 'u)' : ' / 方位のみ') + (b && b.relay ? ' / 聴音局の方位' : '') }; });
-    return capAsk('lock', { title: '追跡する信号', sit: '受信している信号が ' + cands.length + ' つ。' + _capVoice(P, 'SIG-' + sigNo(best) + ' を追う') + '。', opts, rec: best }, 900);
+    return capAsk('lock', { title: '追跡する信号', sit: '艦影らしい候補が ' + L.length + ' つ。' + _capVoice(P, 'SIG-' + sigNo(best) + ' を追う') + '。', opts, rec: best }, 900);
 }
 // 第187弾: QTE (AI操艦) 中の手動操艦 — プレイヤーが移動を命じたら、到着するか30秒たつか「AIに任せる」まで、AIは航路を引かない (撃つ・使う・QTEの判断は続く)
 var _capManualUntil = 0; const CAP_MANUAL_FRAMES = 1800;
@@ -23673,7 +23777,7 @@ function _comPilotStep0() {
         const sac = _signalAnalysis[lockedSignalId], estc = sac && sac.fix ? trackEstimate(sac, 0) : null, loc = sac && sac.obs.length ? sac.obs[sac.obs.length - 1] : null;
         const angc = estc ? Math.atan2(estc.y - player.y, estc.x - player.x) : loc ? loc.ang : null;
         if (angc !== null) {
-            const cg = capContactGate(c, P, D, angc, estc);
+            const cg = capContactGate(c, P, lockedSignalId, angc, estc);
             if (cg && cg.wait) return;
             if (cg && cg.id === 'hold') { c.capHoldUntil = now + 2400; comThinkEvent('p', '艦長の判断: 息を潜めて待つ (40秒)'); return; }
             if (cg && cg.id === 'avoid') { const tp = clampToMapCircle(player.x - Math.cos(angc) * 5000, player.y - Math.sin(angc) * 5000, 1500); player.setTarget(tp.x, tp.y); _comSteered(c, 'free'); c.legF = now; c.capAvoidUntil = now + 2400; setStance('cruise', true); comThinkEvent('p', '艦長の判断: 距離を取る'); return; }
@@ -24320,7 +24424,7 @@ function startComDemo() {
     saveComCfg();
     document.getElementById('com-overlay').classList.add('hidden');
     comDemo = true;
-    capMode = !!comCfg.cap; _capSeekUntil = 0; _capPlanLast = -1e9; _syncQteBtn(); _capDec = null; _capRes = {}; _capLast = {}; _capStats = { asked: 0, auto: 0 }; _com = null; _capSavedSpeed = null; _capSaveF = -1e9; _capWatchCDUntil = -1e9; _capSlowOff = false; // 第227弾: 倍速の保存・再低下抑制・超スロー解除も試合ごとに消す
+    capMode = !!comCfg.cap; _capSeekUntil = 0; _capPlanLast = -1e9; _syncQteBtn(); _capDec = null; _capRes = {}; _capLast = {}; _capStats = { asked: 0, auto: 0 }; _com = null; _capOffered.clear(); _capKick = false;
     { const b = document.getElementById('cap-dec'); if (b) b.classList.remove('on'); }
     document.body.classList.add('com-demo');
     document.querySelectorAll('.enemy-select-btn').forEach(b => b.classList.toggle('active', b.dataset.type === comCfg.enemy));
@@ -24926,18 +25030,19 @@ function gameLoop() {
         if (_hitStop > 0) _hitStop--;
         else if (!gamePaused && !userPaused && !_uiPause && !_orientPaused && !_draft) { // 第32弾: 部品を選んでいる間は止める
             // 第22弾: 倍速 = 1フレームにn回ロジックを進める。重くてフレームが詰まる時は打ち切る (固まらない)
-            _speedAcc += (_capDec && !_capSlowOff) ? CAP_SLOW : gameSpeed; // 第182弾: 艦長の判断を待つ間は超スロー (第227弾: 表示中に人が倍速を変えたら超スローを解いて即時に効かせる)
             const t0 = performance.now();
             if (_capDec) capTick(Math.min(0.1, (t0 - (_capLastT || t0)) / 1000));
             _capLastT = t0;
+            const speed = capEffectiveSpeed();
+            _speedAcc += speed;
             let n = 0;
             while (_speedAcc >= 1) {
                 stepWorld(); _speedAcc -= 1; n++;
+                if (capEffectiveSpeed() < speed) { _speedAcc = 0; break; }
                 if (n >= 1 && performance.now() - t0 > 24) { _speedAcc = 0; break; }
                 if (!player || player.hp <= 0 || gamePaused) { _speedAcc = 0; break; }
             }
         }
-        if (_capSavedSpeed !== null) capSpeedRestore(); // 第227弾: 接敵で強制低下した倍速の自動復帰
         renderWorld();
         if ((_rcTick = (_rcTick + 1) & 15) === 0) updateRecenterChip(); // 第72弾: 一時停止中でも更新する
     } catch (err) {
@@ -25639,9 +25744,10 @@ function buyUpgrade(type) {
 });
 
 // ── ゲームスピードトグル ──────────────────────────────────────
-function setGameSpeed(v, forced) { // 第227弾: forced=true は接敵ウォッチの強制低下と自動復帰 (人の操作ではない)
+function setGameSpeed(v) {
     gameSpeed = GAME_SPEEDS.indexOf(v) >= 0 ? v : 1; _speedAcc = 0; _gameSpeedChanged();
-    if (!forced) { _capSavedSpeed = null; if (_capDec) _capSlowOff = true; } // 第227弾: 人の変更が正 — 自動復帰の保存は破棄する。選択肢の表示中なら超スローを解いて即時に効かせる
+    capSetSlow(false);
+    syncSpeedPicker();
     const lb = gameSpeed === 0.5 ? '0.5x' : gameSpeed + 'x';
     const sp = document.querySelector('#btn-game-speed span'); // ラベルだけ (旧: textContent で丸ごと置換しアイコンが消えていた)
     if (sp) sp.textContent = 'SPD:' + lb;
@@ -25649,11 +25755,45 @@ function setGameSpeed(v, forced) { // 第227弾: forced=true は接敵ウォッ�
     if (fx) { fx.textContent = lb; fx.classList.toggle('on', gameSpeed !== 1); }
     logMessage('SYSTEM: ゲームスピード ' + lb + (gameSpeed > 1 ? ' (重い時は自動で抑える)' : ''), 'system-msg');
 }
-function cycleGameSpeed() { setGameSpeed(GAME_SPEEDS[(GAME_SPEEDS.indexOf(gameSpeed) + 1) % GAME_SPEEDS.length]); }
-document.getElementById('btn-speed-fixed')?.addEventListener('click', cycleGameSpeed);
-document.getElementById('btn-game-speed')?.addEventListener('click', () => {
-    setGameSpeed(GAME_SPEEDS[(GAME_SPEEDS.indexOf(gameSpeed) + 1) % GAME_SPEEDS.length]); // 1→2→4→8→0.5→1
-});
+const speedPicker = document.getElementById('speed-picker');
+const speedButtons = ['btn-speed-fixed', 'btn-game-speed'].map(id => document.getElementById(id)).filter(Boolean);
+let speedAnchor = null;
+function syncSpeedPicker() {
+    speedPicker?.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(Number(b.value) === gameSpeed)));
+}
+function closeSpeedPicker() {
+    if (!speedAnchor) return;
+    speedAnchor.setAttribute('aria-expanded', 'false');
+    speedAnchor = null;
+    speedPicker.hidden = true;
+}
+if (speedPicker) {
+    for (const speed of [...GAME_SPEEDS].sort((a, b) => a - b)) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.value = speed; b.textContent = speed + '×';
+        b.onclick = () => { const anchor = speedAnchor; setGameSpeed(speed); closeSpeedPicker(); anchor?.focus(); };
+        speedPicker.appendChild(b);
+    }
+    for (const trigger of speedButtons) trigger.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const toggled = speedAnchor === trigger;
+        closeSpeedPicker();
+        if (toggled) return;
+        speedAnchor = trigger;
+        trigger.setAttribute('aria-expanded', 'true');
+        speedPicker.hidden = false;
+        syncSpeedPicker();
+        const r = trigger.getBoundingClientRect();
+        const left = Math.max(8, Math.min(r.left, innerWidth - speedPicker.offsetWidth - 8));
+        speedPicker.style.left = left + 'px';
+        speedPicker.style.top = (r.top > innerHeight / 2 ? r.top - speedPicker.offsetHeight - 8 : r.bottom + 8) + 'px';
+        speedPicker.querySelector('[aria-pressed="true"]')?.focus();
+    });
+    document.getElementById('btn-speed-max')?.addEventListener('click', (ev) => { ev.stopPropagation(); closeSpeedPicker(); setGameSpeed(20); });
+    document.addEventListener('click', ev => { if (!speedPicker.contains(ev.target)) closeSpeedPicker(); });
+    document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && speedAnchor) { const anchor = speedAnchor; closeSpeedPicker(); anchor.focus(); ev.stopImmediatePropagation(); } }, true);
+    window.addEventListener('resize', closeSpeedPicker);
+}
 // ─────────────────────────────────────────────────────────────
 
 // ═══ 第156弾: 人の操作の記録 ═══

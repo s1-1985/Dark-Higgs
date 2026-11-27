@@ -14,7 +14,7 @@
     <link rel="manifest" href="manifest.webmanifest?v=165">
     <meta name="theme-color" content="#020a06">
     <!-- ?v= は game.js/style.css を変更するたびに必ず更新する (キャッシュバスティング) -->
-    <link rel="stylesheet" href="style.css?v=20261127a246">
+    <link rel="stylesheet" href="style.css?v=20261127c246">
     <link
         href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&family=Inter:wght@300;400;600&display=swap"
         rel="stylesheet">
@@ -323,8 +323,8 @@
                     <i class="ico" style="--ico:url(assets/icons/icon_repair.png)"></i>
                     <span id="repair-drone-label">REGEN</span>
                 </button>
-                <!-- ゲームスピードトグル (戦闘時スロー・移動時ファスト) -->
-                <button class="act-icon-btn common-btn" id="btn-game-speed" title="ゲームスピード切替: 1x→2x→4x→8x→0.5x" style="border-color:#aaffcc;color:#ccffee;">
+                <!-- ゲームスピード選択 -->
+                <button class="act-icon-btn common-btn" id="btn-game-speed" title="倍速を選ぶ" aria-controls="speed-picker" aria-expanded="false" style="border-color:#aaffcc;color:#ccffee;">
                     <i class="ico" style="--ico:url(assets/icons/icon_speed.png)"></i>
                     <span>SPD:1x</span>
                 </button>
@@ -353,12 +353,13 @@
             <div id="zoom-ctl">
                 <!-- 第72弾 (オーナー): 普段は丸いボタン1個だけ。タップすると4つが縦に展開し、別の所をタップするまで開いたまま -->
                 <div id="zoom-stack">
-                    <button id="btn-speed-fixed" title="倍速 — 1x→2x→4x→8x→15x→20x→0.5x (1フレームにn回進める・シグネチャは変わらない。重い端末では自動で抑える)">1x</button>
+                    <button id="btn-speed-fixed" title="倍速を選ぶ" aria-controls="speed-picker" aria-expanded="false">1x</button>
                     <button id="btn-pause" title="一時停止 (P) — 止めている間も地図を見て指示を出せる">Ⅱ</button>
                     <button id="zoom-in" onclick="zoomStep(1.6)" title="拡大 (+)">＋</button>
                     <button id="zoom-out" onclick="zoomStep(1 / 1.6)" title="縮小 (−)">－</button>
                 </div>
                 <div id="zoom-row">
+                    <button id="btn-speed-max" title="20倍速に切り替える">20×</button>
                     <!-- 第167弾 (オーナー): 受信中でロックできる信号の一覧 — AIの評価・解析の進み・タップでロック -->
                     <button id="btn-siglist" title="受信中の信号の一覧 (タップでロック)"><i class="ico" style="--ico:url(assets/icons/icon_siglist.png)"></i><small id="siglist-n"></small></button>
                     <button id="zoom-fab" title="倍速・一時停止・拡大縮小 (タップで開く)"><i class="ico" id="zoom-fab-ico" style="--ico:url(assets/icons/icon_speed.png)"></i><small id="zoom-fab-sub"></small></button>
@@ -912,7 +913,9 @@
         });
     })();
     </script>
-    <script src="game.js?v=20261127a246"></script>
+    <div id="speed-picker" role="group" aria-label="倍速を選ぶ" hidden></div>
+    <script src="sprite-stack.js?v=20261127c246"></script>
+    <script src="game.js?v=20261127c246"></script>
     <script>
     // アイコンボタン ↔ hidden select の同期
     function setupIconSelect(groupId, selectId) {
