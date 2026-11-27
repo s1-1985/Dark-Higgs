@@ -18,7 +18,7 @@ const model = new Function(`
     const _frameCount = 1200;
     const lockedSignalId = 'e-1';
     const comThinkEvent = () => {};
-    ${fragment('const OPP_CLS =', '// 帯域比率 → エンジン仮説')}
+    ${fragment('const OPP_CLS =', '// 推進機関の検証に使う帯域傾向。')}
     ${fragment('const OPP_DRONE_CLS =', '// 瞬時行動推定 (predictedBehavior)')}
     ${fragment('function _oppView(', '// 収集型仮説の強さ')}
     return { _oppNew, _oppAddM, _oppDrone, _oppView, _oppRead, oppDroneSeenE, oppDroneSeenP, oppRecP };
