@@ -15,6 +15,7 @@ const test = new Function(`
     const THEORY = {ship: {hpBase: {assault: 3500, stealth: 700, carrier: 2500}}};
     const ENEMY_CLASS = {destroyer: 'assault', corvette: 'stealth', carrier: 'carrier'};
     const gameState = {shipType: 'stealth'};
+    const enemies = [];
     const player = {x: 0, y: 0}, _signalAnalysis = { 'e-1': {fix: {}} };
     const saAge = () => _frameCount - 9000, trackEstimate = () => ({x: 100, y: 200});
     const BANDS = ['heat', 'optic', 'em', 'higgs'];
@@ -27,11 +28,15 @@ const test = new Function(`
     ${fragment('const OPP_CLS =', '// 自機側の発射観測 (被弾・ビーム軌跡の経路から)')}
     ${fragment('function _oppNeg(rec)', '// 収集型仮説の強さ')}
     ${fragment('function sitOdds(S)', 'var SIT_HOLD =')}
+    ${fragment('function repairProtected(', 'function tacticFit(')}
+    const branchOf = P => P;
+    ${fragment('function branchWeight(', 'function branchOfShip(')}
     ${fragment('function huntApproach(HA, H, X)', '    const sp = X.plan(est, H.force);')}
     }
     ${fragment('function comDatumNote(c, te, lk)', 'function comWantsPress')}
     return { comDatumNote, expireComDatum, _oppNew, _oppBandObs, _oppView, _oppRead, _oppFire, _oppNeg, oppWakeE,
         observeHullDamageP, observeHullDamageE, _oppHullEstimate, oppRecP, sitOdds, huntApproach,
+        observeRestockP, observeRestockE, enemies, strategyReview, branchWeight,
         advance: frames => { _frameCount += frames; } };
 `)();
 
@@ -69,6 +74,61 @@ test._oppFire(opponent, 'missile');
 assert.equal(opponent.ammo, 0.95);
 test._oppFire(opponent, 'kinetic');
 assert(Math.abs(opponent.ammo - 0.92) < 1e-9);
+
+const lastAmmoEvidence = opponent.ammoF;
+test.advance(5400);
+assert(Math.abs(test._oppView(opponent).ammo - 0.92) < 1e-9);
+test._oppFire(opponent, 'beam');
+test.advance(10800);
+assert.equal(opponent.ammoF, lastAmmoEvidence);
+assert(Math.abs(test._oppView(opponent).ammo - 0.96) < 1e-9);
+
+const aRec = test.oppRecP('e-1'), sRec = test.oppRecP('e-2');
+test._oppFire(aRec, 'missile');
+test._oppFire(sRec, 'missile');
+test.observeRestockP(assault, true);
+assert.equal(aRec.ammo, 0.95);
+assault.inVision = true;
+test.observeRestockP(assault, false);
+assert.equal(aRec.ammo, 0.95);
+test.observeRestockP(assault, true);
+assert.equal(aRec.ammo, 1);
+assert(aRec.restockF >= 0);
+assert.equal(sRec.ammo, 0.95);
+observer.hp = 1;
+test.enemies.push(observer);
+test._oppFire(observer._B.opp, 'missile');
+test.observeRestockE(true);
+assert.equal(observer._B.opp.ammo, 0.95); // 目視ロックの余韻では補給を確認できない
+observer._sawPlayerF = observer._B.opp.ammoF;
+test.observeRestockE(true);
+assert.equal(observer._B.opp.ammo, 1);
+assert.equal(observer._B.opp.restockF, observer._sawPlayerF);
+
+const plan = {id:'ambush', ph:'wait', t0:0};
+const expansion = {id:'expand', t0:1800};
+const recovery = {id:'recover', hullRecovery:'active'};
+const outlook = {paths:{hack:true, hackProg:0.5}};
+const win = {aim:'hack'};
+assert.match(test.strategyReview(plan, expansion, outlook, win, false, 3600), /コロニー制圧/);
+assert.equal(test.strategyReview(plan, expansion, outlook, win, false, 3599), null);
+assert.equal(test.strategyReview(plan, {...expansion, t0:1801}, outlook, win, false, 3600), null);
+assert.equal(test.strategyReview(plan, expansion, outlook, {aim:'sink'}, false, 3600), null);
+assert.equal(test.strategyReview({...plan, cap:true}, expansion, outlook, win, false, 3600), null);
+assert.equal(test.strategyReview(plan, expansion, outlook, win, true, 3600), null);
+assert.match(test.strategyReview({id:'screen'}, recovery, null, null, false, 100), /耐久を回復/);
+assert.equal(test.strategyReview({id:'screen'}, {id:'recover'}, null, null, false, 100), null);
+assert.equal(test.strategyReview({id:'restock'}, recovery, null, null, false, 100), null);
+assert.equal(test.strategyReview({id:'screen'}, recovery, null, null, true, 100), null);
+
+const branch = {traits:[{id:'hunter', v:1}, {id:'commander', v:0.75}],
+    byTrait:{hunter:['hu_shadow', 'st_ambush', 'hu_stalk'], commander:['hu_screen']}};
+assert.deepEqual(test.branchWeight(branch, 'hu_', {shadow:2, stalk:1, screen:1, lure:0}),
+    {shadow:2.12, stalk:1.06, screen:1, lure:0});
+assert.deepEqual(test.branchWeight(branch, 'st_', {ambush:1, push:1, trap:0}),
+    {ambush:1.06, push:1, trap:0});
+assert.deepEqual(test.branchWeight(branch, 'hu_', {shadow:1, stalk:0}), {shadow:1, stalk:0});
+assert(test.branchWeight(branch, 'hu_', {shadow:0, screen:1, lure:1}).screen > 1);
 
 const audio = test._oppNew();
 test._oppBandObs(audio, {heat: 2, em: 1}, 1, ['heat', 'em']);
