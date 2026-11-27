@@ -3386,3 +3386,10 @@ body.in-game #action-popover .act-icon-btn span { font-family: Orbitron, sans-se
 .esc-ship { grid-column: 2; grid-row: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #7fffd4; font-size: 11px; }
 .esc-ship i { font-style: normal; font-size: 26px; display: inline-block; color: #5dff9a; }
 .com-scn { display: block; font-style: normal; font-size: 10px; color: #8fd8ff; margin-top: 2px; }
+
+/* Experimental renderer: the original canvas retains pointer input and screen-space HUD. */
+#gameCanvas3D { position:absolute; inset:0; width:100%; height:100%; z-index:0; pointer-events:none; display:none; }
+.view3d-active #gameCanvas { background:transparent; }
+#minimapCanvas { touch-action:none; cursor:pointer; }
+#minimapCanvas:focus-visible { outline:2px solid #8ef4cb; outline-offset:3px; }
+#view3d-label { position:absolute; bottom:6px; left:0; right:0; text-align:center; font-size:10px; line-height:1.2; color:#b7f7dc; background:rgba(0,15,12,.8); pointer-events:none; }
