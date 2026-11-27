@@ -3235,10 +3235,12 @@ body.in-game #action-popover .act-icon-btn span { font-family: Orbitron, sans-se
 .mode-label, .mode-select .mode-label { letter-spacing: 3px; font-family: Orbitron, sans-serif; }
 
 /* 第182弾: AI操艦モード — 艦長の判断 (結果に効く場面だけ・超スロー+制限時間) */
-/* 第247弾 (オーナー「右下の丸ボタンの展開パネルとQTEダイアログが被る」): 旧は left:50%+transform で画面の真ん中に
-   固定幅(640px)で出しており、画面が狭いとズームボタン(右下)に重なっていた → 左右のHUD余白(--hud-left/--hud-right)の
-   内側に収まる帯(右は zoom-ctl の分だけ広く空ける)に幅を合わせ、その中で中央寄せする。常に zoom-ctl と重ならない */
-#cap-dec { position: fixed; left: calc(var(--hud-left) + 8px); right: calc(var(--hud-right) + 60px); margin: 0 auto; bottom: 74px; transform: translateY(14px); z-index: 60; width: auto; max-width: 640px; padding: 10px 12px 8px; display: none; pointer-events: auto;
+/* 第247弾改め第248弾 (オーナー「詰めすぎ。倍速ボタンの展開と被らなければいいだけ・赤枠くらいの広さでいい」):
+   第247弾は右マージンを zoom-ctl の実測幅ぶん(+160px相当)広く取りすぎて狭くなりすぎた → HUD本体の余白
+   (--hud-left/--hud-right) だけを避ける元の広さに戻し、z-index(cap-dec=60 > zoom-ctl=22)で
+   「展開パネルと高さが重なっても手前に表示される」方に任せる(cap-decはbottom:74pxでzoom-ctlの常時表示の
+   行(bottom:10px)より上にあり、展開して縦に伸びた時だけ重なりうるが、その時はこのz-indexで隠れない) */
+#cap-dec { position: fixed; left: calc(var(--hud-left) + 8px); right: calc(var(--hud-right) + 8px); margin: 0 auto; bottom: 74px; transform: translateY(14px); z-index: 60; width: auto; max-width: 640px; padding: 10px 12px 8px; display: none; pointer-events: auto;
     background: linear-gradient(180deg, rgba(8,22,30,0.93), rgba(2,8,12,0.95)); box-shadow: inset 0 0 0 1px rgba(255,190,80,0.55), 0 0 28px rgba(255,170,40,0.18);
     clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px); font-family: 'Share Tech Mono', monospace; color: #cfeee6; }
 #cap-dec.on { max-height: calc(100dvh - 90px); overflow-y: auto; overscroll-behavior: contain; display: block; animation: capIn .18s ease-out forwards; }

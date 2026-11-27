@@ -23036,11 +23036,9 @@ function capOpen(key, spec) {
     box.classList.add('on');
     box.querySelectorAll('.cap-opt').forEach(b => b.addEventListener('click', (ev) => { ev.stopPropagation(); capChoose(b.dataset.id, false); }));
     sfxUI('ui_panel_open');
-    // 第247弾 (オーナー「QTEダイアログと右下の丸ボタンの展開パネルが被る」): CSS の --hud-right 頼りの計算は
-    //   #zoom-ctl が position:absolute (祖先次第でズレうる) なので、開く瞬間の実際の画面位置から直接 right を決め直す
-    //   (zoom-ctl の左端のすぐ左で止める。展開(.open)していても #zoom-row の幅までしか広がらないので毎回これで足りる)
-    const zc = document.getElementById('zoom-ctl');
-    if (zc) { const r = zc.getBoundingClientRect(); if (r.width > 0) box.style.right = Math.max(8, innerWidth - r.left + 12) + 'px'; }
+    // 第248弾: 右マージンを zoom-ctl の実測位置に合わせて動的に狭める処理は撤去 (第247弾で広すぎる余白を取ってしまった原因)。
+    //   CSS の固定余白(--hud-right+8px)と z-index(cap-dec=60 > zoom-ctl=22)だけに任せる
+    box.style.right = '';
 }
 // ═══ 第200弾 (オーナー「ゴーストを認識した段階で ミニマップの右に緊急離脱ボタン。押すとQTEと同じスロー・7秒で8方向から逃げる方角を選ぶ。向いている向きの逆ほど時間がかかる」) ═══
 var _escGo = null, _escBtn = null, _escConfirmBox = null;
