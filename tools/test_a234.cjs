@@ -43,4 +43,22 @@ for (const side of ['p', 'e']) {
  eq(sim.step({}, side, 12479).hullRecovery, 'active');
  eq(sim.step({}, side, 12480).hullRecovery, 'available');
 }
+// 実際の自機COMの事実層から、修理中フラグと耐久の不足量を取得できる。
+const playerFacts = new Function(`
+ const _frameCount = 12000, gameState = {shipType: 'assault'};
+ const SHIP_DRONES = {assault: ['repair']}, cargo = {stock: {repair: 1}};
+ const player = {x: 0, y: 0, hp: 200, maxHp: 1000, _kitT: 0};
+ const enemies = [], THREATS = [], playerHitLog = [], HIDE_STRATS = {};
+ const lockedSignalId = null, playerExposureLevel = 0, lullPhase = 'none', surgePhase = 'none';
+ const getHiggsIntensity = () => 0, ammoOutOf = () => false, statusDazed = () => false;
+ ${fragment(source.after, 'function itemFactsP(', 'function itemFactsE(')}
+ return (kitTimer) => {
+  player._kitT = kitTimer;
+  return itemFactsP({mode: 'free'}, {}, player.hp / player.maxHp);
+ };
+`)();
+eq(playerFacts(0).kit, false);
+eq(playerFacts(360).kit, true);
+eq(playerFacts(360).missing, 800);
+eq(playerFacts(360).n('repair'), 1);
 console.log('A234 stage assertions:',checks,'PASS; baseline',JSON.stringify(before().step()),'candidate',JSON.stringify(a));
