@@ -2519,9 +2519,12 @@ body.in-game.com-demo.think-on #think-panel.wide { max-height: 62%; }
     .com-box .brief-lead { display: none; }
     .com-box { padding-top: 10px; padding-bottom: 6px; }
 }
-/* 倍速の選択と20倍速のショートカット */
-body.in-game #zoom-ctl :is(#btn-speed-fixed, #btn-speed-max) { font-size: 12px; font-weight: bold; font-family: Orbitron, sans-serif; }
+/* 倍速の選択 */
+body.in-game #zoom-ctl #btn-speed-fixed { font-size: 12px; font-weight: bold; font-family: Orbitron, sans-serif; }
 body.in-game #zoom-ctl #btn-speed-fixed.on { background: rgba(80,60,0,0.85); color: #ffe08a; border-color: #ffcc55; }
+/* 第247弾: 常時表示の一時停止ボタン (旧 btn-speed-max=20倍速ショートカットを置換) — #zoom-stack 内の #btn-pause と見た目・状態を揃える */
+body.in-game #zoom-ctl #btn-pause-fixed { width: 44px; height: 44px; font-size: 18px; font-weight: bold; }
+body.in-game #zoom-ctl #btn-pause-fixed.on { background: rgba(80,60,0,0.85); color: #ffe08a; border-color: #ffcc55; }
 
 /* ═══ 第32弾: 部品 (ドラフト・一覧・上帯のチップ) ═══ */
 .service-card.hidden { display: none !important; }
@@ -2747,8 +2750,13 @@ body.in-game #status-strip {
 #xh-list .xh-t { flex-shrink: 0; width: 44px; color: #5fb8a2; font-family: 'Orbitron', monospace; font-size: 9px; padding-top: 2px; }
 #xh-list .xh-row.bad { color: #ff9a8a; } #xh-list .xh-row.go { color: #ffe08a; } #xh-list .xh-row.good { color: #7dffc4; } #xh-list .xh-row.warning-msg { color: #ffc070; }
 /* 右下: 丸いボタン1個 → タップで 倍速・停止・拡大・縮小 が縦に展開 (別の所をタップするまで開いたまま) */
-body.in-game #zoom-ctl { flex-direction: column; align-items: center; gap: 6px; }
+/* 第247弾 (オーナー「展開パネルが少し左にズレる・元の丸ボタンの真上に出して」): #zoom-row は flex-end で右に寄るが
+   #zoom-ctl 自体は center のままだったため、#zoom-stack (単列) は zoom-fab の真上でなく #zoom-ctl 全体の中央 (= zoom-row の
+   中の btn-siglist あたり) に出ていた → #zoom-ctl も flex-end にして両者の右端を揃え、#zoom-stack のボタン幅を zoom-fab と
+   同じ44pxにして中心も一致させる */
+body.in-game #zoom-ctl { flex-direction: column; align-items: flex-end; gap: 6px; }
 body.in-game #zoom-ctl #zoom-stack { display: none; flex-direction: column; gap: 6px; }
+body.in-game #zoom-ctl #zoom-stack button { width: 44px; height: 44px; }
 body.in-game #zoom-ctl.open #zoom-stack { display: flex; }
 body.in-game #zoom-ctl #zoom-fab { width: 44px; height: 44px; font-size: 18px; position: relative; background: rgba(0,32,26,0.85); border-color: rgba(0,255,170,0.7); box-shadow: 0 0 10px rgba(0,255,170,0.25); }
 body.in-game #zoom-ctl #zoom-fab small { position: absolute; bottom: 2px; left: 0; right: 0; font-size: 8px; line-height: 1; color: #ffe08a; font-family: Orbitron, sans-serif; }
@@ -2890,7 +2898,7 @@ body.play-replay #hud-right { pointer-events: none; opacity: 1; }
 body.prp-epov #hud-left, body.prp-epov #status-strip, body.prp-epov #hud-top { box-shadow: inset 0 0 0 1px rgba(255,90,90,0.35); }
 body.play-replay #band-tuner, body.play-replay #ss-cp { pointer-events: none; }
 body.prp-epov #combat-bar, body.prp-epov #recenter-chip { display: none !important; }
-body.play-replay #btn-speed-max { display: none; }
+/* 第247弾: 一時停止は再生中も使えるので隠さない (旧 btn-speed-max だけ非表示にしていた) */
 body.play-replay #zoom-ctl #zoom-stack { flex-wrap: wrap-reverse; max-height: calc(100vh - var(--hud-top) - 80px); align-content: flex-end; flex-direction: column; }
 
 /* ═══ 第90弾 ═══ */
@@ -3227,11 +3235,14 @@ body.in-game #action-popover .act-icon-btn span { font-family: Orbitron, sans-se
 .mode-label, .mode-select .mode-label { letter-spacing: 3px; font-family: Orbitron, sans-serif; }
 
 /* 第182弾: AI操艦モード — 艦長の判断 (結果に効く場面だけ・超スロー+制限時間) */
-#cap-dec { position: fixed; left: 50%; bottom: 74px; transform: translateX(-50%) translateY(14px); z-index: 60; width: min(640px, calc(100vw - 32px)); padding: 10px 12px 8px; display: none; pointer-events: auto;
+/* 第247弾 (オーナー「右下の丸ボタンの展開パネルとQTEダイアログが被る」): 旧は left:50%+transform で画面の真ん中に
+   固定幅(640px)で出しており、画面が狭いとズームボタン(右下)に重なっていた → 左右のHUD余白(--hud-left/--hud-right)の
+   内側に収まる帯(右は zoom-ctl の分だけ広く空ける)に幅を合わせ、その中で中央寄せする。常に zoom-ctl と重ならない */
+#cap-dec { position: fixed; left: calc(var(--hud-left) + 8px); right: calc(var(--hud-right) + 60px); margin: 0 auto; bottom: 74px; transform: translateY(14px); z-index: 60; width: auto; max-width: 640px; padding: 10px 12px 8px; display: none; pointer-events: auto;
     background: linear-gradient(180deg, rgba(8,22,30,0.93), rgba(2,8,12,0.95)); box-shadow: inset 0 0 0 1px rgba(255,190,80,0.55), 0 0 28px rgba(255,170,40,0.18);
     clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px); font-family: 'Share Tech Mono', monospace; color: #cfeee6; }
 #cap-dec.on { max-height: calc(100dvh - 90px); overflow-y: auto; overscroll-behavior: contain; display: block; animation: capIn .18s ease-out forwards; }
-@keyframes capIn { to { transform: translateX(-50%) translateY(0); } }
+@keyframes capIn { to { transform: translateY(0); } }
 #cap-dec .cap-head { display: flex; gap: 10px; align-items: baseline; letter-spacing: 2px; font-size: 12px; }
 #cap-dec .cap-head b { color: #ffbe50; font-family: Orbitron, sans-serif; }
 #cap-dec .cap-head span { color: #fff; font-size: 14px; }

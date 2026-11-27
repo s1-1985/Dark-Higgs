@@ -1386,6 +1386,7 @@ let _giantStarTile = null; // 明るい巨星タイル (スクリーン空間パ
 const _GSTAR_TILE = 1400;  // 巨星タイルのピクセルサイズ (繰り返しを目立たせない大きさ)
 let bgMistCanvas = null;  // bgMist事前焼き付けキャンバス
 let higgsCloudCanvas = null; // ヒッグス雲(白)事前焼き付け — 視野内で「下から見上げた雲」として合成
+let _higgsFlowTile = null; // 第246弾: 雲の中の模様を流すシームレスタイル (手続き生成・試合をまたいで再利用)
 let scrapDrops = [];
 let stations = [];
 let higgsWakes = [];    // ヒッグスの点状の乱れ (ビームのダークチャネル等) {x, y, intensity, life}
@@ -2148,23 +2149,15 @@ function visionReachAt(ang) {
     return _visRays[i] * (1 - t) + _visRays[(i + 1) % VIS_RAYS] * t;
 }
 function inPlayerVision(x, y) { return player && Math.hypot(x - player.x, y - player.y) <= visionReachAt(Math.atan2(y - player.y, x - player.x)); }
-// 有視界の縁の頂点列 (k = 縁からの拡大率)
-function getAmoebaPoints(cx, cy, baseR, numPts, timeSec, k = 1) {
-    if (_visRaysF !== _frameCount) updatePlayerVision();
-    const pts = [];
-    for (let i = 0; i < VIS_RAYS; i++) {
-        const a = (i / VIS_RAYS) * Math.PI * 2, r = _visRays[i] * k;
-        pts.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r });
-    }
-    return pts;
-}
-function _amoebaPath(ctx, pts) {
-    // 第22弾: 視線の端を直線でつなぐ (判定と同じ形)。旧: 中点を通る曲線で、濃い霧のくぼみでは描いた縁が判定より外へ膨らみ、
-    // 「有視界の内に見えるのに敵が描かれない」場所ができていた
-    const n = pts.length;
-    ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < n; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    ctx.closePath();
+// 第245弾 (オーナー「有視界とヒッグスの境界がはっきりした線に見える・もっと曖昧な宇宙の霧らしい質感に・ゆっくり揺蕩う感じも」):
+//   見た目専用のゆっくりした縁の揺らぎ。判定(_visRays/visionReachAt/inPlayerVision)はこの関数を経由しないので触れない。
+//   揺らぎは必ず「半径を縮める」側にだけ掛け、判定では見えるのに霧の揺らぎで一瞬覆われることはあっても、
+//   判定で見えない所が描画でだけ見えてしまうことは起きないようにする(第22弾の教訓: 判定と描画の形を一致させる)。
+const VIS_WOBBLE_AMP = 0.05; // 縁の揺らぎの最大幅(半径比・内側へのみ)
+function visWobbleK(ang, t) {
+    const a = Math.sin(t * 0.047 + ang * 2.3) * 0.5 + 0.5;
+    const b = Math.sin(t * 0.019 - ang * 4.1 + 1.7) * 0.5 + 0.5;
+    return 1 - VIS_WOBBLE_AMP * (a * 0.6 + b * 0.4);
 }
 
 // 第90弾: 霧の板 (画面より小さい解像度・最大1024px) — 全面を霧で塗り、穴 (中心と方向ごとの届く距離) を縁から内側へ段々と消す
@@ -2172,7 +2165,11 @@ function _amoebaPath(ctx, pts) {
 //   旧5層(半径倍率1.08→0.74・幅0.34)は消す強さの飛びが大きく、段差(リング)が見えて「線」に見えた。
 //   10層・幅1.22→0.58(0.64)へ広げ、各層の消す強さを滑らかな累積曲線(smoothstep)から逆算して段差を無くし、
 //   最後に画面全体へわずかにガウシアンブラーを掛けて縁をにじませる(1024px以下のオフスクリーン1枚への1回のフィルタなので負荷は小さい)。
-let _fogCv = null, _fogCx = null;
+// 第245弾: ①この層の半径にも visWobbleK を掛け、縁をゆっくり有機的に揺らす ②同じ層・同じ揺らぎで「見えている強さ」の
+//   マスク(_visCv・白を source-over で積む＝暗闇側の destination-out と対になる累積式)も同時に作る。雲の重ね描き
+//   (drawFogOfWar)はこれを destination-in でマスクに使うので、暗闇の縁と雲の縁が完全に同じ滑らかさで揃う。
+let _fogCv = null, _fogCx = null, _cloudCv = null, _cloudCx = null;
+let _fogMaskW = 0, _fogMaskH = 0, _fogMaskZ = 1; // 雲の重ね描き側が _fogCv を同じ解像度・変換で抜き型に再利用するための値
 const FOG_HOLE_LAYERS = (() => {
     const N = 10, kFrom = 1.22, kTo = 0.58;
     const arr = []; let prevR = 1;
@@ -2189,25 +2186,36 @@ function drawFogHoles(ctx, holes, fogCol, fogAlpha) {
     const sc = Math.min(1, 1024 / Math.max(1, cssW)), w = Math.max(1, Math.ceil(cssW * sc)), h = Math.max(1, Math.ceil(cssH * sc));
     if (!_fogCv) { _fogCv = document.createElement('canvas'); _fogCx = _fogCv.getContext('2d'); }
     if (_fogCv.width !== w || _fogCv.height !== h) { _fogCv.width = w; _fogCv.height = h; }
-    const fc = _fogCx, z = camera.zoom * sc;
+    const fc = _fogCx, z = camera.zoom * sc, t = _frameCount / 60;
     fc.setTransform(1, 0, 0, 1, 0, 0); fc.globalCompositeOperation = 'source-over'; fc.globalAlpha = 1; fc.clearRect(0, 0, w, h);
-    fc.fillStyle = fogCol; fc.globalAlpha = fogAlpha; fc.fillRect(0, 0, w, h);
+    // 第245弾 (Codexレビュー指摘の是正): ここを fogAlpha で塗ると _fogCv の最大アルファが0.86〜0.96止まりになり、
+    //   視界の外へ出てもう何も消さない(層が1つも掛からない)領域で、雲側を destination-out した時に素抜けできず
+    //   4〜14%の雲が未探索の全域にうっすら残ってしまう(指摘どおりのバグ)。→ ここは常に1で塗り、
+    //   「見えている強さの逆数(0〜1)」としての完全な範囲を持たせ、fogAlphaによる暗さの調整は
+    //   「暗闇オーバーレイを画面に貼る時」にだけ掛ける(下の ctx.globalAlpha = fogAlpha)。
+    fc.fillStyle = fogCol; fc.globalAlpha = 1; fc.fillRect(0, 0, w, h);
     fc.setTransform(z, 0, 0, z, -camera.x * z, -camera.y * z);
     fc.globalCompositeOperation = 'destination-out'; fc.fillStyle = '#000';
     for (const [k, a] of FOG_HOLE_LAYERS) {
         fc.globalAlpha = a;
         for (const H of holes) {
             fc.beginPath();
-            for (let i = 0; i < H.n; i++) { const an = i / H.n * Math.PI * 2, r = Math.max(10, H.r[i]) * k, x = H.x + Math.cos(an) * r, y = H.y + Math.sin(an) * r; if (i) fc.lineTo(x, y); else fc.moveTo(x, y); }
+            for (let i = 0; i < H.n; i++) {
+                const an = i / H.n * Math.PI * 2, r = Math.max(10, H.r[i]) * k * visWobbleK(an, t);
+                const x = H.x + Math.cos(an) * r, y = H.y + Math.sin(an) * r;
+                if (i) fc.lineTo(x, y); else fc.moveTo(x, y);
+            }
             fc.closePath(); fc.fill();
         }
     }
     fc.globalCompositeOperation = 'source-over'; fc.globalAlpha = 1;
     ctx.save(); ctx.setTransform(_dpr, 0, 0, _dpr, 0, 0); ctx.imageSmoothingEnabled = true;
+    ctx.globalAlpha = fogAlpha; // _fogCv 自体は常に満タン(1)で焼いたので、画面に貼る時だけここで暗さを掛ける
     try { ctx.filter = `blur(${FOG_BLUR_PX}px)`; } catch (e) {}
     ctx.drawImage(_fogCv, 0, 0, cssW, cssH);
     ctx.filter = 'none';
     ctx.restore();
+    _fogMaskW = w; _fogMaskH = h; _fogMaskZ = z;
 }
 function drawFogOfWar(ctx) {
     if (!player || player.hp <= 0) return;
@@ -2216,8 +2224,6 @@ function drawFogOfWar(ctx) {
     if (_visRaysF !== _frameCount) updatePlayerVision();
     const cx = player.x;
     const cy = player.y;
-    const t = _frameCount / 60;
-    const NUM_PTS = VIS_RAYS;
 
     // 霧の不透明度: ヒッグス高濃度で濃くなる
     const hHere = getHiggsIntensity(cx, cy);
@@ -2233,30 +2239,83 @@ function drawFogOfWar(ctx) {
     const mw = vw + 1000;
     const mh = vh + 1000;
 
-    const pts   = getAmoebaPoints(cx, cy, playerVisionRadius, NUM_PTS, t);
     // 第90弾 (オーナー): 霧は縮小した別の板に描き、見える範囲を「縁ほど薄く」消す (縁の内側が段々と暗くなる)。通信のあるドローンの有視界も同じようにはっきり抜く
+    // 第245弾: 視界の縁をなぞる実線(旧 teal stroke)は撤去 — 縁そのものを線で描くのは「曖昧な霧」と矛盾する。
+    //   縁の表現はこの下の drawFogHoles (暗闇10層+ブラー) と、続く雲の重ね描き(同じマスクで destination-in)だけに任せる
     const holes = [{ x: cx, y: cy, r: _visRays, n: VIS_RAYS }];
     for (const d of playerDrones) if (d.hp > 0 && d._visPts && d._q >= DRONE_LINK_WEAK) holes.push({ x: d.x, y: d.y, r: d._visPts, n: 24 });
-    drawFogHoles(ctx, holes, fogCol, fogAlpha);
-    ctx.save();
-    ctx.beginPath(); _amoebaPath(ctx, pts);
-    ctx.strokeStyle = '#00ffb4';
-    ctx.globalAlpha = 0.10 + hHere * 0.06;
-    ctx.lineWidth = 1 / camera.zoom;
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-    ctx.restore();
+    drawFogHoles(ctx, holes, fogCol, fogAlpha); // ここで _visCv (見えている強さのマスク) も同じ層・同じ揺らぎで更新される
 
     // ── 視野内のヒッグス雲を「下から見上げた濃淡」で重ねる (§3-13 B) ──
-    // 視野バブル内にクリップし、白い雲を 'lighter' 合成。艦・弾はこの後に描くので霞まない (第16弾)
-    if (higgsCloudCanvas) {
+    // 第245弾: 硬いクリップ(旧 _amoebaPath)をやめ、drawFogHoles が作った暗闇マスク _fogCv をそのまま destination-out の
+    //   抜き型として再利用する(同じ生成元=FOG_HOLE_LAYERS・visWobbleKなので縁の滑らかさが暗闇側と完全に揃う・追加の
+    //   マスク生成ループやブラーパスを増やさない)。艦・弾はこの後に描くので霞まない (第16弾)
+    if (higgsCloudCanvas && _fogCv) {
+        if (!_cloudCv) { _cloudCv = document.createElement('canvas'); _cloudCx = _cloudCv.getContext('2d'); }
+        if (_cloudCv.width !== _fogMaskW || _cloudCv.height !== _fogMaskH) { _cloudCv.width = _fogMaskW; _cloudCv.height = _fogMaskH; }
+        const cc = _cloudCx;
+        cc.setTransform(1, 0, 0, 1, 0, 0); cc.globalCompositeOperation = 'source-over'; cc.globalAlpha = 1; cc.clearRect(0, 0, _fogMaskW, _fogMaskH);
+        cc.setTransform(_fogMaskZ, 0, 0, _fogMaskZ, -camera.x * _fogMaskZ, -camera.y * _fogMaskZ);
+        cc.imageSmoothingEnabled = true;
+        cc.drawImage(higgsCloudCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
+        // 第246弾: ここから3つ、まだワールド座標変換のまま(=higgsCloudCanvasのアルファ形状の中だけに効く)で雲を進化させる
+        // ①雲の中の模様を低速で流す — 輪郭(どこが濃いか=探知の境界)は上のdrawImageのアルファそのまま、その「濃さ」にタイルの
+        //   明暗(0.6〜1.0倍)を乗算する(destination-in)。source-atopは色(RGB)だけ変える合成で、higgsCloudCanvasが
+        //   ほぼ白一色のため色を重ねても見た目にほぼ効かなかった(計測で確認) → 濃淡そのものを揺らす方式に変更
+        if (!_higgsFlowTile) _higgsFlowTile = _initHiggsFlowTile();
+        if (_higgsFlowTile) {
+            const pat = cc.createPattern(_higgsFlowTile, 'repeat');
+            if (pat && pat.setTransform) {
+                const scl = 1800, t = _frameCount / 60;
+                const ox = (((t * (higgsCurrent.x * 500 + 24)) % scl) + scl) % scl;
+                const oy = (((t * (higgsCurrent.y * 500 + 17)) % scl) + scl) % scl;
+                pat.setTransform(new DOMMatrix().translate(ox, oy).scale(scl / 256));
+                cc.globalCompositeOperation = 'destination-in';
+                cc.fillStyle = pat; cc.fillRect(mx, my, mw, mh); // カメラの可視範囲+マージンだけ塗る(FIELD_SIZE全体より軽い)
+                cc.globalCompositeOperation = 'source-over'; cc.globalAlpha = 1;
+            }
+        }
+        // ②ビームの軌跡(higgsClears)で実際に雲が薄く見える — getHiggsIntensity(beamClearFactor)の数値はもう効いていたが絵には出ていなかった不整合の是正
+        if (higgsClears.length) {
+            cc.globalCompositeOperation = 'destination-out'; cc.lineCap = 'round'; cc.strokeStyle = '#000';
+            for (const cl of higgsClears) {
+                const age = _frameCount - cl.t, hold = cl.hold || BEAM_CLEAR_HOLD, rec = cl.rec || BEAM_CLEAR_RECOVER;
+                const k = age < hold ? 1 : Math.max(0, 1 - (age - hold) / rec);
+                if (k <= 0) continue;
+                cc.globalAlpha = k; cc.lineWidth = cl.hw ? cl.hw * 2 : BEAM_CLEAR_W;
+                cc.beginPath(); cc.moveTo(cl.x0, cl.y0); cc.lineTo(cl.x1, cl.y1); cc.stroke();
+            }
+            cc.globalCompositeOperation = 'source-over'; cc.globalAlpha = 1;
+        }
+        // ③ヒッグス帯域の航跡(wakeRibbons・band==='higgs')に沿って雲がかき乱れたように薄く見える(装飾のみ・探知には無関係。第39弾「霧の痕跡」の見た目を伴わせる)
+        if (wakeRibbons.length) {
+            cc.globalCompositeOperation = 'destination-out'; cc.lineCap = 'round';
+            for (const rb of wakeRibbons) {
+                if (rb.band !== 'higgs' || rb.pts.length < 2) continue;
+                const life = trailLife(rb);
+                for (let i = 3; i < rb.pts.length; i += 3) {
+                    const p0 = rb.pts[i - 3], p1 = rb.pts[i], age = _frameCount - p1.f;
+                    if (age < TRAIL_SETTLE) continue;
+                    const v = p1.s * Math.max(0, 1 - age / life);
+                    if (v <= 0.02) continue;
+                    cc.globalAlpha = Math.min(0.5, v * 0.6); cc.lineWidth = 140;
+                    cc.beginPath(); cc.moveTo(p0.x, p0.y); cc.lineTo(p1.x, p1.y); cc.stroke();
+                }
+            }
+            cc.globalCompositeOperation = 'source-over'; cc.globalAlpha = 1;
+        }
+        cc.setTransform(1, 0, 0, 1, 0, 0);
+        cc.globalCompositeOperation = 'destination-out';
+        try { cc.filter = `blur(${FOG_BLUR_PX}px)`; } catch (e) {}
+        cc.drawImage(_fogCv, 0, 0, _fogMaskW, _fogMaskH); // _fogCv=「見えている強さ」の逆数(0〜1、常に満タンで焼いた生データ) → 暗い所ほど雲を消す
+        cc.filter = 'none'; cc.globalCompositeOperation = 'source-over';
+
         ctx.save();
-        ctx.beginPath(); _amoebaPath(ctx, pts);
-        ctx.clip();
+        ctx.setTransform(_dpr, 0, 0, _dpr, 0, 0);
         ctx.globalCompositeOperation = 'lighter';
         ctx.globalAlpha = 0.5 * (1 - LULL_FOG * lullK); // 第34弾: 凪で霧が晴れる
         ctx.imageSmoothingEnabled = true;
-        ctx.drawImage(higgsCloudCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
+        ctx.drawImage(_cloudCv, 0, 0, cssW, cssH);
         ctx.restore();
     }
 }
@@ -2390,6 +2449,26 @@ function _bakeHiggsGrid(white) {
         else if (d >= 0.30) { r = 62; g = 22; b = 104; a = 0.30; }
         else                { r = 54; g = 24; b = 96;  a = 0.04 + d * 0.45; }
         px[o] = r; px[o + 1] = g; px[o + 2] = b; px[o + 3] = (a * 255) | 0;
+    }
+    cx.putImageData(img, 0, 0);
+    return c;
+}
+// 第246弾 (オーナー「ヒッグス雲は気体・流体なので、もっと生き物的にゆっくり動くべき」): 雲の輪郭(=探知の境界)は
+//   higgsGrid/higgsCloudCanvas のまま一切変えず、その内側の「明暗の模様」だけを低周波のシームレスタイルで
+//   時間シフトして重ね、雲の中がゆっくり渦巻いているように見せる(判定には一切関わらない装飾専用のタイル)。
+function _initHiggsFlowTile() {
+    const TS = 256, c = document.createElement('canvas'); c.width = c.height = TS;
+    const cx = c.getContext('2d'), img = cx.createImageData(TS, TS), px = img.data;
+    for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) {
+        const u = x / TS * Math.PI * 2, v = y / TS * Math.PI * 2;
+        // 周波数はすべて整数倍なのでタイル境界でシームレスにつながる
+        let n = Math.sin(u * 3 + Math.cos(v * 2) * 1.4) * 0.5
+              + Math.sin(v * 4 + Math.cos(u * 3) * 1.1) * 0.35
+              + Math.sin((u + v) * 2) * 0.3;
+        n = n / 1.15 * 0.5 + 0.5; // 0..1
+        // destination-inで雲のアルファに乗算するため、0.4〜1.0倍の範囲に収める(真っ暗=消える、ではなく濃淡のムラにする)
+        const o = (y * TS + x) * 4, a = Math.max(0, Math.min(255, (100 + n * 155) | 0));
+        px[o] = px[o + 1] = px[o + 2] = 255; px[o + 3] = a;
     }
     cx.putImageData(img, 0, 0);
     return c;
@@ -7062,7 +7141,12 @@ let _logDedup = {};
 var _logHist = [], _xoHist = []; // var: 初期化中に logMessage が呼ばれても落ちない
 function uiToast(msg, warn) {
     let d = document.getElementById('ui-toast');
-    if (!d) { d = document.createElement('div'); d.id = 'ui-toast'; d.style.cssText = 'position:fixed;left:124px;bottom:46px;z-index:9000;max-width:46vw;padding:8px 14px;border-radius:6px;font:13px/1.45 sans-serif;text-align:center;pointer-events:none'; document.body.appendChild(d); }
+    if (!d) { d = document.createElement('div'); d.id = 'ui-toast'; d.style.cssText = 'position:fixed;z-index:9000;max-width:46vw;padding:8px 14px;border-radius:6px;font:13px/1.45 sans-serif;text-align:center;pointer-events:none'; document.body.appendChild(d); }
+    // 第247弾 (オーナー「経過時間の右側に移動して・状態異常の表示に被ってもいい」): 旧は固定座標(左下)だったので画面サイズで
+    //   ズレることがあった → 下の帯の経過時間 (#ss-time) の実際の画面位置から毎回右隣に出す (状態異常チップに重なるのは許容)
+    const t = document.getElementById('ss-time');
+    if (t) { const r = t.getBoundingClientRect(); d.style.left = (r.right + 8) + 'px'; d.style.right = 'auto'; d.style.top = 'auto'; d.style.bottom = Math.max(4, innerHeight - r.bottom) + 'px'; }
+    else { d.style.left = '124px'; d.style.bottom = '46px'; } // 下の帯が無い画面 (タイトル等) のフォールバック
     d.style.background = warn ? 'rgba(40,20,8,0.94)' : 'rgba(8,24,34,0.94)'; d.style.border = '1px solid ' + (warn ? '#ffb070' : '#66ddff'); d.style.color = warn ? '#ffe0c0' : '#c8f4ff';
     d.textContent = msg; d.style.display = 'block'; clearTimeout(d._t); d._t = setTimeout(() => { d.style.display = 'none'; }, 4200);
 }
@@ -11253,8 +11337,8 @@ function drawAlertFx(ctx) {
     // ── 第193弾: ハックの進捗パネル (撃った側=シアン・撃たれた側=マゼンタ) と結果の表示 ──
     { let by = T + 12 + (THREATS.some(t => t.kind === 'beam') ? 30 : 0);
       const SS = S, AS = !_seatOn() ? hackSessP : null;
-      if (SS) { _drawHackPanel(ctx, L, Rr, by, SS, false, now); by += 82; }
-      if (AS && AS.tgt) { _drawHackPanel(ctx, L, Rr, by, AS, true, now); by += 82; }
+      if (SS) by += _drawHackPanel(ctx, L, Rr, by, SS, false, now);
+      if (AS && AS.tgt) by += _drawHackPanel(ctx, L, Rr, by, AS, true, now);
       by = drawBoardAlert(ctx, L, T, Rr, B, now, by); // 第197弾: 強襲
       _drawHackBanner(ctx, L, Rr, by - (SS || AS ? 0 : 0)); }
     // ── ミサイル接近: その方向の画面の縁が赤く脈打ち、矢印と文字 ──
@@ -11283,29 +11367,45 @@ function drawAlertFx(ctx) {
     }
     ctx.restore();
 }
+function _wrapClauses(ctx, text, maxW) { // 第247弾: ' ・ ' 区切りの節を、幅に収まるだけまとめて行に詰める (情報は削らず行数だけ増やす)
+    const parts = text.split(' ・ '); const lines = []; let cur = '';
+    for (const p of parts) {
+        const cand = cur ? cur + ' ・ ' + p : p;
+        if (cur && ctx.measureText(cand).width > maxW) { lines.push(cur); cur = p; } else cur = cand;
+    }
+    if (cur) lines.push(cur);
+    return lines;
+}
 function _drawHackPanel(ctx, L, Rr, by, S, mine, now) {
+    // 第247弾 (オーナー「ハックのダイアログをもっとコンパクトに・情報量は減らさなくていい」): 幅480→最大400・高さ固定74px→
+    //   可変(情報行が収まる分だけ)にし、フォント・余白を詰めた。4段の進捗バーの仕様(今の段が光る・✓表示)は変えていない
     const col = mine ? '#66ddff' : '#ff3fd0', soft = mine ? '#a8ecff' : '#ffb0e0', bg = mine ? 'rgba(0,22,34,0.92)' : 'rgba(40,0,20,0.92)';
-    const u = Math.min(1, S.p / S.need), E = HACK_EFFECTS[S.effect] || {}, bw = Math.min(480, Rr - L - 20), bx = L + (Rr - L - bw) / 2, bh = 74;
+    const u = Math.min(1, S.p / S.need), E = HACK_EFFECTS[S.effect] || {}, bw = Math.min(400, Rr - L - 20), bx = L + (Rr - L - bw) / 2;
     const link = Math.round((S.link ?? 1) * 100), left = Math.max(0, Math.ceil((S.need - S.p) / 60)), flash = S.stageF && _frameCount - S.stageF < 24 ? 1 - (_frameCount - S.stageF) / 24 : 0;
+    const infoText = mine
+        ? '回線 ' + link + '% ・ 残り約' + left + '秒 ・ 成功の見込み ' + (S.chance >= 0.7 ? '高' : S.chance >= 0.45 ? '中' : '低') + ' ・ 相手が離れる/濃い霧/断線で中断'
+        : (() => { const A = S.att, deg = A ? compassDeg(Math.atan2(A.y - player.y, A.x - player.x)) : null; return '回線 ' + link + '%' + (deg !== null ? ' (方位' + deg + '°から)' : '') + ' ・ 残り約' + left + '秒 ・ 切る: 離れる / 濃いヒッグス / 断線パルス'; })();
+    ctx.font = '10px sans-serif'; const infoLines = _wrapClauses(ctx, infoText, bw - 20);
+    const barY = by + 16, barH = 8, infoY = barY + barH + 13, bh = infoY - by + infoLines.length * 11 + 5;
     ctx.save(); ctx.globalAlpha = 0.94; ctx.fillStyle = bg; ctx.fillRect(bx, by, bw, bh);
     ctx.globalAlpha = 0.55 + 0.45 * flash; ctx.strokeStyle = col; ctx.lineWidth = 1.5 + flash * 1.5; ctx.strokeRect(bx, by, bw, bh);
     ctx.globalAlpha = 1; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
-    ctx.font = 'bold 13px sans-serif'; ctx.fillStyle = soft; ctx.fillText((S.counter ? (mine ? '⇄ 逆ハック実行中 — ' : '⚠ 逆ハックを受けている — ') : (mine ? '◆ ハック侵入中 — ' : '⚠ 侵入を受けている — ')) + (E.jp || ''), bx + 10, by + 6);
-    ctx.textAlign = 'right'; ctx.font = 'bold 15px monospace'; ctx.fillStyle = col; ctx.fillText(Math.round(u * 100) + '%', bx + bw - 10, by + 5); ctx.textAlign = 'left';
+    ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = soft; ctx.fillText((S.counter ? (mine ? '⇄ 逆ハック実行中 — ' : '⚠ 逆ハックを受けている — ') : (mine ? '◆ ハック侵入中 — ' : '⚠ 侵入を受けている — ')) + (E.jp || ''), bx + 8, by + 4);
+    ctx.textAlign = 'right'; ctx.font = 'bold 13px monospace'; ctx.fillStyle = col; ctx.fillText(Math.round(u * 100) + '%', bx + bw - 8, by + 3); ctx.textAlign = 'left';
     // 4段の進捗バー (今の段は光が流れる)
-    const sx0 = bx + 10, sw = (bw - 20 - 9) / 4, sy = by + 27;
+    const sx0 = bx + 8, sw = (bw - 16 - 9) / 4, sy = barY;
     for (let k = 0; k < 4; k++) {
         const x = sx0 + k * (sw + 3), seg = Math.max(0, Math.min(1, 4 * u - k));
-        ctx.globalAlpha = 0.28; ctx.fillStyle = col; ctx.fillRect(x, sy, sw, 9);
-        ctx.globalAlpha = 0.95; ctx.fillStyle = col; ctx.fillRect(x, sy, sw * seg, 9);
-        if (seg > 0 && seg < 1) { const gx = x + ((now * 1.6 + k * 0.17) % 1) * sw * seg; ctx.globalAlpha = 0.85; ctx.fillStyle = '#ffffff'; ctx.fillRect(Math.min(gx, x + sw * seg - 6), sy, 6, 9); }
-        ctx.globalAlpha = seg >= 1 ? 1 : seg > 0 ? 0.95 : 0.5; ctx.font = (seg > 0 && seg < 1 ? 'bold ' : '') + '10px sans-serif'; ctx.fillStyle = seg > 0 ? '#ffffff' : soft;
-        ctx.fillText((seg >= 1 ? '✓ ' : '') + HACK_STAGES[k], x, sy + 12);
+        ctx.globalAlpha = 0.28; ctx.fillStyle = col; ctx.fillRect(x, sy, sw, barH);
+        ctx.globalAlpha = 0.95; ctx.fillStyle = col; ctx.fillRect(x, sy, sw * seg, barH);
+        if (seg > 0 && seg < 1) { const gx = x + ((now * 1.6 + k * 0.17) % 1) * sw * seg; ctx.globalAlpha = 0.85; ctx.fillStyle = '#ffffff'; ctx.fillRect(Math.min(gx, x + sw * seg - 6), sy, 6, barH); }
+        ctx.globalAlpha = seg >= 1 ? 1 : seg > 0 ? 0.95 : 0.5; ctx.font = (seg > 0 && seg < 1 ? 'bold ' : '') + '9px sans-serif'; ctx.fillStyle = seg > 0 ? '#ffffff' : soft;
+        ctx.fillText((seg >= 1 ? '✓ ' : '') + HACK_STAGES[k], x, sy + barH + 1);
     }
-    ctx.globalAlpha = 1; ctx.font = '11px sans-serif'; ctx.fillStyle = soft;
-    if (mine) ctx.fillText('回線 ' + link + '% ・ 残り約' + left + '秒 ・ 成功の見込み ' + (S.chance >= 0.7 ? '高' : S.chance >= 0.45 ? '中' : '低') + ' ・ 相手が離れる/濃い霧/断線で中断', bx + 10, by + 56);
-    else { const A = S.att, deg = A ? compassDeg(Math.atan2(A.y - player.y, A.x - player.x)) : null; ctx.fillText('回線 ' + link + '%' + (deg !== null ? ' (方位' + deg + '°から)' : '') + ' ・ 残り約' + left + '秒 ・ 切る: 離れる / 濃いヒッグス / 断線パルス', bx + 10, by + 56); }
+    ctx.globalAlpha = 1; ctx.font = '10px sans-serif'; ctx.fillStyle = soft;
+    for (let i = 0; i < infoLines.length; i++) ctx.fillText(infoLines[i], bx + 8, infoY + i * 11);
     ctx.restore();
+    return bh + 6; // 呼び出し側はこの戻り値ぶん by を進める (旧: 固定82px)
 }
 function _drawHackBanner(ctx, L, Rr, by) {
     const b = _hackBanner; if (!b) return;
@@ -22863,7 +22963,7 @@ function comReactItems(c, P, hpF, retreating) {
 //   通常の決断は設定倍率で進み、差し迫った危険だけ一時減速する。
 //   選択はAIの上位の方針として一定時間効く (COMの目的に上書きされない)。画面に出す見込みは「AIの推定」から作る (真の状態・先読みは使わない)
 var capMode = false, _capDec = null, _capRes = {}, _capKick = false, _capLast = {}, _capLastT = 0, _capStats = { asked: 0, auto: 0 };
-const CAP_SLOW = 0.08, CAP_LIMIT = 7, CAP_PLAN_LIFETIME = 3600;
+const CAP_SLOW = 0.08, CAP_LIMIT = 7;
 const CAP_URGENT = new Set(['missile', 'beam', 'escape']);
 function capUrgent(key, spec) { return CAP_URGENT.has(key) || spec.urgent === true; }
 const CAP_REPEAT_GAP = 5400; // 同じスキルの提示は試合内で最低90秒あける
@@ -22936,6 +23036,11 @@ function capOpen(key, spec) {
     box.classList.add('on');
     box.querySelectorAll('.cap-opt').forEach(b => b.addEventListener('click', (ev) => { ev.stopPropagation(); capChoose(b.dataset.id, false); }));
     sfxUI('ui_panel_open');
+    // 第247弾 (オーナー「QTEダイアログと右下の丸ボタンの展開パネルが被る」): CSS の --hud-right 頼りの計算は
+    //   #zoom-ctl が position:absolute (祖先次第でズレうる) なので、開く瞬間の実際の画面位置から直接 right を決め直す
+    //   (zoom-ctl の左端のすぐ左で止める。展開(.open)していても #zoom-row の幅までしか広がらないので毎回これで足りる)
+    const zc = document.getElementById('zoom-ctl');
+    if (zc) { const r = zc.getBoundingClientRect(); if (r.width > 0) box.style.right = Math.max(8, innerWidth - r.left + 12) + 'px'; }
 }
 // ═══ 第200弾 (オーナー「ゴーストを認識した段階で ミニマップの右に緊急離脱ボタン。押すとQTEと同じスロー・7秒で8方向から逃げる方角を選ぶ。向いている向きの逆ほど時間がかかる」) ═══
 var _escGo = null, _escBtn = null, _escConfirmBox = null;
@@ -23053,15 +23158,15 @@ function capTick(dt) { // 実時間 (一時停止中は数えない)。gameLoop 
     if (!_capDec) return;
     if (!player || player.hp <= 0 || sectorCleared) { const b = document.getElementById('cap-dec'); if (b) b.classList.remove('on'); _capDec = null; return; }
     if (userPaused || gamePaused || _uiPause || _orientPaused || _draft) return; // 第227弾: 止めている間は制限時間を進めない (gameLoop からは通常その状態で呼ばれないが、凍結をここでも保証する)
+    // 第247弾 (オーナー「倍速で進行中のダイアログが3秒くらいで消える、速すぎる」): 旧は `frames`(ゲームフレーム基準の60秒予算)を
+    //   そのまま期限にしていたため、非緊急(slow:false)の決断は倍速が速いほど実時間が短くなり、20倍速では3秒で消えていた
+    //   (3600フレーム÷(60fps×20) = 3秒)。`el`(実時間・ポーズ中は進まない)だけを基準にし、倍速に関わらず常に CAP_LIMIT 秒にする。
     _capDec.el += dt;
-    const frames = CAP_PLAN_LIFETIME - (_frameCount - _capDec.frame);
-    const timeLeft = CAP_LIMIT - _capDec.el;
-    const running = !_capDec.slow && !_capDec.urgent;
-    const left = Math.max(0, running ? Math.min(timeLeft, frames / (60 * gameSpeed)) : timeLeft), bar = document.querySelector('#cap-dec .cap-bar'), sec = document.querySelector('#cap-dec .cap-sec'), bx = document.getElementById('cap-dec');
+    const left = Math.max(0, CAP_LIMIT - _capDec.el), bar = document.querySelector('#cap-dec .cap-bar'), sec = document.querySelector('#cap-dec .cap-sec'), bx = document.getElementById('cap-dec');
     if (bar) bar.style.width = (100 * left / CAP_LIMIT) + '%';
     if (sec) sec.textContent = Math.ceil(left);
     if (bx) { bx.classList.toggle('warn', left <= 4 && left > 2); bx.classList.toggle('crit', left <= 2); }
-    if (timeLeft <= 0 || running && frames <= 0) capChoose(_capDec.spec.rec, true);
+    if (left <= 0) capChoose(_capDec.spec.rec, true);
 }
 document.addEventListener('keydown', (ev) => {
     if (!_capDec || ev.target.closest?.('#cap-dec button, #speed-picker button')) return;
@@ -25710,7 +25815,6 @@ if (speedPicker) {
         speedPicker.style.top = (r.top > innerHeight / 2 ? r.top - speedPicker.offsetHeight - 8 : r.bottom + 8) + 'px';
         speedPicker.querySelector('[aria-pressed="true"]')?.focus();
     });
-    document.getElementById('btn-speed-max')?.addEventListener('click', (ev) => { ev.stopPropagation(); closeSpeedPicker(); setGameSpeed(20); });
     document.addEventListener('click', ev => { if (!speedPicker.contains(ev.target)) closeSpeedPicker(); });
     document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && speedAnchor) { const anchor = speedAnchor; closeSpeedPicker(); anchor.focus(); ev.stopImmediatePropagation(); } }, true);
     window.addEventListener('resize', closeSpeedPicker);
@@ -25825,14 +25929,17 @@ let userPaused = false;
 function togglePause(on) {
     userPaused = on === undefined ? !userPaused : !!on;
     if (_capDec) _capLastT = 0; // 第227弾: 再開した瞬間の dt を 0 にして、選択肢の制限時間をポーズの分だけ正確に凍結する
-    const b = document.getElementById('btn-pause');
-    if (b) { b.classList.toggle('on', userPaused); b.textContent = userPaused ? '▶' : 'Ⅱ'; }
+    for (const id of ['btn-pause', 'btn-pause-fixed']) { // 第247弾: 常時表示の丸ボタン列にも一時停止ボタンを置いたので両方更新
+        const b = document.getElementById(id);
+        if (b) { b.classList.toggle('on', userPaused); b.textContent = userPaused ? '▶' : 'Ⅱ'; }
+    }
     const ind = document.getElementById('pause-ind');
     if (ind) ind.classList.toggle('hidden', !userPaused);
     sfxUI(userPaused ? 'sys_pause_on' : 'sys_pause_off');
     updateZoomFab();
 }
 document.getElementById('btn-pause')?.addEventListener('click', () => togglePause());
+document.getElementById('btn-pause-fixed')?.addEventListener('click', () => togglePause());
 (function initUiPause() { // 第172弾: メニュー・デバッグパネルが開いている間は進行を止める
     const m = document.getElementById('mobile-menu-modal'), d = document.getElementById('debug-panel'); if (!m || !d) return;
     const f = () => { _uiPause = !m.classList.contains('hidden') || d.style.display === 'flex'; };
