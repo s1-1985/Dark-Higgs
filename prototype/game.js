@@ -2176,7 +2176,12 @@ function drawFogHoles(ctx, holes, fogCol, fogAlpha) {
     if (_fogCv.width !== w || _fogCv.height !== h) { _fogCv.width = w; _fogCv.height = h; }
     const fc = _fogCx, z = camera.zoom * sc, t = _frameCount / 60;
     fc.setTransform(1, 0, 0, 1, 0, 0); fc.globalCompositeOperation = 'source-over'; fc.globalAlpha = 1; fc.clearRect(0, 0, w, h);
-    fc.fillStyle = fogCol; fc.globalAlpha = fogAlpha; fc.fillRect(0, 0, w, h);
+    // 第245弾 (Codexレビュー指摘の是正): ここを fogAlpha で塗ると _fogCv の最大アルファが0.86〜0.96止まりになり、
+    //   視界の外へ出てもう何も消さない(層が1つも掛からない)領域で、雲側を destination-out した時に素抜けできず
+    //   4〜14%の雲が未探索の全域にうっすら残ってしまう(指摘どおりのバグ)。→ ここは常に1で塗り、
+    //   「見えている強さの逆数(0〜1)」としての完全な範囲を持たせ、fogAlphaによる暗さの調整は
+    //   「暗闇オーバーレイを画面に貼る時」にだけ掛ける(下の ctx.globalAlpha = fogAlpha)。
+    fc.fillStyle = fogCol; fc.globalAlpha = 1; fc.fillRect(0, 0, w, h);
     fc.setTransform(z, 0, 0, z, -camera.x * z, -camera.y * z);
     fc.globalCompositeOperation = 'destination-out'; fc.fillStyle = '#000';
     for (const [k, a] of FOG_HOLE_LAYERS) {
@@ -2193,6 +2198,7 @@ function drawFogHoles(ctx, holes, fogCol, fogAlpha) {
     }
     fc.globalCompositeOperation = 'source-over'; fc.globalAlpha = 1;
     ctx.save(); ctx.setTransform(_dpr, 0, 0, _dpr, 0, 0); ctx.imageSmoothingEnabled = true;
+    ctx.globalAlpha = fogAlpha; // _fogCv 自体は常に満タン(1)で焼いたので、画面に貼る時だけここで暗さを掛ける
     try { ctx.filter = `blur(${FOG_BLUR_PX}px)`; } catch (e) {}
     ctx.drawImage(_fogCv, 0, 0, cssW, cssH);
     ctx.filter = 'none';
@@ -2243,7 +2249,7 @@ function drawFogOfWar(ctx) {
         cc.setTransform(1, 0, 0, 1, 0, 0);
         cc.globalCompositeOperation = 'destination-out';
         try { cc.filter = `blur(${FOG_BLUR_PX}px)`; } catch (e) {}
-        cc.drawImage(_fogCv, 0, 0, _fogMaskW, _fogMaskH); // _fogCv=暗闇の強さ(0〜fogAlpha) → 暗い所ほど雲を消す
+        cc.drawImage(_fogCv, 0, 0, _fogMaskW, _fogMaskH); // _fogCv=「見えている強さ」の逆数(0〜1、常に満タンで焼いた生データ) → 暗い所ほど雲を消す
         cc.filter = 'none'; cc.globalCompositeOperation = 'source-over';
 
         ctx.save();
