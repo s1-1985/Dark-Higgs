@@ -2137,23 +2137,15 @@ function visionReachAt(ang) {
     return _visRays[i] * (1 - t) + _visRays[(i + 1) % VIS_RAYS] * t;
 }
 function inPlayerVision(x, y) { return player && Math.hypot(x - player.x, y - player.y) <= visionReachAt(Math.atan2(y - player.y, x - player.x)); }
-// 有視界の縁の頂点列 (k = 縁からの拡大率)
-function getAmoebaPoints(cx, cy, baseR, numPts, timeSec, k = 1) {
-    if (_visRaysF !== _frameCount) updatePlayerVision();
-    const pts = [];
-    for (let i = 0; i < VIS_RAYS; i++) {
-        const a = (i / VIS_RAYS) * Math.PI * 2, r = _visRays[i] * k;
-        pts.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r });
-    }
-    return pts;
-}
-function _amoebaPath(ctx, pts) {
-    // 第22弾: 視線の端を直線でつなぐ (判定と同じ形)。旧: 中点を通る曲線で、濃い霧のくぼみでは描いた縁が判定より外へ膨らみ、
-    // 「有視界の内に見えるのに敵が描かれない」場所ができていた
-    const n = pts.length;
-    ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < n; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    ctx.closePath();
+// 第245弾 (オーナー「有視界とヒッグスの境界がはっきりした線に見える・もっと曖昧な宇宙の霧らしい質感に・ゆっくり揺蕩う感じも」):
+//   見た目専用のゆっくりした縁の揺らぎ。判定(_visRays/visionReachAt/inPlayerVision)はこの関数を経由しないので触れない。
+//   揺らぎは必ず「半径を縮める」側にだけ掛け、判定では見えるのに霧の揺らぎで一瞬覆われることはあっても、
+//   判定で見えない所が描画でだけ見えてしまうことは起きないようにする(第22弾の教訓: 判定と描画の形を一致させる)。
+const VIS_WOBBLE_AMP = 0.05; // 縁の揺らぎの最大幅(半径比・内側へのみ)
+function visWobbleK(ang, t) {
+    const a = Math.sin(t * 0.047 + ang * 2.3) * 0.5 + 0.5;
+    const b = Math.sin(t * 0.019 - ang * 4.1 + 1.7) * 0.5 + 0.5;
+    return 1 - VIS_WOBBLE_AMP * (a * 0.6 + b * 0.4);
 }
 
 // 第90弾: 霧の板 (画面より小さい解像度・最大1024px) — 全面を霧で塗り、穴 (中心と方向ごとの届く距離) を縁から内側へ段々と消す
@@ -2161,7 +2153,11 @@ function _amoebaPath(ctx, pts) {
 //   旧5層(半径倍率1.08→0.74・幅0.34)は消す強さの飛びが大きく、段差(リング)が見えて「線」に見えた。
 //   10層・幅1.22→0.58(0.64)へ広げ、各層の消す強さを滑らかな累積曲線(smoothstep)から逆算して段差を無くし、
 //   最後に画面全体へわずかにガウシアンブラーを掛けて縁をにじませる(1024px以下のオフスクリーン1枚への1回のフィルタなので負荷は小さい)。
-let _fogCv = null, _fogCx = null;
+// 第245弾: ①この層の半径にも visWobbleK を掛け、縁をゆっくり有機的に揺らす ②同じ層・同じ揺らぎで「見えている強さ」の
+//   マスク(_visCv・白を source-over で積む＝暗闇側の destination-out と対になる累積式)も同時に作る。雲の重ね描き
+//   (drawFogOfWar)はこれを destination-in でマスクに使うので、暗闇の縁と雲の縁が完全に同じ滑らかさで揃う。
+let _fogCv = null, _fogCx = null, _cloudCv = null, _cloudCx = null;
+let _fogMaskW = 0, _fogMaskH = 0, _fogMaskZ = 1; // 雲の重ね描き側が _fogCv を同じ解像度・変換で抜き型に再利用するための値
 const FOG_HOLE_LAYERS = (() => {
     const N = 10, kFrom = 1.22, kTo = 0.58;
     const arr = []; let prevR = 1;
@@ -2178,7 +2174,7 @@ function drawFogHoles(ctx, holes, fogCol, fogAlpha) {
     const sc = Math.min(1, 1024 / Math.max(1, cssW)), w = Math.max(1, Math.ceil(cssW * sc)), h = Math.max(1, Math.ceil(cssH * sc));
     if (!_fogCv) { _fogCv = document.createElement('canvas'); _fogCx = _fogCv.getContext('2d'); }
     if (_fogCv.width !== w || _fogCv.height !== h) { _fogCv.width = w; _fogCv.height = h; }
-    const fc = _fogCx, z = camera.zoom * sc;
+    const fc = _fogCx, z = camera.zoom * sc, t = _frameCount / 60;
     fc.setTransform(1, 0, 0, 1, 0, 0); fc.globalCompositeOperation = 'source-over'; fc.globalAlpha = 1; fc.clearRect(0, 0, w, h);
     fc.fillStyle = fogCol; fc.globalAlpha = fogAlpha; fc.fillRect(0, 0, w, h);
     fc.setTransform(z, 0, 0, z, -camera.x * z, -camera.y * z);
@@ -2187,7 +2183,11 @@ function drawFogHoles(ctx, holes, fogCol, fogAlpha) {
         fc.globalAlpha = a;
         for (const H of holes) {
             fc.beginPath();
-            for (let i = 0; i < H.n; i++) { const an = i / H.n * Math.PI * 2, r = Math.max(10, H.r[i]) * k, x = H.x + Math.cos(an) * r, y = H.y + Math.sin(an) * r; if (i) fc.lineTo(x, y); else fc.moveTo(x, y); }
+            for (let i = 0; i < H.n; i++) {
+                const an = i / H.n * Math.PI * 2, r = Math.max(10, H.r[i]) * k * visWobbleK(an, t);
+                const x = H.x + Math.cos(an) * r, y = H.y + Math.sin(an) * r;
+                if (i) fc.lineTo(x, y); else fc.moveTo(x, y);
+            }
             fc.closePath(); fc.fill();
         }
     }
@@ -2197,6 +2197,7 @@ function drawFogHoles(ctx, holes, fogCol, fogAlpha) {
     ctx.drawImage(_fogCv, 0, 0, cssW, cssH);
     ctx.filter = 'none';
     ctx.restore();
+    _fogMaskW = w; _fogMaskH = h; _fogMaskZ = z;
 }
 function drawFogOfWar(ctx) {
     if (!player || player.hp <= 0) return;
@@ -2205,8 +2206,6 @@ function drawFogOfWar(ctx) {
     if (_visRaysF !== _frameCount) updatePlayerVision();
     const cx = player.x;
     const cy = player.y;
-    const t = _frameCount / 60;
-    const NUM_PTS = VIS_RAYS;
 
     // 霧の不透明度: ヒッグス高濃度で濃くなる
     const hHere = getHiggsIntensity(cx, cy);
@@ -2222,30 +2221,37 @@ function drawFogOfWar(ctx) {
     const mw = vw + 1000;
     const mh = vh + 1000;
 
-    const pts   = getAmoebaPoints(cx, cy, playerVisionRadius, NUM_PTS, t);
     // 第90弾 (オーナー): 霧は縮小した別の板に描き、見える範囲を「縁ほど薄く」消す (縁の内側が段々と暗くなる)。通信のあるドローンの有視界も同じようにはっきり抜く
+    // 第245弾: 視界の縁をなぞる実線(旧 teal stroke)は撤去 — 縁そのものを線で描くのは「曖昧な霧」と矛盾する。
+    //   縁の表現はこの下の drawFogHoles (暗闇10層+ブラー) と、続く雲の重ね描き(同じマスクで destination-in)だけに任せる
     const holes = [{ x: cx, y: cy, r: _visRays, n: VIS_RAYS }];
     for (const d of playerDrones) if (d.hp > 0 && d._visPts && d._q >= DRONE_LINK_WEAK) holes.push({ x: d.x, y: d.y, r: d._visPts, n: 24 });
-    drawFogHoles(ctx, holes, fogCol, fogAlpha);
-    ctx.save();
-    ctx.beginPath(); _amoebaPath(ctx, pts);
-    ctx.strokeStyle = '#00ffb4';
-    ctx.globalAlpha = 0.10 + hHere * 0.06;
-    ctx.lineWidth = 1 / camera.zoom;
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-    ctx.restore();
+    drawFogHoles(ctx, holes, fogCol, fogAlpha); // ここで _visCv (見えている強さのマスク) も同じ層・同じ揺らぎで更新される
 
     // ── 視野内のヒッグス雲を「下から見上げた濃淡」で重ねる (§3-13 B) ──
-    // 視野バブル内にクリップし、白い雲を 'lighter' 合成。艦・弾はこの後に描くので霞まない (第16弾)
-    if (higgsCloudCanvas) {
+    // 第245弾: 硬いクリップ(旧 _amoebaPath)をやめ、drawFogHoles が作った暗闇マスク _fogCv をそのまま destination-out の
+    //   抜き型として再利用する(同じ生成元=FOG_HOLE_LAYERS・visWobbleKなので縁の滑らかさが暗闇側と完全に揃う・追加の
+    //   マスク生成ループやブラーパスを増やさない)。艦・弾はこの後に描くので霞まない (第16弾)
+    if (higgsCloudCanvas && _fogCv) {
+        if (!_cloudCv) { _cloudCv = document.createElement('canvas'); _cloudCx = _cloudCv.getContext('2d'); }
+        if (_cloudCv.width !== _fogMaskW || _cloudCv.height !== _fogMaskH) { _cloudCv.width = _fogMaskW; _cloudCv.height = _fogMaskH; }
+        const cc = _cloudCx;
+        cc.setTransform(1, 0, 0, 1, 0, 0); cc.globalCompositeOperation = 'source-over'; cc.globalAlpha = 1; cc.clearRect(0, 0, _fogMaskW, _fogMaskH);
+        cc.setTransform(_fogMaskZ, 0, 0, _fogMaskZ, -camera.x * _fogMaskZ, -camera.y * _fogMaskZ);
+        cc.imageSmoothingEnabled = true;
+        cc.drawImage(higgsCloudCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
+        cc.setTransform(1, 0, 0, 1, 0, 0);
+        cc.globalCompositeOperation = 'destination-out';
+        try { cc.filter = `blur(${FOG_BLUR_PX}px)`; } catch (e) {}
+        cc.drawImage(_fogCv, 0, 0, _fogMaskW, _fogMaskH); // _fogCv=暗闇の強さ(0〜fogAlpha) → 暗い所ほど雲を消す
+        cc.filter = 'none'; cc.globalCompositeOperation = 'source-over';
+
         ctx.save();
-        ctx.beginPath(); _amoebaPath(ctx, pts);
-        ctx.clip();
+        ctx.setTransform(_dpr, 0, 0, _dpr, 0, 0);
         ctx.globalCompositeOperation = 'lighter';
         ctx.globalAlpha = 0.5 * (1 - LULL_FOG * lullK); // 第34弾: 凪で霧が晴れる
         ctx.imageSmoothingEnabled = true;
-        ctx.drawImage(higgsCloudCanvas, 0, 0, FIELD_SIZE, FIELD_SIZE);
+        ctx.drawImage(_cloudCv, 0, 0, cssW, cssH);
         ctx.restore();
     }
 }
