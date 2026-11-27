@@ -5432,7 +5432,7 @@ class Ship {
                     _hardDetect || this._sitJ?.phase === 'escape' || stratNearE(this) || incomingMissile(this, true), _frameCount,
                     reactionForReview(this, this._B.fresh > 0.25 && !this._B.guess));
                 if (review && (review.goal === 'repair' || !this._hunt)) {
-                    const A = operationActorE(this), next = makeOperation(A, review, _frameCount, this._strat.spot);
+                    const A = operationActorE(this), next = makeOperation(A, review, _frameCount, this._strat.spot, false, this);
                     if (next) {
                         endEnemyStrat(this, review.why, true);
                         this._roamGoal = null;
@@ -5532,10 +5532,12 @@ class Ship {
             // ──────────────────────────────────────
             let _planActive = false;
             if (this._operation) {
-                const urgent = _hardDetect || stratNearE(this) || !!incomingMissile(this, true) ||
-                    this._sitJ?.phase === 'escape' || (this._operation.goal !== 'repair' &&
-                    (_hideActive || this.hp / this.maxHp < retreatThreshold(this.personality || PERS_DEF)));
-                if (!_supplyActive || urgent) _planActive = runOperation(operationActorE(this), this, _frameCount, urgent);
+                const A = operationActorE(this);
+                const danger = _hardDetect || stratNearE(this) || !!incomingMissile(this, true) || this._sitJ?.phase === 'escape';
+                if (!_supplyActive) operationReviewActive(A, this, _frameCount, danger);
+                const urgent = danger || (this._operation.goal !== 'repair' &&
+                    (_hideActive || A.hpF < retreatThreshold(this.personality || PERS_DEF)));
+                if (!_supplyActive || urgent) _planActive = runOperation(A, this, _frameCount, urgent);
             }
             if (!_planActive && !_hideActive && !_supplyActive && this.type !== 'fighter') _planActive = !!pilotLadder({ plan: () => !this._hunt && enemyPlanStep(this), // 第137弾: 自機COMと同じ並び (PILOT_LADDER: 作戦 → 拾い物 → 狩人の任務)。旧: 狩人 → 拾い物 → 作戦 (自機COMは 作戦 → 拾い物 → 狩人)
             grab: () => enemyGrabStep(this) || enemyItemStep(this), hunt: () => enemyHunterStep(this, playerSigDetected, _hardDetect) }); // 第80弾: 狩人の頭脳 (忍び寄り・偽装の罠・待ち伏せ) / 第46弾: 作戦「囮で誘い背後を取る」
@@ -16089,6 +16091,10 @@ function reactionEvent(ship, kind, amount, source = null) {
     } else if (kind === 'part') {
         v.confidence += 19 * profile.supplyConfidence;
         v.impatience -= 10 * profile.supplyConfidence;
+    } else if (kind === 'operationProgress') {
+        const scale = Math.min(1, amount);
+        v.impatience -= 12 * scale * profile.progressRelief;
+        v.calm += 10 * scale;
     } else if (kind === 'setback') {
         v.impatience += 12 * profile.failedPlan;
         v.confidence -= 6 * profile.failedPlan;
@@ -16187,10 +16193,13 @@ function trunkStep(F, S, J) {
     const hullRecovery = trunkHullRecovery({ side, S, J });
     // 修理機会の出入りと、修理可能・修理中の切り替わりを既存の即時評価間隔で拾う。
     const trigHull = hullRecovery !== (T.hullRecovery ?? null);
-    if (prevD && now - T.lastF < TRUNK_PERIOD && !(now - T.lastF >= TRUNK_TRIG_GAP && (trigPh || trigOd || trigHull))) return prevD;
+    const report = holder._operationReport;
+    const trigReport = report && report !== T.operationReport && report.result !== 'interrupted';
+    if (prevD && now - T.lastF < TRUNK_PERIOD && !(now - T.lastF >= TRUNK_TRIG_GAP && (trigPh || trigOd || trigHull || trigReport))) return prevD;
     T._ph = J.phase; T._od = J.odds;
     const wasHullRecovery = !!T.hullRecovery;
     T.hullRecovery = hullRecovery;
+    T.operationReport = report;
     T.lastF = now;
     // ① 見通し
     const O = matchOutlook(side, who, S, holder._outlook || null, now);
@@ -16300,7 +16309,39 @@ function strategyReview(S, doc, outlook, win, urgent, now, reaction) {
 function operationColonyThreat(site, est) {
     return est && est.r <= 2500 && Math.hypot(est.x - site.x, est.y - site.y) < 3500;
 }
-function operationTarget(A, goal, excluded) {
+// 作戦の成否はこの艦の観測だけを使う。危険と進行停止の履歴は時間とともに古くなる。
+function operationSitePenalty(holder, site, now) {
+    const record = holder?._operationSites?.get(site);
+    return record ? Math.max(0, 1 - (now - record.at) / THEORY.memory.searchForget) * record.cost : 0;
+}
+function operationReport(A, holder, M, result, why, now, retry = false) {
+    holder._operationReport = { goal: M.goal, result, why, x: M.target.x, y: M.target.y, at: now };
+    if (retry && M.goal === 'colony') {
+        const sites = holder._operationSites || (holder._operationSites = new Map());
+        sites.set(M.target, { at: now, cost: why === '制圧が競合' || why.startsWith('制圧先で') ? 1.5 : 0.65 });
+    }
+    if (result === 'success' || result === 'contact') {
+        if (M.goal === 'search' && result === 'success') A.listened?.();
+        if (M.goal === 'colony' || M.goal === 'repair' || result === 'contact') {
+            reactionEvent(A.who, 'operationProgress', M.goal === 'repair' ? 1 : 0.65);
+        }
+    } else if (result === 'setback' && !retry) {
+        reactionEvent(A.who, 'setback', 1);
+    }
+}
+function operationSiteScore(A, site, d, memory, now) {
+    const reward = rewardValueFor(A.side, A.who, site, 'colony');
+    const fog = getHiggsIntensity(site.x, site.y), rock = getDebrisIntensity(site.x, site.y);
+    const cover = envIntake({ fog, rock, storm: getStormIntensity(site.x, site.y),
+        thermal: getThermalIntensity(site.x, site.y), wreck: getWreckIntensity(site.x, site.y) }, now).cover;
+    const drag = Math.max(fog, getHiggsIntensity((A.x + site.x) / 2, (A.y + site.y) / 2));
+    const P = A.P;
+    // 風は露出と航行の代償の両方に効く。枝で覆いと不足の読み方を調節する。
+    const shelter = cover * (0.12 + 0.20 * persAx(P, 'stealth') + 0.16 * persAx(P, 'caution'));
+    const supply = reward * (0.25 + 0.25 * persAx(P, 'greed'));
+    return (d + 400) * (1 + 0.32 * drag + operationSitePenalty(memory, site, now)) / (1 + shelter + supply);
+}
+function operationTarget(A, goal, excluded, memory, now) {
     if (goal === 'repair') {
         if (A.kit() || (skillOn(A.side, 'it_repair') && A.can('repair'))) {
             const est = A.est();
@@ -16319,20 +16360,21 @@ function operationTarget(A, goal, excluded) {
         const d = Math.hypot(site.x - A.x, site.y - A.y);
         if (d > CAP_RANGE) continue;
         if (operationColonyThreat(site, threat)) continue;
-        if (d < score) { best = site; score = d; }
+        const value = operationSiteScore(A, site, d, memory, now);
+        if (value < score) { best = site; score = value; }
     }
     return best;
 }
 const OPERATION_JP = { colony: 'コロニーを制圧', search: '未聴取の海域を索敵', repair: '安全な場所で修理' };
-function makeOperation(A, review, now, excluded = null, retried = false) {
-    let goal = review.goal, target = operationTarget(A, goal, excluded), why = review.why;
+function makeOperation(A, review, now, excluded = null, retried = false, memory = null) {
+    let goal = review.goal, target = operationTarget(A, goal, excluded, memory, now), why = review.why;
     if (!target && goal === 'colony') {
         goal = 'search';
         why += '。近くに安全に向かえる制圧先がない';
-        target = operationTarget(A, goal, excluded);
+        target = operationTarget(A, goal, excluded, memory, now);
     }
     if (!target) return null;
-    return { goal, target, why, phase: 'prepare', until: now + (goal === 'repair' ? 7200 : 18000), retried };
+    return { goal, target, why, phase: 'prepare', started: now, until: now + (goal === 'repair' ? 7200 : 18000), retried };
 }
 // スキル停止、危険、目標達成、詰まりを確認してから、その時点の段階だけ実行する。
 function operationStep(A, M, now, urgent) {
@@ -16344,7 +16386,10 @@ function operationStep(A, M, now, urgent) {
         if (A.contested(target)) return 'retry:制圧が競合';
         if (operationColonyThreat(target, A.est())) return 'retry:制圧先で相手の気配を捉えた';
     }
-    if (goal === 'search' && !skillOn(A.side, 'gt_stall')) return 'end:索敵を無効化';
+    if (goal === 'search') {
+        if (!skillOn(A.side, 'gt_stall')) return 'end:索敵を無効化';
+        if (A.contact?.()) return 'contact:相手の手掛かりを得た';
+    }
     if (now > M.until) return goal === 'colony' ? 'retry:制圧の期限切れ' : 'end:期限切れ';
     if (goal === 'repair') {
         if (A.kit()) { M.phase = 'repair'; A.hold(true); return true; }
@@ -16359,7 +16404,9 @@ function operationStep(A, M, now, urgent) {
         if (M.scout) A.say('再計画・制圧先へ哨戒機を先行させる');
     }
     if (M.phase === 'scout') {
-        if (now - M.phaseF < 720 && A.scoutWaiting(M.scout, target)) { A.hold(true); return true; }
+        const waiting = A.scoutWaiting(M.scout, target);
+        if (now - M.phaseF < 720 && waiting) { A.hold(true); return true; }
+        A.say(waiting ? '再計画・哨戒の待ち時間終了。潜航で接近する' : '再計画・哨戒先行を終え、母艦が接近する');
         A.releaseScout(M.scout);
         M.scout = null;
         M.phase = 'go';
@@ -16368,7 +16415,7 @@ function operationStep(A, M, now, urgent) {
     if (d > near) {
         if (M.bestDist === undefined || d <= M.bestDist - 150) { M.bestDist = d; M.progressF = now; }
         if (now - M.progressF > 3600) return goal === 'colony' ? 'retry:制圧先へ進めない' : 'end:行き先へ進めない';
-        A.go(target.x, target.y, 180, goal !== 'repair' && d > 5200 ? 'cruise' : 'silent');
+        A.go(target.x, target.y, 180, goal !== 'repair' && d > 5200 && !A.quietRoute?.(target) ? 'cruise' : 'silent');
         return true;
     }
     A.hold(true);
@@ -16394,8 +16441,14 @@ function runOperation(A, holder, now, urgent, expectsRepair) {
     if (result === true) return true;
     if (M.scout) A.releaseScout(M.scout);
     const [outcome, why] = result.split(':');
-    holder._operation = outcome === 'retry' && !M.retried
-        ? makeOperation(A, { goal: M.goal, why }, now, M.target, true) : null;
+    const success = ['制圧完了', '修理完了', '聴取完了'].includes(why);
+    const setback = outcome === 'retry' || ['行き先へ進めない', '修理を開始できない', '期限切れ'].includes(why);
+    const status = success ? 'success' : outcome === 'contact' ? 'contact' : setback ? 'setback' : 'interrupted';
+    operationReport(A, holder, M, status, why, now, outcome === 'retry');
+    const next = outcome === 'retry' && !M.retried
+        ? makeOperation(A, { goal: M.goal, why }, now, M.target, true, holder) : null;
+    if (!next && outcome === 'retry') reactionEvent(A.who, 'setback', 1);
+    holder._operation = next;
     if (holder._operation) {
         announceOperation(A, holder._operation);
         // 同じティックに交代先を実行する。再度失敗したら再抽選せずに終了させる。
@@ -16404,6 +16457,17 @@ function runOperation(A, holder, now, urgent, expectsRepair) {
     if (result === 'end:修理完了') A.recovered?.();
     A.say('再計画を終了・' + why);
     return false;
+}
+function operationReviewActive(A, holder, now, urgent) {
+    const M = holder._operation;
+    if (!M || M.goal === 'repair' || !repairProtected(doctrineOf(A.side, A.who), urgent || A.expo >= 2)) return;
+    const review = { goal: 'repair', why: '作戦中に安全な修理機会を得た' };
+    const next = makeOperation(A, review, now, null, false, holder);
+    if (!next) return;
+    if (M.scout) A.releaseScout(M.scout);
+    operationReport(A, holder, M, 'interrupted', review.why, now);
+    holder._operation = next;
+    announceOperation(A, next);
 }
 function tacticFit(doc, category, id, cover, needsFix) {
     const preferred = !!doc && DOC_TACTIC_AFFINITY[doc.id] === category && (category !== 'info' || needsFix);
@@ -16483,8 +16547,8 @@ window.__trunkDbg = function () {
         const prin = {}; if (R) for (const id in R.list) prin[id] = R.list[id].str;
         const ship = h === _com ? player : h;
         const M = h._operation;
-        const operation = M ? { goal: M.goal, phase: M.phase, why: M.why, target: { x: M.target.x, y: M.target.y }, until: M.until } : null;
-        return { operation, emotion: ship ? reactionRead(ship) : null, outlook: O ? { stance: O.stance, score: O.score, phase: O.phase, sw: O.sw, why: O.why } : null,
+        const operation = M ? { goal: M.goal, phase: M.phase, why: M.why, target: { x: M.target.x, y: M.target.y }, started: M.started, until: M.until } : null;
+        return { operation, operationReport: h._operationReport || null, emotion: ship ? reactionRead(ship) : null, outlook: O ? { stance: O.stance, score: O.score, phase: O.phase, sw: O.sw, why: O.why } : null,
             prin, prinTop: R ? R.top : null,
             doc: D && D.id ? { id: D.id, score: D.score, sw: D.sw, prin: D.prin, why: D.why, all: D.all, envCover: D.envCover, envMul: D.envMul, hullRecovery: D.hullRecovery || null } : null,
             env: h._env || null, reward: h._reward || null }; // 第232弾: 風の受け口と不足の記録も採取できるように
@@ -20854,9 +20918,21 @@ const HIDE_STRATS = { rock: 1, wreck: 1, fogHide: 1, ambush: 1, bait: 1, trap: 1
 const STRAT_NEW = { fallback: 1, restock: 1, playdead: 1, storm: 1, heatcloud: 1, surge: 1, wide_loop: 1, center: 1, orbit: 1, salvage: 1, net: 1, rock: 1, wreck: 1, hop: 1, decoyship: 1, supply_hunt: 1, hitflee: 1 }, STRAT_KEEP = { board: 1, rock: 1, wreck: 1, fogHide: 1, screen: 1, fallback: 1, playdead: 1, storm: 1, heatcloud: 1, restock: 1 }; // 第146弾: 新しい戦略 / 相手が近くても続ける戦略
 const STRAT_SHARED = { board: 1, rock: 1, wreck: 1, hop: 1, decoyship: 1, fogHide: 1, push: 1, screen: 1, guard: 1, tech: 1, raid: 1, fallback: 1, restock: 1, playdead: 1, storm: 1, heatcloud: 1, surge: 1, wide_loop: 1, center: 1, orbit: 1, salvage: 1, net: 1, supply_hunt: 1, hitflee: 1 };
 // 自機COMのアダプタ
+function operationQuietRoute(who, P, target) {
+    const guard = reactionRead(who)?.pressure.guard || 0;
+    return persAx(P, 'stealth') * 0.6 + persAx(P, 'caution') * 0.3 + guard * 0.25 +
+        getHiggsIntensity((who.x + target.x) / 2, (who.y + target.y) / 2) * 0.1 >= 0.65;
+}
 function operationActorP(c, hpF) {
     const A = stratActorP(c, hpF, null, null);
-    return { ...A,
+    return { ...A, who: player, P: c.pp,
+        quietRoute: (target) => operationQuietRoute(player, c.pp, target),
+        est() {
+            const est = huntEstimate(beliefViewP(lockedSignalId).sa);
+            return est && est.age <= 600 && sigLockable(lockedSignalId) ? est : null;
+        },
+        contact() { const est = this.est(); return est && est.age <= 300 && est.r <= 2200; },
+        listened() { searchMark(player, player.x, player.y, passiveRange() * SEARCH_HEAR_FRAC); },
         recovered() { c.hideUntil = _frameCount; c.retreatS = null; },
         go(x, y, tolerance, stance) {
             if (playerCoasting) toggleCoast(false);
@@ -20867,7 +20943,14 @@ function operationActorP(c, hpF) {
 }
 function operationActorE(e) {
     const A = stratActorE(e);
-    return { ...A,
+    return { ...A, who: e, P: e.personality,
+        quietRoute: (target) => operationQuietRoute(e, e.personality, target),
+        est() {
+            const est = _huntEst(e);
+            return est && est.age <= 600 && enemyConf(e) > 0.5 ? est : null;
+        },
+        contact() { const est = this.est(); return est && est.age <= 300 && est.r <= 2200; },
+        listened() { if (e._sigRangeV > 0) searchMark(e, e.x, e.y, e._sigRangeV * SEARCH_HEAR_FRAC); },
         recovered() { e._hideT = 0; e._hiding = false; e._hideCD = 3600; },
         go(x, y, tolerance, stance) {
             e._quietRun = stance === 'silent';
@@ -20897,7 +20980,9 @@ function operationScoutWaiting(scout, target, who) {
     const { d, order } = scout;
     if (d.hp <= 0 || d._dying || d._boarded) return false;
     if ((who === player ? d._own : d._operationPatrol) !== order) return false;
-    return d._auto || Math.hypot(d.x - target.x, d.y - target.y) >= 1800;
+    const side = who === player ? 'player' : 'enemy';
+    const units = who === player ? playerDrones : enemies;
+    return droneLinkState(side, d, who, units).auto || Math.hypot(d.x - target.x, d.y - target.y) >= 1800;
 }
 function releaseOperationScout(scout, who) {
     const { d, order } = scout;
@@ -22304,14 +22389,14 @@ function gatherPick(side, x, y, mode, range, who, minValue = 0) {
     // 第232弾 (光と雨の接続): スコアに価値の項を足す — 見かけの距離を (1 + REWARD_VALUE_MAX × 価値) で割る。
     //   価値は幹が記録した艦ごとの不足 (rewardValueFor) から来るので、不足している艦ほど不足を埋める
     //   機会へ寄り、万全な艦は従来どおり近さで選ぶ。近さの判断を置き換えるのではなく、項を1つ足すだけ。
-    const vw = who || (side === 'p' ? player : null);
+    const vw = who || (side === 'p' ? player : null), memory = side === 'p' ? _com : who;
     let best = null, bs = Infinity; const lim = range === undefined ? Infinity : range;
     const gdb = window.__gatherDbg ? [] : null; // 検証専用の記録 (判断には使わない)
     for (const st of structures) {
         let ok = false;
         if (st.type === 'derelict') { if (mode === 'part' && !st.salvaged) { if (side === 'e' && !st._discE && Math.hypot(st.x - x, st.y - y) < 2500) st._discE = true; ok = (side === 'p' ? !!st.discovered : !!(st.discovered || st._discE)) && (derelictSosOn(st) || derelictSosIn(st) < 3600); } } // 第152弾: SOS が鳴っている (か間もなく鳴る) 難破船だけ
         else if (st.type === 'colony') ok = st.owner !== me && (mode === 'any' || !st[pk]);
-        if (!ok) continue; const d = Math.hypot(st.x - x, st.y - y); if (d >= lim) continue; const rv = rewardValueFor(side, vw, st, st.type); if (rv < minValue) continue; const sc = d * kd / ((kw[st.type] || kd) * (1 + REWARD_VALUE_MAX * rv)); if (gdb) gdb.push({ kind: st.type, d: Math.round(d), rv, sc: Math.round(sc) }); if (sc < bs) { bs = sc; best = st; }
+        if (!ok) continue; const d = Math.hypot(st.x - x, st.y - y); if (d >= lim) continue; const rv = rewardValueFor(side, vw, st, st.type); if (rv < minValue) continue; const sc = d * kd * (1 + operationSitePenalty(memory, st, _frameCount)) / ((kw[st.type] || kd) * (1 + REWARD_VALUE_MAX * rv)); if (gdb) gdb.push({ kind: st.type, d: Math.round(d), rv, sc: Math.round(sc) }); if (sc < bs) { bs = sc; best = st; }
     }
     for (const n of resourceNodes) { if (n.owner === me || (mode === 'part' && n[pk])) continue; const d = Math.hypot(n.x - x, n.y - y); if (d >= lim) continue; const rv = rewardValueFor(side, vw, n, 'node'); if (rv < minValue) continue; const sc = d * kd / (kw.node * (1 + REWARD_VALUE_MAX * rv)); if (gdb) gdb.push({ kind: 'node', d: Math.round(d), rv, sc: Math.round(sc) }); if (sc < bs) { bs = sc; best = n; } }
     if (gdb) window.__gatherDbg.last = { side, mode, cands: gdb, pick: best ? (best.type || 'node') : null };
@@ -23060,7 +23145,15 @@ function capManualOn() { return capMode && _capManualUntil > _frameCount; }
 function capManualStart() {
     if (!capMode || !comDemo) return;
     _capManualUntil = _frameCount + CAP_MANUAL_FRAMES;
-    if (_com) { _com.item = null; if (_com.hunt) cancelHuntShot(_com.hunt); _com.hunt = null; } // AIの目的 (取りに行く・任務) は一旦手放す
+    if (_com) {
+        const M = _com._operation;
+        if (M) {
+            if (M.scout) releaseOperationScout(M.scout, player);
+            operationReport(null, _com, M, 'interrupted', '艦長が操艦を引き継いだ', _frameCount);
+            _com._operation = null;
+        }
+        _com.item = null; if (_com.hunt) cancelHuntShot(_com.hunt); _com.hunt = null;
+    } // AIの目的 (取りに行く・任務) は一旦手放す
     _capManualChip();
 }
 function capManualEnd(why) { if (_capManualUntil > 0) { _capManualUntil = 0; _capManualChip(); if (why) logMessage('AI操艦: ' + why, 'system-msg'); } }
@@ -23115,7 +23208,7 @@ function _comPilotStep0() {
     if (c.st && !capManualOn() && !capSeeking() && !(c.capHoldUntil > now || c.capAvoidUntil > now || c.standUntil > now)) {
         const review = strategyReview(c.st, doctrineOf('p'), outlookOf('p'), c._prin?.list?.winpath, comEngaged() || c._sitJ?.phase === 'escape' || THREATS.some(t => t.kind === 'msl'), now, reactionForReview(player, contact));
         if (review && (review.goal === 'repair' || !c.hunt)) {
-            const A = operationActorP(c, hpF), next = makeOperation(A, review, now, c.st.spot);
+            const A = operationActorP(c, hpF), next = makeOperation(A, review, now, c.st.spot, false, c);
             if (next) {
                 c.goalLeg = null; c.item = null; c.legF = -1e9;
                 player.setTarget(player.x, player.y);
@@ -23130,6 +23223,7 @@ function _comPilotStep0() {
         capManualOn() || capSeeking() || c.capHoldUntil > now || c.capAvoidUntil > now || c.standUntil > now)) {
         const M = c._operation;
         if (M.scout) releaseOperationScout(M.scout, player);
+        operationReport(null, c, M, 'interrupted', '危険への対処または艦長の指示を優先', now);
         c._operation = null;
         comThinkEvent('p', '再計画を中断・危険への対処または艦長の指示を優先');
     }
@@ -23257,8 +23351,11 @@ function _comPilotStep0() {
             }
         }
     }
-    if (c._operation?.goal === 'repair' &&
-        runOperation(operationActorP(c, hpF), c, now, false, true)) return;
+    if (c._operation) {
+        const A = operationActorP(c, hpF);
+        if (!(c.standUntil > now)) operationReviewActive(A, c, now, false);
+        if (runOperation(A, c, now, false, true)) return;
+    }
     // 1) 退く
     if (hpF < retreat) {
         if (c.hunt) cancelHuntShot(c.hunt);
