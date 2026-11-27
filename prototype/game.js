@@ -5248,7 +5248,7 @@ class Ship {
                 const _R = Math.max(visClose(this), myDetectRange), _me = this;
                 const _see = (x, y) => { const d = Math.hypot(x - _me.x, y - _me.y); return d < _R && losReach(_me.x, _me.y, Math.atan2(y - _me.y, x - _me.x), _R) >= d; };
                 const _vm = visualNegative(_sa, _see, _see(player.x, player.y));
-                if (_vm) { recordMissSa(_sa, _vm); this._B.guess = false; searchMark(this, _vm.x, _vm.y, _vm.r, true); if (_oppNegNear(_vm.x, _vm.y)) _oppNeg(oppRecE(this)); } // 第219弾: 「見たが居なかった」も不在レイヤーへ / 第221弾: ノード・拠点近傍の不在は相手モデル (様式の反証) へ
+                if (_vm) { operationObserveSites(this, 'player', _vm, _frameCount, true); recordMissSa(_sa, _vm); this._B.guess = false; searchMark(this, _vm.x, _vm.y, _vm.r, true); if (_oppNegNear(_vm.x, _vm.y)) _oppNeg(oppRecE(this)); } // 第219弾: 「見たが居なかった」も不在レイヤーへ / 第221弾: ノード・拠点近傍の不在は相手モデル (様式の反証) へ
             }
             if (_listen && this.type !== 'fighter' && (_frameCount + this.uid) % 120 < 60) searchMark(this, this.x, this.y, sigRange * SEARCH_HEAR_FRAC); // 第39弾: 聴いた範囲を覚える
             if (_listen && this.type !== 'fighter' && (_frameCount + this.uid) % 120 === 0) searchMarkSensors(this, 'enemy'); // 第219弾: 聴音局・哨戒機の範囲も (2秒ごとのまとめ打ち)
@@ -5427,6 +5427,10 @@ class Ship {
                 if (J.turret()) { this.turretStock--; spawnEnemyDrone(this, 'turret'); }
             }
 
+            if (this._operationSites && _frameCount % COM_TICK === 0) {
+                const est = operationActorE(this).est();
+                if (est && est.age <= 180) operationObserveSites(this, est.sid, est, _frameCount - est.age);
+            }
             if (this._strat && _frameCount % COM_TICK === 0) {
                 const review = strategyReview(this._strat, doctrineOf('e', this), outlookOf('e', this), this._prin?.list?.winpath,
                     _hardDetect || this._sitJ?.phase === 'escape' || stratNearE(this) || incomingMissile(this, true), _frameCount,
@@ -9988,6 +9992,7 @@ function updateVisualNegatives() {
             }
         }
         if (!m) continue;
+        operationObserveSites(_com, sid, m, _frameCount, true);
         recordMiss(sid, m);
         searchMark(player, m.x, m.y, m.r, true); // 第219弾: 「見たが居なかった」も不在レイヤーへ (肯定の聴取記録とは混ぜない)
         if (sid === lockedSignalId) { const _nt = enemyBySid(sid); if (_nt && _nt.type !== 'fighter' && _oppNegNear(m.x, m.y)) _oppNeg(oppRecP(sid)); } // 第221弾: ノード・拠点近傍の不在は相手モデルへ
@@ -16310,15 +16315,56 @@ function operationColonyThreat(site, est) {
     return est && est.r <= 2500 && Math.hypot(est.x - site.x, est.y - site.y) < 3500;
 }
 // 作戦の成否はこの艦の観測だけを使う。危険と進行停止の履歴は時間とともに古くなる。
+function recentOperationMemory(record, now) {
+    return record && now - record.at < THEORY.memory.searchForget ? record : null;
+}
 function operationSitePenalty(holder, site, now) {
     const record = holder?._operationSites?.get(site);
-    return record ? Math.max(0, 1 - (now - record.at) / THEORY.memory.searchForget) * record.cost : 0;
+    if (!record) return 0;
+    const remaining = r => r ? Math.max(0, 1 - (now - r.at) / THEORY.memory.searchForget) : 0;
+    return 1.5 * remaining(record.conflict) + 0.65 * remaining(record.route) + 0.45 * remaining(record.stalled);
+}
+function operationRemember(holder, episode) {
+    const history = holder._operationHistory || (holder._operationHistory = []);
+    history.push(episode);
+    if (history.length > 32) history.shift();
+}
+function operationObserveSite(holder, site, sid, observation, now, negative = false) {
+    const record = holder?._operationSites?.get(site);
+    const conflict = recentOperationMemory(record?.conflict, now);
+    if (!conflict || !sid || conflict.sid !== sid || !observation || now <= conflict.at) return;
+    const d = Math.hypot(observation.x - site.x, observation.y - site.y);
+    // 視認した不在は制圧範囲を覆う場合だけ。位置の更新は誤差円の手前端も拠点から遠い場合だけ。
+    const resolved = negative ? observation.r >= d + COLONY_HACK_R : d - observation.r >= 3500;
+    if (!resolved) return;
+    delete record.conflict;
+    operationRemember(holder, { goal: 'colony', result: 'updated', why: negative ? '制圧範囲を目視して対象艦の不在を確認' : '相手の新しい推定が拠点から離れた',
+        x: site.x, y: site.y, at: now, sid });
+}
+function operationObserveSites(holder, sid, observation, now, negative = false) {
+    if (!holder?._operationSites) return;
+    for (const site of holder._operationSites.keys()) operationObserveSite(holder, site, sid, observation, now, negative);
 }
 function operationReport(A, holder, M, result, why, now, retry = false) {
-    holder._operationReport = { goal: M.goal, result, why, x: M.target.x, y: M.target.y, at: now };
-    if (retry && M.goal === 'colony') {
+    const episode = { goal: M.goal, result, why, phase: M.phase, started: M.started, via: M.via || null,
+        x: M.target.x, y: M.target.y, at: now };
+    holder._operationReport = episode;
+    operationRemember(holder, episode);
+    if (M.goal === 'colony' && (retry || result === 'success')) {
         const sites = holder._operationSites || (holder._operationSites = new Map());
-        sites.set(M.target, { at: now, cost: why === '制圧が競合' || why.startsWith('制圧先で') ? 1.5 : 0.65 });
+        if (result === 'success') sites.delete(M.target);
+        else {
+            const record = sites.get(M.target) || {};
+            if (why === '制圧が競合' || why.startsWith('制圧先で')) {
+                const est = A.est();
+                record.conflict = { at: now, sid: M.contender !== undefined ? M.contender : (why === '制圧が競合' ? A.contender?.(M.target) ?? null : est?.sid ?? null) };
+            } else if (why === '制圧先へ進めない') {
+                record.route = { at: now, x: A.x, y: A.y, via: M.via || null };
+            } else {
+                record.stalled = { at: now };
+            }
+            sites.set(M.target, record);
+        }
     }
     if (result === 'success' || result === 'contact') {
         if (M.goal === 'search' && result === 'success') A.listened?.();
@@ -16365,6 +16411,27 @@ function operationTarget(A, goal, excluded, memory, now) {
     }
     return best;
 }
+// 直線経路が詰まった地点の両側を調べ、地形と機関特性から比較する。
+function operationBypass(A, target, route) {
+    if (!route) return null;
+    const dx = target.x - A.x, dy = target.y - A.y, distance = Math.hypot(dx, dy);
+    if (distance <= 1400) return null;
+    const nx = -dy / distance, ny = dx / distance;
+    const offset = Math.min(2700, Math.max(1500, distance * 0.35));
+    const ahead = Math.min(2400, distance * 0.5), threat = A.est();
+    let best = null, cost = Infinity;
+    for (const sign of [-1, 1]) {
+        const point = clampToMapCircle(A.x + dx / distance * ahead + nx * offset * sign,
+            A.y + dy / distance * ahead + ny * offset * sign, 500);
+        if (operationColonyThreat(point, threat) || Math.hypot(point.x - route.x, point.y - route.y) < 1000 ||
+            (route.via && Math.hypot(point.x - route.via.x, point.y - route.via.y) < 900)) continue;
+        const fog = getHiggsIntensity(point.x, point.y), rock = getDebrisIntensity(point.x, point.y);
+        const value = (Math.hypot(point.x - A.x, point.y - A.y) + Math.hypot(point.x - target.x, point.y - target.y))
+            * (1 + 0.55 * rock) / engineSpeedFactor(A.engine, fog);
+        if (value < cost) { best = point; cost = value; }
+    }
+    return best;
+}
 const OPERATION_JP = { colony: 'コロニーを制圧', search: '未聴取の海域を索敵', repair: '安全な場所で修理' };
 function makeOperation(A, review, now, excluded = null, retried = false, memory = null) {
     let goal = review.goal, target = operationTarget(A, goal, excluded, memory, now), why = review.why;
@@ -16374,7 +16441,12 @@ function makeOperation(A, review, now, excluded = null, retried = false, memory 
         target = operationTarget(A, goal, excluded, memory, now);
     }
     if (!target) return null;
-    return { goal, target, why, phase: 'prepare', started: now, until: now + (goal === 'repair' ? 7200 : 18000), retried };
+    const record = goal === 'colony' ? memory?._operationSites?.get(target) : null;
+    const recheck = !!recentOperationMemory(record?.conflict, now);
+    const via = operationBypass(A, target, recentOperationMemory(record?.route, now));
+    if (recheck) why += '。以前の競合を哨戒で再確認する';
+    if (via) why += '。以前の進行停止地点を迂回する';
+    return { goal, target, why, recheck, via, phase: 'prepare', started: now, until: now + (goal === 'repair' ? 7200 : 18000), retried };
 }
 // スキル停止、危険、目標達成、詰まりを確認してから、その時点の段階だけ実行する。
 function operationStep(A, M, now, urgent) {
@@ -16398,18 +16470,58 @@ function operationStep(A, M, now, urgent) {
     }
     if (M.phase === 'prepare') {
         // 通信範囲内へ先に送り、報告待ちを12秒に制限する。哨戒機が無くても作戦は続く。
-        M.scout = goal === 'colony' && d > COLONY_HACK_R && d <= DRONE_AUTO_DIST * 0.6 ? A.scout(target) : null;
-        M.phase = M.scout ? 'scout' : 'go';
+        if (M.recheck && d > DRONE_AUTO_DIST * 0.6 && A.canScout?.()) {
+            const f = (d - DRONE_AUTO_DIST * 0.55) / d;
+            M.staging = { x: A.x + (target.x - A.x) * f, y: A.y + (target.y - A.y) * f };
+            M.phase = 'stageScout';
+        }
+        if (M.phase !== 'stageScout') {
+            M.scout = goal === 'colony' && (M.recheck || (d > COLONY_HACK_R && d <= DRONE_AUTO_DIST * 0.6)) ? A.scout(target) : null;
+            if (M.recheck && !M.scout) return 'alternate:競合を再確認できる哨戒機がない';
+        }
+        if (M.phase !== 'stageScout') M.phase = M.scout ? 'scout' : 'go';
         M.phaseF = now;
         if (M.scout) A.say('再計画・制圧先へ哨戒機を先行させる');
     }
+    if (M.phase === 'stageScout') {
+        if (d > DRONE_AUTO_DIST * 0.6 && now - M.phaseF < 3600) {
+            A.go(M.staging.x, M.staging.y, 180, d > 5200 ? 'cruise' : 'silent');
+            return true;
+        }
+        M.scout = d <= DRONE_AUTO_DIST * 0.6 ? A.scout(target) : null;
+        if (!M.scout) return 'alternate:哨戒を再開できない';
+        M.phase = 'scout';
+        M.phaseF = now;
+        A.say('再計画・過去に競合した拠点の手前から哨戒機を出す');
+    }
     if (M.phase === 'scout') {
-        const waiting = A.scoutWaiting(M.scout, target);
-        if (now - M.phaseF < 720 && waiting) { A.hold(true); return true; }
-        A.say(waiting ? '再計画・哨戒の待ち時間終了。潜航で接近する' : '再計画・哨戒先行を終え、母艦が接近する');
+        if (M.recheck) {
+            const evidence = A.scoutEvidence?.(M.scout, target);
+            if (evidence?.kind === 'threat') {
+                M.contender = evidence.sid;
+                return 'retry:制圧先で哨戒機が相手を確認';
+            }
+            if (evidence?.kind === 'clear') M.rechecked = true;
+            else if (now - M.phaseF < 1500) { A.hold(true); return true; }
+            else return 'alternate:以前競合した拠点の哨戒が未確認';
+        } else {
+            const waiting = A.scoutWaiting(M.scout, target);
+            if (now - M.phaseF < 720 && waiting) { A.hold(true); return true; }
+        }
+        A.say(M.rechecked ? '再計画・哨戒で制圧範囲を確認。母艦が接近する' : '再計画・哨戒の先行を終了。母艦が接近する');
         A.releaseScout(M.scout);
         M.scout = null;
         M.phase = 'go';
+    }
+    if (M.via && !M.viaReached) {
+        const leg = Math.hypot(M.via.x - A.x, M.via.y - A.y);
+        if (leg > 350) {
+            if (M.viaBest === undefined || leg <= M.viaBest - 150) { M.viaBest = leg; M.viaProgress = now; }
+            if (now - M.viaProgress > 3600) return 'retry:制圧先へ進めない';
+            A.go(M.via.x, M.via.y, 180, 'cruise');
+            return true;
+        }
+        M.viaReached = true;
     }
     const near = goal === 'colony' ? COLONY_HACK_R * 0.6 : goal === 'repair' ? 300 : 800;
     if (d > near) {
@@ -16438,6 +16550,14 @@ function runOperation(A, holder, now, urgent, expectsRepair) {
     const M = holder._operation;
     if (!M || (expectsRepair !== undefined && (M.goal === 'repair') !== expectsRepair)) return false;
     const result = operationStep(A, M, now, urgent);
+    if (M.rechecked) {
+        const record = holder._operationSites?.get(M.target);
+        if (record?.conflict) {
+            delete record.conflict;
+            operationRemember(holder, { goal: M.goal, result: 'updated', why: '哨戒機が制圧範囲を再確認', x: M.target.x, y: M.target.y, at: now });
+        }
+        M.rechecked = false;
+    }
     if (result === true) return true;
     if (M.scout) A.releaseScout(M.scout);
     const [outcome, why] = result.split(':');
@@ -16445,8 +16565,16 @@ function runOperation(A, holder, now, urgent, expectsRepair) {
     const setback = outcome === 'retry' || ['行き先へ進めない', '修理を開始できない', '期限切れ'].includes(why);
     const status = success ? 'success' : outcome === 'contact' ? 'contact' : setback ? 'setback' : 'interrupted';
     operationReport(A, holder, M, status, why, now, outcome === 'retry');
-    const next = outcome === 'retry' && !M.retried
-        ? makeOperation(A, { goal: M.goal, why }, now, M.target, true, holder) : null;
+    let next = null;
+    if (!M.retried && (outcome === 'retry' || outcome === 'alternate')) {
+        if (why === '制圧先へ進めない' && !operationColonyThreat(M.target, A.est())) {
+            const route = holder._operationSites?.get(M.target)?.route;
+            const via = operationBypass(A, M.target, route);
+            if (via) next = { ...M, via, viaReached: false, viaBest: undefined, bestDist: undefined, scout: null,
+                phase: 'go', started: now, until: now + 9000, retried: true, why: '進行を阻んだ地点を迂回する' };
+        }
+        if (!next) next = makeOperation(A, { goal: M.goal, why }, now, M.target, true, holder);
+    }
     if (!next && outcome === 'retry') reactionEvent(A.who, 'setback', 1);
     holder._operation = next;
     if (holder._operation) {
@@ -16548,7 +16676,7 @@ window.__trunkDbg = function () {
         const ship = h === _com ? player : h;
         const M = h._operation;
         const operation = M ? { goal: M.goal, phase: M.phase, why: M.why, target: { x: M.target.x, y: M.target.y }, started: M.started, until: M.until } : null;
-        return { operation, operationReport: h._operationReport || null, emotion: ship ? reactionRead(ship) : null, outlook: O ? { stance: O.stance, score: O.score, phase: O.phase, sw: O.sw, why: O.why } : null,
+        return { operation, operationReport: h._operationReport || null, operationHistory: h._operationHistory?.slice() || [], emotion: ship ? reactionRead(ship) : null, outlook: O ? { stance: O.stance, score: O.score, phase: O.phase, sw: O.sw, why: O.why } : null,
             prin, prinTop: R ? R.top : null,
             doc: D && D.id ? { id: D.id, score: D.score, sw: D.sw, prin: D.prin, why: D.why, all: D.all, envCover: D.envCover, envMul: D.envMul, hullRecovery: D.hullRecovery || null } : null,
             env: h._env || null, reward: h._reward || null }; // 第232弾: 風の受け口と不足の記録も採取できるように
@@ -20312,7 +20440,7 @@ function beliefSeen(B) { return !!B.seen; }
 const OPP_CLS = ['assault', 'stealth', 'carrier'], OPP_ENG = ['thermonuclear', 'pulse', 'higgs', 'photon'], OPP_STY = ['gathering', 'aggressive', 'cautious', 'raider'];
 const OPP_AXIS_JP = { cls: '艦種', sty: '様式' };
 const OPP_JP = { assault: '攻撃型', stealth: '潜航型', carrier: '空母', thermonuclear: '熱核', pulse: 'パルス', higgs: 'ヒッグス', photon: 'フォトン', gathering: '収集型', aggressive: '攻撃的', cautious: '慎重', raider: '襲撃型' };
-const _oppModelP = {}; // 自機側: sid → 相手モデル (主対象 = lockedSignalId の間だけ証拠が入る)
+const _oppModelP = {}; // 自機側: sid → 相手モデル (発射の観測はロック外でも入る)
 function _oppNew() {
     const ax = (cands) => { const L = {}; for (const c of cands) L[c] = 0; return { L, n: 0, top: null }; };
     return { cls: ax(OPP_CLS), eng: ax(OPP_ENG), sty: ax(OPP_STY),
@@ -20479,12 +20607,14 @@ function _oppFire(rec, wType) {
 }
 // 自機側の発射観測 (被弾・ビーム軌跡の経路から)
 // 第223弾: 信念としての「最後に観測した発射種別」_lastFireP (sid → {type, f}。敵側 e._B.lastFire と対称) は観測のたびに残す
-//   (被弾・軌跡はロック状態に依らない観測事実)。相手モデルへの集計は従来どおり主対象 (lockedSignalId) の時だけ
+//   被弾・軌跡で帰属できる発射は、ロックの有無にかかわらずその信号の相手モデルにも入れる。
 const _lastFireP = {};
 function observeFireP(sid, wType) {
     if (!sid || !wType) return;
+    const previous = _lastFireP[sid];
+    if (wType === 'beam' && previous?.type === wType && previous.f === _frameCount) return;
     _lastFireP[sid] = { type: wType, f: _frameCount };
-    if (sid === lockedSignalId) _oppFire(oppRecP(sid), wType);
+    _oppFire(oppRecP(sid), wType);
 }
 // 確認したドローン機種は、搭載できる艦種の候補を絞る。共通機種の目撃だけで片方を優遇しない。
 const OPP_DRONE_CLS = {
@@ -20929,7 +21059,7 @@ function operationActorP(c, hpF) {
         quietRoute: (target) => operationQuietRoute(player, c.pp, target),
         est() {
             const est = huntEstimate(beliefViewP(lockedSignalId).sa);
-            return est && est.age <= 600 && sigLockable(lockedSignalId) ? est : null;
+            return est && est.age <= 600 && sigLockable(lockedSignalId) ? { ...est, sid: lockedSignalId } : null;
         },
         contact() { const est = this.est(); return est && est.age <= 300 && est.r <= 2200; },
         listened() { searchMark(player, player.x, player.y, passiveRange() * SEARCH_HEAR_FRAC); },
@@ -20947,7 +21077,7 @@ function operationActorE(e) {
         quietRoute: (target) => operationQuietRoute(e, e.personality, target),
         est() {
             const est = _huntEst(e);
-            return est && est.age <= 600 && enemyConf(e) > 0.5 ? est : null;
+            return est && est.age <= 600 && enemyConf(e) > 0.5 ? { ...est, sid: 'player' } : null;
         },
         contact() { const est = this.est(); return est && est.age <= 300 && est.r <= 2200; },
         listened() { if (e._sigRangeV > 0) searchMark(e, e.x, e.y, e._sigRangeV * SEARCH_HEAR_FRAC); },
@@ -20984,6 +21114,28 @@ function operationScoutWaiting(scout, target, who) {
     const units = who === player ? playerDrones : enemies;
     return droneLinkState(side, d, who, units).auto || Math.hypot(d.x - target.x, d.y - target.y) >= 1800;
 }
+function operationScoutEvidence(scout, site, who) {
+    const { d, order } = scout, own = who === player;
+    if (d.hp <= 0 || d._dying || d._boarded || (own ? d._own : d._operationPatrol) !== order) return null;
+    if (droneLinkState(own ? 'player' : 'enemy', d, who, own ? playerDrones : enemies).auto) return null;
+    const range = own ? d._visR : DRONE_VIS.scout;
+    if (!range || Math.hypot(site.x - d.x, site.y - d.y) > range) return null;
+    const fog = getHiggsIntensity(d.x, d.y);
+    const sees = (x, y) => {
+        const dx = x - d.x, dy = y - d.y, distance = Math.hypot(dx, dy);
+        return distance <= range && losReach(d.x, d.y, Math.atan2(dy, dx), range, fog) >= distance;
+    };
+    const hostiles = own ? enemies.filter(e => e.type !== 'fighter' && e.hp > 0 && !e._dying) : (player?.hp > 0 ? [player] : []);
+    const seen = hostiles.filter(e => Math.hypot(e.x - site.x, e.y - site.y) < COLONY_HACK_R && sees(e.x, e.y) &&
+        (own ? e.inVision : !isBottomed));
+    if (seen.length) return { kind: 'threat', sid: seen.length === 1 ? (own ? enemySid(seen[0]) : 'player') : null };
+    if (!sees(site.x, site.y)) return null;
+    for (let i = 0; i < 8; i++) {
+        const angle = i * Math.PI / 4;
+        if (!sees(site.x + Math.cos(angle) * COLONY_HACK_R, site.y + Math.sin(angle) * COLONY_HACK_R)) return null;
+    }
+    return { kind: 'clear' };
+}
 function releaseOperationScout(scout, who) {
     const { d, order } = scout;
     if (who !== player) { if (d._operationPatrol === order) d._operationPatrol = null; return; }
@@ -21000,8 +21152,16 @@ function stratActorP(c, hpF, te, lk) {
         scout: (target) => operationScout(player, target, () => !droneRoster('p').scout.live && stock('scout') && droneCtrlFits('p', null, 'scout') &&
             skillOn('p', 'dr_scout') && (execLaunchP('scout'), true)),
         scoutWaiting: (scout, target) => operationScoutWaiting(scout, target, player),
+        scoutEvidence: (scout, target) => operationScoutEvidence(scout, target, player),
         releaseScout: (scout) => releaseOperationScout(scout, player),
         contested: (site) => _capturing?.obj === site && _capturing.contested,
+        contender(site) {
+            const visible = enemies.filter(e => e.hp > 0 && !e._dying && e.type !== 'fighter' && e.inVision &&
+                Math.hypot(e.x - site.x, e.y - site.y) < COLONY_HACK_R);
+            return visible.length === 1 ? enemySid(visible[0]) : null;
+        },
+        canScout: () => skillOn('p', 'dr_order') && (playerDrones.some(d => d.type === 'scout' && d.hp > 0 && !d._own && !d._boarded) ||
+            (skillOn('p', 'dr_scout') && stock('scout') && droneCtrlFits('p', null, 'scout'))),
         oppRestockF: (S) => _oppModelP[S.sid]?.restockF ?? -1,
         estName: 'SIG-' + sigNo(lockedSignalId), est: () => sa && sa.fix ? trackEstimate(sa, 0) : null, next: (excluded) => searchNext(player, player.x, player.y, excluded), kit: () => (player._kitT || 0) > 0,
         go: (x, y, tol, stance) => { c.mode = 'strat'; _comCMOff(); if (!(player.state === 'moving' && Math.hypot(player.targetX - x, player.targetY - y) < tol) && _comCanSteer(c)) { player.setTarget(x, y); _comSteered(c, 'leg'); }
@@ -21030,8 +21190,12 @@ function stratActorE(e) {
         scout: (target) => operationScout(e, target, () => !droneRoster('e', e).scout.live && e.scoutStock > 0 && droneCtrlFits('e', e, 'scout') &&
             skillOn('e', 'dr_scout') && (execLaunchE('scout'), true)),
         scoutWaiting: (scout, target) => operationScoutWaiting(scout, target, e),
+        scoutEvidence: (scout, target) => operationScoutEvidence(scout, target, e),
         releaseScout: (scout) => releaseOperationScout(scout, e),
         contested: (site) => e._sawPlayerF === now && B.est && Math.hypot(B.est.x - site.x, B.est.y - site.y) <= COLONY_HACK_R,
+        contender: () => 'player',
+        canScout: () => skillOn('e', 'dr_order') && (droneRoster('e', e).scout.live ||
+            (skillOn('e', 'dr_scout') && e.scoutStock > 0 && droneCtrlFits('e', e, 'scout'))),
         oppRestockF: () => e._B.opp?.restockF ?? -1,
         estName: '自機', est: () => B.sa && B.sa.fix ? trackEstimate(B.sa, 0) : null, next: (excluded) => searchNext(e, e.x, e.y, excluded), kit: () => (e._kitT || 0) > 0,
         go: (x, y, tol) => { if (!(e.state === 'moving' && Math.hypot(e.targetX - x, e.targetY - y) < tol)) { e.setTarget(x, y); e._roam = 'strat'; } },
@@ -23205,6 +23369,10 @@ function _comPilotStep0() {
     if (c.shipLike) c.lastShipF = now;
     comExtrasStep(c, P, D, hpF, contact);
     comReactItems(c, P, hpF, hpF < retreat); // 第58弾: かく乱 (閃光・ノイズ・煙幕・偽装)
+    if (c._operationSites) {
+        const est = operationActorP(c, hpF).est();
+        if (est && est.age <= 180) operationObserveSites(c, est.sid, est, now - est.age);
+    }
     if (c.st && !capManualOn() && !capSeeking() && !(c.capHoldUntil > now || c.capAvoidUntil > now || c.standUntil > now)) {
         const review = strategyReview(c.st, doctrineOf('p'), outlookOf('p'), c._prin?.list?.winpath, comEngaged() || c._sitJ?.phase === 'escape' || THREATS.some(t => t.kind === 'msl'), now, reactionForReview(player, contact));
         if (review && (review.goal === 'repair' || !c.hunt)) {
