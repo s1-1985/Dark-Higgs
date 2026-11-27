@@ -6,7 +6,7 @@ function make(s){
  const code=fragment(s,'function sitRaw(S) {','var SIT_HOLD =')+fragment(s,'const TRUNK_PERIOD =','// 幹の読み口');
  return new Function(`
  const structures=[],resourceNodes=[],gameState={mode:'br'},player={hp:200,maxHp:1000,x:0,y:0},_com={},THEORY={time:{earlyUntil:10800,openingUntil:5400,gatherUntil:36000}},CAP_RANGE=16000,PERS_DEF={aggression:.5,greed:.4,tech:.4,cunning:.4,patience:.4,stealth:.4,caution:.4}, REPAIR_KIT_HP=700;
- let _frameCount=12000,enabled=true;
+ let _frameCount=12000,enabled=true,lockedSignalId=null;
  const coloniesOwned=()=>0,nodesOwned=()=>0,persAx=(p,k)=>p[k]??.4,envIntake=()=>({cover:0}),ENV_COVER_MIN=.3,ENV_VEIL_MAX=.3,ENV_AMBUSH_MAX=.2,_restockSite=()=>null,rewardNeeds=()=>({}),comThinkEvent=()=>{},SIT_PHASE_JP={},skillOn=()=>enabled;
  ${code}
  const e={hp:200,maxHp:1000,x:0,y:0};
