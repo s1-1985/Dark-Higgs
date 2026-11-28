@@ -687,15 +687,19 @@
         1022,
         1001
       ],
-      "generation_status": "submitted",
+      "generation_status": "completed",
       "job_id": "77717d91-6900-447a-bb55-23da1a04be6d",
       "previous_jobs": [],
-      "model_url": null,
+      "model_url": "https://storage.to3d.app/generated-3d/models/2026-11-28/task_77717d91-6900-447a-bb55-23da1a04be6d_model.glb",
       "target_path": "prototype/assets/models/fogborn-carrier.glb",
       "triangle_budget": 12000,
-      "review_status": "source_sprite_verified; model_not_generated",
+      "review_status": "generated; geometry_review_pending",
       "runtime_enabled": false,
-      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3",
+      "last_status_checked": "2026-11-28T05:54:46.517Z",
+      "fallback_model_url": "https://img.theapi.app/temp/ad833bae-a743-4942-aaca-1e2bac1dee8c.glb",
+      "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-28/task_77717d91-6900-447a-bb55-23da1a04be6d_image.png",
+      "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-28/task_77717d91-6900-447a-bb55-23da1a04be6d_video.mp4"
     },
     {
       "id": "fogborn-fighter",
@@ -716,15 +720,19 @@
         512,
         490
       ],
-      "generation_status": "submitted",
+      "generation_status": "completed",
       "job_id": "63cc85e2-f040-4327-be18-383cc1427035",
       "previous_jobs": [],
-      "model_url": null,
+      "model_url": "https://storage.to3d.app/generated-3d/models/2026-11-28/task_63cc85e2-f040-4327-be18-383cc1427035_model.glb",
       "target_path": "prototype/assets/models/fogborn-fighter.glb",
       "triangle_budget": 5000,
-      "review_status": "source_sprite_verified; model_not_generated",
+      "review_status": "generated; geometry_review_pending",
       "runtime_enabled": false,
-      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3",
+      "last_status_checked": "2026-11-28T05:55:28.006Z",
+      "fallback_model_url": "https://img.theapi.app/temp/adbed0ef-a8ef-4758-a99f-4050a9ed28f2.glb",
+      "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-28/task_63cc85e2-f040-4327-be18-383cc1427035_image.png",
+      "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-28/task_63cc85e2-f040-4327-be18-383cc1427035_video.mp4"
     },
     {
       "id": "fogborn-scout",
@@ -745,15 +753,19 @@
         512,
         398
       ],
-      "generation_status": "submitted",
+      "generation_status": "completed",
       "job_id": "37a7a0f1-6aea-40c2-924e-ac099f26ffea",
       "previous_jobs": [],
-      "model_url": null,
+      "model_url": "https://storage.to3d.app/generated-3d/models/2026-11-28/task_37a7a0f1-6aea-40c2-924e-ac099f26ffea_model.glb",
       "target_path": "prototype/assets/models/fogborn-scout.glb",
       "triangle_budget": 5000,
-      "review_status": "source_sprite_verified; model_not_generated",
+      "review_status": "generated; geometry_review_pending",
       "runtime_enabled": false,
-      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3",
+      "last_status_checked": "2026-11-28T05:55:24.180Z",
+      "fallback_model_url": "https://img.theapi.app/temp/f290943c-cde0-4e2c-86c5-8a2b97827d39.glb",
+      "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-28/task_37a7a0f1-6aea-40c2-924e-ac099f26ffea_image.png",
+      "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-28/task_37a7a0f1-6aea-40c2-924e-ac099f26ffea_video.mp4"
     },
     {
       "id": "fogborn-mech",
@@ -775,14 +787,21 @@
         512
       ],
       "generation_status": "submitted",
-      "job_id": "8aee1e63-af33-4768-aa8c-ad462aad0115",
-      "previous_jobs": [],
+      "job_id": "83750a13-f8ba-4b2b-adde-4dc30d9a6c23",
+      "previous_jobs": [
+        {
+          "jobId": "8aee1e63-af33-4768-aa8c-ad462aad0115",
+          "status": "failed",
+          "error": "Too many requests."
+        }
+      ],
       "model_url": null,
       "target_path": "prototype/assets/models/fogborn-mech.glb",
       "triangle_budget": 12000,
       "review_status": "source_sprite_verified; model_not_generated",
       "runtime_enabled": false,
-      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3",
+      "last_status_checked": "2026-11-28T05:54:38.826Z"
     }
   ]
 }
