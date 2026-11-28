@@ -37,7 +37,7 @@
         if (!wanted) { active = false; sync(); return false; }
         if (renderer) { active = true; sync(); return true; }
         if (!pending) {
-            pending = import('./view3d-renderer.js?v=20261128-units2')
+            pending = import('./view3d-renderer.js?v=20261128-world1')
                 .then(m => m.createRenderer({ onFailure: fail }));
         }
         sync();
@@ -66,6 +66,14 @@
             if (!frame || !active) return false;
             try { return renderer.captureSprite(ctx, img, role, len, angle, screenScale); }
             catch (error) { fail(error); return false; }
+        },
+        background(source) {
+            if (!frame || !active) return false;
+            try { return renderer.background(source); } catch (error) { fail(error); return false; }
+        },
+        captureFog(source, mask, strength) {
+            if (!frame || !active) return false;
+            try { return renderer.captureFog(source, mask, strength); } catch (error) { fail(error); return false; }
         },
         present(source) {
             if (!active || !frame) return false;
