@@ -225,16 +225,19 @@
         1011,
         816
       ],
-      "generation_status": "processing",
+      "generation_status": "completed",
       "job_id": "0bf94cf2-f847-407b-b678-96c2d5d6e17c",
       "previous_jobs": [],
-      "model_url": null,
+      "model_url": "https://storage.to3d.app/generated-3d/models/2026-11-28/task_0bf94cf2-f847-407b-b678-96c2d5d6e17c_model.glb",
       "target_path": "prototype/assets/models/rustroad-assault.glb",
       "triangle_budget": 12000,
-      "review_status": "source_sprite_verified; model_not_generated",
+      "review_status": "generated; geometry_review_pending",
       "runtime_enabled": false,
       "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3",
-      "last_status_checked": "2026-11-28T05:45:25.952Z"
+      "last_status_checked": "2026-11-28T05:47:03.327Z",
+      "fallback_model_url": "https://img.theapi.app/temp/02a19f0b-e7bc-4644-8eab-6b6a3b607239.glb",
+      "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-28/task_0bf94cf2-f847-407b-b678-96c2d5d6e17c_image.png",
+      "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-28/task_0bf94cf2-f847-407b-b678-96c2d5d6e17c_video.mp4"
     },
     {
       "id": "rustroad-stealth",
@@ -255,15 +258,19 @@
         957,
         858
       ],
-      "generation_status": "submitted",
+      "generation_status": "completed",
       "job_id": "f6eb5e8e-4fc4-4e52-8fc6-0508e813319d",
       "previous_jobs": [],
-      "model_url": null,
+      "model_url": "https://storage.to3d.app/generated-3d/models/2026-11-28/task_f6eb5e8e-4fc4-4e52-8fc6-0508e813319d_model.glb",
       "target_path": "prototype/assets/models/rustroad-stealth.glb",
       "triangle_budget": 12000,
-      "review_status": "source_sprite_verified; model_not_generated",
+      "review_status": "generated; geometry_review_pending",
       "runtime_enabled": false,
-      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3",
+      "last_status_checked": "2026-11-28T05:47:03.199Z",
+      "fallback_model_url": "https://img.theapi.app/temp/f095d931-7698-454d-9134-61174686da23.glb",
+      "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-28/task_f6eb5e8e-4fc4-4e52-8fc6-0508e813319d_image.png",
+      "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-28/task_f6eb5e8e-4fc4-4e52-8fc6-0508e813319d_video.mp4"
     },
     {
       "id": "rustroad-carrier",
@@ -284,7 +291,7 @@
         1005,
         846
       ],
-      "generation_status": "submitted",
+      "generation_status": "processing",
       "job_id": "8dfff1ba-6265-4ea1-82c3-4794ef8709cc",
       "previous_jobs": [],
       "model_url": null,
@@ -292,7 +299,8 @@
       "triangle_budget": 12000,
       "review_status": "source_sprite_verified; model_not_generated",
       "runtime_enabled": false,
-      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3",
+      "last_status_checked": "2026-11-28T05:46:55.767Z"
     },
     {
       "id": "rustroad-fighter",
@@ -313,7 +321,7 @@
         509,
         512
       ],
-      "generation_status": "submitted",
+      "generation_status": "processing",
       "job_id": "f972dc71-3f8d-46fd-9d88-441129199ef7",
       "previous_jobs": [],
       "model_url": null,
@@ -321,7 +329,8 @@
       "triangle_budget": 5000,
       "review_status": "source_sprite_verified; model_not_generated",
       "runtime_enabled": false,
-      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3",
+      "last_status_checked": "2026-11-28T05:46:55.770Z"
     },
     {
       "id": "rustroad-scout",
@@ -342,14 +351,15 @@
         512,
         508
       ],
-      "generation_status": "awaiting_external_transfer_approval",
-      "job_id": null,
+      "generation_status": "submitted",
+      "job_id": "7bf9dc48-b717-43ea-85a6-e4c625935288",
       "previous_jobs": [],
       "model_url": null,
       "target_path": "prototype/assets/models/rustroad-scout.glb",
       "triangle_budget": 5000,
       "review_status": "source_sprite_verified; model_not_generated",
-      "runtime_enabled": false
+      "runtime_enabled": false,
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
     },
     {
       "id": "rustroad-mech",
@@ -370,14 +380,15 @@
         414,
         512
       ],
-      "generation_status": "awaiting_external_transfer_approval",
-      "job_id": null,
+      "generation_status": "submitted",
+      "job_id": "31bceca5-b7b2-4016-8c3e-cb471f11bad9",
       "previous_jobs": [],
       "model_url": null,
       "target_path": "prototype/assets/models/rustroad-mech.glb",
       "triangle_budget": 12000,
       "review_status": "source_sprite_verified; model_not_generated",
-      "runtime_enabled": false
+      "runtime_enabled": false,
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
     },
     {
       "id": "sanctum-assault",
