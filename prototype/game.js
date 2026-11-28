@@ -16398,7 +16398,7 @@ function reactionFireThreshold(P, ship, hpF, retreat, reliable, target) {
 //       → 年輪 (このスキルは効いたか) → 次の葉の重み。自機COMも敵も同じ式。材料はこの艦が観測した物だけ (受けた損害・
 //       視認した命中・得た補給と部品・自分の拠点・推定の確かさ)。乱数は使わない。記録は試合の中だけ (艦・作業メモと一緒に消える)。
 const LEAF_HORIZON = { tac: 1800, hunt: 3600, strat: 5400 }; // 結果を見るまでの時間 (戦術30秒・任務60秒・戦略90秒)
-const LEAF_MUL_MAX = 0.3;   // 次の選択への効き (最大 ±30%)
+const LEAF_MUL_MAX = 0.45;  // 次の選択への効き (最大 ±45%。第252弾: 計測で ±30% は実質0だったため引き上げ)
 const LEAF_FADE = 18000;    // 年輪の効きが半分に薄れるまで (5分 × 忍耐で伸びる)
 function leafHolder(side, who) { return side === 'p' ? (_com || null) : (who || null); }
 function leafLedger(holder) { return holder ? (holder._leafLedger || (holder._leafLedger = { hit: 0, dmg: 0, gain: 0 })) : null; }
@@ -16446,10 +16446,10 @@ function leafScore(cat, a, b) {
     const gain = Math.min(1, Math.max(0, b.gain - a.gain)) + 0.4 * Math.max(0, b.bases - a.bases);
     const calm = (a.expo - b.expo) / 3;
     let v;
-    if (cat === 'off') v = 1.3 * dealt + 0.4 * intel - 1.5 * taken - (dealt <= 0 && intel <= 0.05 ? 0.15 : 0);
-    else if (cat === 'def') v = 0.35 + 0.4 * calm - 3 * taken + 0.2 * Math.min(1, Math.max(0, b.hp - a.hp) / Math.max(1, a.max) * 4);
-    else if (cat === 'gain') v = 0.9 * gain + 0.3 * intel - 1.2 * taken - (gain <= 0 ? 0.15 : 0);
-    else v = 1.1 * intel + 0.3 * dealt - 1.0 * taken - (intel <= 0.05 && dealt <= 0 ? 0.2 : 0); // info
+    if (cat === 'off') v = 1.3 * dealt + 0.4 * intel - 1.5 * taken - (dealt <= 0 && intel <= 0.05 ? 0.05 : 0);
+    else if (cat === 'def') v = 0.1 + 0.4 * calm - 3 * taken + 0.2 * Math.min(1, Math.max(0, b.hp - a.hp) / Math.max(1, a.max) * 4);
+    else if (cat === 'gain') v = 0.9 * gain + 0.3 * intel - 1.2 * taken - (gain <= 0 ? 0.05 : 0);
+    else v = 1.1 * intel + 0.3 * dealt - 1.0 * taken - (intel <= 0.05 && dealt <= 0 ? 0.05 : 0); // info (何も起きないのは弱い証拠: 固定の減点で偏らせない)
     return Math.max(-1, Math.min(1, v));
 }
 // 年輪の刻み方は性格 (枝) で変わる: 知略・電脳は早く学ぶ / 慎重は裏目を重く覚える / 攻撃性は仕掛けの裏目を軽く見る / 忍耐は長く覚えている
@@ -16471,10 +16471,10 @@ function leafRingTick(side, who, S) {
         v = Math.max(-1, Math.min(1, v));
         const M = R.m[E.id] || (R.m[E.id] = { v: 0, n: 0, f: now });
         const old = M.v * Math.pow(0.5, (now - M.f) / Lr.fade);
-        M.v = old + Lr.rate * (v - old); M.n++; M.f = now; M.last = v;
+        M.v = M.n ? old + Lr.rate * (v - old) : v; M.n++; M.f = now; M.last = v;
         // 枝の年輪: 同じ系統 (仕掛ける/守る/探る/集める) の結果をまとめて持ち、まだ使っていない葉にも効かせる
         const C = (R.c || (R.c = {}))[cat] || (R.c[cat] = { v: 0, n: 0, f: now });
-        C.v = C.v * Math.pow(0.5, (now - C.f) / Lr.fade) + 0.5 * Lr.rate * (v - C.v * Math.pow(0.5, (now - C.f) / Lr.fade)); C.n++; C.f = now;
+        { const co = C.v * Math.pow(0.5, (now - C.f) / Lr.fade); C.v = C.n ? co + 0.5 * Lr.rate * (v - co) : v * 0.6; } C.n++; C.f = now;
         R.ep.splice(i--, 1);
         if (Math.abs(v) >= 0.35) {
             const nm = (_skillInfo(E.id) || {}).jp || E.id;
@@ -16483,16 +16483,16 @@ function leafRingTick(side, who, S) {
     }
 }
 // 次の葉の重み: 経験が少ないうちは弱く、時間とともに薄れる
-const LEAF_CAT_MAX = 0.15; // 系統の年輪が次の選択に効く最大 (±15%)
+const LEAF_CAT_MAX = 0.25; // 系統の年輪が次の選択に効く最大 (±25%)
 function leafRingMul(holder, id) {
     const R = holder?._leafRing; if (!R) return 1;
     const ship = holder === _com ? player : holder;
     const fade = leafLearn(reactionPersonality(ship)).fade, now = _frameCount;
     let mul = 1;
     const M = R.m[id];
-    if (M && M.n) mul += LEAF_MUL_MAX * Math.max(-1, Math.min(1, M.v * Math.pow(0.5, (now - M.f) / fade) * Math.min(1, M.n / 3)));
+    if (M && M.n) mul += LEAF_MUL_MAX * Math.max(-1, Math.min(1, M.v * Math.pow(0.5, (now - M.f) / fade) * Math.min(1, (M.n + 1) / 3)));
     const C = R.c && R.c[leafCat(id)];
-    if (C && C.n) mul *= 1 + LEAF_CAT_MAX * Math.max(-1, Math.min(1, C.v * Math.pow(0.5, (now - C.f) / fade) * Math.min(1, C.n / 4)));
+    if (C && C.n) mul *= 1 + LEAF_CAT_MAX * Math.max(-1, Math.min(1, C.v * Math.pow(0.5, (now - C.f) / fade) * Math.min(1, (C.n + 1) / 4)));
     return mul;
 }
 function leafRingRead(holder) {

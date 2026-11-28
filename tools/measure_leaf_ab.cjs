@@ -8,7 +8,7 @@ const res = [];
 async function worker(b, q) {
   while (q.length) {
     const j = q.shift(); const p = await b.newPage({ viewport: { width: 1280, height: 720 } }); const errs = []; p.on('pageerror', e => errs.push(e.message));
-    await p.addInitScript(seed => { let a = seed >>> 0; window.__rs = () => { a = seed >>> 0 }; Math.random = () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296 }; window.requestAnimationFrame = () => 0 }, j.seed);
+    await p.addInitScript(seed => { let a = seed >>> 0; window.__rs = () => { a = seed >>> 0 }; Math.random = () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296 }; window.requestAnimationFrame = () => 0; window.__spawnMin = 4500; window.__spawnVar = 2500 }, j.seed);
     try {
       await p.goto('http://127.0.0.1:8099/prototype/index.html'); await p.waitForTimeout(500);
       const r = await p.evaluate(([j, mins]) => {
