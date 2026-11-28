@@ -3,10 +3,14 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { UNIT_MODELS, modelForSprite, createModelCache, spritePlacement } from '../prototype/unit-models.js';
 const specs = Object.values(UNIT_MODELS);
-assert.equal(specs.length,12);
+assert.equal(specs.length,36);
+const factions = ['helios','crow','valkyr','rustroad','sanctum','fogborn'];
+for(const faction of factions) assert.equal(specs.filter(s=>s.id.startsWith(faction+'-')).length,6);
 for (const spec of specs) {
     assert.equal(modelForSprite({ src: `https://game/assets/f2_${spec.id.replace('-', '_')}.png?v=2` }),spec);
+    assert.equal(modelForSprite({ currentSrc: `https://game/assets/f2_${spec.id.replace('-', '_')}.png#sprite`, src:'wrong.png' }),spec);
     if(spec.role==='mech') for(const pose of ['ready','fire','thrust','slash']) assert.equal(modelForSprite({src:`assets/f2_${spec.id.replace('-','_')}_${pose}.png`}),spec);
+    else assert.equal(modelForSprite({src:`assets/f2_${spec.id.replace('-','_')}_fire.png`}),null);
     const data=fs.readFileSync(new URL(spec.url));
     assert.equal(data.toString('ascii',0,4),'glTF'); assert.equal(data.readUInt32LE(4),2); assert.equal(data.readUInt32LE(8),data.length);
     const doc=JSON.parse(data.toString('utf8',20,20+data.readUInt32LE(12)));
@@ -18,7 +22,7 @@ for (const spec of specs) {
     const record=JSON.parse(fs.readFileSync('prototype/assets/models/model-preparation-report.json')).find(x=>x.id===spec.id);
     assert.equal(triangles,record.triangles); assert.equal(crypto.createHash('sha256').update(data).digest('hex'),record.sha256);
 }
-for (const src of ['assets/f2_valkyr_assault.png','assets/f2_crow_missile.png','assets/f2_crow_boarder.png','assets/f2_crow_assault_fire.png','assets/e_fighter.png']) assert.equal(modelForSprite({src}),null);
+for (const src of ['assets/f2_unknown_assault.png','assets/f2_valkyr_assault.png.bak','assets/f2_crow_missile.png','assets/f2_crow_boarder.png','assets/f2_crow_assault_fire.png','assets/e_fighter.png']) assert.equal(modelForSprite({src}),null);
 const frame={width:844,height:390,dpr:2,zoom:.08};
 assert.equal(spritePlacement({a:2,b:0,e:100,f:200},frame,32,.24).length,7.68,'drone minimum size must survive the 3D hook');
 assert.equal(spritePlacement({a:0,b:2*Math.cos(35*Math.PI/180),e:100,f:200},frame,32).length,32,'projected rotated scale');
@@ -32,4 +36,4 @@ await tick();assert.deepEqual(loads,specs.slice(0,2).map(s=>s.id));
 pending[0].resolve('first');await tick();assert.equal(cache.get(specs[0]),'first');assert.equal(loads.length,3);
 pending[1].reject(new Error('missing'));await tick();assert.equal(cache.get(specs[1]),null);assert.equal(failed.length,1);assert.equal(loads.length,3);
 cache.dispose();assert.deepEqual(released,['first']);pending[2].resolve('late');await tick();assert.deepEqual(released,['first','late']);assert.equal(cache.get(specs[0]),null);
-console.log('PASS: 12 embedded GLBs / hashes / triangle budgets; exact sprite mapping and Tech aliases; screen scale and culling; lazy load concurrency / dedup / isolated failure / disposal.');
+console.log('PASS: 36 embedded GLBs / hashes / triangle budgets; six faction mappings and Tech aliases; screen scale and culling; lazy load concurrency / dedup / isolated failure / disposal.');

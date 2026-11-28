@@ -12,10 +12,10 @@ class WebGLRenderer {
     render(scene) { if(scene.children.some(o=>o.isHemisphereLight)) meshScene=scene; }
 }
 class GLTFLoader {
-    async loadAsync() {
+    async loadAsync(url) {
         downloads++;
         const material=new Three.MeshStandardMaterial(); material.addEventListener('dispose',()=>materialDisposals++);
-        const geometry=new Three.BoxGeometry(2,1,8); geometry.addEventListener('dispose',()=>geometryDisposals++);
+        const geometry=url.includes('rustroad-fighter') ? new Three.BoxGeometry(1,8,2) : new Three.BoxGeometry(2,1,8); geometry.addEventListener('dispose',()=>geometryDisposals++);
         const scene=new Three.Group();scene.add(new Three.Mesh(geometry,material));return {scene};
     }
 }
@@ -43,5 +43,16 @@ renderer.beginFrame(frame);assert(objects.every(o=>!o.visible));
 ctx.globalAlpha=.4;renderer.captureSprite(ctx,helios,'assault',100,0,.5);renderer.present({});
 objects=meshScene.children.filter(o=>o.isGroup);assert.equal(objects.length,2,'reuse pool per model');assert(!objects[1].visible,'no stale enemy model');
 const materials=[];objects[0].traverse(o=>{if(o.isMesh)materials.push(o.material);});assert.equal(materials[0].opacity,.4);assert(materials[0].transparent);
-assert.equal(downloads,2);renderer.dispose();renderer.dispose();assert.equal(geometryDisposals,2);assert.equal(materialDisposals,2);
-console.log('PASS: real renderer scene graph / model bounds / yaw / scale / separate pools / frame visibility reset / alpha / resource disposal (CPU).');
+assert.equal(downloads,2);
+renderer.beginFrame(frame);ctx.globalAlpha=1;
+const rolled={src:'assets/f2_rustroad_fighter.png'};
+assert.equal(renderer.captureSprite(ctx,rolled,'fighter',100,0,.5),false);
+await new Promise(r=>setImmediate(r));assert.equal(renderer.captureSprite(ctx,rolled,'fighter',100,0,.5),true);
+renderer.present({});objects=meshScene.children.filter(o=>o.isGroup);
+assert.equal(objects.length,3,'new faction has its own model pool');
+const corrected=objects[2].children[0];
+assert.equal(corrected.rotation.y,-Math.PI/2,'reviewed reverse heading');
+assert(Math.abs(corrected.children[0].rotation.z-Math.PI/2)<1e-10,'sideways source gets roll correction');
+assert(Math.abs(corrected.scale.x-1/8)<1e-10,'measure bounds after roll, so the 8-unit wing span sets scale');
+assert.equal(downloads,3);renderer.dispose();renderer.dispose();assert.equal(geometryDisposals,3);assert.equal(materialDisposals,3);
+console.log('PASS: real renderer scene graph / model bounds / yaw / scale / roll before sizing / separate faction pools / frame visibility reset / alpha / resource disposal (CPU).');
