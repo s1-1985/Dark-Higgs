@@ -16472,6 +16472,9 @@ function leafRingTick(side, who, S) {
         const M = R.m[E.id] || (R.m[E.id] = { v: 0, n: 0, f: now });
         const old = M.v * Math.pow(0.5, (now - M.f) / Lr.fade);
         M.v = old + Lr.rate * (v - old); M.n++; M.f = now; M.last = v;
+        // 枝の年輪: 同じ系統 (仕掛ける/守る/探る/集める) の結果をまとめて持ち、まだ使っていない葉にも効かせる
+        const C = (R.c || (R.c = {}))[cat] || (R.c[cat] = { v: 0, n: 0, f: now });
+        C.v = C.v * Math.pow(0.5, (now - C.f) / Lr.fade) + 0.5 * Lr.rate * (v - C.v * Math.pow(0.5, (now - C.f) / Lr.fade)); C.n++; C.f = now;
         R.ep.splice(i--, 1);
         if (Math.abs(v) >= 0.35) {
             const nm = (_skillInfo(E.id) || {}).jp || E.id;
@@ -16480,17 +16483,23 @@ function leafRingTick(side, who, S) {
     }
 }
 // 次の葉の重み: 経験が少ないうちは弱く、時間とともに薄れる
+const LEAF_CAT_MAX = 0.15; // 系統の年輪が次の選択に効く最大 (±15%)
 function leafRingMul(holder, id) {
-    const M = holder?._leafRing?.m[id]; if (!M || !M.n) return 1;
+    const R = holder?._leafRing; if (!R) return 1;
     const ship = holder === _com ? player : holder;
-    const fade = leafLearn(reactionPersonality(ship)).fade;
-    const v = M.v * Math.pow(0.5, (_frameCount - M.f) / fade) * Math.min(1, M.n / 3);
-    return 1 + LEAF_MUL_MAX * Math.max(-1, Math.min(1, v));
+    const fade = leafLearn(reactionPersonality(ship)).fade, now = _frameCount;
+    let mul = 1;
+    const M = R.m[id];
+    if (M && M.n) mul += LEAF_MUL_MAX * Math.max(-1, Math.min(1, M.v * Math.pow(0.5, (now - M.f) / fade) * Math.min(1, M.n / 3)));
+    const C = R.c && R.c[leafCat(id)];
+    if (C && C.n) mul *= 1 + LEAF_CAT_MAX * Math.max(-1, Math.min(1, C.v * Math.pow(0.5, (now - C.f) / fade) * Math.min(1, C.n / 4)));
+    return mul;
 }
 function leafRingRead(holder) {
     const R = holder?._leafRing; if (!R) return null;
     const m = {}; for (const id in R.m) m[id] = { v: +R.m[id].v.toFixed(3), n: R.m[id].n, last: +(R.m[id].last ?? 0).toFixed(3), mul: +leafRingMul(holder, id).toFixed(3) };
-    return { pending: R.ep.map(e => e.id), mem: m, ledger: holder._leafLedger || null };
+    const c = {}; for (const k in (R.c || {})) c[k] = { v: +R.c[k].v.toFixed(3), n: R.c[k].n };
+    return { pending: R.ep.map(e => e.id), mem: m, cat: c, ledger: holder._leafLedger || null };
 }
 function trunkStep(F, S, J) {
     if (!F || !S || !J) return null;
