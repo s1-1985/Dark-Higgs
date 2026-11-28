@@ -16252,6 +16252,7 @@ function reactionAdvance(ship, profile, now) {
 }
 function reactionEvent(ship, kind, amount, source = null) {
     if (!ship || ship.hp <= 0 || !(amount > 0) || (ship === player ? !comDemo : !ENEMY_CLASS[ship.type])) return;
+    leafLedgerAdd(ship, kind, amount); // 第250弾: 葉の年輪の通算
     const profile = reactionProfile(reactionPersonality(ship));
     const R = reactionAdvance(ship, profile, _frameCount), v = R.values;
     if (kind === 'damage') {
@@ -16366,12 +16367,112 @@ function reactionFireThreshold(P, ship, hpF, retreat, reliable, target) {
     return delta === 0 ? base : Math.max(Math.min(base, 0.15), Math.min(Math.max(base, 0.95), base + delta));
 }
 // ── 幹の周期処理: 見通し → 原則 → 方針 を更新する (判定ティック sitJudgeAttach から呼ばれる) ──
+// ═══ 第250弾 (木の構造・作り込み「葉の年輪」): 葉 (スキル) を発動した結果を年輪に刻み、次の葉の選び方に効かせる ═══
+// 流れ: 根 (観測) → 幹 (原則・方針) → 枝 (性格の適性) → 葉 (スキル発動) → 光と雨 (得た報酬) と風 (地形) を受けた結果
+//       → 年輪 (このスキルは効いたか) → 次の葉の重み。自機COMも敵も同じ式。材料はこの艦が観測した物だけ (受けた損害・
+//       視認した命中・得た補給と部品・自分の拠点・推定の確かさ)。乱数は使わない。記録は試合の中だけ (艦・作業メモと一緒に消える)。
+const LEAF_HORIZON = { tac: 1800, hunt: 3600, strat: 5400 }; // 結果を見るまでの時間 (戦術30秒・任務60秒・戦略90秒)
+const LEAF_MUL_MAX = 0.3;   // 次の選択への効き (最大 ±30%)
+const LEAF_FADE = 18000;    // 年輪の効きが半分に薄れるまで (5分 × 忍耐で伸びる)
+function leafHolder(side, who) { return side === 'p' ? (_com || null) : (who || null); }
+function leafLedger(holder) { return holder ? (holder._leafLedger || (holder._leafLedger = { hit: 0, dmg: 0, gain: 0 })) : null; }
+// reactionEvent が受け取った観測 (被弾・視認した命中・補給・部品) を、艦ごとの通算に足す
+function leafLedgerAdd(ship, kind, amount) {
+    const L = leafLedger(ship === player ? _com : ship); if (!L) return;
+    if (kind === 'damage') L.dmg += amount;
+    else if (kind === 'hit') L.hit += amount;
+    else if (kind === 'supply') L.gain += Math.min(1, amount);
+    else if (kind === 'part') L.gain += 1;
+}
+// 葉の系統: 戦術は TAC_URG の種類、戦略は方針の束、任務は「仕掛ける」
+function leafCat(id) {
+    if (id.startsWith('hu_')) return 'off';
+    if (id.startsWith('st_')) {
+        const s = id.slice(3);
+        if (DOC_STRAT_BUNDLE.expand.includes(s)) return 'gain';
+        if (DOC_STRAT_BUNDLE.recover.includes(s) || DOC_STRAT_BUNDLE.veil.includes(s)) return 'def';
+        return 'off';
+    }
+    if (id.startsWith('it_')) return 'def'; // 反応で使う搭載品は身を守る系
+    return (TAC_URG[id] || [1, 'off'])[1];
+}
+function leafSnap(side, who, S) {
+    const holder = leafHolder(side, who), ship = side === 'p' ? player : who, L = leafLedger(holder);
+    if (!ship || !L || !S) return null;
+    const own = side === 'p' ? 'player' : 'enemy';
+    const estQ = S.seen ? 0 : (S.est && S.estD < 1e8 ? Math.min(1, (S.estR || 0) / Math.max(1, S.estD)) : 1);
+    return { f: _frameCount, hp: ship.hp, max: ship.maxHp, hit: L.hit, dmg: L.dmg, gain: L.gain, bases: coloniesOwned(own) + 0.5 * nodesOwned(own), estQ, seen: !!S.seen, expo: S.exposure || 0 };
+}
+function leafPlant(side, who, id, kind, S) {
+    const holder = leafHolder(side, who); if (!holder || !id) return;
+    if (!S) S = sitNow(side, who);
+    const s = leafSnap(side, who, S); if (!s) return;
+    const R = holder._leafRing || (holder._leafRing = { ep: [], m: {} });
+    if (R.ep.some(e => e.id === id && _frameCount - e.s.f < 300)) return; // 同じ葉の連続発動は1回に数える
+    R.ep.push({ id, kind, s });
+    if (R.ep.length > 24) R.ep.shift();
+}
+// 結果の点 (−1〜+1)。系統ごとに「何が効いたことになるか」が違う
+function leafScore(cat, a, b) {
+    const taken = Math.max(0, b.dmg - a.dmg) / Math.max(1, a.max);
+    const dealt = Math.min(1, Math.max(0, b.hit - a.hit) / 700);
+    const intel = Math.max(-1, Math.min(1, a.estQ - b.estQ)) + (b.seen && !a.seen ? 0.4 : 0);
+    const gain = Math.min(1, Math.max(0, b.gain - a.gain)) + 0.4 * Math.max(0, b.bases - a.bases);
+    const calm = (a.expo - b.expo) / 3;
+    let v;
+    if (cat === 'off') v = 1.3 * dealt + 0.4 * intel - 1.5 * taken - (dealt <= 0 && intel <= 0.05 ? 0.15 : 0);
+    else if (cat === 'def') v = 0.35 + 0.4 * calm - 3 * taken + 0.2 * Math.min(1, Math.max(0, b.hp - a.hp) / Math.max(1, a.max) * 4);
+    else if (cat === 'gain') v = 0.9 * gain + 0.3 * intel - 1.2 * taken - (gain <= 0 ? 0.15 : 0);
+    else v = 1.1 * intel + 0.3 * dealt - 1.0 * taken - (intel <= 0.05 && dealt <= 0 ? 0.2 : 0); // info
+    return Math.max(-1, Math.min(1, v));
+}
+// 年輪の刻み方は性格 (枝) で変わる: 知略・電脳は早く学ぶ / 慎重は裏目を重く覚える / 攻撃性は仕掛けの裏目を軽く見る / 忍耐は長く覚えている
+function leafLearn(P) {
+    const ca = persAx(P, 'caution'), ag = persAx(P, 'aggression'), cu = persAx(P, 'cunning'), te = persAx(P, 'tech'), pa = persAx(P, 'patience');
+    return { rate: Math.max(0.15, Math.min(0.6, 0.35 + 0.25 * (cu - 0.4) + 0.15 * (te - 0.4))), neg: 1 + 0.6 * (ca - 0.4), offNeg: Math.max(0.5, 1 - 0.4 * (ag - 0.4)), fade: LEAF_FADE * (0.8 + 0.6 * pa) };
+}
+function leafRingTick(side, who, S) {
+    const holder = leafHolder(side, who), R = holder?._leafRing; if (!R || !R.ep.length) return;
+    const now = _frameCount; if (now - (R.tickF ?? -1e9) < 60) return; R.tickF = now;
+    const ship = side === 'p' ? player : who; if (!ship || ship.hp <= 0) return;
+    let b = null;
+    for (let i = 0; i < R.ep.length; i++) {
+        const E = R.ep[i]; if (now - E.s.f < (LEAF_HORIZON[E.kind] || 1800)) continue;
+        if (!b) b = leafSnap(side, who, S); if (!b) return;
+        const cat = leafCat(E.id), Lr = leafLearn(reactionPersonality(ship));
+        let v = leafScore(cat, E.s, b);
+        if (v < 0) v *= Lr.neg * (cat === 'off' ? Lr.offNeg : 1);
+        v = Math.max(-1, Math.min(1, v));
+        const M = R.m[E.id] || (R.m[E.id] = { v: 0, n: 0, f: now });
+        const old = M.v * Math.pow(0.5, (now - M.f) / Lr.fade);
+        M.v = old + Lr.rate * (v - old); M.n++; M.f = now; M.last = v;
+        R.ep.splice(i--, 1);
+        if (Math.abs(v) >= 0.35) {
+            const nm = (_skillInfo(E.id) || {}).jp || E.id;
+            comThinkEvent(side, '年輪: 「' + nm + '」は ' + (v > 0 ? '効いた' : '裏目に出た') + ' (' + (v > 0 ? '+' : '') + v.toFixed(2) + ') → 次の選び方に刻む (平均' + (M.v > 0 ? '+' : '') + M.v.toFixed(2) + '・' + M.n + '回)', 'leaf:' + E.id);
+        }
+    }
+}
+// 次の葉の重み: 経験が少ないうちは弱く、時間とともに薄れる
+function leafRingMul(holder, id) {
+    const M = holder?._leafRing?.m[id]; if (!M || !M.n) return 1;
+    const ship = holder === _com ? player : holder;
+    const fade = leafLearn(reactionPersonality(ship)).fade;
+    const v = M.v * Math.pow(0.5, (_frameCount - M.f) / fade) * Math.min(1, M.n / 3);
+    return 1 + LEAF_MUL_MAX * Math.max(-1, Math.min(1, v));
+}
+function leafRingRead(holder) {
+    const R = holder?._leafRing; if (!R) return null;
+    const m = {}; for (const id in R.m) m[id] = { v: +R.m[id].v.toFixed(3), n: R.m[id].n, last: +(R.m[id].last ?? 0).toFixed(3), mul: +leafRingMul(holder, id).toFixed(3) };
+    return { pending: R.ep.map(e => e.id), mem: m, ledger: holder._leafLedger || null };
+}
 function trunkStep(F, S, J) {
     if (!F || !S || !J) return null;
     const side = F.side, who = S.who || (side === 'p' ? player : null);
     if (!who || who.hp <= 0) return null;
     const holder = side === 'p' ? (_com || F.who) : F.who;
     if (!holder) return null;
+    leafRingTick(side, who, S); // 第250弾: 発動した葉の結果を年輪に刻む
     const now = _frameCount, docKey = side === 'p' ? 'doc' : '_doc';
     let T = holder._trunk;
     if (!T) T = holder._trunk = { lastF: -1e9, _ph: null, _od: null };
@@ -16863,7 +16964,7 @@ window.__trunkDbg = function () {
         return { operation, operationReport: h._operationReport || null, operationHistory: h._operationHistory?.slice() || [], emotion: ship ? reactionRead(ship) : null, outlook: O ? { stance: O.stance, score: O.score, phase: O.phase, sw: O.sw, why: O.why } : null,
             prin, prinTop: R ? R.top : null,
             doc: D && D.id ? { id: D.id, score: D.score, sw: D.sw, prin: D.prin, why: D.why, all: D.all, envCover: D.envCover, envMul: D.envMul, hullRecovery: D.hullRecovery || null } : null,
-            env: h._env || null, reward: h._reward || null }; // 第232弾: 風の受け口と不足の記録も採取できるように
+            env: h._env || null, reward: h._reward || null, leafRing: leafRingRead(h) }; // 第232弾: 風の受け口と不足の記録も採取できるように
     };
     const out = { p: _com ? one(_com) : null, e: [] };
     for (const e of enemies) if (e.type !== 'fighter') out.e.push(Object.assign({ uid: e.uid }, one(e) || {}));
@@ -16976,7 +17077,7 @@ const TAC_URG = {
 function tacScore(F, id, doc, cover, needsFix) {
     const u = TAC_URG[id] || [1, 'off'], E = F.exposure || 0, low = F.hpF < 0.5;
     const cat = u[1] === 'def' ? (0.7 + 0.35 * E) * (low ? 1.3 : 1) : u[1] === 'off' ? Math.max(0.35, 1.3 - 0.25 * E) * (low ? 0.7 : 1) : Math.max(0.3, 1.4 - 0.45 * E);
-    return u[0] * cat * Math.pow(skillAff(F.P || {}, id), 0.8) * (0.7 + 0.6 * Math.random()) * tacticFit(doc, u[1], id, cover, needsFix);
+    return u[0] * cat * Math.pow(skillAff(F.P || {}, id), 0.8) * (0.7 + 0.6 * Math.random()) * tacticFit(doc, u[1], id, cover, needsFix) * leafRingMul(leafHolder(F.side, F.who), id); // 第250弾: 年輪
 }
 function tacticDecide(F, A, X, act, doAct) {
     const now = _frameCount, cands = [];
@@ -17003,10 +17104,10 @@ function tacticDecide(F, A, X, act, doAct) {
         const frac = m ? (m.sceneOK ? Math.max(0.5, m.frac) : 0.4) : 1;
         if (dbg) { const d = dbg[id] || (dbg[id] = { n: 0, on: 0, cond: 0, tbl: 0, side: { p: 0, e: 0 } }); d.n++; d.on++; if (ok) { d.cond++; d.side[F.side]++; } }
         if (!ok) return;
-        const run2 = () => { let r = false; try { r = !!run(); } catch (er) { r = false; } if (r) F.mark('sk_' + id); return r; };
+        const run2 = () => { let r = false; try { r = !!run(); } catch (er) { r = false; } if (r) { F.mark('sk_' + id); leafPlant(F.side, F.who, id, 'tac', S); } return r; };
         cands.push({ id, run: run2, sc: tacScore(F, id, doc, cover, needsFix) * (0.5 + 0.7 * frac), use: capP ? skillUse(F.side, id) : true, frac });
     };
-    if (act) cands.push({ id: '_item', act, use: true, run: () => { for (const k of (act._marks || [])) F.mark(k); doAct(act); return true; }, sc: 1.6 * (0.7 + 0.6 * Math.random()) * (0.7 + 0.35 * (F.exposure || 0)) * (act.k === 'repair' && doc?.id === 'recover' ? actionFit(doc) : 1) });
+    if (act) cands.push({ id: '_item', act, use: true, run: () => { for (const k of (act._marks || [])) F.mark(k); doAct(act); leafPlant(F.side, F.who, 'it_' + act.k, 'tac', S); return true; }, sc: 1.6 * (0.7 + 0.6 * Math.random()) * (0.7 + 0.35 * (F.exposure || 0)) * (act.k === 'repair' && doc?.id === 'recover' ? actionFit(doc) : 1) * leafRingMul(leafHolder(F.side, F.who), 'it_' + act.k) });
     comboRules(F, A, X, R); tacticRules(F, A, X, R);
     cands.sort((a, b) => b.sc - a.sc);
     let list = cands;
@@ -20361,6 +20462,7 @@ function huntWeights(F) {
         for (const id of ['charge', 'rush', 'snipe']) w[id] *= 1 + 0.16 * push - 0.10 * guard;
         for (const id of ['hold', 'feint', 'shadow']) w[id] *= 1 + 0.15 * guard;
     }
+    { const lh = leafHolder(F.side, F.who); for (const id in w) if (w[id] > 0) w[id] *= leafRingMul(lh, 'hu_' + id); } // 第250弾: 年輪
     return branchWeight(P, 'hu_', w);
 }
 function choosePositiveWeight(w, roll) {
@@ -20438,6 +20540,7 @@ function enemyHunterStep(e, heard, hard) {
         if (window.__huntWLog) { const o = {}; for (const k in w) if (w[k] > 0) o[k] = +w[k].toFixed(2); o._it = [e.itemNoise || 0, e.itemFake || 0, lureK]; window.__huntWLog.push(o); }
         const pick = choosePositiveWeight(w, Math.random());
         if (!pick) return false;
+        leafPlant('e', e, 'hu_' + pick, 'hunt'); // 第250弾
         if (pick === 'charge') { e._huntCD = now + 1200 + Math.random() * 1200; say('【突撃】自機 (推定' + Math.round(D / 100) * 100 + 'u) へまっすぐ詰める — 攻撃性' + _pct(ag)); return false; }
         const side = Math.random() < 0.5 ? 1 : -1;
         H = e._hunt = { k: pick, jp: HUNT_REG[pick].jp, ph: HUNT_REG[pick].ph, t0: now, f0: now, side, w: sp.w, R: sp.R, hp0: e.hp, strikes: 0, lureK, force: pick === 'rush' ? 'kinetic' : pick === 'snipe' ? 'beam' : null };
@@ -21554,6 +21657,7 @@ function comHunterStep(c, P, D0, hpF, retreat, te, lk) {
         if (capMode && !window.__huntForceP) { const cg = capHuntGate(c, P, w, D); if (cg && cg.wait) return true; if (cg && cg.id) { for (const k in w) w[k] = k === cg.id ? 1 : 0; comThinkEvent('p', '艦長の判断: 作戦「' + (cg.id === 'charge' ? '突撃' : HUNT_REG[cg.id].jp) + '」'); } } // 第185弾: 作戦は艦長が選ぶ
         const pick = choosePositiveWeight(w, Math.random());
         if (!pick) return false;
+        leafPlant('p', player, 'hu_' + pick, 'hunt'); // 第250弾
         if (pick === 'charge') { c.huntCD = now + 1200 + Math.random() * 1200; say('【突撃】SIG-' + sigNo(lockedSignalId) + ' (推定' + Math.round(D / 100) * 100 + 'u) へまっすぐ詰める — 攻撃性' + _pct(ag)); return false; }
         const side = Math.random() < 0.5 ? 1 : -1;
         H = c.hunt = { k: pick, jp: HUNT_REG[pick].jp, ph: HUNT_REG[pick].ph, t0: now, f0: now, side, w: sp.w, R: sp.R, hp0: player.hp, strikes: 0, sid: lockedSignalId, lureK: kinds[0], force: pick === 'rush' ? 'kinetic' : pick === 'snipe' ? 'beam' : null };
@@ -22862,6 +22966,7 @@ function stratWeights(P, x) {
         if (x.hpF < 0.85) w.fallback *= 1 + 0.15 * pressure.calm;
         if (x.ammoOut) w.restock *= 1 + 0.15 * pressure.calm;
     }
+    if (x.side) { const lh = leafHolder(x.side, x.side === 'p' ? player : x.who); for (const id in w) if (w[id] > 0) w[id] *= leafRingMul(lh, 'st_' + id); } // 第250弾: 年輪
     return branchWeight(P, 'st_', w);
 }
 function stratPick(P, x, lastId, force) {
@@ -22870,6 +22975,7 @@ function stratPick(P, x, lastId, force) {
     for (const k of ids) v[k] = Math.max(0, w[k]) * (0.6 + 0.8 * Math.random()) * (k === lastId ? 0.35 : 1);
     let pick = choosePositiveWeight(v, Math.random());
     if (force && w[force] !== undefined) pick = force; // ヘッドレス検証用
+    if (pick && x && x.side) leafPlant(x.side, x.side === 'p' ? player : x.who, 'st_' + pick, 'strat'); // 第250弾: 葉を植える
     const _df = docFitFor(x), doc = _df ? _df.id : null; // 第230弾: ピックに「その時の方針」を紐付ける (方針別ピックシェアの集計用)
     if (pick && window.__pickDbg && x && x.side) { const pd = window.__pickDbg, key = x.side + '|' + (doc || 'none'); const cell = pd[key] || (pd[key] = {}); cell[pick] = (cell[pick] || 0) + 1;
         const B = branchOf(P), bk = x.side + '|br:' + (B.top || 'none'), bc = pd[bk] || (pd[bk] = {}); bc[pick] = (bc[pick] || 0) + 1; } // 第231弾: そのピックがどの枝 (最も太い気質) に付いたスキルかも記録する
