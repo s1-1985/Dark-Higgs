@@ -1,5 +1,12 @@
 # Dark Echo — HANDOVER（セッションログ・決定経緯・教訓）
 
+## 2026-11-28: 残り4勢力の生成再開準備（未生成）
+
+- PR #346はマージ済み。main `6728119`（PR #348）から再開。追加24種の生成結果・作業ブランチはGitHub上に見つからず、作業開始時の変更ファイルもなかった。
+- `tools/model_batches/remaining-factions-20261128.json` に4勢力×6種の固定元画像・ハッシュ・寸法・面数上限を記録。`tools/check_remaining_unit_batch.py` でオフライン検証できる。
+- 外部to3Dへの最初の送信は、自動承認審査により明示的許可不足で拒否された。ジョブID未発行。ユーザーの送信許可を受けるまで再送しない。
+- GLB24種と本編接続は未完。既存12種とruntimeは変更していない。詳細・再開手順: `docs/REMAINING_UNIT_MODELS_20261128.md`。
+
 ## 2026-11-28: 本編3Dモードのユニット12種
 
 - `prototype/unit-models.js` がヘリオス／鉄鴉団6種ずつとTech姿勢絵を対応付ける。生成元・ジョブは `tools/model_batches/helios-crow-20261128.json`。別勢力への流用なし。

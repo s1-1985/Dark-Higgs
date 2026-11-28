@@ -1,0 +1,684 @@
+{
+  "schema_version": 1,
+  "batch": "remaining-factions-20261128",
+  "source_repository": "s1-1985/Dark-Higgs",
+  "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+  "requested_scope": "Remaining four factions, six unit roles each, per user request on 2026-11-28",
+  "external_transfer_approval": "pending: automatic review rejected sending source sprites to to3D without explicit destination approval",
+  "runtime_changes": false,
+  "review_status": "source_preflight_complete; generation_blocked_before_job_creation",
+  "units": [
+    {
+      "id": "valkyr-assault",
+      "faction": "valkyr",
+      "role": "assault",
+      "source_path": "prototype/assets/f2_valkyr_assault.png",
+      "source_blob_sha": "8282e36b3cbca2d3e64c985ac21603b614bf3434",
+      "source_sha256": "d2cde05bf2355bd71a3d302c4d26ab5aa96924811abe4ccf41032d24e7da8481",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_valkyr_assault.png",
+      "source_size": [
+        1015,
+        1015
+      ],
+      "source_alpha_bounds": [
+        0,
+        174,
+        1015,
+        841
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/valkyr-assault.glb",
+      "triangle_budget": 12000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "valkyr-stealth",
+      "faction": "valkyr",
+      "role": "stealth",
+      "source_path": "prototype/assets/f2_valkyr_stealth.png",
+      "source_blob_sha": "c81a0898060f6875b105b29c4ceb2a81c4daf6db",
+      "source_sha256": "e63dfb587d011165f8d4e55ed073ae8cd32d3ff7337043225465ad89886f70db",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_valkyr_stealth.png",
+      "source_size": [
+        949,
+        949
+      ],
+      "source_alpha_bounds": [
+        0,
+        193,
+        949,
+        755
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/valkyr-stealth.glb",
+      "triangle_budget": 12000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "valkyr-carrier",
+      "faction": "valkyr",
+      "role": "carrier",
+      "source_path": "prototype/assets/f2_valkyr_carrier.png",
+      "source_blob_sha": "4e0cb92cb94bf4632c3583c3fafd4d6c087c77e2",
+      "source_sha256": "ce371e31fe57a0e228ae8c1e28e377e20269113ab33b536fd6b603fc8928b34b",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_valkyr_carrier.png",
+      "source_size": [
+        1011,
+        1011
+      ],
+      "source_alpha_bounds": [
+        0,
+        124,
+        1011,
+        887
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/valkyr-carrier.glb",
+      "triangle_budget": 12000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "valkyr-fighter",
+      "faction": "valkyr",
+      "role": "fighter",
+      "source_path": "prototype/assets/f2_valkyr_fighter.png",
+      "source_blob_sha": "e63bd3813267d0eea7259f826a0d89a7a8d5b908",
+      "source_sha256": "925b3dee5a075c462ab0c656aa0613b1343a85a02fe65dd943d7492dc5bf9fd7",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_valkyr_fighter.png",
+      "source_size": [
+        512,
+        512
+      ],
+      "source_alpha_bounds": [
+        0,
+        40,
+        512,
+        471
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/valkyr-fighter.glb",
+      "triangle_budget": 5000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "valkyr-scout",
+      "faction": "valkyr",
+      "role": "scout",
+      "source_path": "prototype/assets/f2_valkyr_scout.png",
+      "source_blob_sha": "81f2194c1f79408da77f145e0a7fc5061231d290",
+      "source_sha256": "8097eb6be147af349fb5440fda3cd197a646375b0423d61a7126a9e07af0d498",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_valkyr_scout.png",
+      "source_size": [
+        512,
+        512
+      ],
+      "source_alpha_bounds": [
+        0,
+        26,
+        512,
+        486
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/valkyr-scout.glb",
+      "triangle_budget": 5000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "valkyr-mech",
+      "faction": "valkyr",
+      "role": "mech",
+      "source_path": "prototype/assets/f2_valkyr_mech.png",
+      "source_blob_sha": "64524fec1ff9efd4de8a459aede72c5bd570abb1",
+      "source_sha256": "f2a59fe45af0741ded762ef6df1258f1548201e1ad5734d3623f7e881ba50fcd",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_valkyr_mech.png",
+      "source_size": [
+        512,
+        512
+      ],
+      "source_alpha_bounds": [
+        60,
+        0,
+        452,
+        512
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/valkyr-mech.glb",
+      "triangle_budget": 12000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "rustroad-assault",
+      "faction": "rustroad",
+      "role": "assault",
+      "source_path": "prototype/assets/f2_rustroad_assault.png",
+      "source_blob_sha": "843891aa8509eae8f4441f85eefaa5072a0a9d7c",
+      "source_sha256": "5cccec20e46d7165612527fa12490f69b32264b663c03a500e42d23068cf0dec",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_rustroad_assault.png",
+      "source_size": [
+        1011,
+        1011
+      ],
+      "source_alpha_bounds": [
+        0,
+        194,
+        1011,
+        816
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/rustroad-assault.glb",
+      "triangle_budget": 12000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "rustroad-stealth",
+      "faction": "rustroad",
+      "role": "stealth",
+      "source_path": "prototype/assets/f2_rustroad_stealth.png",
+      "source_blob_sha": "ff36a30f89b525a0a50a48ffd5a806d32158725d",
+      "source_sha256": "2cd00023fdfe6136d0edfe5b341cbd68f7f0e5b56962e5177545737905dc1687",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_rustroad_stealth.png",
+      "source_size": [
+        957,
+        957
+      ],
+      "source_alpha_bounds": [
+        0,
+        99,
+        957,
+        858
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/rustroad-stealth.glb",
+      "triangle_budget": 12000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "rustroad-carrier",
+      "faction": "rustroad",
+      "role": "carrier",
+      "source_path": "prototype/assets/f2_rustroad_carrier.png",
+      "source_blob_sha": "e3a365863c673cbbe35e9f35b0c7685b30b455ad",
+      "source_sha256": "d05f93db239ca3d56a24fbd036756a69572ddce17a9ae2f504126353994fb656",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_rustroad_carrier.png",
+      "source_size": [
+        1005,
+        1005
+      ],
+      "source_alpha_bounds": [
+        0,
+        158,
+        1005,
+        846
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/rustroad-carrier.glb",
+      "triangle_budget": 12000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "rustroad-fighter",
+      "faction": "rustroad",
+      "role": "fighter",
+      "source_path": "prototype/assets/f2_rustroad_fighter.png",
+      "source_blob_sha": "d030dc691316440753fa6c9a5d51383c979e9361",
+      "source_sha256": "e472fa046b1a07de00f73b67f48a0bef6f579f43564e82afa46196fc2b25d5d2",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_rustroad_fighter.png",
+      "source_size": [
+        512,
+        512
+      ],
+      "source_alpha_bounds": [
+        3,
+        0,
+        509,
+        512
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/rustroad-fighter.glb",
+      "triangle_budget": 5000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "rustroad-scout",
+      "faction": "rustroad",
+      "role": "scout",
+      "source_path": "prototype/assets/f2_rustroad_scout.png",
+      "source_blob_sha": "0037f9c9e1885bf6a7d08478e969376177b7a845",
+      "source_sha256": "9458e22ab6fb799ce1d0a89cd3c9ac146194217c273b2eeb066d922aad579961",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_rustroad_scout.png",
+      "source_size": [
+        512,
+        512
+      ],
+      "source_alpha_bounds": [
+        0,
+        4,
+        512,
+        508
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/rustroad-scout.glb",
+      "triangle_budget": 5000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "rustroad-mech",
+      "faction": "rustroad",
+      "role": "mech",
+      "source_path": "prototype/assets/f2_rustroad_mech.png",
+      "source_blob_sha": "12c452c90dba43c418ad85580bc5017235b07b88",
+      "source_sha256": "306a2759cd541a3fcc1aa48148b47da646766cd2943dbbd19f8abc661f0dd708",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_rustroad_mech.png",
+      "source_size": [
+        512,
+        512
+      ],
+      "source_alpha_bounds": [
+        97,
+        0,
+        414,
+        512
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/rustroad-mech.glb",
+      "triangle_budget": 12000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "sanctum-assault",
+      "faction": "sanctum",
+      "role": "assault",
+      "source_path": "prototype/assets/f2_sanctum_assault.png",
+      "source_blob_sha": "c3f41c436885b139b456dcd291eef2574f7d820d",
+      "source_sha256": "0872fea08350e68cacb000c130ac3b7360ecafe9126b31887cb6803caf239f6a",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_sanctum_assault.png",
+      "source_size": [
+        971,
+        971
+      ],
+      "source_alpha_bounds": [
+        0,
+        125,
+        971,
+        846
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/sanctum-assault.glb",
+      "triangle_budget": 12000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "sanctum-stealth",
+      "faction": "sanctum",
+      "role": "stealth",
+      "source_path": "prototype/assets/f2_sanctum_stealth.png",
+      "source_blob_sha": "b68cc4f841fe1dd84c319e372483434f00230ba6",
+      "source_sha256": "3fa6a707db05f31ba77b3049f6bc75f5c853ea9532b8184cf9a569f4a12f96ef",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_sanctum_stealth.png",
+      "source_size": [
+        747,
+        747
+      ],
+      "source_alpha_bounds": [
+        0,
+        29,
+        747,
+        718
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/sanctum-stealth.glb",
+      "triangle_budget": 12000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "sanctum-carrier",
+      "faction": "sanctum",
+      "role": "carrier",
+      "source_path": "prototype/assets/f2_sanctum_carrier.png",
+      "source_blob_sha": "1ed24dafc03f50ac084811cb7fe1c23e535d0a0b",
+      "source_sha256": "8ccde0e95743e490207ca8a938a756fe5221bcf33a966cc051d3c0ed76f2e1dc",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_sanctum_carrier.png",
+      "source_size": [
+        1010,
+        1010
+      ],
+      "source_alpha_bounds": [
+        0,
+        3,
+        1010,
+        1007
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/sanctum-carrier.glb",
+      "triangle_budget": 12000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "sanctum-fighter",
+      "faction": "sanctum",
+      "role": "fighter",
+      "source_path": "prototype/assets/f2_sanctum_fighter.png",
+      "source_blob_sha": "3a570fa5987a1ce99041eeca176c5305724e8249",
+      "source_sha256": "fd570081a2a1a938eb3e3a65cb707f90fa85fcf5168b205fb6ad37dbec077b90",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_sanctum_fighter.png",
+      "source_size": [
+        512,
+        512
+      ],
+      "source_alpha_bounds": [
+        0,
+        0,
+        512,
+        511
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/sanctum-fighter.glb",
+      "triangle_budget": 5000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "sanctum-scout",
+      "faction": "sanctum",
+      "role": "scout",
+      "source_path": "prototype/assets/f2_sanctum_scout.png",
+      "source_blob_sha": "d9b882272b0e0f3b853d558c956f379cf0488b7f",
+      "source_sha256": "41974f44836a37d25c272a1e29b24dfa2934c2cb231d9ae3a3e076a1eca2bf9c",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_sanctum_scout.png",
+      "source_size": [
+        512,
+        512
+      ],
+      "source_alpha_bounds": [
+        0,
+        65,
+        512,
+        446
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/sanctum-scout.glb",
+      "triangle_budget": 5000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "sanctum-mech",
+      "faction": "sanctum",
+      "role": "mech",
+      "source_path": "prototype/assets/f2_sanctum_mech.png",
+      "source_blob_sha": "e29a2cef0b5105331d5866c4c647ffb726432b6c",
+      "source_sha256": "d7aa023d48d21468ca7a94af80caf4c5b24cd9890160bca33b7ac5a3cf5eeada",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_sanctum_mech.png",
+      "source_size": [
+        512,
+        512
+      ],
+      "source_alpha_bounds": [
+        87,
+        0,
+        424,
+        512
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/sanctum-mech.glb",
+      "triangle_budget": 12000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "fogborn-assault",
+      "faction": "fogborn",
+      "role": "assault",
+      "source_path": "prototype/assets/f2_fogborn_assault.png",
+      "source_blob_sha": "d7207130acb1cbe98cef121d6e50701797f8771c",
+      "source_sha256": "a3e3f56184e593066ce089008b2ea46ad24dcc178ed4b6b22bd43a1daf40244b",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_fogborn_assault.png",
+      "source_size": [
+        997,
+        997
+      ],
+      "source_alpha_bounds": [
+        3,
+        0,
+        994,
+        997
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/fogborn-assault.glb",
+      "triangle_budget": 12000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "fogborn-stealth",
+      "faction": "fogborn",
+      "role": "stealth",
+      "source_path": "prototype/assets/f2_fogborn_stealth.png",
+      "source_blob_sha": "c43002b75597c36f5271eba90a24342672e8b7c9",
+      "source_sha256": "11cffbae0de8442a39a658b2158df299eb2a995fdefe615018f0658bfc9e88e1",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_fogborn_stealth.png",
+      "source_size": [
+        995,
+        995
+      ],
+      "source_alpha_bounds": [
+        0,
+        192,
+        995,
+        802
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/fogborn-stealth.glb",
+      "triangle_budget": 12000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "fogborn-carrier",
+      "faction": "fogborn",
+      "role": "carrier",
+      "source_path": "prototype/assets/f2_fogborn_carrier.png",
+      "source_blob_sha": "ff0480c28f5723b5bfb22a63020cdc93ffc61b15",
+      "source_sha256": "97ea9f3badf4c675d41d083a9dcb6c3d40f9b244ac7844c2c1412a7a438286cc",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_fogborn_carrier.png",
+      "source_size": [
+        1022,
+        1022
+      ],
+      "source_alpha_bounds": [
+        0,
+        21,
+        1022,
+        1001
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/fogborn-carrier.glb",
+      "triangle_budget": 12000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "fogborn-fighter",
+      "faction": "fogborn",
+      "role": "fighter",
+      "source_path": "prototype/assets/f2_fogborn_fighter.png",
+      "source_blob_sha": "9c5bb793569fb3d54623b7b71cea37483746ef1b",
+      "source_sha256": "51de6a1c6804996f5cbe760e137f7b2aef87a72d4326ee04b7bbee3946ff8877",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_fogborn_fighter.png",
+      "source_size": [
+        512,
+        512
+      ],
+      "source_alpha_bounds": [
+        0,
+        22,
+        512,
+        490
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/fogborn-fighter.glb",
+      "triangle_budget": 5000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "fogborn-scout",
+      "faction": "fogborn",
+      "role": "scout",
+      "source_path": "prototype/assets/f2_fogborn_scout.png",
+      "source_blob_sha": "7e747513a81deb827c0c53b1d969879d70539e06",
+      "source_sha256": "7d5998a1e6cb88bd591b2fe28a3b54d4beeed48314e765035192bb1940ccda4b",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_fogborn_scout.png",
+      "source_size": [
+        512,
+        512
+      ],
+      "source_alpha_bounds": [
+        0,
+        114,
+        512,
+        398
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/fogborn-scout.glb",
+      "triangle_budget": 5000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    },
+    {
+      "id": "fogborn-mech",
+      "faction": "fogborn",
+      "role": "mech",
+      "source_path": "prototype/assets/f2_fogborn_mech.png",
+      "source_blob_sha": "ced5f3f211e4bfdc2bd6ac65716ce11f39e8481d",
+      "source_sha256": "2d008423e73d09ffd8bc984c015a647b134ed320437997e98d99fb97eac1aef7",
+      "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
+      "source_url": "https://raw.githubusercontent.com/s1-1985/Dark-Higgs/6728119595caaa0cf448ca138230a8a6b8214bd3/prototype/assets/f2_fogborn_mech.png",
+      "source_size": [
+        512,
+        512
+      ],
+      "source_alpha_bounds": [
+        94,
+        0,
+        417,
+        512
+      ],
+      "generation_status": "awaiting_external_transfer_approval",
+      "job_id": null,
+      "previous_jobs": [],
+      "model_url": null,
+      "target_path": "prototype/assets/models/fogborn-mech.glb",
+      "triangle_budget": 12000,
+      "review_status": "source_sprite_verified; model_not_generated",
+      "runtime_enabled": false
+    }
+  ]
+}
