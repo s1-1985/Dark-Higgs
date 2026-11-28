@@ -16252,7 +16252,7 @@ function reactionAdvance(ship, profile, now) {
 }
 function reactionEvent(ship, kind, amount, source = null) {
     if (!ship || ship.hp <= 0 || !(amount > 0) || (ship === player ? !comDemo : !ENEMY_CLASS[ship.type])) return;
-    leafLedgerAdd(ship, kind, amount); // 第250弾: 葉の年輪の通算
+    if (typeof leafLedgerAdd === 'function') leafLedgerAdd(ship, kind, amount); // 第250弾 (抜き出して試す tools/test_com_reactions.cjs でも動くように): 葉の年輪の通算
     const profile = reactionProfile(reactionPersonality(ship));
     const R = reactionAdvance(ship, profile, _frameCount), v = R.values;
     if (kind === 'damage') {
@@ -17104,7 +17104,7 @@ function tacticDecide(F, A, X, act, doAct) {
         const frac = m ? (m.sceneOK ? Math.max(0.5, m.frac) : 0.4) : 1;
         if (dbg) { const d = dbg[id] || (dbg[id] = { n: 0, on: 0, cond: 0, tbl: 0, side: { p: 0, e: 0 } }); d.n++; d.on++; if (ok) { d.cond++; d.side[F.side]++; } }
         if (!ok) return;
-        const run2 = () => { let r = false; try { r = !!run(); } catch (er) { r = false; } if (r) { F.mark('sk_' + id); leafPlant(F.side, F.who, id, 'tac', S); } return r; };
+        const run2 = () => { let r = false; try { r = run(); } catch (er) { r = false; } if (r) { if (r === true) F.mark('sk_' + id); leafPlant(F.side, F.who, id, 'tac', S); } return r === true; }; // 'cont' = 実行したが次の候補も試す (航行モードの切替・斥候)
         cands.push({ id, run: run2, sc: tacScore(F, id, doc, cover, needsFix) * (0.5 + 0.7 * frac), use: capP ? skillUse(F.side, id) : true, frac });
     };
     if (act) cands.push({ id: '_item', act, use: true, run: () => { for (const k of (act._marks || [])) F.mark(k); doAct(act); leafPlant(F.side, F.who, 'it_' + act.k, 'tac', S); return true; }, sc: 1.6 * (0.7 + 0.6 * Math.random()) * (0.7 + 0.35 * (F.exposure || 0)) * (act.k === 'repair' && doc?.id === 'recover' ? actionFit(doc) : 1) * leafRingMul(leafHolder(F.side, F.who), 'it_' + act.k) });
@@ -17167,9 +17167,9 @@ function tacticRules(F, A, X, R) {
         F.mark('tcPingF'); if (X.sonar('weak')) { say('ピン&ステップ — 弱いソナーを打ってすぐ横へ離れる'); X.slip(Math.random() * Math.PI * 2); return true; }
     });
     // 航行モードの切替: 推定が広い=解析 / 推定が絞れて近い=兵装 / 静かに待っている=探知。20〜40秒は自動の選び直しを止める
-    R('tc_focus_scan', () => (wideEst && F.exposure <= 1 && F.cd('tcFocusF', 60) && !F.seen), () => { F.mark('tcFocusF'); X.focus('analysis', 40); say('解析重視へ — 推定が広い → 演算力を解析へ回して絞る'); return false;  });
-    R('tc_focus_weapon', () => (tightEst && F.estD < 3500 && F.exposure <= 1 && F.cd('tcFocusF', 60)), () => { F.mark('tcFocusF'); X.focus('weapon', 40); say('兵装重視へ — 推定が絞れて近い → 先制に備えて火力へ'); return false;  });
-    R('tc_focus_sensor', () => ((F.hiding || (F.get('tacHold') || 0) > now) && F.exposure === 0 && F.quietF > 3600 && F.cd('tcFocusF', 90)), () => { F.mark('tcFocusF'); X.focus('sensor', 60); say('探知重視へ — 隠れて待つ間は耳を研ぐ'); return false;  });
+    R('tc_focus_scan', () => (wideEst && F.exposure <= 1 && F.cd('tcFocusF', 60) && !F.seen), () => { F.mark('tcFocusF'); X.focus('analysis', 40); say('解析重視へ — 推定が広い → 演算力を解析へ回して絞る'); return 'cont';  });
+    R('tc_focus_weapon', () => (tightEst && F.estD < 3500 && F.exposure <= 1 && F.cd('tcFocusF', 60)), () => { F.mark('tcFocusF'); X.focus('weapon', 40); say('兵装重視へ — 推定が絞れて近い → 先制に備えて火力へ'); return 'cont';  });
+    R('tc_focus_sensor', () => ((F.hiding || (F.get('tacHold') || 0) > now) && F.exposure === 0 && F.quietF > 3600 && F.cd('tcFocusF', 90)), () => { F.mark('tcFocusF'); X.focus('sensor', 60); say('探知重視へ — 隠れて待つ間は耳を研ぐ'); return 'cont';  });
     // 状態異常の後始末: センサー損傷・機関損傷・火器管制ダウン・通信障害の間に見つかっている → 煙幕を焚いて隠れ場所へ
     R('tc_status_retreat', () => (F.dazed && F.exposure >= 1 && F.cd('tcDazeF', 60)), () => {
         const cv = X.cover(); F.mark('tcDazeF');
@@ -17217,7 +17217,7 @@ function tacticRules(F, A, X, R) {
     });
     // 初動の斥候: 統率の高い性格は、集めに出る前から哨戒機を未踏の海域へ出す
     R('tc_early_scout', () => (now < COM_EARLY_GATHER && persAx(P, 'command') >= 0.55 && F.estD > 1e8 && A.have('scout') && F.cd('tcEScoutF', 120)), () => {
-        F.mark('tcEScoutF'); const sn = A.next(); A.launch('scout'); if (sn) A.order(['scout'], 'patrol', sn.x, sn.y); say('初動の斥候 — 集めに出る前に哨戒機を未踏の海域へ出す (統率)'); return false;
+        F.mark('tcEScoutF'); const sn = A.next(); A.launch('scout'); if (sn) A.order(['scout'], 'patrol', sn.x, sn.y); say('初動の斥候 — 集めに出る前に哨戒機を未踏の海域へ出す (統率)'); return 'cont';
     });
     // 初動の測定: 電脳の高い性格は、序盤に弱いソナーを一度だけ打って周りの様子を掴む
     R('tc_early_sonar', () => ((F.side === 'p' ? omniSonarCooldown <= 0 : !(F.who?._pingCD > 0)) && now > 1800 && now < 7200 && persAx(P, 'tech') >= 0.55 && F.exposure === 0 && !F.seen && F.cd('tcESonarF', 9999)), () => {
@@ -21536,6 +21536,7 @@ function enemyStratStep(e, P) {
         const x = stratFactsE(e), pk = stratPick(P, x, e._lastStrat, window.__stratForceE), pick = pk.pick;
         if (!pick) { e._stratCD = now + 600; return false; }
         e._lastStrat = pick;
+        leafPlant('e', e, 'st_' + pick, 'strat'); // 第250弾: 実行が決まった戦略を植える
         if (pick === 'gather') { e._stratCD = now + COM_STRAT_MIN + Math.random() * COM_STRAT_VAR + 600 + Math.random() * 1800; return false; } // 第180弾: 自機COMの「収集」と同じ長さ (戦略90〜300秒+間10〜40秒)。旧: 30〜90秒で選び直し、収集以外を自機COMの約3倍引いて序盤の占有が遅れた
         S = e._strat = { id: pick, t0: now, until: now + 5400 + Math.random() * 12600, ph: 'go' };
         if (pick === 'outpost') { // 第133弾: 占有した拠点の中継圏に艦載機・哨戒機を置いて見張らせる (自分は巡回を続ける)
@@ -22975,7 +22976,6 @@ function stratPick(P, x, lastId, force) {
     for (const k of ids) v[k] = Math.max(0, w[k]) * (0.6 + 0.8 * Math.random()) * (k === lastId ? 0.35 : 1);
     let pick = choosePositiveWeight(v, Math.random());
     if (force && w[force] !== undefined) pick = force; // ヘッドレス検証用
-    if (pick && x && x.side) leafPlant(x.side, x.side === 'p' ? player : x.who, 'st_' + pick, 'strat'); // 第250弾: 葉を植える
     const _df = docFitFor(x), doc = _df ? _df.id : null; // 第230弾: ピックに「その時の方針」を紐付ける (方針別ピックシェアの集計用)
     if (pick && window.__pickDbg && x && x.side) { const pd = window.__pickDbg, key = x.side + '|' + (doc || 'none'); const cell = pd[key] || (pd[key] = {}); cell[pick] = (cell[pick] || 0) + 1;
         const B = branchOf(P), bk = x.side + '|br:' + (B.top || 'none'), bc = pd[bk] || (pd[bk] = {}); bc[pick] = (bc[pick] || 0) + 1; } // 第231弾: そのピックがどの枝 (最も太い気質) に付いたスキルかも記録する
@@ -23025,6 +23025,7 @@ function comStratStep(c, P, D, hpF, contact, te, lk, r) {
             if (mstone && cg) c._milestoneAsk = false;
         }
         if (!pk.pick) { c.stratCD = now + 600; return false; }
+        leafPlant('p', player, 'st_' + pk.pick, 'strat'); // 第250弾: 艦長の判断を経て実行が決まった戦略を植える
         S = c.st = { id: pk.pick, t0: now, until: now + COM_STRAT_MIN + Math.random() * COM_STRAT_VAR, ph: 'go', hp0: player.hp, x0: player.x, y0: player.y };
         if (S.id === 'supply_hunt') S.sid = lockedSignalId;
         const ws = Object.keys(pk.w).map(k => k + ' ' + pk.w[k].toFixed(1)).join(' / ');
