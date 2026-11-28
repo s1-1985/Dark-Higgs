@@ -6,7 +6,7 @@
   "requested_scope": "Remaining four factions, six unit roles each, per user request on 2026-11-28",
   "external_transfer_approval": "Explicit user approval in this conversation on 2026-11-28 for sending all 24 source images to to3D",
   "runtime_changes": false,
-  "review_status": "generation_in_progress",
+  "review_status": "all_24_generated; final_model_validation_in_progress",
   "units": [
     {
       "id": "valkyr-assault",
@@ -786,7 +786,7 @@
         417,
         512
       ],
-      "generation_status": "submitted",
+      "generation_status": "completed",
       "job_id": "83750a13-f8ba-4b2b-adde-4dc30d9a6c23",
       "previous_jobs": [
         {
@@ -795,13 +795,16 @@
           "error": "Too many requests."
         }
       ],
-      "model_url": null,
+      "model_url": "https://storage.to3d.app/generated-3d/models/2026-11-28/task_83750a13-f8ba-4b2b-adde-4dc30d9a6c23_model.glb",
       "target_path": "prototype/assets/models/fogborn-mech.glb",
       "triangle_budget": 12000,
-      "review_status": "source_sprite_verified; model_not_generated",
+      "review_status": "generated; geometry_review_pending",
       "runtime_enabled": false,
       "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3",
-      "last_status_checked": "2026-11-28T05:54:38.826Z"
+      "last_status_checked": "2026-11-28T05:58:00.291Z",
+      "fallback_model_url": "https://img.theapi.app/temp/5623b38a-e42c-452a-b659-7456beab60ee.glb",
+      "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-28/task_83750a13-f8ba-4b2b-adde-4dc30d9a6c23_image.png",
+      "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-28/task_83750a13-f8ba-4b2b-adde-4dc30d9a6c23_video.mp4"
     }
   ]
 }
