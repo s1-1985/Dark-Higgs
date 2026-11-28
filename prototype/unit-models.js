@@ -1,13 +1,16 @@
-// Reviewed against source sprites and +X-facing renders. Two generated ships face glTF -Z.
+// Reviewed against source sprites and +X-facing renders. Generated axes vary by asset.
+const REVERSED = new Set(['helios-fighter', 'crow-stealth', 'rustroad-carrier', 'rustroad-fighter', 'sanctum-stealth', 'sanctum-scout']);
+const ROLLED = new Set(['rustroad-carrier', 'rustroad-fighter']);
 export const UNIT_MODELS = Object.freeze(Object.fromEntries(
-    ['helios', 'crow'].flatMap(faction => ['assault', 'stealth', 'carrier', 'fighter', 'scout', 'mech'].map(role => {
+    ['helios', 'crow', 'valkyr', 'rustroad', 'sanctum', 'fogborn'].flatMap(faction => ['assault', 'stealth', 'carrier', 'fighter', 'scout', 'mech'].map(role => {
         const id = `${faction}-${role}`;
         return [id, Object.freeze({ id, role, url: new URL(`./assets/models/${id}.glb`, import.meta.url).href,
-            yaw: (id === 'helios-fighter' || id === 'crow-stealth') ? -Math.PI / 2 : Math.PI / 2 })];
+            yaw: id === 'rustroad-scout' ? 0 : REVERSED.has(id) ? -Math.PI / 2 : Math.PI / 2,
+            roll: ROLLED.has(id) ? Math.PI / 2 : 0 })];
     }))
 ));
 export function modelForSprite(img) {
-    const match = /(?:^|\/)f2_(helios|crow)_(assault|stealth|carrier|fighter|scout|mech)(?:_(?:fire|ready|slash|thrust))?\.png(?:[?#]|$)/.exec(img.currentSrc || img.src || '');
+    const match = /(?:^|\/)f2_(helios|crow|valkyr|rustroad|sanctum|fogborn)_(assault|stealth|carrier|fighter|scout|mech)(?:_(?:fire|ready|slash|thrust))?\.png(?:[?#]|$)/.exec(img.currentSrc || img.src || '');
     // Pose aliases exist only for Tech; never substitute another faction or role.
     if (!match || (match[2] !== 'mech' && /_(?:fire|ready|slash|thrust)\.png/.test(match[0]))) return null;
     return UNIT_MODELS[`${match[1]}-${match[2]}`];

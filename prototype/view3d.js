@@ -37,7 +37,7 @@
         if (!wanted) { active = false; sync(); return false; }
         if (renderer) { active = true; sync(); return true; }
         if (!pending) {
-            pending = import('./view3d-renderer.js?v=20261128-units1')
+            pending = import('./view3d-renderer.js?v=20261128-units2')
                 .then(m => m.createRenderer({ onFailure: fail }));
         }
         sync();

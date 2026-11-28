@@ -1,5 +1,15 @@
 # Dark Echo — HANDOVER（セッションログ・決定経緯・教訓）
 
+## 2026-11-28: 残り4勢力24種を本編へ接続
+
+- `prototype/unit-models.js` が全6勢力×6種、36種へ対応。追加24 GLBを `prototype/assets/models/` に格納。既存12 GLB・game.js・sprite-stack.jsは変更なし。通常2D／レーダーで3D。
+- 生成台帳: `tools/model_batches/remaining-factions-20261128.json`。ユーザーの明示的な外部送信許可後に全24種を生成。フォグボーンTechはToo many requestsの一度の失敗後、単独で再試行し完了。
+- 追加24種は48,862,364→25,505,168 bytes、686,403→231,997三角形。全36種は37,402,516 bytes／339,280三角形。画面内・既存可視性ゲートの後で同時2種まで遅延読込。
+- ラストロード空母・戦闘機の横倒しをrollで補正し、補正後に寸法を測る。個別yawも元絵とBlenderで確認。Techの関節アニメは未実装。
+- 36 GLBのハッシュ・面数・実Threeシーングラフ・座標・材質と、投影・入力・2D既定・遅延読込・破棄の回帰を通過。全24種をBlenderで真上／35度俯瞰確認。
+- ブラウザはWebGL無効のため2D復帰と操作を確認。ゲーム内GPU合成・2D/3D往復の目視・スマホFPSは未検証。環境・構造物・霧の立体化は残る。
+- 詳細と比較画像: `docs/REMAINING_UNIT_MODELS_20261128.md`。
+
 ## 2026-11-28: 本編3Dモードのユニット12種
 
 - `prototype/unit-models.js` がヘリオス／鉄鴉団6種ずつとTech姿勢絵を対応付ける。生成元・ジョブは `tools/model_batches/helios-crow-20261128.json`。別勢力への流用なし。

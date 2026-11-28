@@ -1,7 +1,7 @@
 import * as THREE from './vendor/three/three.module.js';
 import { GLTFLoader } from './vendor/three/GLTFLoader.js';
 
-import { modelForSprite, createModelCache, spritePlacement } from './unit-models.js?v=20261128-units1';
+import { modelForSprite, createModelCache, spritePlacement } from './unit-models.js?v=20261128-units2';
 const COS = Math.cos(35 * Math.PI / 180), SIN = Math.sin(35 * Math.PI / 180);
 export async function createRenderer({ onFailure }) {
     const output = document.createElement('canvas');
@@ -34,7 +34,10 @@ export async function createRenderer({ onFailure }) {
     }
     const cache = createModelCache(async spec => {
         const gltf = await new GLTFLoader().loadAsync(spec.url);
-        const model = gltf.scene;
+        // Some generated aircraft are rolled onto their side. Correct in model space
+        // before measuring bounds so their width, height and length remain consistent.
+        const model = new THREE.Group(); model.add(gltf.scene);
+        model.rotation.z = spec.roll || 0;
         const box = new THREE.Box3().setFromObject(model), size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
         // Tech is upright: include height in its size, rather than enlarging its narrow footprint.
         const length = spec.role === 'mech' ? Math.max(size.x, size.y, size.z) : Math.max(size.x, size.z);

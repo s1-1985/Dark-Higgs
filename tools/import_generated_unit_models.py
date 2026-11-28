@@ -15,6 +15,7 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[1]
 HOSTS = {"storage.to3d.app", "img.theapi.app"}
 LIMIT = 64 * 1024 * 1024
+UNIT_ID = re.compile(r"(helios|crow|valkyr|rustroad|sanctum|fogborn)-(assault|stealth|carrier|fighter|scout|mech)")
 
 def inspect_glb(data):
     if len(data) < 20:
@@ -64,13 +65,14 @@ def main():
     parser.add_argument("--manifest", type=Path, default=ROOT / "tools/model_batches/helios-crow-20261128.json")
     parser.add_argument("--dest", type=Path, default=ROOT / "prototype/assets/models")
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--require-complete", action="store_true", help="Fail if any requested model has not been generated")
     args = parser.parse_args()
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     args.dest.mkdir(parents=True, exist_ok=True)
     report = []
     for unit in manifest["units"]:
         ident = unit["id"]
-        if not re.fullmatch(r"(helios|crow)-(assault|stealth|carrier|fighter|scout|mech)", ident):
+        if not UNIT_ID.fullmatch(ident):
             raise ValueError("Unexpected unit ID: " + ident)
         if unit["generation_status"] != "completed":
             report.append({"id": ident, "status": "not_generated"})
@@ -112,7 +114,7 @@ def main():
             print(ident + ": FAILED: " + str(error))
     report_path = args.dest / "generation-import-report.json"
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    if any(item["status"] == "failed" for item in report):
+    if any(item["status"] == "failed" or (args.require_complete and item["status"] == "not_generated") for item in report):
         raise SystemExit(1)
 
 if __name__ == "__main__":

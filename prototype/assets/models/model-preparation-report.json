@@ -118,5 +118,245 @@
     "triangles": 8772,
     "texture_size": 1024,
     "sha256": "18101d4d166d0101e23b4e9f9469cf3fb2dc671fd8827c3146f1251a43bd3608"
+  },
+  {
+    "id": "fogborn-assault",
+    "source_sha256": "dca9836524e2365f796dc19ebe3d0cfe3060e1e4b647b7627788875711e2173f",
+    "source_bytes": 1961528,
+    "source_triangles": 27418,
+    "bytes": 1314536,
+    "triangles": 12000,
+    "texture_size": 1024,
+    "sha256": "54d26853e96b1ea4c20f7899d4df56088377be62d41e091919c7860a4fee1d79"
+  },
+  {
+    "id": "fogborn-carrier",
+    "source_sha256": "22e19eef88dce29cf42d9c2d1ffaa8bb4a3dd4c294d24db4bc2e8d29faef3cb5",
+    "source_bytes": 2408080,
+    "source_triangles": 47800,
+    "bytes": 1309888,
+    "triangles": 12000,
+    "texture_size": 1024,
+    "sha256": "aa96ba311222b5ac20fd79d7421a557614fb493449e9ddbc446e21b9c3193c4c"
+  },
+  {
+    "id": "fogborn-fighter",
+    "source_sha256": "96db90ba12b49f56e781794f2a5c3dad275f9cfbb25106f8aed783b2aa3f8e08",
+    "source_bytes": 1780712,
+    "source_triangles": 17143,
+    "bytes": 547640,
+    "triangles": 5000,
+    "texture_size": 512,
+    "sha256": "829de5cf3b9075b1cef11d9edbaa5a12ded4a3e3c411208a5e71f5aeaae12431"
+  },
+  {
+    "id": "fogborn-mech",
+    "source_sha256": "7ebbcb4bdf3b411e1e363064df3308b6520380976e6d66288e04d4a4f60c59a2",
+    "source_bytes": 1997216,
+    "source_triangles": 29502,
+    "bytes": 1303160,
+    "triangles": 12000,
+    "texture_size": 1024,
+    "sha256": "1145ec5c286f7f048c4ee590d22ab448451132197532ef7f840e4dabeac88ce3"
+  },
+  {
+    "id": "fogborn-scout",
+    "source_sha256": "f5cc2fdbf52197abc1a50cc258ff43c24f28daf6e9282fad301a57bc657f144a",
+    "source_bytes": 1760276,
+    "source_triangles": 13122,
+    "bytes": 557340,
+    "triangles": 5000,
+    "texture_size": 512,
+    "sha256": "bcaa56f2acba80c8af4c67010d2f2d9a6bc862a6b9c67c0169f94c987a569465"
+  },
+  {
+    "id": "fogborn-stealth",
+    "source_sha256": "781cf69cef69cec1fbf5937c62139bf84e55c4daa79a0da25a689e13a16acd7e",
+    "source_bytes": 1632744,
+    "source_triangles": 15708,
+    "bytes": 1292404,
+    "triangles": 11999,
+    "texture_size": 1024,
+    "sha256": "f61761d4abb576692b444e82a59054083aa8bdbd7f2a68ea3d52956bf09b8e94"
+  },
+  {
+    "id": "rustroad-assault",
+    "source_sha256": "7972c02b98bc25ea6948a6bfd97537c76ab99f7546d3afd06fc3fb14e55128c0",
+    "source_bytes": 2403168,
+    "source_triangles": 39066,
+    "bytes": 1325232,
+    "triangles": 12000,
+    "texture_size": 1024,
+    "sha256": "a8aea756d0c8d1f718b96a8fd98bf8f946e0106a13b9229cb1296f1459536b36"
+  },
+  {
+    "id": "rustroad-carrier",
+    "source_sha256": "3c9aa4981e8a844f0cf7ca6d067d42e12af108f0c76e1f36f042254142759810",
+    "source_bytes": 2404172,
+    "source_triangles": 40182,
+    "bytes": 1326436,
+    "triangles": 12000,
+    "texture_size": 1024,
+    "sha256": "e79142056a89709eb1c2bacb3257265218e9fbb3588ce9e33332f90de155376e"
+  },
+  {
+    "id": "rustroad-fighter",
+    "source_sha256": "9dfec75967cc61b2102a642dfe75bacab7845366cf40be20dbed713a5ccc0e21",
+    "source_bytes": 2057556,
+    "source_triangles": 27430,
+    "bytes": 545692,
+    "triangles": 4999,
+    "texture_size": 512,
+    "sha256": "0f251ff3cb94fb1f0952daed7fd678d787fd91013d17fb0486b4edffb8df9013"
+  },
+  {
+    "id": "rustroad-mech",
+    "source_sha256": "c64039ebf262778121a4650239cc8ec1918a699a71e2eed3c1116e54b3f53024",
+    "source_bytes": 1989044,
+    "source_triangles": 26704,
+    "bytes": 1320468,
+    "triangles": 12000,
+    "texture_size": 1024,
+    "sha256": "a929dbb12f247ecf9f9b14c2d0fdd7b5cc699a3fe4066e603602d11090196fee"
+  },
+  {
+    "id": "rustroad-scout",
+    "source_sha256": "ab0c715e9bf8f14e011ee815ac06fdcfd5bf4935576c32bca7eff95397a3d798",
+    "source_bytes": 2391540,
+    "source_triangles": 41113,
+    "bytes": 545776,
+    "triangles": 5000,
+    "texture_size": 512,
+    "sha256": "27fa5fb5466b4f574959f4b68efe61e14466149f34555fd4747e35e6347de94c"
+  },
+  {
+    "id": "rustroad-stealth",
+    "source_sha256": "4f1cbb5e87b2be216f3b55a16c75dc4b35228ed3808d489d94d0403d02f82b40",
+    "source_bytes": 1770060,
+    "source_triangles": 19726,
+    "bytes": 1318168,
+    "triangles": 12000,
+    "texture_size": 1024,
+    "sha256": "6c5944c817935b126ea344d0a2119d250c0e3f7dec7a86b5774c706718fed739"
+  },
+  {
+    "id": "sanctum-assault",
+    "source_sha256": "cb66ff6d2f93198aaf65a947da466386848c0dfbff891b3440b93324e515c92e",
+    "source_bytes": 2204532,
+    "source_triangles": 29221,
+    "bytes": 1347888,
+    "triangles": 12000,
+    "texture_size": 1024,
+    "sha256": "42149e12d7d84b7044b0ce8704666a61966a4bb6b78960dcd54ca0c4cfe1d40b"
+  },
+  {
+    "id": "sanctum-carrier",
+    "source_sha256": "e6410eef335060aae4814b2aaaee4368fb9ae1b006c17f4a76dd52bcba03b1b7",
+    "source_bytes": 2212376,
+    "source_triangles": 27975,
+    "bytes": 1346980,
+    "triangles": 12000,
+    "texture_size": 1024,
+    "sha256": "91d0720a552425049bd9fb4f622c466cc677eca9c3cd7a1ca056f1c530080fbc"
+  },
+  {
+    "id": "sanctum-fighter",
+    "source_sha256": "ca6b0b9904d7bf19890232a1b51533135b6a221209b00e6e342cc43c63aca3a5",
+    "source_bytes": 1868404,
+    "source_triangles": 18140,
+    "bytes": 560032,
+    "triangles": 5000,
+    "texture_size": 512,
+    "sha256": "4afab1c97e071b6856bad99f99835ff92ad8724f95e4fa734c91e508844d9dcd"
+  },
+  {
+    "id": "sanctum-mech",
+    "source_sha256": "fd4b9b9c66df5de13b1bbfa97987726a681ab6772fee56e93fd7ccaeff3acc5a",
+    "source_bytes": 2046404,
+    "source_triangles": 31320,
+    "bytes": 1328096,
+    "triangles": 12000,
+    "texture_size": 1024,
+    "sha256": "7b36ba107f8d1d2ab9899a95516c30b60ee95b3bcc15b3c8077d83eb19b64edc"
+  },
+  {
+    "id": "sanctum-scout",
+    "source_sha256": "d2983054598fa79d590fddecb0778fcf87d30e92f3689be845bea1753dedd08e",
+    "source_bytes": 2047788,
+    "source_triangles": 23530,
+    "bytes": 561468,
+    "triangles": 5000,
+    "texture_size": 512,
+    "sha256": "f74c48b5466e44f7ee3407c0012302acd8cfb84d4a6fa0e071852e63b47e6edc"
+  },
+  {
+    "id": "sanctum-stealth",
+    "source_sha256": "4d4bce419dde5ca8d6691bbb5d6ba647e22164e22d8905dfc02e4ef94d3405ba",
+    "source_bytes": 1857848,
+    "source_triangles": 17484,
+    "bytes": 1354468,
+    "triangles": 12000,
+    "texture_size": 1024,
+    "sha256": "a7ece9ce03ea1310a707e0ac408a875c2c4009f60613215fa325a51a576c06d3"
+  },
+  {
+    "id": "valkyr-assault",
+    "source_sha256": "56975758cf76efa1d08ffa7cb1e6f57e3d375ad0fb83ef54297360d090e20f7a",
+    "source_bytes": 2100396,
+    "source_triangles": 32404,
+    "bytes": 1315628,
+    "triangles": 12000,
+    "texture_size": 1024,
+    "sha256": "808ba0e4ec0957be5381e098836b5b6e53a65498fe2a0c2739377eb70e71f6fa"
+  },
+  {
+    "id": "valkyr-carrier",
+    "source_sha256": "2e985a301c8cd7711f9feb01aa28192342ed5f4cece01dbc245cd889c919f3ff",
+    "source_bytes": 1921128,
+    "source_triangles": 26038,
+    "bytes": 1310152,
+    "triangles": 12000,
+    "texture_size": 1024,
+    "sha256": "1b90a8f8921ff2eba8a262397fce14871db0dff19bcf5f9233230723c6f9fa40"
+  },
+  {
+    "id": "valkyr-fighter",
+    "source_sha256": "c8b4a955d1dad725938673137985fdaecf9dc39ca6ba379bc89f03e0c405c45c",
+    "source_bytes": 1540244,
+    "source_triangles": 15808,
+    "bytes": 538156,
+    "triangles": 5000,
+    "texture_size": 512,
+    "sha256": "358f7e178cccf0db59ec1ec81bc76b24083cbc7c1d4c8d25735b0f2385f94404"
+  },
+  {
+    "id": "valkyr-mech",
+    "source_sha256": "2c7e64a3a6d9519466dd1cc787363daca4c2ee167171f185e5cc4625c33c092e",
+    "source_bytes": 2149304,
+    "source_triangles": 39314,
+    "bytes": 1296832,
+    "triangles": 11999,
+    "texture_size": 1024,
+    "sha256": "797f3c4d0b5f04c6f7f501d926b8b8fcc9d4fc00aee21ff8a1b765dbd71fed6f"
+  },
+  {
+    "id": "valkyr-scout",
+    "source_sha256": "d9013cd9d971361df263c247461abd371ef58551a6c2c0038b645b6b15e72120",
+    "source_bytes": 2392364,
+    "source_triangles": 47120,
+    "bytes": 542764,
+    "triangles": 5000,
+    "texture_size": 512,
+    "sha256": "54721eb04da5ae4ebedf5af805a792c08984ff297e2e7f22cc4fee2d625b0db2"
+  },
+  {
+    "id": "valkyr-stealth",
+    "source_sha256": "4c729ef4916a00f0332ce9f98cd81d191da51f25b0932b8067a961fb3d918c6b",
+    "source_bytes": 1965480,
+    "source_triangles": 33135,
+    "bytes": 1295964,
+    "triangles": 12000,
+    "texture_size": 1024,
+    "sha256": "0ca55a05eda0c954d7911eddc4e2cb85c63135c07f997c59577ed192557eff7c"
   }
 ]
