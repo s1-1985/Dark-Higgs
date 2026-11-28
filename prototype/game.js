@@ -671,10 +671,22 @@ function dsk(key, side) {
 }
 function spriteReady(img) { return img && img.complete && img.naturalWidth > 0; }
 // 既に translate(x,y)+rotate(angle) 済みのコンテキストへ、中心合わせ・最長辺=targetLen で描画
+// Drawing-only bridge. Call sites retain their existing visibility/known-position gates.
+function drawWorldImage(ctx, img, ...args) {
+    if (window.Experimental3D && Experimental3D.isActive() && (args.length === 4 || args.length === 8)) {
+        const [x, y, w, h] = args.slice(-4);
+        ctx.save(); ctx.translate(x + w / 2, y + h / 2);
+        const m = ctx.getTransform(), angle = Math.atan2(m.b / Experimental3D.projection.cos, m.a);
+        const captured = Experimental3D.captureSprite(ctx, img, 'world', Math.max(Math.abs(w), Math.abs(h)), angle);
+        ctx.restore();
+        if (captured) return true;
+    }
+    ctx.drawImage(img, ...args); return false;
+}
 function drawSpriteCentered(ctx, img, targetLen) {
     const iw = img.naturalWidth, ih = img.naturalHeight;
     const s = targetLen / Math.max(iw, ih);
-    ctx.drawImage(img, -iw * s / 2, -ih * s / 2, iw * s, ih * s);
+    drawWorldImage(ctx, img, -iw * s / 2, -ih * s / 2, iw * s, ih * s);
 }
 // Call after the existing rotation and (for Tech) flip. The stack offset
 // is in screen-up direction; targeting, camera, and hull origin stay in world space.
@@ -693,6 +705,12 @@ function drawMobileSprite(ctx, img, role, len, angle, flipped, screenScale, squa
 // ctx は呼び出し側で既に position へ translate 済みのこと。rotAngle は各層に同じ角度で (オフセットより後に) かける
 // ので、段差は保ったまま層ごとの円環が独立にゆっくり自転しているように見える。
 function drawSpriteStack(ctx, layerImgs, targetLen, rotAngle, dyFrac, backingImg) {
+    if (window.Experimental3D && Experimental3D.isActive()) {
+        ctx.save(); ctx.rotate(rotAngle || 0);
+        const captured = Experimental3D.captureSprite(ctx, backingImg || layerImgs[0], 'structure', targetLen, rotAngle || 0);
+        ctx.restore(); if (captured) return;
+    }
+
     dyFrac = dyFrac == null ? 0.05 : dyFrac;
     const dy = targetLen * dyFrac;
     // 土台の影 (層がある程度揃ったら薄い楕円で接地感を出す)
@@ -2315,7 +2333,7 @@ function drawFogOfWar(ctx) {
         ctx.globalCompositeOperation = 'lighter';
         ctx.globalAlpha = 0.5 * (1 - LULL_FOG * lullK); // 第34弾: 凪で霧が晴れる
         ctx.imageSmoothingEnabled = true;
-        ctx.drawImage(_cloudCv, 0, 0, cssW, cssH);
+        if (!window.Experimental3D || !Experimental3D.captureFog(_cloudCv, _fogCv, ctx.globalAlpha)) ctx.drawImage(_cloudCv, 0, 0, cssW, cssH);
         ctx.restore();
     }
 }
@@ -2591,7 +2609,7 @@ function drawBelts(ctx, cx, cy, vw, vh) {
             const m = arr[i]; if (!m.st || m.x + m.r + 3000 < cx || m.x - m.r - 3000 > cx + vw || m.y + m.r + 3000 < cy || m.y - m.r - 3000 > cy + vh) continue;
             for (const t of m.st) {
                 if (t.x + t.s < cx || t.x - t.s > cx + vw || t.y + t.s < cy || t.y - t.s > cy + vh) continue;
-                ctx.save(); ctx.globalAlpha = alpha * t.al; ctx.translate(t.x, t.y); ctx.rotate(t.rot); ctx.drawImage(img, -t.s / 2, -t.s / 2, t.s, t.s); ctx.restore();
+                ctx.save(); ctx.globalAlpha = alpha * t.al; ctx.translate(t.x, t.y); ctx.rotate(t.rot); drawWorldImage(ctx, img, -t.s / 2, -t.s / 2, t.s, t.s); ctx.restore();
             }
         }
         ctx.globalAlpha = 1;
@@ -3507,6 +3525,8 @@ class Station {
         ctx.translate(this.x, this.y);
         ctx.rotate(this.angle);
 
+        const _station3D = window.Experimental3D && Experimental3D.captureSprite(ctx, {src:'assets/station_model.png'}, 'station', 210, this.angle, camera.zoom);
+        if (!_station3D) {
         // Main core (Hexagon)
         ctx.beginPath();
         for (let i = 0; i < 6; i++) {
@@ -3538,6 +3558,7 @@ class Station {
             ctx.fill();
         }
 
+        }
         ctx.restore();
 
         // Label (adaptive font size so it remains readable at all zoom levels)
@@ -4120,7 +4141,7 @@ class Projectile {
             if (spriteReady(_boltImg)) {
                 ctx.globalCompositeOperation = 'lighter';
                 ctx.globalAlpha = 0.92;
-                ctx.drawImage(_boltImg, -14, -9, 28, 18);
+                drawWorldImage(ctx, _boltImg, -14, -9, 28, 18);
                 ctx.globalCompositeOperation = 'source-over';
                 ctx.globalAlpha = 1;
             } else {
@@ -4143,7 +4164,7 @@ class Projectile {
             // ミサイル弾体スプライト
             const _mslImg = this.isPlayer === false ? (spriteReady(SPRITES[dsk('drone_missile_e', 'e')]) ? SPRITES[dsk('drone_missile_e', 'e')] : SPRITES['drone_missile']) : SPRITES[dsk('drone_missile', 'p')]; // 第49弾: 敵のミサイルは敵側のデザイン
             if (spriteReady(_mslImg)) {
-                ctx.drawImage(_mslImg, -16, -16, 32, 32); // 透過スプライト (第16弾)
+                drawWorldImage(ctx, _mslImg, -16, -16, 32, 32); // 透過スプライト (第16弾)
             } else {
                 ctx.fillStyle = '#ddd';
                 ctx.beginPath();
@@ -4166,7 +4187,7 @@ class Projectile {
             if (spriteReady(_mexImg)) {
                 ctx.globalCompositeOperation = 'lighter';
                 ctx.globalAlpha = 0.80;
-                ctx.drawImage(_mexImg, -28, -10, 20, 20);
+                drawWorldImage(ctx, _mexImg, -28, -10, 20, 20);
                 ctx.globalCompositeOperation = 'source-over';
                 ctx.globalAlpha = 1;
             }
@@ -9576,7 +9597,7 @@ function drawMines(ctx) {
         ctx.save();
         ctx.globalAlpha = mn.t < MINE_ARM ? 0.4 : 0.85; ctx.strokeStyle = '#ffcc66'; ctx.lineWidth = 1.6 * inv;
         const r = Math.max(30, 6 * inv);
-        if (spriteReady(SPRITES.field_mine)) ctx.drawImage(SPRITES.field_mine, mn.x - r * 1.6, mn.y - r * 1.6, r * 3.2, r * 3.2); // 第35弾
+        if (spriteReady(SPRITES.field_mine)) drawWorldImage(ctx, SPRITES.field_mine, mn.x - r * 1.6, mn.y - r * 1.6, r * 3.2, r * 3.2); // 第35弾
         else {
             ctx.beginPath(); ctx.arc(mn.x, mn.y, r, 0, Math.PI * 2); ctx.stroke();
             ctx.beginPath(); ctx.moveTo(mn.x - r * 1.5, mn.y); ctx.lineTo(mn.x + r * 1.5, mn.y); ctx.moveTo(mn.x, mn.y - r * 1.5); ctx.lineTo(mn.x, mn.y + r * 1.5); ctx.stroke();
@@ -9973,7 +9994,7 @@ function drawConvoys(ctx) {
         if (!higgsViewOff && !(player && inPlayerVision(cv.x, cv.y))) continue;
         ctx.save(); ctx.translate(cv.x, cv.y); ctx.rotate(cv.angle);
         const _cvImg = SPRITES.field_convoy;
-        if (spriteReady(_cvImg)) { ctx.globalAlpha = 1; ctx.drawImage(_cvImg, -150, -150, 300, 300); } // 第35弾: 艦首が右を向いた横長の絵 (正方形の中央の帯)
+        if (spriteReady(_cvImg)) { ctx.globalAlpha = 1; drawWorldImage(ctx, _cvImg, -150, -150, 300, 300); } // 第35弾: 艦首が右を向いた横長の絵 (正方形の中央の帯)
         else {
             ctx.globalAlpha = 0.95; ctx.fillStyle = '#5a4a32'; ctx.strokeStyle = '#ffcf88'; ctx.lineWidth = 2 * inv;
             ctx.fillRect(-110, -32, 220, 64); ctx.strokeRect(-110, -32, 220, 64);
@@ -11669,6 +11690,11 @@ function _strokeBolt(ctx, pts, w) { ctx.lineWidth = w; ctx.beginPath(); ctx.move
 function drawFieldFx(ctx, f, img, fade, t) {
     ctx.save();
     ctx.translate(f.x, f.y);
+    if (window.Experimental3D && Experimental3D.isActive()) {
+        ctx.globalAlpha *= fade;
+        if (Experimental3D.captureSprite(ctx, img, 'environment', f.kind === 'cloud' ? 900 : 520, f.ph || 0, camera.zoom)) { ctx.restore(); return; }
+    }
+
     ctx.globalCompositeOperation = 'lighter';
     if (f.kind === 'cloud') {
         // 霧のゆらぎ: 同じ渦の絵を3層、逆向きにゆっくり回しながら呼吸させる → 渦が巻いて見える
@@ -11812,7 +11838,7 @@ function drawFieldSignals(ctx) {
         if (known) drawKnownMark(ctx, f.x, f.y, known, k, inv, t);
         if (known && known.kind === 'trap') { // 偽コンテナ (自分のもの・見抜いたもの): 赤い×の印
             const R = Math.max(240, 24 * inv);
-            if (spriteReady(SPRITES.field_trap)) { const L = Math.max(150, 30 * inv); ctx.save(); ctx.globalAlpha = 0.95; ctx.translate(f.x, f.y); ctx.rotate(f.ph || 0); ctx.drawImage(SPRITES.field_trap, -L / 2, -L / 2, L, L); ctx.restore(); }
+            if (spriteReady(SPRITES.field_trap)) { const L = Math.max(150, 30 * inv); ctx.save(); ctx.globalAlpha = 0.95; ctx.translate(f.x, f.y); ctx.rotate(f.ph || 0); drawWorldImage(ctx, SPRITES.field_trap, -L / 2, -L / 2, L, L); ctx.restore(); }
             ctx.save(); ctx.strokeStyle = '#ff5a4a'; ctx.lineWidth = 2 * inv; ctx.globalAlpha = 0.85;
             ctx.beginPath(); ctx.moveTo(f.x - R, f.y - R); ctx.lineTo(f.x + R, f.y + R); ctx.moveTo(f.x + R, f.y - R); ctx.lineTo(f.x - R, f.y + R); ctx.stroke();
             ctx.setLineDash([5 * inv, 7 * inv]); ctx.beginPath(); ctx.arc(f.x, f.y, CACHE_R, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
@@ -11821,7 +11847,7 @@ function drawFieldSignals(ctx) {
         if (spriteReady(_fxImg)) { // 第35弾: 生成したスプライト (自然の信号は黒地を加算で重ねる)
             if (f.kind === 'cache') {
                 const L = Math.max(150, 30 * inv);
-                ctx.save(); ctx.globalAlpha = 0.95; ctx.translate(f.x, f.y); ctx.rotate(f.ph); ctx.drawImage(_fxImg, -L / 2, -L / 2, L, L); ctx.restore();
+                ctx.save(); ctx.globalAlpha = 0.95; ctx.translate(f.x, f.y); ctx.rotate(f.ph); drawWorldImage(ctx, _fxImg, -L / 2, -L / 2, L, L); ctx.restore();
             } /* 自然の信号の絵は drawNatureFx (地形の層) */
             if (f.kind === 'cache' && f.takeP > 0) { ctx.globalAlpha = 0.9; ctx.strokeStyle = '#ffe18c'; ctx.lineWidth = 2 * inv; ctx.beginPath(); ctx.arc(f.x, f.y, CACHE_R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, f.takeP / CACHE_TIME)); ctx.stroke(); }
             if (f.kind === 'cache') { ctx.globalAlpha = 0.3; ctx.strokeStyle = '#ffe18c'; ctx.lineWidth = 1.5 * inv; ctx.setLineDash([6 * inv, 8 * inv]); ctx.beginPath(); ctx.arc(f.x, f.y, CACHE_R, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
@@ -15182,7 +15208,7 @@ function drawDecoys(ctx) {
         ctx.translate(d.x, d.y);
         if (spriteReady(_dsp)) {
             ctx.globalCompositeOperation = 'lighter';
-            ctx.drawImage(_dsp, -20, -20, 40, 40);
+            drawWorldImage(ctx, _dsp, -20, -20, 40, 40);
             ctx.globalCompositeOperation = 'source-over';
         } else {
             // フォールバック: 菱形コア
@@ -17517,7 +17543,7 @@ function drawLures(ctx) {
             drawKnownMark(ctx, lp.x, lp.y, kn, null, zc, t / 1000);
             const _li2 = SPRITES.lure_ship;
             ctx.globalAlpha = 0.7;
-            if (spriteReady(_li2)) { const z = Math.max(120, 28 * zc); ctx.drawImage(_li2, lp.x - z / 2, lp.y - z / 2, z, z); }
+            if (spriteReady(_li2)) { const z = Math.max(120, 28 * zc); drawWorldImage(ctx, _li2, lp.x - z / 2, lp.y - z / 2, z, z); }
             ctx.globalAlpha = 1;
             continue;
         }
@@ -17526,7 +17552,7 @@ function drawLures(ctx) {
         ctx.strokeStyle = L.kind === 'sos' ? '#00e5ff' : L.band ? ({ heat: '#ff8a4c', optic: '#ffe066', em: '#c48bff', higgs: '#66aaff' })[L.band] : '#c48bff'; ctx.fillStyle = ctx.strokeStyle; ctx.lineWidth = 1.5 * zc;
         const r = 8 * zc;
         const _li = SPRITES[L.kind === 'sos' ? 'lure_sos' : (L.band && spriteReady(SPRITES['bcn_' + L.band]) ? 'bcn_' + L.band : 'lure_ship')]; // 第21弾: 囮の絵 (第49弾: ビーコンは帯域ごとの専用の絵)
-        if (spriteReady(_li)) { const z = 34 * zc; ctx.drawImage(_li, L.x - z / 2, L.y - z / 2, z, z); }
+        if (spriteReady(_li)) { const z = 34 * zc; drawWorldImage(ctx, _li, L.x - z / 2, L.y - z / 2, z, z); }
         else { ctx.beginPath(); ctx.arc(L.x, L.y, r, 0, Math.PI * 2); ctx.stroke(); }
         if (L.phase === 'on') { ctx.beginPath(); ctx.arc(L.x, L.y, r * 2.2 + (t % 1200) / 1200 * r * 2, 0, Math.PI * 2); ctx.globalAlpha = a * 0.4; ctx.stroke(); }
         ctx.globalAlpha = a; ctx.font = 'bold ' + Math.round(9 * zc) + 'px Orbitron, sans-serif'; ctx.textAlign = 'center';
@@ -17539,6 +17565,11 @@ function drawSmokeClouds(ctx) {
     for (const s of smokeClouds) {
         const a = (s.follow ? 0.22 : 0.32) * _smokeFade(s);
         if (a <= 0.01) continue;
+        if (window.Experimental3D && Experimental3D.isActive()) {
+            ctx.save(); ctx.translate(s.x, s.y); ctx.globalAlpha = a;
+            const captured = Experimental3D.captureSprite(ctx, {src:'assets/smoke_cloud.png'}, 'smoke', s.r * 2, 0, camera.zoom);
+            ctx.restore(); if (captured) continue;
+        }
         const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, s.r);
         g.addColorStop(0, 'rgba(150,200,255,0.9)');
         g.addColorStop(0.5, 'rgba(120,175,240,0.75)');
@@ -17556,7 +17587,10 @@ function drawNoiseMakers(ctx) {
         ctx.globalAlpha = 0.85 * a;
         ctx.strokeStyle = '#ffaa55'; ctx.lineWidth = 1.5 * zc;
         const r = 7 * zc;
-        ctx.beginPath(); ctx.moveTo(n.x, n.y - r); ctx.lineTo(n.x + r, n.y); ctx.lineTo(n.x, n.y + r); ctx.lineTo(n.x - r, n.y); ctx.closePath(); ctx.stroke();
+        ctx.save(); ctx.translate(n.x, n.y);
+        const _noise3D = window.Experimental3D && Experimental3D.captureSprite(ctx, {src:'assets/noise_device.png'}, 'beacon', r * 2, 0, camera.zoom);
+        ctx.restore();
+        if (!_noise3D) { ctx.beginPath(); ctx.moveTo(n.x, n.y - r); ctx.lineTo(n.x + r, n.y); ctx.lineTo(n.x, n.y + r); ctx.lineTo(n.x - r, n.y); ctx.closePath(); ctx.stroke(); }
         const sp = Math.hypot(n.vx, n.vy) || 1;
         ctx.globalAlpha = 0.35 * a;
         ctx.beginPath(); ctx.moveTo(n.x, n.y); ctx.lineTo(n.x - n.vx / sp * 40 * zc, n.y - n.vy / sp * 40 * zc); ctx.stroke();
@@ -18096,7 +18130,7 @@ class Drone {
             if (!_posed && (this._dash > 0 || this._slash > 0) && spriteReady(SPRITES.fx_saber_blade)) { // 第36弾: ビームサーベルを抜いている
                 ctx.globalCompositeOperation = 'lighter';
                 const sw = this._slash > 0 ? (1 - this._slash / 24) * 2.4 - 1.2 : -0.5;
-                ctx.save(); ctx.translate(12, -6); ctx.rotate(sw); ctx.drawImage(SPRITES.fx_saber_blade, -4, -46, 8, 46); ctx.restore();
+                ctx.save(); ctx.translate(12, -6); ctx.rotate(sw); drawWorldImage(ctx, SPRITES.fx_saber_blade, -4, -46, 8, 46); ctx.restore();
                 ctx.globalCompositeOperation = 'source-over';
             }
             ctx.restore();
@@ -18128,8 +18162,8 @@ class Drone {
             if (spriteReady(_sp)) {
                 ctx.rotate(this.angle);
                 if (this.type === 'attack') drawMobileSprite(ctx, _sp, 'fighter', 32, this.angle, false, camera.zoom * _zs, true);
-                else if (this.type === 'boarder') ctx.drawImage(_sp, -21, -21, 42, 42);
-                else if (!window.Experimental3D || !Experimental3D.captureSprite(ctx, _sp, 'scout', 32, this.angle, camera.zoom * _zs)) ctx.drawImage(_sp, -16, -16, 32, 32);
+                else if (this.type === 'boarder') drawWorldImage(ctx, _sp, -21, -21, 42, 42);
+                else if (!window.Experimental3D || !Experimental3D.captureSprite(ctx, _sp, 'scout', 32, this.angle, camera.zoom * _zs)) drawWorldImage(ctx, _sp, -16, -16, 32, 32);
                 ctx.rotate(-this.angle);
             } else {
                 const col = this.type === 'attack' ? '#00ffaa' : '#66ccff';
@@ -18141,7 +18175,7 @@ class Drone {
         } else if (this.type === 'decoy') {
             const _sp = _droneSprite;
             if (spriteReady(_sp)) {
-                ctx.drawImage(_sp, -16, -16, 32, 32);
+                drawWorldImage(ctx, _sp, -16, -16, 32, 32);
             } else {
                 ctx.fillStyle = '#cc99ff';
                 ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(6, 0); ctx.lineTo(0, 7); ctx.lineTo(-6, 0); ctx.closePath(); ctx.fill();
@@ -18153,7 +18187,7 @@ class Drone {
             const _sp = _droneSprite;
             if (spriteReady(_sp)) {
                 ctx.rotate(this.angle);
-                ctx.drawImage(_sp, -16, -16, 32, 32);
+                drawWorldImage(ctx, _sp, -16, -16, 32, 32);
                 ctx.rotate(-this.angle);
             } else {
                 ctx.fillStyle = '#ffaa33';
@@ -18170,13 +18204,13 @@ class Drone {
                 ctx.globalCompositeOperation = 'lighter';
                 ctx.globalAlpha = a * (0.22 + 0.08 * Math.sin(Date.now() * 0.004));
                 const R2 = DRONE_BARRIER_RADIUS * 1.08 / _zs; // 盾は世界の大きさ (本体はズームで縮まない描き方なので割り戻す)
-                ctx.drawImage(_sh, -R2, -R2, R2 * 2, R2 * 2);
+                drawWorldImage(ctx, _sh, -R2, -R2, R2 * 2, R2 * 2);
                 ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = a;
             } else {
                 ctx.globalAlpha = a * 0.3; ctx.strokeStyle = '#6699ff'; ctx.lineWidth = 2;
                 ctx.beginPath(); ctx.arc(0, 0, DRONE_BARRIER_RADIUS / _zs, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = a;
             }
-            if (spriteReady(_bs)) ctx.drawImage(_bs, -18, -18, 36, 36);
+            if (spriteReady(_bs)) drawWorldImage(ctx, _bs, -18, -18, 36, 36);
             else {
                 ctx.strokeStyle = '#4499ff'; ctx.lineWidth = 1.5; ctx.beginPath();
                 for (let i = 0; i < 6; i++) { const ba = (i / 6) * Math.PI * 2; (i === 0 ? ctx.moveTo : ctx.lineTo).call(ctx, Math.cos(ba) * 8, Math.sin(ba) * 8); }
@@ -18185,7 +18219,7 @@ class Drone {
         } else if (this.type === 'buoy') {
             const _sp = _droneSprite;
             if (spriteReady(_sp)) {
-                ctx.drawImage(_sp, -16, -16, 32, 32);
+                drawWorldImage(ctx, _sp, -16, -16, 32, 32);
             } else {
                 ctx.fillStyle = '#44ccff';
                 ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI * 2); ctx.fill();
@@ -18720,9 +18754,9 @@ function drawSaberFx(ctx) {
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
         ctx.translate(f.tx, f.ty); ctx.rotate(f.a + Math.PI / 2);
-        if (spriteReady(SPRITES.fx_saber_slash)) { ctx.globalAlpha = k; ctx.drawImage(SPRITES.fx_saber_slash, -L / 2, -L / 2, L, L); }
+        if (spriteReady(SPRITES.fx_saber_slash)) { ctx.globalAlpha = k; drawWorldImage(ctx, SPRITES.fx_saber_slash, -L / 2, -L / 2, L, L); }
         else { ctx.globalAlpha = k; ctx.strokeStyle = '#ff9df0'; ctx.lineWidth = 18; ctx.beginPath(); ctx.arc(0, 60, 150, -Math.PI * 0.85, -Math.PI * 0.15); ctx.stroke(); }
-        if (f.t < 14 && spriteReady(SPRITES.fx_saber_hit)) { ctx.globalAlpha = 1 - f.t / 14; const H = 200 + f.t * 10; ctx.drawImage(SPRITES.fx_saber_hit, -H / 2, -H / 2, H, H); }
+        if (f.t < 14 && spriteReady(SPRITES.fx_saber_hit)) { ctx.globalAlpha = 1 - f.t / 14; const H = 200 + f.t * 10; drawWorldImage(ctx, SPRITES.fx_saber_hit, -H / 2, -H / 2, H, H); }
         ctx.restore();
     }
 }
@@ -25657,7 +25691,7 @@ function renderWorld() {
         _tickZoomAnim();
         // カメラ追従
         const _pov = prpPov(); // プレイ画面のリプレイ: 敵の席
-        if (window.Experimental3D) Experimental3D.beginFrame({ width: cssW, height: cssH, dpr: _dpr, zoom: camera.zoom, enemyReplay: !!_pov });
+        if (window.Experimental3D) Experimental3D.beginFrame({ width: cssW, height: cssH, dpr: _dpr, zoom: camera.zoom, time: _frameCount / 60, mobile: _isMobile, enemyReplay: !!_pov });
         if (cameraFollowPlayer && player) { if (_pov) { const _px = player.x, _py = player.y; player.x = _pov.x; player.y = _pov.y; centerCameraOnPlayer(); player.x = _px; player.y = _py; } else centerCameraOnPlayer(); }
 
         // Rendering — ベース変換を _dpr 倍に固定 (高精細でくっきり)。以降の描画は全てCSS px基準。
@@ -25681,6 +25715,10 @@ function renderWorld() {
         ctx.translate(-camera.x + sx, -camera.y + sy);
 
         drawBackground(ctx);
+        // Commit terrain below the unchanged fog/visibility overlay. Clear only after a successful GPU pass.
+        if (window.Experimental3D && Experimental3D.background(canvas)) {
+            ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.restore();
+        }
         if (_pov) prpSeat(_pov, () => drawTargetLine(ctx)); else drawTargetLine(ctx); // 敵の席: 敵の行き先の線 (自機の線は敵には見えない)
 
         // ズームアウト時 or デバッグフラグでshadowBlurをスキップ (描画コスト削減)
