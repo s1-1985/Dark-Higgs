@@ -1,5 +1,13 @@
 # Dark Echo — HANDOVER（セッションログ・決定経緯・教訓）
 
+## 2026-11-28: 本編3Dモードのユニット12種
+
+- `prototype/unit-models.js` がヘリオス／鉄鴉団6種ずつとTech姿勢絵を対応付ける。生成元・ジョブは `tools/model_batches/helios-crow-20261128.json`。別勢力への流用なし。
+- `view3d-renderer.js` は描画ゲート通過後に画面内のモデルだけ読込（同時2件）、種類別に再利用。未読込／失敗は元絵。ドローン最小縮尺・フェードを継承。Techは直立、姿勢別の骨格アニメは未実装。
+- GLB12種: 260,012→107,283三角形、22,337,056→11,897,348 bytes。艦・Tech最大12,000、小型5,000三角形。容量・面数の削減でありFPS改善の実測ではない。
+- `tools/test_view3d.cjs`、`tools/test_unit_models.mjs`、`node --experimental-vm-modules tools/test_unit_renderer.mjs` 通過。12モデルをBlender再読込・35度俯瞰で確認。ブラウザで2D出撃・レーダーでWebGL無効から2D復帰を確認。ゲーム内GPU合成・スマホFPS未検証。
+- 全画面Canvas→CanvasTexture転送は従来のまま。霧・地形の3D化、残り4勢力は未完。詳細 `docs/UNIT_MODELS_20261128.md`。
+
 > **このファイルの役割**: セッション間の引き継ぎ記録。**何を・なぜ・どう決めたか**の経緯と、
 > パフォーマンス／git の教訓を残す。
 > - プロジェクト概要・確定仕様・コードクイックリファレンス → **`CLAUDE.md`**

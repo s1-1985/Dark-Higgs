@@ -1,0 +1,112 @@
+[
+  {
+    "id": "helios-assault",
+    "status": "downloaded",
+    "bytes": 1468424,
+    "sha256": "b0ba0c9e512ff11e8eedf5a106824af3737c15b8a32c1d7674082ca83b21864f",
+    "triangles": 6514,
+    "meshes": 1,
+    "materials": 1,
+    "required_extensions": []
+  },
+  {
+    "id": "helios-stealth",
+    "status": "downloaded",
+    "bytes": 1636576,
+    "sha256": "3cef2aa26e452a22f0320109127540a88ac8717ebf07de2b8aa02f0c70b11afb",
+    "triangles": 8772,
+    "meshes": 1,
+    "materials": 1,
+    "required_extensions": []
+  },
+  {
+    "id": "helios-carrier",
+    "status": "downloaded",
+    "bytes": 1889932,
+    "sha256": "c784e6b80fc91d51ab109d17fac813d86c1bf9442b3929b9082af1dfeb12e782",
+    "triangles": 14692,
+    "meshes": 1,
+    "materials": 1,
+    "required_extensions": []
+  },
+  {
+    "id": "helios-fighter",
+    "status": "downloaded",
+    "bytes": 1455660,
+    "sha256": "281e1faf6df1546989f0e38028e89755bf172294dc3f774daef481ccf2b3e857",
+    "triangles": 7040,
+    "meshes": 1,
+    "materials": 1,
+    "required_extensions": []
+  },
+  {
+    "id": "helios-scout",
+    "status": "downloaded",
+    "bytes": 1721688,
+    "sha256": "b97a8eb84cca627d7704b4eb465c1e171a1b9fb3a6927752ab638167a0dbb6b2",
+    "triangles": 15758,
+    "meshes": 1,
+    "materials": 1,
+    "required_extensions": []
+  },
+  {
+    "id": "helios-mech",
+    "status": "downloaded",
+    "bytes": 2011932,
+    "sha256": "223f1f2fb59f7b0d9fa26c573d7e987aebd64d40bf2bf209e319f8702e3582e8",
+    "triangles": 18295,
+    "meshes": 1,
+    "materials": 1,
+    "required_extensions": []
+  },
+  {
+    "id": "crow-stealth",
+    "status": "downloaded",
+    "bytes": 1982932,
+    "sha256": "5e859008f545d083f840e96a613a3357eed3765392c74ebaaed57f1aa8a27c1f",
+    "triangles": 29284,
+    "meshes": 1,
+    "materials": 1,
+    "required_extensions": []
+  },
+  {
+    "id": "crow-carrier",
+    "status": "downloaded",
+    "bytes": 1867568,
+    "sha256": "52d41fe4716b9d831530344157cfb826370425505ab2fab625187937229d52b0",
+    "triangles": 28539,
+    "meshes": 1,
+    "materials": 1,
+    "required_extensions": []
+  },
+  {
+    "id": "crow-fighter",
+    "status": "downloaded",
+    "bytes": 1723804,
+    "sha256": "bf10b35a64bf1dbff73e6702882a547c3855ae6389594a76677524ce6ceb1ba4",
+    "triangles": 18260,
+    "meshes": 1,
+    "materials": 1,
+    "required_extensions": []
+  },
+  {
+    "id": "crow-scout",
+    "status": "downloaded",
+    "bytes": 2389920,
+    "sha256": "6ac5583034837f3327724756b5b4c78c9b0cb989a7cb82193055b289e73bb1a5",
+    "triangles": 42710,
+    "meshes": 1,
+    "materials": 1,
+    "required_extensions": []
+  },
+  {
+    "id": "crow-mech",
+    "status": "downloaded",
+    "bytes": 1936272,
+    "sha256": "5409643be1781db5554ff68387b430ca6c2b10fcbfb0e4068a54dc0c7643d9d9",
+    "triangles": 32281,
+    "meshes": 1,
+    "materials": 1,
+    "required_extensions": []
+  }
+]

@@ -679,7 +679,7 @@ function drawSpriteCentered(ctx, img, targetLen) {
 // Call after the existing rotation and (for Tech) flip. The stack offset
 // is in screen-up direction; targeting, camera, and hull origin stay in world space.
 function drawMobileSprite(ctx, img, role, len, angle, flipped, screenScale, square = false) {
-    if (window.Experimental3D && Experimental3D.captureSprite(ctx, img, role, len, angle)) return true;
+    if (window.Experimental3D && Experimental3D.captureSprite(ctx, img, role, len, angle, screenScale)) return true;
     const longest = Math.max(img.naturalWidth, img.naturalHeight);
     const w = square ? len : len * img.naturalWidth / longest;
     const h = square ? len : len * img.naturalHeight / longest;
@@ -17975,7 +17975,7 @@ class Drone {
                 ctx.rotate(this.angle);
                 if (this.type === 'attack') drawMobileSprite(ctx, _sp, 'fighter', 32, this.angle, false, camera.zoom * _zs, true);
                 else if (this.type === 'boarder') ctx.drawImage(_sp, -21, -21, 42, 42);
-                else ctx.drawImage(_sp, -16, -16, 32, 32);
+                else if (!window.Experimental3D || !Experimental3D.captureSprite(ctx, _sp, 'scout', 32, this.angle, camera.zoom * _zs)) ctx.drawImage(_sp, -16, -16, 32, 32);
                 ctx.rotate(-this.angle);
             } else {
                 const col = this.type === 'attack' ? '#00ffaa' : '#66ccff';

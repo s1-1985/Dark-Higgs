@@ -1,0 +1,122 @@
+[
+  {
+    "id": "crow-assault",
+    "source_sha256": "21133681587ec863f527c41ab841cbefe39529fcdc3e929fc1b3b004d3948d20",
+    "source_bytes": 2252348,
+    "source_triangles": 37867,
+    "bytes": 1299456,
+    "triangles": 12000,
+    "texture_size": 1024,
+    "sha256": "169fa7ab2a93003bff5d285ebe43db529ca57fb159b67bce030e7205b01e5a13"
+  },
+  {
+    "id": "crow-carrier",
+    "source_sha256": "52d41fe4716b9d831530344157cfb826370425505ab2fab625187937229d52b0",
+    "source_bytes": 1867568,
+    "source_triangles": 28539,
+    "bytes": 1283332,
+    "triangles": 12000,
+    "texture_size": 1024,
+    "sha256": "8fc14245bc7d54115edc7a780b0c78c3cfcd6b119d3ec140f80a3691ec251a63"
+  },
+  {
+    "id": "crow-fighter",
+    "source_sha256": "bf10b35a64bf1dbff73e6702882a547c3855ae6389594a76677524ce6ceb1ba4",
+    "source_bytes": 1723804,
+    "source_triangles": 18260,
+    "bytes": 539288,
+    "triangles": 5000,
+    "texture_size": 512,
+    "sha256": "ca32ff5ed6ae41b3c3019cb0fe4729ec23a7dfc9225d5cc3c76ea89852298581"
+  },
+  {
+    "id": "crow-mech",
+    "source_sha256": "5409643be1781db5554ff68387b430ca6c2b10fcbfb0e4068a54dc0c7643d9d9",
+    "source_bytes": 1936272,
+    "source_triangles": 32281,
+    "bytes": 1274896,
+    "triangles": 12000,
+    "texture_size": 1024,
+    "sha256": "016f0863921b79e879bbb25df42e838d9f862b46b7001da54f5d8dfdd8da46f8"
+  },
+  {
+    "id": "crow-scout",
+    "source_sha256": "6ac5583034837f3327724756b5b4c78c9b0cb989a7cb82193055b289e73bb1a5",
+    "source_bytes": 2389920,
+    "source_triangles": 42710,
+    "bytes": 540888,
+    "triangles": 5000,
+    "texture_size": 512,
+    "sha256": "09d43c9e8d3533a5352c82153f85acdc056eb9390a10f20a35d517a9d2830cba"
+  },
+  {
+    "id": "crow-stealth",
+    "source_sha256": "5e859008f545d083f840e96a613a3357eed3765392c74ebaaed57f1aa8a27c1f",
+    "source_bytes": 1982932,
+    "source_triangles": 29284,
+    "bytes": 1299968,
+    "triangles": 11999,
+    "texture_size": 1024,
+    "sha256": "b97f805c2469f5d1ea3625716b28264b9f339987b2af074c6cd46674add675de"
+  },
+  {
+    "id": "helios-assault",
+    "source_sha256": "b0ba0c9e512ff11e8eedf5a106824af3737c15b8a32c1d7674082ca83b21864f",
+    "source_bytes": 1468424,
+    "source_triangles": 6514,
+    "bytes": 790628,
+    "triangles": 6514,
+    "texture_size": 1024,
+    "sha256": "b0863e108d867fd0942d072bc98c74b797e4ee552eb36cfbf1e6aad353d75ca9"
+  },
+  {
+    "id": "helios-carrier",
+    "source_sha256": "c784e6b80fc91d51ab109d17fac813d86c1bf9442b3929b9082af1dfeb12e782",
+    "source_bytes": 1889932,
+    "source_triangles": 14692,
+    "bytes": 1371028,
+    "triangles": 11999,
+    "texture_size": 1024,
+    "sha256": "dff030ace6c9ccd70d681f41f345b89876ec6b611ec0eeea4e849d4e86184fa2"
+  },
+  {
+    "id": "helios-fighter",
+    "source_sha256": "281e1faf6df1546989f0e38028e89755bf172294dc3f774daef481ccf2b3e857",
+    "source_bytes": 1455660,
+    "source_triangles": 7040,
+    "bytes": 549188,
+    "triangles": 5000,
+    "texture_size": 512,
+    "sha256": "68af3e0c36b27fd4e6b05e8d59195ef1a3f1a84d83ebfed6165131f44ae06430"
+  },
+  {
+    "id": "helios-mech",
+    "source_sha256": "223f1f2fb59f7b0d9fa26c573d7e987aebd64d40bf2bf209e319f8702e3582e8",
+    "source_bytes": 2011932,
+    "source_triangles": 18295,
+    "bytes": 1381180,
+    "triangles": 11999,
+    "texture_size": 1024,
+    "sha256": "803a491af67674cc26389f8e5e78050a41825cec05521ff25ebaae06b008ecda"
+  },
+  {
+    "id": "helios-scout",
+    "source_sha256": "b97a8eb84cca627d7704b4eb465c1e171a1b9fb3a6927752ab638167a0dbb6b2",
+    "source_bytes": 1721688,
+    "source_triangles": 15758,
+    "bytes": 553492,
+    "triangles": 5000,
+    "texture_size": 512,
+    "sha256": "9c67c44afef84a37b5ad00eed4868c9146504f8a5769634215801bbac951578c"
+  },
+  {
+    "id": "helios-stealth",
+    "source_sha256": "3cef2aa26e452a22f0320109127540a88ac8717ebf07de2b8aa02f0c70b11afb",
+    "source_bytes": 1636576,
+    "source_triangles": 8772,
+    "bytes": 1014004,
+    "triangles": 8772,
+    "texture_size": 1024,
+    "sha256": "18101d4d166d0101e23b4e9f9469cf3fb2dc671fd8827c3146f1251a43bd3608"
+  }
+]
