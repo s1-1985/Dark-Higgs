@@ -5003,7 +5003,10 @@ class Ship {
                     const pa = Math.atan2(pf.y - this.y, pf.x - this.x);
                     const pd = _steer(pa, _baseTargetSpeed * 0.6); // 止まったままでは回頭が遅い (第174弾: 最も小回りが利くのは巡航の6割) — 進みながら向きを変える
                     const parc = WEAPON_FIRE_ARC[pf.w] || Math.PI / 4;
-                    if (Math.abs(pd) < parc * 0.9) { this._ptFire = null; fireAtPoint(pf.x, pf.y); }
+                    // 射角に入っても装填中・冷却中・火器管制ダウンなら予約を残して待つ (撃てた時だけ消す)
+                    if (Math.abs(pd) < parc * 0.9 && this._weaponJamTimer <= 0 && this.fireCooldown <= 0 && playerWeaponReady(this, pf.w) && !this._ffBeam) {
+                        if (fireAtPoint(pf.x, pf.y)) this._ptFire = null;
+                    }
                 }
             }
             // 射撃命令の失効
@@ -25915,6 +25918,7 @@ function _recGate(name, args, self) { // true = そのまま実行 / false = 受
     }
     const ost = Ship.prototype.setTarget;
     Ship.prototype.setTarget = function (...a) {
+        if (this === player && (!_inStep || _prpApplying) && !(_hReplay() && !_prpApplying)) this._ptFire = null; // 第249弾: 人の移動・停止の命令は座標射撃の予約(回頭)を取り消す
         if (this === player && !_inStep) { if (_hReplay() && !_prpApplying) return; if (comDemo && capMode) capManualStart(); if (_recOn && _recDepth === 0 && !comDemo && !playReplay) _inputLog.push([_frameCount, '$setTarget', a.map(_recEnc)]); }
         _recDepth++; try { return ost.apply(this, a); } finally { _recDepth--; }
     };
