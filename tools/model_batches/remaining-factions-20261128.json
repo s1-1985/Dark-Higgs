@@ -4,9 +4,9 @@
   "source_repository": "s1-1985/Dark-Higgs",
   "source_commit": "6728119595caaa0cf448ca138230a8a6b8214bd3",
   "requested_scope": "Remaining four factions, six unit roles each, per user request on 2026-11-28",
-  "external_transfer_approval": "pending: automatic review rejected sending source sprites to to3D without explicit destination approval",
+  "external_transfer_approval": "Explicit user approval in this conversation on 2026-11-28 for sending all 24 source images to to3D",
   "runtime_changes": false,
-  "review_status": "source_preflight_complete; generation_blocked_before_job_creation",
+  "review_status": "generation_in_progress",
   "units": [
     {
       "id": "valkyr-assault",
@@ -27,14 +27,19 @@
         1015,
         841
       ],
-      "generation_status": "awaiting_external_transfer_approval",
-      "job_id": null,
+      "generation_status": "completed",
+      "job_id": "11e1233d-7f69-465d-ad8a-d9c360943bbe",
       "previous_jobs": [],
-      "model_url": null,
+      "model_url": "https://storage.to3d.app/generated-3d/models/2026-11-28/task_11e1233d-7f69-465d-ad8a-d9c360943bbe_model.glb",
       "target_path": "prototype/assets/models/valkyr-assault.glb",
       "triangle_budget": 12000,
-      "review_status": "source_sprite_verified; model_not_generated",
-      "runtime_enabled": false
+      "review_status": "generated; geometry_review_pending",
+      "runtime_enabled": false,
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3",
+      "last_status_checked": "2026-11-28T05:43:51.680Z",
+      "fallback_model_url": "https://img.theapi.app/temp/0ba0b3ea-65b7-4853-b0a8-7f3ffcf4c52e.glb",
+      "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-28/task_11e1233d-7f69-465d-ad8a-d9c360943bbe_image.png",
+      "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-28/task_11e1233d-7f69-465d-ad8a-d9c360943bbe_video.mp4"
     },
     {
       "id": "valkyr-stealth",
@@ -55,14 +60,19 @@
         949,
         755
       ],
-      "generation_status": "awaiting_external_transfer_approval",
-      "job_id": null,
+      "generation_status": "completed",
+      "job_id": "fbcbc2ea-2ce6-4246-a00d-717ea6452e84",
       "previous_jobs": [],
-      "model_url": null,
+      "model_url": "https://storage.to3d.app/generated-3d/models/2026-11-28/task_fbcbc2ea-2ce6-4246-a00d-717ea6452e84_model.glb",
       "target_path": "prototype/assets/models/valkyr-stealth.glb",
       "triangle_budget": 12000,
-      "review_status": "source_sprite_verified; model_not_generated",
-      "runtime_enabled": false
+      "review_status": "generated; geometry_review_pending",
+      "runtime_enabled": false,
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3",
+      "last_status_checked": "2026-11-28T05:43:58.928Z",
+      "fallback_model_url": "https://img.theapi.app/temp/4541b9dc-b0a9-46ad-908c-8948d16017b3.glb",
+      "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-28/task_fbcbc2ea-2ce6-4246-a00d-717ea6452e84_image.png",
+      "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-28/task_fbcbc2ea-2ce6-4246-a00d-717ea6452e84_video.mp4"
     },
     {
       "id": "valkyr-carrier",
@@ -83,14 +93,19 @@
         1011,
         887
       ],
-      "generation_status": "awaiting_external_transfer_approval",
-      "job_id": null,
+      "generation_status": "completed",
+      "job_id": "a8f0e61d-abcc-425a-ba84-4ed529668996",
       "previous_jobs": [],
-      "model_url": null,
+      "model_url": "https://storage.to3d.app/generated-3d/models/2026-11-28/task_a8f0e61d-abcc-425a-ba84-4ed529668996_model.glb",
       "target_path": "prototype/assets/models/valkyr-carrier.glb",
       "triangle_budget": 12000,
-      "review_status": "source_sprite_verified; model_not_generated",
-      "runtime_enabled": false
+      "review_status": "generated; geometry_review_pending",
+      "runtime_enabled": false,
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3",
+      "last_status_checked": "2026-11-28T05:44:00.282Z",
+      "fallback_model_url": "https://img.theapi.app/temp/b601eb4c-2b31-45bc-8e01-d9ced1b9ef14.glb",
+      "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-28/task_a8f0e61d-abcc-425a-ba84-4ed529668996_image.png",
+      "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-28/task_a8f0e61d-abcc-425a-ba84-4ed529668996_video.mp4"
     },
     {
       "id": "valkyr-fighter",
@@ -111,14 +126,16 @@
         512,
         471
       ],
-      "generation_status": "awaiting_external_transfer_approval",
-      "job_id": null,
+      "generation_status": "processing",
+      "job_id": "1e179205-ceea-4cfa-a97b-d8b8c727fb0d",
       "previous_jobs": [],
       "model_url": null,
       "target_path": "prototype/assets/models/valkyr-fighter.glb",
       "triangle_budget": 5000,
       "review_status": "source_sprite_verified; model_not_generated",
-      "runtime_enabled": false
+      "runtime_enabled": false,
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3",
+      "last_status_checked": "2026-11-28T05:43:51.642Z"
     },
     {
       "id": "valkyr-scout",
@@ -139,14 +156,15 @@
         512,
         486
       ],
-      "generation_status": "awaiting_external_transfer_approval",
-      "job_id": null,
+      "generation_status": "submitted",
+      "job_id": "d188904d-d77d-408a-b502-6e00868821eb",
       "previous_jobs": [],
       "model_url": null,
       "target_path": "prototype/assets/models/valkyr-scout.glb",
       "triangle_budget": 5000,
       "review_status": "source_sprite_verified; model_not_generated",
-      "runtime_enabled": false
+      "runtime_enabled": false,
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
     },
     {
       "id": "valkyr-mech",
@@ -167,14 +185,15 @@
         452,
         512
       ],
-      "generation_status": "awaiting_external_transfer_approval",
-      "job_id": null,
+      "generation_status": "submitted",
+      "job_id": "1efb34a5-aa68-4e6f-9850-aee2d12dbe2b",
       "previous_jobs": [],
       "model_url": null,
       "target_path": "prototype/assets/models/valkyr-mech.glb",
       "triangle_budget": 12000,
       "review_status": "source_sprite_verified; model_not_generated",
-      "runtime_enabled": false
+      "runtime_enabled": false,
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
     },
     {
       "id": "rustroad-assault",
@@ -195,14 +214,15 @@
         1011,
         816
       ],
-      "generation_status": "awaiting_external_transfer_approval",
-      "job_id": null,
+      "generation_status": "submitted",
+      "job_id": "0bf94cf2-f847-407b-b678-96c2d5d6e17c",
       "previous_jobs": [],
       "model_url": null,
       "target_path": "prototype/assets/models/rustroad-assault.glb",
       "triangle_budget": 12000,
       "review_status": "source_sprite_verified; model_not_generated",
-      "runtime_enabled": false
+      "runtime_enabled": false,
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
     },
     {
       "id": "rustroad-stealth",
