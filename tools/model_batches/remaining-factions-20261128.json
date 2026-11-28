@@ -126,16 +126,19 @@
         512,
         471
       ],
-      "generation_status": "processing",
+      "generation_status": "completed",
       "job_id": "1e179205-ceea-4cfa-a97b-d8b8c727fb0d",
       "previous_jobs": [],
-      "model_url": null,
+      "model_url": "https://storage.to3d.app/generated-3d/models/2026-11-28/task_1e179205-ceea-4cfa-a97b-d8b8c727fb0d_model.glb",
       "target_path": "prototype/assets/models/valkyr-fighter.glb",
       "triangle_budget": 5000,
-      "review_status": "source_sprite_verified; model_not_generated",
+      "review_status": "generated; geometry_review_pending",
       "runtime_enabled": false,
       "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3",
-      "last_status_checked": "2026-11-28T05:43:51.642Z"
+      "last_status_checked": "2026-11-28T05:45:33.101Z",
+      "fallback_model_url": "https://img.theapi.app/temp/2f88b940-de9b-43a6-9da7-b12708e06fd5.glb",
+      "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-28/task_1e179205-ceea-4cfa-a97b-d8b8c727fb0d_image.png",
+      "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-28/task_1e179205-ceea-4cfa-a97b-d8b8c727fb0d_video.mp4"
     },
     {
       "id": "valkyr-scout",
@@ -156,15 +159,19 @@
         512,
         486
       ],
-      "generation_status": "submitted",
+      "generation_status": "completed",
       "job_id": "d188904d-d77d-408a-b502-6e00868821eb",
       "previous_jobs": [],
-      "model_url": null,
+      "model_url": "https://storage.to3d.app/generated-3d/models/2026-11-28/task_d188904d-d77d-408a-b502-6e00868821eb_model.glb",
       "target_path": "prototype/assets/models/valkyr-scout.glb",
       "triangle_budget": 5000,
-      "review_status": "source_sprite_verified; model_not_generated",
+      "review_status": "generated; geometry_review_pending",
       "runtime_enabled": false,
-      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3",
+      "last_status_checked": "2026-11-28T05:45:33.110Z",
+      "fallback_model_url": "https://img.theapi.app/temp/cc6e5067-e940-4791-8852-14b701ae742e.glb",
+      "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-28/task_d188904d-d77d-408a-b502-6e00868821eb_image.png",
+      "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-28/task_d188904d-d77d-408a-b502-6e00868821eb_video.mp4"
     },
     {
       "id": "valkyr-mech",
@@ -185,15 +192,19 @@
         452,
         512
       ],
-      "generation_status": "submitted",
+      "generation_status": "completed",
       "job_id": "1efb34a5-aa68-4e6f-9850-aee2d12dbe2b",
       "previous_jobs": [],
-      "model_url": null,
+      "model_url": "https://storage.to3d.app/generated-3d/models/2026-11-28/task_1efb34a5-aa68-4e6f-9850-aee2d12dbe2b_model.glb",
       "target_path": "prototype/assets/models/valkyr-mech.glb",
       "triangle_budget": 12000,
-      "review_status": "source_sprite_verified; model_not_generated",
+      "review_status": "generated; geometry_review_pending",
       "runtime_enabled": false,
-      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3",
+      "last_status_checked": "2026-11-28T05:45:33.508Z",
+      "fallback_model_url": "https://img.theapi.app/temp/6633cc19-b6f6-44f5-ad93-fe3a82a0fe90.glb",
+      "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-28/task_1efb34a5-aa68-4e6f-9850-aee2d12dbe2b_image.png",
+      "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-28/task_1efb34a5-aa68-4e6f-9850-aee2d12dbe2b_video.mp4"
     },
     {
       "id": "rustroad-assault",
@@ -214,7 +225,7 @@
         1011,
         816
       ],
-      "generation_status": "submitted",
+      "generation_status": "processing",
       "job_id": "0bf94cf2-f847-407b-b678-96c2d5d6e17c",
       "previous_jobs": [],
       "model_url": null,
@@ -222,7 +233,8 @@
       "triangle_budget": 12000,
       "review_status": "source_sprite_verified; model_not_generated",
       "runtime_enabled": false,
-      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3",
+      "last_status_checked": "2026-11-28T05:45:25.952Z"
     },
     {
       "id": "rustroad-stealth",
@@ -243,14 +255,15 @@
         957,
         858
       ],
-      "generation_status": "awaiting_external_transfer_approval",
-      "job_id": null,
+      "generation_status": "submitted",
+      "job_id": "f6eb5e8e-4fc4-4e52-8fc6-0508e813319d",
       "previous_jobs": [],
       "model_url": null,
       "target_path": "prototype/assets/models/rustroad-stealth.glb",
       "triangle_budget": 12000,
       "review_status": "source_sprite_verified; model_not_generated",
-      "runtime_enabled": false
+      "runtime_enabled": false,
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
     },
     {
       "id": "rustroad-carrier",
@@ -271,14 +284,15 @@
         1005,
         846
       ],
-      "generation_status": "awaiting_external_transfer_approval",
-      "job_id": null,
+      "generation_status": "submitted",
+      "job_id": "8dfff1ba-6265-4ea1-82c3-4794ef8709cc",
       "previous_jobs": [],
       "model_url": null,
       "target_path": "prototype/assets/models/rustroad-carrier.glb",
       "triangle_budget": 12000,
       "review_status": "source_sprite_verified; model_not_generated",
-      "runtime_enabled": false
+      "runtime_enabled": false,
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
     },
     {
       "id": "rustroad-fighter",
@@ -299,14 +313,15 @@
         509,
         512
       ],
-      "generation_status": "awaiting_external_transfer_approval",
-      "job_id": null,
+      "generation_status": "submitted",
+      "job_id": "f972dc71-3f8d-46fd-9d88-441129199ef7",
       "previous_jobs": [],
       "model_url": null,
       "target_path": "prototype/assets/models/rustroad-fighter.glb",
       "triangle_budget": 5000,
       "review_status": "source_sprite_verified; model_not_generated",
-      "runtime_enabled": false
+      "runtime_enabled": false,
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
     },
     {
       "id": "rustroad-scout",
