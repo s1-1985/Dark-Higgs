@@ -4579,10 +4579,9 @@ function issueFireOrder(expectedSid) {
     if (lockedSignalId && !/^e-/.test(lockedSignalId)) {
         const sa = _signalAnalysis[lockedSignalId];
         if (!sa || !sa.fix) { logMessage('WEP: 射撃解なし — 目標の推定位置が無い。信号を追跡して解析を進めろ', 'warning-msg'); return; }
-        if (!sigLockable(lockedSignalId)) { logMessage('WEP: SIG-' + sigNo(lockedSignalId) + ' は確度' + Math.round(sigConf(lockedSignalId) * 100) + '% — ロックオンできない (50%超が必要)。撃つなら長押し→射撃で座標へ', 'warning-msg'); return; } // 第199弾
+        // 第249弾 (オーナー「ロックオンしてなくてもどの武器も撃てるように」): 確度50%未満でも推定点へ撃てる (注意ログは残す)・実弾も撃てる
         const est = trackEstimate(sa, 0), idn = identInfo(lockedSignalId);
         if (idn.low) logMessage('WEP: 注意 — SIG-' + sigNo(lockedSignalId) + ' は' + idn.txt + '。外れれば位置を教える', 'warning-msg');
-        if (w !== 'missile' && w !== 'beam') { logMessage('WEP: 推定点への射撃はミサイル/ビームのみ', 'warning-msg'); return; }
         freeFireAt(est.x, est.y);
         return;
     }
@@ -4590,7 +4589,7 @@ function issueFireOrder(expectedSid) {
     if (expectedSid && (!te || te.hp <= 0 || te._dying)) return;
     if (te && !te.inVision) { const idn = identInfo(enemySid(te)); if (idn.low) logMessage('WEP: 注意 — SIG-' + sigNo(enemySid(te)) + ' は' + idn.txt + '。外れれば位置を教える', 'warning-msg'); }
     if (!te) { logMessage('WEP: 射撃解なし — 目標の推定位置が無い。信号を追跡して解析を進めろ', 'warning-msg'); return; }
-    if (!te.inVision && !sigLockable(enemySid(te))) { logMessage('WEP: 確度' + Math.round(sigConf(enemySid(te)) * 100) + '% — ロックオンできない (50%超が必要)。撃つなら長押し→射撃で座標へ', 'warning-msg'); return; } // 第199弾
+    // 第249弾: 確度50%未満 (ロックオン不可) でも推定位置へ撃てる (旧: ここで止まり「射撃してくれない」の原因だった)
     if (!playerWeaponReady(player, w)) { logMessage(`WEP: ${w.toUpperCase()} リロード中`, 'warning-msg'); return; }
     const lk = playerLockInfo(te);
     if (expectedSid && !lk.full && !lk.assumed) return;
@@ -4996,6 +4995,20 @@ class Ship {
                     : 'LOCK: 想定ロック — センサー推定のみ。撃つかは自分で決めろ (射撃命令)',
                     lk.full ? 'system-msg' : 'warning-msg');
             }
+            // 第249弾: 座標射撃の予約 — 射角の外を指した時は艦首を向けてから撃つ (旧: 「射角外」で撃たずに終わっていた)
+            const pf = this._ptFire;
+            if (pf) {
+                if ((pf.ttl -= gameSpeedFactor) <= 0 || currentWeapon() !== pf.w) { this._ptFire = null; }
+                else {
+                    const pa = Math.atan2(pf.y - this.y, pf.x - this.x);
+                    const pd = _steer(pa, _baseTargetSpeed * 0.6); // 止まったままでは回頭が遅い (第174弾: 最も小回りが利くのは巡航の6割) — 進みながら向きを変える
+                    const parc = WEAPON_FIRE_ARC[pf.w] || Math.PI / 4;
+                    // 射角に入っても装填中・冷却中・火器管制ダウンなら予約を残して待つ (撃てた時だけ消す)
+                    if (Math.abs(pd) < parc * 0.9 && this._weaponJamTimer <= 0 && this.fireCooldown <= 0 && playerWeaponReady(this, pf.w) && !this._ffBeam) {
+                        if (fireAtPoint(pf.x, pf.y)) this._ptFire = null;
+                    }
+                }
+            }
             // 射撃命令の失効
             const ord = this._fireOrder;
             if (ord && (!ord.target || ord.target.hp <= 0 || ord.target._dying || (ord.ttl -= gameSpeedFactor) <= 0)) {
@@ -5003,7 +5016,9 @@ class Ship {
                 this._fireOrder = null;
             }
 
-            if (this._fireOrder) {
+            if (this._ptFire) {
+                // 座標射撃の予約中は艦首を向けるのを優先 (上で操舵済み)
+            } else if (this._fireOrder) {
                 // ── 射撃命令: 推定位置へ艦首を向け、射角に入った瞬間に1射。その後は元の航路に戻る ──
                 const o = this._fireOrder;
                 const oLk = playerLockInfo(o.target);
@@ -5012,7 +5027,7 @@ class Ship {
                 const moveSpd = this.state === 'moving' ? _baseTargetSpeed * 0.55 : 0;
                 const d = _steer(ang, moveSpd);
                 const arc = WEAPON_FIRE_ARC[o.wType] || Math.PI / 4;
-                const valid = !o.huntSid || ((oLk.full || (oLk.assumed && sigLockable(o.huntSid))) && oLk.dist <= weaponRange(o.wType));
+                const valid = !o.huntSid || ((oLk.full || oLk.assumed) && oLk.dist <= weaponRange(o.wType)); // 第249弾: 確度(ロックオン可否)では止めない
                 if (valid && Math.abs(d) < arc * 0.9 && this._weaponJamTimer <= 0 && this.fireCooldown <= 0 && playerWeaponReady(this, o.wType)) {
                     if (playerFireWeapon(this, o.target, o.wType, oLk)) {
                         o.fired = true;
@@ -11892,7 +11907,7 @@ const ANA_MIN = 0.12, ANA_TAU = 6, ANA_COLONY = 0.6, ANA_NEWPOS = 1.5; // 第72�
 //   解析の速さ = 演算力 × 受け取りの質。受け取りの質 qf = (確かさ conf − 最低ライン) ÷ (1 − 最低ライン) (conf は受信の強さ=距離・感度・経路の減衰で決まる)。
 //   最低ライン cmin = ANA_CMIN ÷ 演算力^0.6 — 演算力が低いと弱い信号 (遠い・感度が低い) は解析がまったく進まず、コロニーを取ると遠く弱い信号も進む。
 //   精度 (推定円の下限) も演算力で締まる。進捗 (名札の蛍光グリーン) = 解析量 ÷ ANA_FULL。自艦も敵も同じ式 (anaRate)。
-const ANA_CMIN = 0.24, ANA_RATE = 0.36, ANA_FULL = 12; // 第159弾 (オーナー「演算力1.0で2000u先の熱源の解析に時間がかかりすぎ」): 最低ライン 0.34→0.24・速さ 0.26→0.36 (conf 0.1 の遠い信号が進まなかった)
+const ANA_CMIN = 0.16, ANA_RATE = 0.55, ANA_FULL = 12; // 第249弾 (オーナー「解析が遅い・もっと早くしていい」): 最低ライン 0.24→0.16・速さ 0.36→0.55 (自艦も敵も同じ式・symmetry維持)
 const ANA_CONF_REF = 0.26; // 実測: 受け取りの確かさ conf は 近く=0.2〜0.25・中距離=0.1・遠く=0.05 前後 (最大でも0.3台) → 0.30 を「十分強い」とする
 function anaQf(cp, conf) { const sn = Math.min(1, conf / ANA_CONF_REF), cmin = ANA_CMIN / Math.pow(Math.max(0.3, cp), 0.6); return Math.max(0, (sn - cmin) / (1 - cmin)); }
 function anaRate(cp, conf, newPos) { return cp * anaQf(cp, conf) * ANA_RATE * (newPos ? ANA_NEWPOS : 1); }
@@ -12053,7 +12068,7 @@ function checkPassiveDetection() {
 
     // 強い順に最大4件 + 追跡中の信号 (第31弾: 自然/お宝の信号が増えたので3→4)
     allContacts.sort((a, b) => b.sig - a.sig);
-    const picks = allContacts.slice(0, 4);
+    const picks = allContacts.slice(0, 6); // 第249弾: 同時に解析する信号 4→6 (特定して海図に載せた発信元はここに入らない)
     if (lockedSignalId && !picks.some(c => c.sourceId === lockedSignalId)) {
         const _lc = allContacts.find(c => c.sourceId === lockedSignalId);
         if (_lc) picks.push(_lc);
@@ -12062,7 +12077,10 @@ function checkPassiveDetection() {
     let _newSig = null; // このサイクルで新たに(または10秒ぶりに)受信した信号
     // 第29弾: 演算力を受信中の信号で分け合う (追跡中に半分・残りを等分)
     const _anaB = analysisPower('player'), _hasLock = picks.some(c => c.sourceId === lockedSignalId);
-    const _shareOf = (sid) => _hasLock ? (sid === lockedSignalId ? (picks.length > 1 ? 0.5 : 1) : 0.5 / (picks.length - 1)) : 1 / picks.length;
+    // 第249弾 (オーナー「ロックオンしていない信号も受信していれば同時に解析」): 追跡中=全力・それ以外は 0.6÷√(本数) ずつ並行して進む
+    //   (旧: 演算力1を等分 — 追跡中0.5・残りは0.5を等分で、4本なら1本0.17しか進まなかった)。信号が多いほど1本あたりは遅くなる (囮の効き目は残る)
+    const _nOther = Math.max(1, picks.length - (_hasLock ? 1 : 0));
+    const _shareOf = (sid) => (_hasLock && sid === lockedSignalId) ? 1 : 0.6 / Math.sqrt(_nOther);
     for (const sid in _signalAnalysis) { // 記録が消えたら解析量も無し / 30秒聞こえなければ少しずつ薄れる
         const sa0 = _signalAnalysis[sid], lo0 = sa0.obs && sa0.obs[sa0.obs.length - 1];
         if (!lo0) sa0.ana = 0; else if (_frameCount - lo0.f > 1800) sa0.ana = (sa0.ana || 0) * 0.95;
@@ -12144,8 +12162,21 @@ function drawInertiaPath(ctx) {
     for (let k = 24; k < pts.length; k += 24) { ctx.globalAlpha = 0.75 * (1 - k / 160); ctx.beginPath(); ctx.arc(pts[k][0], pts[k][1], 2.4 * inv, 0, Math.PI * 2); ctx.fill(); }
     ctx.restore();
 }
+// 第249弾: 座標射撃の予約 — 狙う点の十字と自艦からの点線、名札「回頭中 → 撃つ」
+function drawPtFire(ctx) {
+    const pf = player && player.hp > 0 && player._ptFire; if (!pf) return;
+    const inv = 1 / camera.zoom, s = 14 * inv, pulse = 0.6 + 0.4 * Math.sin(_frameCount * 0.15);
+    ctx.save(); ctx.strokeStyle = '#ff7a5a'; ctx.lineWidth = 1.5 * inv; ctx.globalAlpha = 0.5;
+    ctx.setLineDash([4 * inv, 6 * inv]); ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(pf.x, pf.y); ctx.stroke(); ctx.setLineDash([]);
+    ctx.globalAlpha = pulse; ctx.lineWidth = 2 * inv;
+    ctx.beginPath(); ctx.arc(pf.x, pf.y, s, 0, Math.PI * 2); ctx.moveTo(pf.x - s * 1.6, pf.y); ctx.lineTo(pf.x - s * 0.5, pf.y); ctx.moveTo(pf.x + s * 0.5, pf.y); ctx.lineTo(pf.x + s * 1.6, pf.y);
+    ctx.moveTo(pf.x, pf.y - s * 1.6); ctx.lineTo(pf.x, pf.y - s * 0.5); ctx.moveTo(pf.x, pf.y + s * 0.5); ctx.lineTo(pf.x, pf.y + s * 1.6); ctx.stroke();
+    ctx.restore();
+    queueTag(pf.x, pf.y, (_WPN_NAME[pf.w] || pf.w) + ' 予約', '回頭中 → 射角で撃つ', '#ff9a7a', 'top', 1);
+}
 function drawPassiveBearings(ctx) {
     drawInertiaPath(ctx);
+    drawPtFire(ctx);
     const invZoom = 1 / camera.zoom;
     // 追跡していない信号: 最新の方位を1本ずつ (「何かがあっちに居る」)。
     // 第18弾: 線を引くのは強い方から2つだけ (艦載機が群がると破線が飛び交って読めなかった)。残りは自艦リングの点で示す
@@ -12821,7 +12852,17 @@ function lpmSelectFire() {
         const est = trackEstimate(sa, 0), d = Math.hypot(_lpmWorld.x - est.x, _lpmWorld.y - est.y);
         if (d <= est.r && d / est.r < hd) { hd = d / est.r; hit = sid; }
     }
-    if (hit) { if (hit !== lockedSignalId) window._lockSignal(hit); issueFireOrder(); return; }
+    if (hit) {
+        if (hit !== lockedSignalId) window._lockSignal(hit);
+        // 第249弾: 艦の信号で射程内なら射撃命令 (見越し点・艦首を向けて撃つ)。射程外・弾の準備中などで命令にならなければ推定点へ座標射撃
+        const te = /^e-/.test(hit) ? enemyBySid(hit) : null, w = currentWeapon();
+        if (te && te.hp > 0 && !te._dying) {
+            const lk = playerLockInfo(te);
+            if ((lk.full || lk.assumed) && lk.dist <= weaponRange(w) && playerWeaponReady(player, w) && issueFireOrder(hit)) return;
+            const est = trackEstimate(_signalAnalysis[hit], 0); freeFireAt(est.x, est.y); return;
+        }
+        issueFireOrder(); return; // 艦でない信号は推定点へ座標射撃 (issueFireOrder → freeFireAt)
+    }
     freeFireAt(_lpmWorld.x, _lpmWorld.y);
 }
 // 第43弾: 長押しメニュー「指向ソナー」— 押した点の方向へすぐ撃つ (旧: 索敵 → 指向ソナー → 方向を指す の3手)
@@ -12845,13 +12886,25 @@ function toggleAutoAttack() {
 // ビームはチャージ専用 — 2秒溜めてから、その時の向きで撃つ (溜めている間は熱/EM/ヒッグスが漏れる)
 function freeFireAt(wx, wy) {
     if (obsOnly()) return;
-    fireAtPoint(wx, wy);
+    // 第249弾 (オーナー「QTEで地図の点を指して射撃しても撃たない・どの武器もロックオン無しで撃てるように」):
+    //   射角の外なら撃たずに終わらず、艦首をその方向へ向けて射角に入った瞬間に撃つ (40秒で取り消し)
+    if (player && player.hp > 0) {
+        const w = currentWeapon(), arc = WEAPON_FIRE_ARC[w] || (Math.PI / 4);
+        const ang = Math.atan2(wy - player.y, wx - player.x);
+        if (playerHasWeapon(w) && Math.abs(_angDiff(ang, player.angle)) > arc) {
+            player._ptFire = { x: wx, y: wy, w, ttl: 2400 }; player._fireOrder = null;
+            logMessage('WEP: ' + (_WPN_NAME[w] || w) + ' — 艦首をその方向へ向けてから撃つ', 'system-msg');
+            return player._ptFire;
+        }
+    }
+    player && (player._ptFire = null);
+    return fireAtPoint(wx, wy);
 }
 // 人の入力は上の窓口から、自機COMの任務はここから実行する。
 function fireAtPoint(wx, wy) {
     if (!player || player.hp <= 0) return;
     if (player._weaponJamTimer > 0) { logMessage('WEP: 火器管制ダウン — 復旧まで発砲不能', 'warning-msg'); return; }
-    const wType = document.getElementById('weapon-select')?.value;
+    const wType = currentWeapon(); // 第249弾: 予約した射撃と同じ読み元 (選択欄と _curWeapon は change で同期している)
     if (!playerHasWeapon(wType)) { logMessage('WEP: ' + (_WPN_NAME[wType] || wType) + 'は積んでいない', 'warning-msg'); return; } // 第48弾
     // 第46弾: 全兵装が任意の地点へ撃てる。射程より遠い地点は、その方向へ射程いっぱいまで撃つ
     const _dd = Math.hypot(wx - player.x, wy - player.y), _rg = weaponRange(wType);
@@ -23147,7 +23200,8 @@ function capChoose(id, auto, delegate = false) {
     if (auto) _capStats.auto++;
     if (!(auto || delegate) || d.urgent) {
         _capRes[d.key] = { id: o.id, auto: !!auto, frame: _frameCount, context: d.spec.context };
-        uiToast('艦長: ' + o.label + (auto ? ' (AI推奨)' : '') + ' → AIが実行', false);
+        // 第249弾 (オーナー「トーストが邪魔・AIがコメントで残すだけでいい」): 画面中央のポップアップを撤去し、静かなログ(AIバーの履歴)にだけ残す
+        logMessage('AI: 「' + d.spec.title + '」→ ' + o.label + (auto ? ' (推奨のまま)' : ''), 'system-msg');
         if (player) matchRecEvent('cap', player.x, player.y, '艦長の判断「' + d.spec.title + '」→ ' + o.label);
     }
     sfxUI('ui_close');
@@ -25864,6 +25918,7 @@ function _recGate(name, args, self) { // true = そのまま実行 / false = 受
     }
     const ost = Ship.prototype.setTarget;
     Ship.prototype.setTarget = function (...a) {
+        if (this === player && (!_inStep || _prpApplying) && !(_hReplay() && !_prpApplying)) this._ptFire = null; // 第249弾: 人の移動・停止の命令は座標射撃の予約(回頭)を取り消す
         if (this === player && !_inStep) { if (_hReplay() && !_prpApplying) return; if (comDemo && capMode) capManualStart(); if (_recOn && _recDepth === 0 && !comDemo && !playReplay) _inputLog.push([_frameCount, '$setTarget', a.map(_recEnc)]); }
         _recDepth++; try { return ost.apply(this, a); } finally { _recDepth--; }
     };
