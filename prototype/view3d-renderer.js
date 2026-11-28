@@ -1,9 +1,7 @@
 import * as THREE from './vendor/three/three.module.js';
 import { GLTFLoader } from './vendor/three/GLTFLoader.js';
 
-// One experimental asset. Unknown sprites retain the original renderer; never substitute another faction's model.
-const MODEL_SOURCE = new URL('./assets/models/crow-assault.glb', import.meta.url).href;
-const CROW_SPRITE = /(?:^|\/)f2_crow_assault\.png(?:\?|$)/;
+import { modelForSprite, createModelCache, spritePlacement } from './unit-models.js?v=20261128-units1';
 const COS = Math.cos(35 * Math.PI / 180), SIN = Math.sin(35 * Math.PI / 180);
 export async function createRenderer({ onFailure }) {
     const output = document.createElement('canvas');
@@ -28,36 +26,43 @@ export async function createRenderer({ onFailure }) {
     const key = new THREE.DirectionalLight(0xffeee0, 3.5); key.position.set(-100, 300, 120); scene.add(key);
     const rim = new THREE.DirectionalLight(0x77b3d5, 1.7); rim.position.set(100, 50, -150); scene.add(rim);
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, .1, 100000);
-    let template;
-    try {
-        const gltf = await new GLTFLoader().loadAsync(MODEL_SOURCE);
-        template = gltf.scene;
-        const box = new THREE.Box3().setFromObject(template), size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
-        template.position.sub(center);
-        const normalized = new THREE.Group(); normalized.add(template);
-        const length = Math.max(size.x, size.z);
-        if (!Number.isFinite(length) || length <= 0) throw new Error('Invalid ship model bounds');
-        normalized.scale.setScalar(1 / length);
-        normalized.rotation.y = Math.PI / 2; // glTF +Z bow -> simulation +X bow; world +Z = map down.
-        template = normalized;
-    } catch (error) {
-        texture.dispose(); quad.geometry.dispose(); quad.material.dispose(); webgl.dispose(); throw error;
+    function release(template) {
+        const geometries = new Set(), materials = new Set(), textures = new Set();
+        template.traverse(o => { if (o.isMesh) { geometries.add(o.geometry); for (const m of [].concat(o.material)) { materials.add(m); for (const v of Object.values(m)) if (v?.isTexture) textures.add(v); } } });
+        for (const t of textures) { t.dispose(); if (t.image?.close) t.image.close(); }
+        for (const m of materials) m.dispose(); for (const g of geometries) g.dispose();
     }
+    const cache = createModelCache(async spec => {
+        const gltf = await new GLTFLoader().loadAsync(spec.url);
+        const model = gltf.scene;
+        const box = new THREE.Box3().setFromObject(model), size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
+        // Tech is upright: include height in its size, rather than enlarging its narrow footprint.
+        const length = spec.role === 'mech' ? Math.max(size.x, size.y, size.z) : Math.max(size.x, size.z);
+        if (!Number.isFinite(length) || length <= 0) { release(model); throw new Error('Invalid model bounds'); }
+        model.position.sub(center);
+        const normalized = new THREE.Group(); normalized.add(model);
+        normalized.scale.setScalar(1 / length); normalized.rotation.y = spec.yaw;
+        return normalized;
+    }, release, (spec, error) => console.warn(`3D model ${spec.id} unavailable; retaining sprite`, error));
     document.getElementById('game-container').insertBefore(output, document.getElementById('gameCanvas'));
-    const pool = [];
-    let frame, count = 0, width = 0, height = 0;
+    const pools = new Map();
+    let disposed = false;
+    let frame, width = 0, height = 0;
     return {
         setVisible(on) { output.style.display = on ? 'block' : 'none'; },
         dispose() {
             output.remove();
-            const geometries = new Set(), materials = new Set(), textures = new Set();
-            template.traverse(o => { if (o.isMesh) { geometries.add(o.geometry); for (const m of [].concat(o.material)) { materials.add(m); for (const v of Object.values(m)) if (v?.isTexture) textures.add(v); } } });
-            for (const t of textures) t.dispose(); for (const m of materials) m.dispose(); for (const g of geometries) g.dispose();
+            if (disposed) return;
+            disposed = true;
+            for (const pool of pools.values()) for (const obj of pool.objects) obj.traverse(o => {
+                if (o.isMesh) for (const material of [].concat(o.material)) material.dispose();
+            });
+            cache.dispose(); pools.clear();
             texture.dispose(); quad.geometry.dispose(); quad.material.dispose(); webgl.dispose();
         },
         beginFrame(info) {
-            frame = info; count = 0;
-            for (const model of pool) model.visible = false;
+            frame = info;
+            for (const pool of pools.values()) { pool.count = 0; for (const model of pool.objects) model.visible = false; }
             if (info.width !== width || info.height !== height) {
                 width = info.width; height = info.height;
                 webgl.setSize(width, height, false);
@@ -69,21 +74,33 @@ export async function createRenderer({ onFailure }) {
             }
             camera.position.set(0, 20000 * COS, 20000 * SIN); camera.lookAt(0, 0, 0); camera.updateMatrixWorld();
         },
-        captureSprite(ctx, img, role, len, angle) {
-            if (role !== 'assault' || !CROW_SPRITE.test(img.currentSrc || img.src || '')) return false;
-            const t = ctx.getTransform();
-            const x = t.e / frame.dpr, y = t.f / frame.dpr;
-            const length = len * frame.zoom;
-            // Preserve the original viewport culling / tiny-ship icons. Nothing hidden gets a 3D model.
-            if (x < -length || x > width + length || y < -length || y > height + length) return false;
-            let obj = pool[count++];
+        captureSprite(ctx, img, role, len, angle, screenScale) {
+            if (disposed || !frame || ctx.globalAlpha <= 0) return false;
+            const spec = modelForSprite(img);
+            if (!spec) return false;
+            const placement = spritePlacement(ctx.getTransform(), frame, len, screenScale);
+            if (!placement) return false;
+            const template = cache.get(spec);
+            if (!template) return false; // draw the original sprite while this specific model loads
+            const { x, y, length } = placement;
+            let pool = pools.get(spec.id);
+            if (!pool) { pool = { objects: [], count: 0 }; pools.set(spec.id, pool); }
+            let obj = pool.objects[pool.count++];
             if (!obj) {
-                obj = new THREE.Group(); obj.add(template.clone(true)); scene.add(obj); pool.push(obj);
+                obj = new THREE.Group(); obj.add(template.clone(true));
+                // Geometry/textures are shared; instance materials preserve existing fade/death alpha.
+                obj.traverse(o => { if (o.isMesh) o.material = Array.isArray(o.material) ? o.material.map(m => m.clone()) : o.material.clone(); });
+                scene.add(obj); pool.objects.push(obj);
             }
+            const alpha = ctx.globalAlpha;
+            obj.traverse(o => { if (o.isMesh) for (const m of [].concat(o.material)) {
+                const transparent = alpha < 1;
+                if (m.transparent !== transparent) { m.transparent = transparent; m.needsUpdate = true; }
+                m.opacity = alpha; m.depthWrite = !transparent;
+            } });
             obj.position.set(x - width / 2, 0, (y - height / 2) / COS);
             obj.rotation.y = -angle;
-            obj.scale.setScalar(length);
-            obj.visible = true;
+            obj.scale.setScalar(length); obj.visible = true;
             return true;
         },
         present(source) {

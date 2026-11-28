@@ -37,7 +37,7 @@
         if (!wanted) { active = false; sync(); return false; }
         if (renderer) { active = true; sync(); return true; }
         if (!pending) {
-            pending = import('./view3d-renderer.js?v=20261128-3d1')
+            pending = import('./view3d-renderer.js?v=20261128-units1')
                 .then(m => m.createRenderer({ onFailure: fail }));
         }
         sync();
@@ -61,10 +61,10 @@
             frame = active ? Object.freeze({ ...info }) : null;
             if (frame) { try { renderer.beginFrame(frame); } catch (error) { frame = null; fail(error); } }
         },
-        captureSprite(ctx, img, role, len, angle) {
+        captureSprite(ctx, img, role, len, angle, screenScale) {
             // Called only after the existing visibility gate. No entity list or true positions enter the renderer.
             if (!frame || !active) return false;
-            try { return renderer.captureSprite(ctx, img, role, len, angle); }
+            try { return renderer.captureSprite(ctx, img, role, len, angle, screenScale); }
             catch (error) { fail(error); return false; }
         },
         present(source) {

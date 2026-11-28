@@ -4,8 +4,8 @@
   "source_repository": "s1-1985/Dark-Higgs",
   "source_commit": "fde9c24afed1b2be4e3bb0576af4daeb3745f614",
   "approved_scope": "11 existing Helios/Crow sprites sent to to3D with explicit user approval",
-  "runtime_changes": false,
-  "review_status": "not_visually_or_performance_verified",
+  "runtime_changes": true,
+  "review_status": "blender_visual_and_cpu_tests_passed; in_game_gpu_and_device_fps_pending",
   "units": [
     {
       "id": "helios-assault",
@@ -23,8 +23,8 @@
       "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-27/task_1e67dea1-279b-4f54-aa08-42eca7ee488a_image.png",
       "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-27/task_1e67dea1-279b-4f54-aa08-42eca7ee488a_video.mp4",
       "target_path": "prototype/assets/models/helios-assault.glb",
-      "review_status": "pending",
-      "runtime_enabled": false
+      "review_status": "source_sprite_and_prepared_glb_reviewed",
+      "runtime_enabled": true
     },
     {
       "id": "helios-stealth",
@@ -42,8 +42,8 @@
       "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-27/task_0141ee61-f5b4-41ea-965a-f4cfea138da6_image.png",
       "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-27/task_0141ee61-f5b4-41ea-965a-f4cfea138da6_video.mp4",
       "target_path": "prototype/assets/models/helios-stealth.glb",
-      "review_status": "pending",
-      "runtime_enabled": false
+      "review_status": "source_sprite_and_prepared_glb_reviewed",
+      "runtime_enabled": true
     },
     {
       "id": "helios-carrier",
@@ -61,8 +61,8 @@
       "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-27/task_125f234b-f866-4971-9131-751b9b2a4e6a_image.png",
       "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-27/task_125f234b-f866-4971-9131-751b9b2a4e6a_video.mp4",
       "target_path": "prototype/assets/models/helios-carrier.glb",
-      "review_status": "pending",
-      "runtime_enabled": false
+      "review_status": "source_sprite_and_prepared_glb_reviewed",
+      "runtime_enabled": true
     },
     {
       "id": "helios-fighter",
@@ -80,8 +80,8 @@
       "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-27/task_fdb6b353-3388-4699-842f-fff79516b0b9_image.png",
       "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-27/task_fdb6b353-3388-4699-842f-fff79516b0b9_video.mp4",
       "target_path": "prototype/assets/models/helios-fighter.glb",
-      "review_status": "pending",
-      "runtime_enabled": false
+      "review_status": "source_sprite_and_prepared_glb_reviewed",
+      "runtime_enabled": true
     },
     {
       "id": "helios-scout",
@@ -99,8 +99,8 @@
       "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-27/task_42102e5a-580f-4909-923f-df4a5c7b9e40_image.png",
       "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-27/task_42102e5a-580f-4909-923f-df4a5c7b9e40_video.mp4",
       "target_path": "prototype/assets/models/helios-scout.glb",
-      "review_status": "pending",
-      "runtime_enabled": false
+      "review_status": "source_sprite_and_prepared_glb_reviewed",
+      "runtime_enabled": true
     },
     {
       "id": "helios-mech",
@@ -118,8 +118,8 @@
       "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-27/task_09b14218-d6e1-4463-aace-181a8f533281_image.png",
       "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-27/task_09b14218-d6e1-4463-aace-181a8f533281_video.mp4",
       "target_path": "prototype/assets/models/helios-mech.glb",
-      "review_status": "pending",
-      "runtime_enabled": false
+      "review_status": "source_sprite_and_prepared_glb_reviewed",
+      "runtime_enabled": true
     },
     {
       "id": "crow-stealth",
@@ -143,8 +143,8 @@
       "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-27/task_307c9b85-1582-42a1-8837-784e5762a9ee_image.png",
       "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-27/task_307c9b85-1582-42a1-8837-784e5762a9ee_video.mp4",
       "target_path": "prototype/assets/models/crow-stealth.glb",
-      "review_status": "pending",
-      "runtime_enabled": false
+      "review_status": "source_sprite_and_prepared_glb_reviewed",
+      "runtime_enabled": true
     },
     {
       "id": "crow-carrier",
@@ -162,8 +162,8 @@
       "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-27/task_d941edb8-42e6-4eab-823e-f44a8649cd50_image.png",
       "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-27/task_d941edb8-42e6-4eab-823e-f44a8649cd50_video.mp4",
       "target_path": "prototype/assets/models/crow-carrier.glb",
-      "review_status": "pending",
-      "runtime_enabled": false
+      "review_status": "source_sprite_and_prepared_glb_reviewed",
+      "runtime_enabled": true
     },
     {
       "id": "crow-fighter",
@@ -181,8 +181,8 @@
       "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-27/task_240ac054-2697-4abe-8df0-bf776b4b47d9_image.png",
       "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-27/task_240ac054-2697-4abe-8df0-bf776b4b47d9_video.mp4",
       "target_path": "prototype/assets/models/crow-fighter.glb",
-      "review_status": "pending",
-      "runtime_enabled": false
+      "review_status": "source_sprite_and_prepared_glb_reviewed",
+      "runtime_enabled": true
     },
     {
       "id": "crow-scout",
@@ -200,8 +200,8 @@
       "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-27/task_21af82f8-e93c-44ea-95d3-05cfc556e2ce_image.png",
       "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-27/task_21af82f8-e93c-44ea-95d3-05cfc556e2ce_video.mp4",
       "target_path": "prototype/assets/models/crow-scout.glb",
-      "review_status": "pending",
-      "runtime_enabled": false
+      "review_status": "source_sprite_and_prepared_glb_reviewed",
+      "runtime_enabled": true
     },
     {
       "id": "crow-mech",
@@ -219,8 +219,8 @@
       "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-27/task_9e7ddf87-4cd2-46a7-96c2-4064fbf5e1b3_image.png",
       "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-27/task_9e7ddf87-4cd2-46a7-96c2-4064fbf5e1b3_video.mp4",
       "target_path": "prototype/assets/models/crow-mech.glb",
-      "review_status": "pending",
-      "runtime_enabled": false
+      "review_status": "source_sprite_and_prepared_glb_reviewed",
+      "runtime_enabled": true
     }
   ]
 }
