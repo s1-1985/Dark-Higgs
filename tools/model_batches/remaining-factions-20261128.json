@@ -423,16 +423,19 @@
         971,
         846
       ],
-      "generation_status": "processing",
+      "generation_status": "completed",
       "job_id": "c8bcdf38-363b-4adf-a83d-6caa3af0b38a",
       "previous_jobs": [],
-      "model_url": null,
+      "model_url": "https://storage.to3d.app/generated-3d/models/2026-11-28/task_c8bcdf38-363b-4adf-a83d-6caa3af0b38a_model.glb",
       "target_path": "prototype/assets/models/sanctum-assault.glb",
       "triangle_budget": 12000,
-      "review_status": "source_sprite_verified; model_not_generated",
+      "review_status": "generated; geometry_review_pending",
       "runtime_enabled": false,
       "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3",
-      "last_status_checked": "2026-11-28T05:48:50.012Z"
+      "last_status_checked": "2026-11-28T05:50:44.064Z",
+      "fallback_model_url": "https://img.theapi.app/temp/f39ca957-9c0c-4fe5-b990-762d7efd50ac.glb",
+      "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-28/task_c8bcdf38-363b-4adf-a83d-6caa3af0b38a_image.png",
+      "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-28/task_c8bcdf38-363b-4adf-a83d-6caa3af0b38a_video.mp4"
     },
     {
       "id": "sanctum-stealth",
@@ -453,16 +456,19 @@
         747,
         718
       ],
-      "generation_status": "processing",
+      "generation_status": "completed",
       "job_id": "8358892d-98e6-4fba-9bf7-3d9cba8dbed6",
       "previous_jobs": [],
-      "model_url": null,
+      "model_url": "https://storage.to3d.app/generated-3d/models/2026-11-28/task_8358892d-98e6-4fba-9bf7-3d9cba8dbed6_model.glb",
       "target_path": "prototype/assets/models/sanctum-stealth.glb",
       "triangle_budget": 12000,
-      "review_status": "source_sprite_verified; model_not_generated",
+      "review_status": "generated; geometry_review_pending",
       "runtime_enabled": false,
       "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3",
-      "last_status_checked": "2026-11-28T05:48:50.240Z"
+      "last_status_checked": "2026-11-28T05:50:44.060Z",
+      "fallback_model_url": "https://img.theapi.app/temp/ce11d32a-9457-4c00-a7bb-f2d67dbaaed4.glb",
+      "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-28/task_8358892d-98e6-4fba-9bf7-3d9cba8dbed6_image.png",
+      "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-28/task_8358892d-98e6-4fba-9bf7-3d9cba8dbed6_video.mp4"
     },
     {
       "id": "sanctum-carrier",
@@ -483,15 +489,19 @@
         1010,
         1007
       ],
-      "generation_status": "submitted",
+      "generation_status": "completed",
       "job_id": "284a8159-b3a2-40cb-8f85-569b269d7a47",
       "previous_jobs": [],
-      "model_url": null,
+      "model_url": "https://storage.to3d.app/generated-3d/models/2026-11-28/task_284a8159-b3a2-40cb-8f85-569b269d7a47_model.glb",
       "target_path": "prototype/assets/models/sanctum-carrier.glb",
       "triangle_budget": 12000,
-      "review_status": "source_sprite_verified; model_not_generated",
+      "review_status": "generated; geometry_review_pending",
       "runtime_enabled": false,
-      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3",
+      "last_status_checked": "2026-11-28T05:50:44.146Z",
+      "fallback_model_url": "https://img.theapi.app/temp/00d87764-80e9-475a-91d0-f4a3d7609387.glb",
+      "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-28/task_284a8159-b3a2-40cb-8f85-569b269d7a47_image.png",
+      "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-28/task_284a8159-b3a2-40cb-8f85-569b269d7a47_video.mp4"
     },
     {
       "id": "sanctum-fighter",
@@ -512,15 +522,19 @@
         512,
         511
       ],
-      "generation_status": "submitted",
+      "generation_status": "completed",
       "job_id": "a2fcbe04-2e55-480b-b72c-03a4005430e5",
       "previous_jobs": [],
-      "model_url": null,
+      "model_url": "https://storage.to3d.app/generated-3d/models/2026-11-28/task_a2fcbe04-2e55-480b-b72c-03a4005430e5_model.glb",
       "target_path": "prototype/assets/models/sanctum-fighter.glb",
       "triangle_budget": 5000,
-      "review_status": "source_sprite_verified; model_not_generated",
+      "review_status": "generated; geometry_review_pending",
       "runtime_enabled": false,
-      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3",
+      "last_status_checked": "2026-11-28T05:50:43.717Z",
+      "fallback_model_url": "https://img.theapi.app/temp/6a0bd40c-ba1b-4dd1-ba46-f8595b6530b6.glb",
+      "preview_image_url": "https://storage.to3d.app/generated-3d/images/2026-11-28/task_a2fcbe04-2e55-480b-b72c-03a4005430e5_image.png",
+      "preview_video_url": "https://storage.to3d.app/generated-3d/videos/2026-11-28/task_a2fcbe04-2e55-480b-b72c-03a4005430e5_video.mp4"
     },
     {
       "id": "sanctum-scout",
@@ -541,14 +555,15 @@
         512,
         446
       ],
-      "generation_status": "awaiting_external_transfer_approval",
-      "job_id": null,
+      "generation_status": "submitted",
+      "job_id": "85a6b5f7-74c4-40a7-8bb0-ac24628418de",
       "previous_jobs": [],
       "model_url": null,
       "target_path": "prototype/assets/models/sanctum-scout.glb",
       "triangle_budget": 5000,
       "review_status": "source_sprite_verified; model_not_generated",
-      "runtime_enabled": false
+      "runtime_enabled": false,
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
     },
     {
       "id": "sanctum-mech",
@@ -569,14 +584,15 @@
         424,
         512
       ],
-      "generation_status": "awaiting_external_transfer_approval",
-      "job_id": null,
+      "generation_status": "submitted",
+      "job_id": "0e883573-4757-452f-bd85-4c6b057c04a2",
       "previous_jobs": [],
       "model_url": null,
       "target_path": "prototype/assets/models/sanctum-mech.glb",
       "triangle_budget": 12000,
       "review_status": "source_sprite_verified; model_not_generated",
-      "runtime_enabled": false
+      "runtime_enabled": false,
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
     },
     {
       "id": "fogborn-assault",
@@ -597,14 +613,15 @@
         994,
         997
       ],
-      "generation_status": "awaiting_external_transfer_approval",
-      "job_id": null,
+      "generation_status": "submitted",
+      "job_id": "d7b9ae54-9734-43c6-a4e6-80cf95de8e86",
       "previous_jobs": [],
       "model_url": null,
       "target_path": "prototype/assets/models/fogborn-assault.glb",
       "triangle_budget": 12000,
       "review_status": "source_sprite_verified; model_not_generated",
-      "runtime_enabled": false
+      "runtime_enabled": false,
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
     },
     {
       "id": "fogborn-stealth",
@@ -625,14 +642,15 @@
         995,
         802
       ],
-      "generation_status": "awaiting_external_transfer_approval",
-      "job_id": null,
+      "generation_status": "submitted",
+      "job_id": "4c53797e-0e94-4c9a-831e-4981db3ce9d2",
       "previous_jobs": [],
       "model_url": null,
       "target_path": "prototype/assets/models/fogborn-stealth.glb",
       "triangle_budget": 12000,
       "review_status": "source_sprite_verified; model_not_generated",
-      "runtime_enabled": false
+      "runtime_enabled": false,
+      "generation_user_id": "302a9f6b-8629-4751-8feb-b1c7ac12a0c3"
     },
     {
       "id": "fogborn-carrier",
